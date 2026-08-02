@@ -1,6 +1,6 @@
 # Steam Achievement Tracker
 
-A self-hosted system for automatically tracking your Steam achievement progress, with no manual data entry. Steam's API is always the source of truth — the spreadsheet, dashboard, and any guide pages just reflect it.
+A self-hosted system for automatically tracking your Steam achievement progress. Steam's API is the source of truth for almost everything — but a few edge cases (see [Known limitations](#known-limitations-manual-data) below) fall outside what the API can tell you, and those rows are handled manually by design, not automatically.
 
 It's three pieces, all free, all yours to host:
 
@@ -62,6 +62,18 @@ In the Apps Script editor, run these functions once (Apps Script will prompt you
 ## Sheet schema (`RAW DATA` tab)
 
 `A`=Status (`Unvetted`/`Manual` flag) · `B`=AppID · `C`=Name · `D`=Achieved count · `E`=Total achievements · `F`=Completion % · `G`=Favorite (♥) · `H`=Spotlight (★) · `I`=Achievements-last-updated date
+
+## Known limitations (manual data)
+
+This is "mostly automatic," not "100% automatic" — a few situations genuinely can't be resolved from the Steam API alone, and the Status column (`A`) is how the sheet tracks that:
+
+- **`Unvetted`** — games Steam's `GetOwnedGames` hides by default (its own "unvetted"/limited-profile-features flag). Auto-detected, excluded from your aggregate completion stats, but otherwise still auto-synced like any other row.
+- **`Manual`** — rows the automation has been told to leave alone, added via `addManualGame()` rather than discovered from the owned-games API. Real cases where this comes up:
+  - **Family Library Sharing** games. Steam's API only reports games *you* own, not ones shared to you — a shared game's achievement counts have to be entered/updated by hand, since there's no API call that returns them.
+  - **Data you've manually corrected** because it drifted from the API for some reason and you don't want the next sync to stomp your correction.
+  - `rebuildSheetFromApi()` (a full table rebuild) explicitly protects `Manual` rows from being overwritten or dropped — that protection is load-bearing, don't remove it without a replacement plan for these cases.
+- **Achievement counts reflect whatever Steam itself reports** — if `GetPlayerAchievements` returns HTTP 400 for a game, that means Steam has no stats for it on your account (common for games with no achievement-tracking, or that you haven't launched), and the row is left as "no achievement system" rather than 0/0.
+- **The optional Notion checkbox sync is intentionally conservative**: it only ticks a checkbox when an achievement's title is an *exact* match to a title segment on the guide page (see `.claude/skills/steam-daily-checkbox-sync/SKILL.md`). A guide page that doesn't follow the expected title-formatting convention will under-sync (skip real unlocks) rather than risk ticking the wrong box — if you use this feature, expect to spot-check pages that don't fit the standard format.
 
 ## Using this with Claude Code
 
