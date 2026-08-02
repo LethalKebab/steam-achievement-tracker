@@ -505,7 +505,7 @@
         return sortDir * ((av > bv) - (av < bv));
       });
 
-      // 重点关注(星标)的游戏置顶,组内保持原来的排序结果
+      // spotlighted (starred) games are pinned to the top, each group keeps its existing sort order
       rows = rows.filter(function(g){ return g.priority; }).concat(rows.filter(function(g){ return !g.priority; }));
 
       const body = document.getElementById('gameTableBody');

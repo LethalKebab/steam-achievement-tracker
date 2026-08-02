@@ -1,69 +1,73 @@
 /**
- * Steam 成就自动同步脚本 (Google Apps Script)
+ * Steam achievement auto-sync script (Google Apps Script)
  * ------------------------------------------------
- * 设计原则:以 Steam API 返回的数据为 source of truth。
- * 表格以 appid 为主键,官方名字/成就数据都从 API 拉取,不依赖手动录入匹配。
+ * Design principle: data returned by the Steam API is the source of truth.
+ * The sheet is keyed on appid; official names/achievement data are always pulled from
+ * the API, never matched against manually entered data.
  *
- * 使用前准备:
- * 1. 打开这个 Google Sheet -> 扩展程序(Extensions) -> Apps Script
- * 2. 把这个文件的内容整个粘贴进去(替换默认的 Code.gs 内容)
- * 3. 项目设置(左侧齿轮图标)-> 脚本属性 -> 新增两条:STEAM_API_KEY / STEAM_ID
- *    (Steam API Key 在 https://steamcommunity.com/dev/apikey 申请;
- *    STEAM_ID 是你的 SteamID64,可以在 https://steamid.io 查)
- * 4. 运行一次 setup()(会要求你授权,点允许即可)
- * 5. 运行一次 rebuildSheetFromApi() 完成初始铺表
- * 6. 运行 createTrigger() 设置定时任务,之后就是全自动的了
+ * Setup:
+ * 1. Open this Google Sheet -> Extensions -> Apps Script
+ * 2. Paste this file's contents in (replacing the default Code.gs contents)
+ * 3. Project Settings (gear icon) -> Script Properties -> add two: STEAM_API_KEY / STEAM_ID
+ *    (get a Steam API Key at https://steamcommunity.com/dev/apikey;
+ *    STEAM_ID is your SteamID64, look it up at https://steamid.io)
+ * 4. Run setup() once (it will prompt you to authorize - click allow)
+ * 5. Run rebuildSheetFromApi() once to do the initial fill
+ * 6. Run createTrigger() to set up the daily schedule - fully automatic from then on
  *
- * 日常会用到的函数:
- * - runBatch()          分批刷新成就数据(定时任务每天跑一次,通常不用手动碰)
- * - syncNewGames()       检测库里的新游戏并加进表格(定时任务自动跑)
- * - updateMissingRows()  手动加了新的appid行、不想等游标转一圈时,手动跑一下
- * - sortSheetByCompletion() 想按完成率/成就总数重新排序时手动跑
- * - fillMissingNames()    专门补名字(appid有但名字空着)的行,不看成就数据有没有填过
- * - fillChineseTranslations() 给英文名的行找中文名,找到直接覆盖游戏名(不是单独一列)
- *   (以后 syncNewGames() 新增游戏时,会默认优先尝试拿官方中文名,不用手动补)
- * - rebuildSheetFromApi() 想彻底重建表格(会保留手动加的"玩过但不owned"的行)时手动跑
- * - hardResetFromApi()    想完全清空、不保留任何旧行、彻底重来时手动跑(很少需要)
+ * Functions you'll use day to day:
+ * - runBatch()          Refreshes achievement data in batches (runs daily via trigger, rarely needs manual runs)
+ * - syncNewGames()       Detects new games in your library and appends them (runs automatically via trigger)
+ * - updateMissingRows()  Run manually after adding a new appid row if you don't want to wait for the cursor to cycle around
+ * - sortSheetByCompletion() Run manually to re-sort by completion rate/total achievements
+ * - fillMissingNames()    Backfills names specifically (appid present but name blank), regardless of whether achievement data is filled
+ * - fillChineseTranslations() Looks up the Chinese name for rows with an English name and overwrites the name in place (not a separate column)
+ *   (syncNewGames() already tries the official Chinese name first for newly added games, so this is only needed for backfilling)
+ * - rebuildSheetFromApi() Run manually to fully rebuild the sheet (keeps manually-added "played but not owned" rows)
+ * - hardResetFromApi()    Run manually for a full wipe-and-restart with nothing kept (rarely needed)
  *
- * 成就详情(完整checklist用)相关的功能拆到了单独文件 steam_achievements_detail.gs 里,
- * 里面的 syncAchievementSchema() 现在也接进了每日定时任务,新游戏/最近成就有更新的游戏
- * 会自动同步,不需要手动跑,参见那个文件顶部的说明。
+ * Achievement-detail functionality (for building a full checklist) lives in the separate
+ * file steam_achievements_detail.gs; its syncAchievementSchema() is now wired into the daily
+ * trigger too, so new games/games with recently updated achievements sync automatically -
+ * see that file's header comment for details.
  */
 
-// ============ 配置区 ============
-// STEAM_API_KEY / STEAM_ID 不写在代码里,从脚本属性读取(项目设置 -> 脚本属性),
-// 这样代码可以安全公开分享,不会泄露任何人的私人信息。
+// ============ Config ============
+// STEAM_API_KEY / STEAM_ID are never hardcoded here - they're read from Script Properties
+// (Project Settings -> Script Properties), so this code can be shared publicly without
+// leaking anyone's personal information.
 const CONFIG = {
   STEAM_API_KEY: PropertiesService.getScriptProperties().getProperty('STEAM_API_KEY'),
   STEAM_ID: PropertiesService.getScriptProperties().getProperty('STEAM_ID'),
   SHEET_NAME: 'RAW DATA',
-  ACHIEVEMENTS_SHEET_NAME: 'ACHIEVEMENTS', // 存全部游戏完整成就详情的独立标签页
-  UNVETTED_COL: 1, // A列:Status标记。'Unvetted'=Steam默认隐藏的游戏(汇总统计会排除);'Manual'=人工记录、锁定不再自动同步的行
-  APPID_COL: 2,    // B列:AppID(表的主键,所有自动化都靠它)
-  NAME_COL: 3,     // C列:游戏名(来自 Steam API 的官方名字)
-  ACHIEVED_COL: 4, // D列:完成数
-  TOTAL_COL: 5,    // E列:成就总数(无成就系统的游戏会写 'N/A')
-  RATE_COL: 6,     // F列:完成率
-  FAVORITE_COL: 7, // G列:喜爱标记(♥),TRUE/FALSE,在Dashboard上点爱心切换
-  PRIORITY_COL: 8, // H列:重点关注标记(★),TRUE/FALSE,在Dashboard上点星标切换,标记的游戏会置顶显示
-  NEW_ACH_DATE_COL: 9, // I列:成就总数比上次记录变多的日期(说明游戏更新加了新成就),用于Dashboard提醒
-  HEADER_ROW: 2,   // 数据从第几行开始
-  BATCH_SIZE: 1000,       // 上限设高一点,真正兜底的是下面的 MAX_RUNTIME_MS
+  ACHIEVEMENTS_SHEET_NAME: 'ACHIEVEMENTS', // separate tab storing full achievement detail for every game
+  UNVETTED_COL: 1, // Col A: Status flag. 'Unvetted' = game Steam hides by default (excluded from aggregate stats); 'Manual' = manually recorded row, locked out of auto-sync
+  APPID_COL: 2,    // Col B: AppID (the sheet's primary key - all automation keys off this)
+  NAME_COL: 3,     // Col C: Game name (official name from the Steam API)
+  ACHIEVED_COL: 4, // Col D: Achieved count
+  TOTAL_COL: 5,    // Col E: Total achievements (games with no achievement system get 'N/A')
+  RATE_COL: 6,     // Col F: Completion rate
+  FAVORITE_COL: 7, // Col G: Favorite flag (♥), TRUE/FALSE, toggled by clicking the heart on the Dashboard
+  PRIORITY_COL: 8, // Col H: Spotlight flag (★), TRUE/FALSE, toggled by clicking the star on the Dashboard - spotlighted games are pinned to the top
+  NEW_ACH_DATE_COL: 9, // Col I: date the total-achievement count last increased (i.e. the game got new achievements in an update), used for a Dashboard notice
+  HEADER_ROW: 2,   // which row the data starts on
+  BATCH_SIZE: 1000,       // set high - MAX_RUNTIME_MS below is the real backstop
   MAX_RUNTIME_MS: 4.5 * 60 * 1000,
 };
 
-// ============ 初始化 ============
+// ============ Initialization ============
 function setup() {
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('CURSOR')) {
     props.setProperty('CURSOR', '0');
   }
   ensureHeaders();
-  Logger.log('初始化完成');
+  Logger.log('Setup complete');
 }
 
 /**
- * 确保各数据列在第1行都有表头文字。可以随时单独运行,也会在重建表格时自动调用。
+ * Ensures every data column has header text in row 1. Safe to run standalone at any time;
+ * also called automatically whenever the sheet is rebuilt.
  */
 function ensureHeaders() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -88,9 +92,10 @@ function hasChineseChars(str) {
 }
 
 /**
- * 用 Steam API 的数据重建整张表,同时保留"appid不在当前owned列表里"的行
- * (手动加的、已玩过但现在不owned的游戏)。
- * 建议在想彻底清理陈旧数据、又不想丢失手动记录时运行。
+ * Rebuilds the whole sheet from Steam API data, while preserving rows whose appid
+ * isn't in the current owned-games list (manually-added games you've played but
+ * don't currently own). Recommended when you want to clean out stale data without
+ * losing manual records.
  */
 function rebuildSheetFromApi() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -100,7 +105,7 @@ function rebuildSheetFromApi() {
   const ownedAppIdSet = new Set(ownedGames.map(g => String(g.appid)));
 
   const manualRows = [];
-  const manualStatusAppIds = new Set(); // 标过'Manual'的appid,不管owned与否,重建后都要保住这个标记
+  const manualStatusAppIds = new Set(); // appids marked 'Manual' - keep this flag through the rebuild regardless of owned status
   if (lastRow >= CONFIG.HEADER_ROW) {
     const numCols = sheet.getLastColumn();
     const data = sheet.getRange(CONFIG.HEADER_ROW, 1, lastRow - CONFIG.HEADER_ROW + 1, numCols).getValues();
@@ -108,7 +113,7 @@ function rebuildSheetFromApi() {
       const appid = rowValues[CONFIG.APPID_COL - 1];
       const name = rowValues[CONFIG.NAME_COL - 1];
       const status = rowValues[CONFIG.UNVETTED_COL - 1];
-      if (!name && !appid) return; // 整行都是空的,跳过
+      if (!name && !appid) return; // entire row is blank, skip
       if (status === 'Manual' && appid) manualStatusAppIds.add(String(appid));
       if (!appid || !ownedAppIdSet.has(String(appid))) manualRows.push(rowValues);
     });
@@ -123,7 +128,7 @@ function rebuildSheetFromApi() {
     sheet.getRange(row, CONFIG.NAME_COL).setValue(g.name);
     sheet.getRange(row, CONFIG.APPID_COL).setValue(g.appid);
     if (manualStatusAppIds.has(String(g.appid))) {
-      sheet.getRange(row, CONFIG.UNVETTED_COL).setValue('Manual'); // 人工锁定优先,盖过API自动判定的Unvetted
+      sheet.getRange(row, CONFIG.UNVETTED_COL).setValue('Manual'); // manual lock takes priority over the API's auto-detected Unvetted flag
     } else if (result.unvettedAppIds.has(String(g.appid))) {
       sheet.getRange(row, CONFIG.UNVETTED_COL).setValue('Unvetted');
     }
@@ -137,14 +142,14 @@ function rebuildSheetFromApi() {
 
   PropertiesService.getScriptProperties().setProperty('CURSOR', '0');
   ensureHeaders();
-  Logger.log('重建完成:写入 ' + ownedGames.length + ' 个 API 游戏(其中 ' + result.unvettedAppIds.size
-    + ' 个标记为Unvetted,' + manualStatusAppIds.size + ' 个人工锁定Manual保留) + 保留 ' + manualRows.length + ' 个手动/非owned行');
+  Logger.log('Rebuild complete: wrote ' + ownedGames.length + ' API games (' + result.unvettedAppIds.size
+    + ' flagged Unvetted, ' + manualStatusAppIds.size + ' kept as manually-locked Manual) + kept ' + manualRows.length + ' manual/non-owned rows');
 }
 
 /**
- * 硬重置:不保留任何东西,直接用 Steam API 的数据把整张表重新铺一遍。
- * 手动加的行(包括可能有appid错误的那些)也会被一起清掉。
- * 适合想彻底清干净、重新开始的情况,平时不需要跑。
+ * Hard reset: keeps nothing, just re-fills the whole sheet from Steam API data.
+ * Manually-added rows (including any with a bad appid) get wiped too.
+ * For a genuine clean-slate restart; not needed for normal use.
  */
 function hardResetFromApi() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -167,12 +172,12 @@ function hardResetFromApi() {
 
   PropertiesService.getScriptProperties().setProperty('CURSOR', '0');
   ensureHeaders();
-  Logger.log('硬重置完成:写入 ' + result.games.length + ' 个 API 游戏(其中 ' + result.unvettedAppIds.size
-    + ' 个标记为Unvetted),没有保留任何旧行');
+  Logger.log('Hard reset complete: wrote ' + result.games.length + ' API games (' + result.unvettedAppIds.size
+    + ' flagged Unvetted), no old rows kept');
 }
 
 /**
- * 检测 Steam 库里表格中还没有的新游戏,自动追加成新行。
+ * Detects games in your Steam library that aren't in the sheet yet and appends them as new rows.
  */
 function syncNewGames() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -181,13 +186,13 @@ function syncNewGames() {
 
   const newGames = result.games.filter(g => !existingAppIds.has(String(g.appid)));
   if (newGames.length === 0) {
-    Logger.log('没有发现新游戏');
+    Logger.log('No new games found');
     return;
   }
 
   let nextRow = sheet.getLastRow() + 1;
   newGames.forEach(g => {
-    const bestName = fetchAppName(g.appid) || g.name; // 优先用两层查到的中文名,查不到就退回GetOwnedGames给的名字
+    const bestName = fetchAppName(g.appid) || g.name; // prefer the two-tier Chinese-name lookup, fall back to whatever GetOwnedGames returned
     sheet.getRange(nextRow, CONFIG.NAME_COL).setValue(bestName);
     sheet.getRange(nextRow, CONFIG.APPID_COL).setValue(g.appid);
     if (result.unvettedAppIds.has(String(g.appid))) {
@@ -197,7 +202,7 @@ function syncNewGames() {
     Utilities.sleep(300);
   });
 
-  Logger.log('新增了 ' + newGames.length + ' 款游戏: ' + JSON.stringify(newGames.map(g => g.name)));
+  Logger.log('Added ' + newGames.length + ' new game(s): ' + JSON.stringify(newGames.map(g => g.name)));
 }
 
 function getExistingAppIds(sheet) {
@@ -209,7 +214,7 @@ function getExistingAppIds(sheet) {
   return set;
 }
 
-// ============ 核心:分批同步成就数据 ============
+// ============ Core: batched achievement-data sync ============
 function runBatch() {
   const startTime = Date.now();
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -236,7 +241,7 @@ function runBatch() {
       try {
         updateRowForGame(sheet, row, appid);
       } catch (e) {
-        Logger.log('appid ' + appid + ' 更新失败: ' + e.message);
+        Logger.log('appid ' + appid + ' update failed: ' + e.message);
       }
       Utilities.sleep(300);
     }
@@ -246,14 +251,16 @@ function runBatch() {
   }
 
   props.setProperty('CURSOR', String(cursor));
-  Logger.log('本次处理范围: 第' + (CONFIG.HEADER_ROW + startCursor) + '行 到 第' + (CONFIG.HEADER_ROW + cursor - 1)
-    + '行 (共' + processed + '行, 表格总数据行数=' + totalDataRows + ')');
+  Logger.log('Processed rows ' + (CONFIG.HEADER_ROW + startCursor) + ' to ' + (CONFIG.HEADER_ROW + cursor - 1)
+    + ' (' + processed + ' rows this run, total data rows=' + totalDataRows + ')');
   updateSummaryStats();
 }
 
 /**
- * 给英文名的行找中文名,找到直接覆盖游戏名(不再单独存一列)。
- * 抓网页比调用API接口容易被限流,单次运行时间到了会先停,可以多跑几次逐步补完。
+ * Looks up the Chinese name for rows that currently have an English name, and overwrites
+ * the name in place (not a separate column) when found.
+ * Scraping the store page is more rate-limit-prone than calling the API, so this stops
+ * when the time budget runs out - just run it again a few more times to finish backfilling.
  */
 function fillChineseTranslations() {
   const startTime = Date.now();
@@ -265,7 +272,7 @@ function fillChineseTranslations() {
 
   for (let row = CONFIG.HEADER_ROW; row <= lastRow; row++) {
     if (Date.now() - startTime > CONFIG.MAX_RUNTIME_MS) {
-      Logger.log('时间快到了,先停在第' + row + '行。抓网页容易被限流,建议隔一会再跑一次接着补。');
+      Logger.log('Time budget nearly up, stopping at row ' + row + '. Store-page scraping rate-limits easily - run again after a short wait to keep going.');
       break;
     }
 
@@ -283,16 +290,17 @@ function fillChineseTranslations() {
     } else {
       notFound++;
     }
-    Utilities.sleep(800); // 抓网页比调用API接口容易触发限流,间隔拉长一些
+    Utilities.sleep(800); // longer delay - scraping the store page trips rate limits more easily than API calls
   }
 
-  Logger.log('补中文名完成: 新查到官方标题 ' + official + ' 个, 没有官方中文名 '
-    + notFound + ' 个(保持原样,下次可重试), 跳过(已是中文) ' + skipped + ' 个');
+  Logger.log('Chinese-name backfill complete: found official title for ' + official + ', no official Chinese name for '
+    + notFound + ' (left as-is, retryable next run), skipped (already Chinese) ' + skipped);
 }
 
 /**
- * 专门补名字:扫一遍全表,把appid有、但名字是空的行都反查一次官方名字。
- * 不看C/D列有没有数据,专门解决"成就数据已经填了、名字还是空的"这种卡住的情况。
+ * Backfills names specifically: scans the whole sheet and looks up the official name for
+ * any row that has an appid but a blank name. Doesn't check columns C/D - this exists
+ * specifically to unstick rows where achievement data got filled but the name didn't.
  */
 function fillMissingNames() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -315,12 +323,13 @@ function fillMissingNames() {
     Utilities.sleep(300);
   }
 
-  Logger.log('补名字完成:成功 ' + filled + ' 个,失败 ' + failed + ' 个(失败原因看上面的日志)');
+  Logger.log('Name backfill complete: ' + filled + ' succeeded, ' + failed + ' failed (see the log above for reasons)');
 }
 
 /**
- * 不看游标,直接扫一遍全表,把还没有成就数据的行(D列是空的,且不是N/A)全部补上。
- * 适合手动加了新行、不想等游标转一圈才轮到它们的情况。
+ * Ignores the cursor and scans the whole sheet, filling in any row that has no
+ * achievement data yet (column D blank and not N/A). Useful after manually adding
+ * new rows when you don't want to wait for the cursor to cycle around to them.
  */
 function updateMissingRows() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -339,22 +348,22 @@ function updateMissingRows() {
     try {
       updateRowForGame(sheet, row, appid);
     } catch (e) {
-      Logger.log('appid ' + appid + ' 更新失败: ' + e.message);
+      Logger.log('appid ' + appid + ' update failed: ' + e.message);
     }
     updated++;
     Utilities.sleep(300);
   }
 
-  Logger.log('补全完成,共处理 ' + updated + ' 行缺失数据');
+  Logger.log('Backfill complete, processed ' + updated + ' row(s) of missing data');
   updateSummaryStats();
 }
 
 function updateRowForGame(sheet, row, appid) {
   const currentName = sheet.getRange(row, CONFIG.NAME_COL).getValue();
   if (!currentName) {
-    const officialName = fetchAppName(appid); // 两层查:JSON优先,没中文再抓商店网页,拿到最好的一个名字
+    const officialName = fetchAppName(appid); // two-tier lookup: JSON first, scrape the store page if that has no Chinese name, use whichever is best
     if (officialName) sheet.getRange(row, CONFIG.NAME_COL).setValue(officialName);
-    Utilities.sleep(300); // 商店接口限流比较严格,单独留个间隔,别紧接着就打成就接口
+    Utilities.sleep(300); // the store endpoint rate-limits fairly aggressively - pause here before hitting the achievements endpoint
   }
 
   const result = fetchAchievementStats(appid);
@@ -365,14 +374,15 @@ function updateRowForGame(sheet, row, appid) {
   }
 
   if (result.retry) {
-    return; // 临时性错误,留空让下次重试
+    return; // transient error - leave it blank so the next run retries
   }
 
   const stats = result;
   const previousTotal = sheet.getRange(row, CONFIG.TOTAL_COL).getValue();
   const rate = stats.total > 0 ? stats.achieved / stats.total : 0;
 
-  // 如果这次查到的成就总数比上次记录的多,说明游戏更新加了新成就,记一下日期
+  // if the total-achievement count is now higher than what's on record, the game's had an
+  // update that added new achievements - note the date
   if (typeof previousTotal === 'number' && stats.total > previousTotal) {
     sheet.getRange(row, CONFIG.NEW_ACH_DATE_COL).setValue(new Date());
   }
@@ -384,11 +394,12 @@ function updateRowForGame(sheet, row, appid) {
 }
 
 /**
- * 按完成率(RATE_COL)降序、成就总数(TOTAL_COL)降序排一次表格数据区。
- * 空值(还没同步到数据的行)会自动排到最后。
- * 注意:排序会打乱行的物理位置,游标(CURSOR)记的是"第几行"而不是具体哪款游戏,
- * 排序后游标含义会跟着变,但不影响正确性——runBatch 只是按位置顺序轮流处理,
- * 转几圈下来所有行还是都会被处理到,不会漏掉。
+ * Sorts the sheet's data range by completion rate (RATE_COL) descending, then total
+ * achievements (TOTAL_COL) descending. Blank rows (not synced yet) naturally sort last.
+ * Note: sorting shuffles rows' physical positions, and the CURSOR property tracks
+ * "which row number" rather than a specific game - so what the cursor points at changes
+ * after a sort, but correctness isn't affected. runBatch() just processes rows in
+ * positional order and cycles through everything eventually, so nothing gets skipped.
  */
 function sortSheetByCompletion() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -404,12 +415,15 @@ function sortSheetByCompletion() {
 }
 
 /**
- * 按 Steam 官方社区文档记录的 AGCR(Average Game Completion Rate)算法计算,
- * 返回计算结果,不写回表格(表格里不再保留汇总统计单元格,只在Dashboard里现算显示)。
- * - 只有"至少解锁过1个成就"的游戏才计入平均(0个成就的游戏直接排除,不算0%)
- * - 每款符合条件的游戏各算一个完成率,取算术平均(权重相同,和成就总数无关)
- * - 标记为Unvetted(Profile Features Limited)的游戏排除在外,和Steam官方口径一致
- * 参考: https://steamcommunity.com/sharedfiles/filedetails/?id=650166273
+ * Computes AGCR (Average Game Completion Rate) per Steam's own community-documented
+ * algorithm, and returns the result without writing it back to the sheet (no summary
+ * cells are kept on the sheet - the Dashboard computes and displays this live).
+ * - Only games with at least 1 unlocked achievement count toward the average (games
+ *   with 0 achieved are excluded entirely, not counted as 0%)
+ * - Each eligible game contributes one completion rate; the result is a plain arithmetic
+ *   mean (equal weight per game, independent of each game's total achievement count)
+ * - Games flagged Unvetted (Profile Features Limited) are excluded, matching Steam's own convention
+ * Reference: https://steamcommunity.com/sharedfiles/filedetails/?id=650166273
  */
 function computeAgcrStats(sheet) {
   const lastRow = sheet.getLastRow();
@@ -442,20 +456,23 @@ function computeAgcrStats(sheet) {
 }
 
 /**
- * 只打日志,方便在编辑器里手动跑一下快速看眼汇总数字,不会写回表格。
+ * Logs the summary only - a quick way to check the aggregate numbers by running this
+ * manually in the editor. Doesn't write anything back to the sheet.
  */
 function updateSummaryStats() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
   const stats = computeAgcrStats(sheet);
   const roundedDownPct = Math.floor(stats.avg * 100);
-  Logger.log('AGCR计算完成: 符合条件游戏数=' + stats.eligibleCount
-    + ', 平均完成率=' + roundedDownPct + '% (精确值 ' + (stats.avg * 100).toFixed(5) + '%), 完美游戏数=' + stats.perfectCount);
+  Logger.log('AGCR computed: eligible games=' + stats.eligibleCount
+    + ', average completion=' + roundedDownPct + '% (precise value ' + (stats.avg * 100).toFixed(5) + '%), perfect games=' + stats.perfectCount);
 }
 
 /**
- * 用 Steam 商店的公开接口(不需要登录、不需要拥有游戏)按 appid 反查官方游戏名。
- * 注意:appdetails 这个JSON接口返回的 name 字段经常不受 l 参数本地化影响(是Steam的一个已知怪癖),
- * 所以如果JSON给的名字没有中文,会再去抓一次商店网页本身的HTML,那里才是真正展示用的本地化标题。
+ * Looks up the official game name by appid using Steam's public store endpoints (no login,
+ * no ownership required).
+ * Note: the appdetails JSON endpoint's name field often ignores the l= localization param
+ * (a known Steam quirk), so if the JSON-provided name has no Chinese characters, this falls
+ * back to scraping the store page's own HTML, which does carry the real localized title.
  */
 function fetchAppName(appid) {
   const apiName = fetchAppNameFromJson(appid);
@@ -464,14 +481,14 @@ function fetchAppName(appid) {
   const pageName = fetchAppNameFromStorePage(appid);
   if (pageName && hasChineseChars(pageName)) return pageName;
 
-  return apiName; // 两边都没有中文名,只能返回JSON给的名字(可能是英文)
+  return apiName; // neither source had a Chinese name - fall back to whatever JSON gave (possibly English)
 }
 
 function fetchAppNameFromJson(appid) {
   const url = 'https://store.steampowered.com/api/appdetails?appids=' + appid + '&l=schinese';
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   if (res.getResponseCode() !== 200) {
-    Logger.log('appid ' + appid + ' -> 反查名字失败, HTTP ' + res.getResponseCode() + ' (商店接口限流比较严格,常见于短时间内查太多次)');
+    Logger.log('appid ' + appid + ' -> name lookup failed, HTTP ' + res.getResponseCode() + ' (the store endpoint rate-limits fairly aggressively - common after too many lookups in a short time)');
     return null;
   }
 
@@ -479,7 +496,7 @@ function fetchAppNameFromJson(appid) {
   try {
     data = JSON.parse(res.getContentText());
   } catch (e) {
-    Logger.log('appid ' + appid + ' -> 反查名字失败, 返回内容不是合法JSON(大概率也是被限流了,返回了错误页面)');
+    Logger.log('appid ' + appid + ' -> name lookup failed, response wasn\'t valid JSON (most likely rate-limited and returned an error page)');
     return null;
   }
 
@@ -487,14 +504,16 @@ function fetchAppNameFromJson(appid) {
   if (entry && entry.success && entry.data && entry.data.name) {
     return entry.data.name;
   }
-  Logger.log('appid ' + appid + ' -> 反查名字失败, 商店接口没有返回有效数据(可能appid无效或该商品类型不支持)');
+  Logger.log('appid ' + appid + ' -> name lookup failed, the store endpoint returned no valid data (appid may be invalid, or this app type isn\'t supported)');
   return null;
 }
 
 /**
- * 抓商店网页本身的HTML,提取真正展示用的本地化标题(apphub_AppName这个元素)。
- * 比JSON接口的name字段更可靠,但网页结构以后可能会变,属于"尽力而为"的兜底方案。
- * 带上年龄验证的cookie,避免部分游戏被年龄确认页面拦住抓不到正文。
+ * Scrapes the store page's own HTML and extracts the real localized title (the
+ * apphub_AppName element). More reliable than the JSON endpoint's name field, but the
+ * page structure could change in the future, so treat this as a best-effort fallback.
+ * Sends an age-verification cookie so age-gated games don't get blocked before the
+ * actual content is reachable.
  */
 function fetchAppNameFromStorePage(appid) {
   const url = 'https://store.steampowered.com/app/' + appid + '/?l=schinese';
@@ -506,13 +525,14 @@ function fetchAppNameFromStorePage(appid) {
   if (res.getResponseCode() !== 200) return null;
 
   const html = res.getContentText();
-  // class属性可能带多个class(比如 "apphub_AppName xxx"),不要求精确匹配整个属性值
+  // the class attribute may carry multiple classes (e.g. "apphub_AppName xxx"), so don't
+  // require an exact match on the whole attribute value
   const match = html.match(/<div[^>]*class="[^"]*apphub_AppName[^"]*"[^>]*>([^<]+)<\/div>/);
   if (match && match[1]) return match[1].trim();
   return null;
 }
 
-// ============ Steam API 封装 ============
+// ============ Steam API wrappers ============
 function fetchOwnedGames(skipUnvettedApps) {
   const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/`
     + `?key=${CONFIG.STEAM_API_KEY}&steamid=${CONFIG.STEAM_ID}`
@@ -524,13 +544,14 @@ function fetchOwnedGames(skipUnvettedApps) {
 }
 
 /**
- * 拉取完整owned列表(含Steam默认会隐藏的"Unvetted/Profile Features Limited"游戏),
- * 同时标记出哪些是被隐藏的那批,方便在表格里单独标注。
- * 返回 { games: [...], unvettedAppIds: Set }
+ * Fetches the full owned-games list (including games Steam hides by default under
+ * "Unvetted/Profile Features Limited"), while also flagging which ones are in that
+ * hidden batch, so the sheet can call them out separately.
+ * Returns { games: [...], unvettedAppIds: Set }
  */
 function fetchOwnedGamesWithUnvettedFlag() {
-  const fullList = fetchOwnedGames(false);   // 不跳过unvetted,拿到完整列表
-  const vettedList = fetchOwnedGames(true);  // 跳过unvetted,拿到"官方认可"的那部分
+  const fullList = fetchOwnedGames(false);   // don't skip unvetted - gets the complete list
+  const vettedList = fetchOwnedGames(true);  // skip unvetted - gets only the "vetted" subset
   const vettedAppIds = new Set(vettedList.map(g => String(g.appid)));
   const unvettedAppIds = new Set(
     fullList.filter(g => !vettedAppIds.has(String(g.appid))).map(g => String(g.appid))
@@ -545,12 +566,12 @@ function fetchAchievementStats(appid) {
   const code = res.getResponseCode();
 
   if (code === 429) {
-    Logger.log('appid ' + appid + ' -> HTTP 429 限流,先留空,下次重试');
+    Logger.log('appid ' + appid + ' -> HTTP 429 rate-limited, leaving blank for now, will retry next run');
     return { retry: true };
   }
 
   if (code !== 200) {
-    Logger.log('appid ' + appid + ' -> HTTP ' + code + ' (Steam判定无成就数据,标记N/A)');
+    Logger.log('appid ' + appid + ' -> HTTP ' + code + ' (Steam says no achievement data, marking N/A)');
     return { noAchievementSystem: true };
   }
 
@@ -558,13 +579,13 @@ function fetchAchievementStats(appid) {
   const stats = data.playerstats;
 
   if (!stats || !stats.success) {
-    const reason = (stats && stats.error) || '未知原因';
-    Logger.log('appid ' + appid + ' -> ' + reason + ' (标记N/A,不再重试)');
+    const reason = (stats && stats.error) || 'unknown reason';
+    Logger.log('appid ' + appid + ' -> ' + reason + ' (marking N/A, won\'t retry)');
     return { noAchievementSystem: true };
   }
 
   if (!stats.achievements) {
-    Logger.log('appid ' + appid + ' -> 确认无成就系统');
+    Logger.log('appid ' + appid + ' -> confirmed no achievement system');
     return { noAchievementSystem: true };
   }
 
@@ -573,7 +594,7 @@ function fetchAchievementStats(appid) {
   return { total, achieved };
 }
 
-// ============ 定时任务 ============
+// ============ Scheduled triggers ============
 function createTrigger() {
   ScriptApp.getProjectTriggers().forEach(t => {
     const fn = t.getHandlerFunction();
@@ -582,5 +603,5 @@ function createTrigger() {
   ScriptApp.newTrigger('runBatch').timeBased().everyDays(1).atHour(2).create();
   ScriptApp.newTrigger('syncNewGames').timeBased().everyDays(1).atHour(3).create();
   ScriptApp.newTrigger('syncAchievementSchema').timeBased().everyDays(1).atHour(4).create();
-  Logger.log('定时任务已创建:runBatch 凌晨2点、syncNewGames 凌晨3点、syncAchievementSchema 凌晨4点,每天各跑一次');
+  Logger.log('Triggers created: runBatch at 2am, syncNewGames at 3am, syncAchievementSchema at 4am, each running once daily');
 }
