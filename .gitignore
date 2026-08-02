@@ -1,0 +1,5 @@
+# Personal Apps Script project binding - each user creates their own via `clasp create`/`clasp clone`
+.clasp.json
+
+# clasp local build/cache artifacts
+.clasprc.json
