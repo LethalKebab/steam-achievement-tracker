@@ -20,27 +20,42 @@ It's entirely self-hosted on Google's free tier — your Sheet, your Apps Script
 
 Takes about 10 minutes, one-time.
 
-**You'll need:**
+### What you'll generate
+
+You need 3 IDs — two from Steam, one from Google. Here's exactly where each one ends up:
+
+| # | What | Generate at | Put it in |
+|---|---|---|---|
+| ① | **Steam Web API Key** | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) | Apps Script editor → **Project Settings → Script Properties** → add property `STEAM_API_KEY` |
+| ② | **SteamID64** | [steamid.io](https://steamid.io) (paste your profile URL) | Apps Script editor → **Project Settings → Script Properties** → add property `STEAM_ID` |
+| ③ | **Google Script ID** | Apps Script editor → **Project Settings** → copy the Script ID | Your local `.clasp.json` (copy from `.clasp.json.example` and paste it in) |
+
+> **Never put ① or ② in source files.** The code reads them from Script Properties at runtime. The `.clasp.json` with your Script ID (③) is gitignored — it won't be committed.
+
+**You'll also need:**
 - A Google account
-- A [Steam Web API key](https://steamcommunity.com/dev/apikey)
-- Your [SteamID64](https://steamid.io)
 - [`clasp`](https://github.com/google/clasp) (`npm i -g @google/clasp`, then `clasp login`)
 
-**Steps:**
+### Steps
+
 1. Create a Google Sheet with a `RAW DATA` tab (see [schema](#sheet-schema-raw-data-tab) below). `ACHIEVEMENTS` and `GUIDES` tabs are created automatically the first time they're needed — no need to add them yourself.
 2. In the Sheet: **Extensions → Apps Script** to create the bound script project.
-3. Copy your Script ID (**Project Settings** in the Apps Script editor) into a local `.clasp.json`:
+3. Add your Steam credentials to the project:
+   - In the Apps Script editor, go to **Project Settings** (the gear icon).
+   - Under **Script Properties**, click **Add script property** and add:
+     - Property: `STEAM_API_KEY` / Value: your Steam Web API key (from ① above)
+     - Property: `STEAM_ID` / Value: your SteamID64 (from ② above)
+4. Set up `.clasp.json` with your Script ID (from ③ above):
    ```bash
    cp .clasp.json.example .clasp.json
-   # paste your Script ID in, then:
+   # Edit .clasp.json and paste your Script ID in, then:
    clasp push
    ```
-4. In the Apps Script editor, **Project Settings → Script Properties**, add `STEAM_API_KEY` and `STEAM_ID`. (Optional features need their own properties — see [Repo layout](#repo-layout).)
-5. Run these once from the Apps Script editor (it'll prompt you to authorize):
+5. Run these once from the Apps Script editor (each will prompt you to authorize on first run):
    - `setup()`
    - `rebuildSheetFromApi()` — pulls your full library in
    - `createTrigger()` — turns on the daily auto-sync (2am/3am/4am, in the project's timezone — `America/Los_Angeles` by default; change it under **Project Settings → Time zone** first if you want the sync to land at specific local hours)
-6. *(Optional)* **Deploy → New deployment → Web app** to get your Dashboard URL. Set **Execute as: Me** and **Who has access: Only myself** unless you specifically want to share the link — and your Steam data — with someone else.
+6. *(Optional)* **Deploy → New deployment → Web app** to get your Dashboard URL. Set **Execute as: Me** and **Who has access: Only myself** unless you specifically want to share the link — and your Steam data — with someone else. Take note of the deployment ID (`clasp deployments`), you'll use it to update the Dashboard without changing the URL: `clasp deploy -i <your-deployment-id>`.
 
 That's it — from here it just runs.
 
