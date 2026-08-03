@@ -14,6 +14,8 @@ Connect your Steam account once, and every day your library and achievement prog
 
 It's entirely self-hosted on Google's free tier — your Sheet, your Apps Script project, your data. No accounts to make anywhere else, no service watching your library but you.
 
+> **Heads up:** the Sheet's column headers and the Dashboard UI are in Chinese (the language this project was originally built in), not English. Nothing about setup or daily use requires reading Chinese, but expect to see it on screen — see [Sheet schema](#sheet-schema-raw-data-tab) below for the exact labels you'll actually get.
+
 ## Setup
 
 Takes about 10 minutes, one-time.
@@ -25,7 +27,7 @@ Takes about 10 minutes, one-time.
 - [`clasp`](https://github.com/google/clasp) (`npm i -g @google/clasp`, then `clasp login`)
 
 **Steps:**
-1. Create a Google Sheet with a `RAW DATA` tab (see [schema](#sheet-schema) below); add empty `ACHIEVEMENTS` and `GUIDES` tabs if you want those.
+1. Create a Google Sheet with a `RAW DATA` tab (see [schema](#sheet-schema-raw-data-tab) below). `ACHIEVEMENTS` and `GUIDES` tabs are created automatically the first time they're needed — no need to add them yourself.
 2. In the Sheet: **Extensions → Apps Script** to create the bound script project.
 3. Copy your Script ID (**Project Settings** in the Apps Script editor) into a local `.clasp.json`:
    ```bash
@@ -37,14 +39,27 @@ Takes about 10 minutes, one-time.
 5. Run these once from the Apps Script editor (it'll prompt you to authorize):
    - `setup()`
    - `rebuildSheetFromApi()` — pulls your full library in
-   - `createTrigger()` — turns on the daily auto-sync
-6. *(Optional)* **Deploy → New deployment → Web app** to get your Dashboard URL.
+   - `createTrigger()` — turns on the daily auto-sync (2am/3am/4am, in the project's timezone — `America/Los_Angeles` by default; change it under **Project Settings → Time zone** first if you want the sync to land at specific local hours)
+6. *(Optional)* **Deploy → New deployment → Web app** to get your Dashboard URL. Set **Execute as: Me** and **Who has access: Only myself** unless you specifically want to share the link — and your Steam data — with someone else.
 
 That's it — from here it just runs.
 
 ## Sheet schema (`RAW DATA` tab)
 
-`A`=Status · `B`=AppID · `C`=Name · `D`=Achieved · `E`=Total · `F`=Completion % · `G`=Favorite (♥) · `H`=Spotlight (★) · `I`=Last updated · `J`=Family-shared (not self-owned)
+Column meaning on the left, the actual header text you'll see on the right (most are Chinese — see the note above):
+
+| Col | Meaning | Actual header |
+|---|---|---|
+| A | Status (`Unvetted`/`Manual`, see [Known limitations](#known-limitations)) | `Status` |
+| B | AppID | `AppID` |
+| C | Name | `游戏名` |
+| D | Achieved count | `完成数` |
+| E | Total achievements | `成就总数` |
+| F | Completion % | `完成率` |
+| G | Favorite (♥) | `喜爱` |
+| H | Spotlight (★) | `重点关注` |
+| I | Last updated | `成就更新日期` |
+| J | Family-shared (not self-owned) | `家庭共享(非自购)` |
 
 ## Known limitations
 
@@ -63,7 +78,7 @@ Steam's API is the source of truth for almost everything, but a few things can't
 | `steam_achievement_sync.gs` | Core daily sync + trigger setup |
 | `steam_achievements_detail.gs` | Fills in full per-achievement detail |
 | `steam_dashboard.gs` + `Dashboard.html` | The web Dashboard |
-| `steam_guides_sync.gs` | Optional: syncs external guide links into `GUIDES` |
+| `steam_guides_sync.gs` | Optional: HTTP endpoint for external tools (e.g. Claude Code) to read/write `GUIDES` and query achievement data (needs `SYNC_SECRET`, plus its own separately-configured deployment — see `CLAUDE.md` for the exact steps) |
 | `steam_daily_checkbox_sync.gs` | Optional: ticks Notion guide checkboxes as you unlock achievements (needs `NOTION_TOKEN`) |
 | `steam_test_debug.gs` | Steam API debugging helpers |
 | `guides/` | Example achievement guide write-ups |
