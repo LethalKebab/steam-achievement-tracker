@@ -1,48 +1,41 @@
 /**
- * Daily auto-sync: automatically checks off Notion guide-page checkboxes to match
- * achievements you've actually unlocked on Steam.
+ * 每日自动同步:根据Steam上实际解锁了哪些成就,自动去Notion攻略页面里勾选对应的checkbox。
  *
- * Design notes (replaces the earlier approach of manually cross-checking each game via
- * Claude Code):
- * - Deciding "should this game be synced" doesn't look at Notion's Status property
- *   (Staged/Paused/Done etc.) - it uses RAW DATA's own achieved-count < total-achievements
- *   directly (skipping games already at 100% and games with no achievement system).
- *   Reason: an automated script doesn't have the token-cost concerns a chat-driven pass
- *   does - re-running against an already-"Done" game is just a no-op (no new unlocks =
- *   no change), so this simple achievement-count filter is good enough.
- * - Name matching requires an **exact** match against a title candidate segment (see
- *   extractTitleCandidates_ below) - not a substring/prefix match. Matches are applied
- *   automatically with no second confirmation step; every change is written to the
- *   "Sync Log" tab for after-the-fact review.
- * - The Notion API calls here are made **directly by this script** (not routed through
- *   Claude Code), so a separate Notion Internal Integration token is required, stored in
- *   Script Properties (never hardcoded, never committed to a repo):
- *     Apps Script editor -> Project Settings (gear icon) -> Script Properties -> Add property
- *     Name: NOTION_TOKEN   Value: your Notion Internal Integration secret
- *   and the relevant Notion pages (or their shared parent page, e.g. "Entertainment")
- *   need to be added to that integration's connections (Notion page top-right ••• ->
- *   Connections -> Add connection), otherwise the API returns 404/no access.
+ * 设计说明(替代了之前通过 Claude Code 手动逐款游戏交叉核对的旧方案):
+ * - 判断"某款游戏是否需要同步"不看Notion的Status属性(Staged/Paused/Done等),
+ *   直接用RAW DATA里自己的完成数 < 成就总数来判断(跳过已经100%完成的游戏,
+ *   以及没有成就系统的游戏)。
+ *   原因:自动化脚本不存在chat-driven那种token成本的顾虑,重新跑一次已经标记"Done"的
+ *   游戏也只是no-op(没有新解锁=没有变化),所以拿简单的成就数过滤就够用了。
+ * - 名字匹配要求**精确**匹配标题候选片段(见下面的extractTitleCandidates_)——
+ *   不做substring/prefix匹配。匹配到的直接自动勾选,没有二次确认;所有变更写进
+ *   "Sync Log"标签页,供事后复查。
+ * - 这里的Notion API调用是**这个脚本直接发出的**(不经过Claude Code),
+ *   所以需要一个独立的Notion Internal Integration token,存在Script Properties里
+ *   (不写进代码里,不提交到仓库):
+ *     Apps Script 编辑器 -> 项目设置(齿轮图标) -> Script Properties -> 添加属性
+ *     名称: NOTION_TOKEN   值: 你的 Notion Internal Integration secret
+ *   并且相关的Notion页面(或者它们共同的父页面,比如 "Entertainment")需要添加到
+ *   这个integration的connections里(Notion页面右上角••• -> Connections -> Add connection),
+ *   否则API会返回404/没有权限。
  *
- * First-time use:
- * 1. Run testSyncOneGameCheckboxSync('<some appid>') to manually test one game first,
- *    check the Sync Log results look right before deciding to install the auto trigger.
- * 2. Once confirmed, run installDailyCheckboxSyncTrigger() once to install the daily
- *    schedule (defaults to 8am, project timezone; change the atHour argument below and
- *    re-run this function to adjust the time).
+ * 首次使用:
+ * 1. 先跑一次 testSyncOneGameCheckboxSync('<某个appid>') 手动测一款游戏,
+ *    检查Sync Log结果没问题再决定要不要装自动定时任务。
+ * 2. 确认没问题后,跑一次 installDailyCheckboxSyncTrigger() 装上每天定时任务
+ *    (默认早上8点按项目时区;改下面atHour参数再重新跑一次这个函数就可以调时间)。
  */
 
 /**
- * Entry point that runs automatically every day: scans RAW DATA for games that have a
- * guide link, aren't at 100%, and have an achievement system, syncs Steam's unlock state
- * to the Notion guide page's checkboxes for each, and writes a summary to the
- * "Sync Log" tab.
+ * 每天自动运行的入口:扫描RAW DATA里有攻略链接、没到100%、有成就系统的游戏,
+ * 把Steam解锁状态同步到Notion攻略页面的checkbox上,然后写一行摘要到"Sync Log"标签页。
  */
 function dailyCheckboxSync() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return;
 
-  // Columns A-E: Status, AppID, Name, Achieved count, Total achievements
+  // A-E列: Status, AppID, 游戏名, 完成数, 成就总数
   const rawData = sheet.getRange(2, 1, lastRow - 1, 5).getValues();
   const guideByAppid = {};
   listGuideRows().forEach(g => { guideByAppid[g.appid] = g; });
@@ -61,23 +54,21 @@ function dailyCheckboxSync() {
     const guide = guideByAppid[c.appid];
     const logs = processGameCheckboxSync_(c.appid, c.name, guide.url);
     allLogs.push.apply(allLogs, logs);
-    Utilities.sleep(350); // leave some margin for the Notion API to avoid 429 rate-limiting
+    Utilities.sleep(350); // 给Notion API留点余量,避免触发429限流
   });
 
   writeSyncLog_(allLogs);
 }
 
 /**
- * Manually test a single game without waiting for the daily trigger. appid can be a
- * string or a number.
- * Select this function in the Apps Script editor, set the argument, and click "Run" -
- * results are written to Sync Log and also visible via Logger.log output under
- * View -> Executions.
+ * 不等定时任务,手动测一款游戏。appid可以是字符串或数字。
+ * 在Apps Script编辑器里选这个函数、填好参数、点"Run"——
+ * 结果会写入Sync Log,同时也可以通过查看 -> 执行记录看Logger.log的输出。
  */
 function testSyncOneGameCheckboxSync(appid) {
   appid = String(appid);
   const guide = listGuideRows().find(g => g.appid === appid);
-  if (!guide) throw new Error('appid ' + appid + ' has no guide link in the GUIDES sheet, can\'t sync');
+  if (!guide) throw new Error('appid ' + appid + ' 在GUIDES表里没有攻略链接,无法同步');
 
   const logs = processGameCheckboxSync_(appid, guide.name, guide.url);
   writeSyncLog_(logs);
@@ -86,9 +77,8 @@ function testSyncOneGameCheckboxSync(appid) {
 }
 
 /**
- * Installs the daily trigger that runs dailyCheckboxSync automatically.
- * Clears any existing same-named trigger first to avoid duplicates, so it's safe to
- * re-run this function whenever you want to change the time.
+ * 安装每天自动跑 dailyCheckboxSync 的定时任务。
+ * 跑之前会先清掉已有的同名trigger避免重复,所以想改时间直接改atHour参数重新跑就行。
  */
 function installDailyCheckboxSyncTrigger() {
   ScriptApp.getProjectTriggers().forEach(t => {
@@ -97,11 +87,11 @@ function installDailyCheckboxSyncTrigger() {
   ScriptApp.newTrigger('dailyCheckboxSync')
     .timeBased()
     .everyDays(1)
-    .atHour(8) // 8am, project timezone (change this number to adjust the time)
+    .atHour(8) // 早上8点,项目时区(改这个数字来调时间)
     .create();
 }
 
-/** Uninstalls the daily trigger (call this if you no longer want it to run automatically). */
+/** 卸载定时任务(不想再自动跑了就调这个)。 */
 function uninstallDailyCheckboxSyncTrigger() {
   ScriptApp.getProjectTriggers().forEach(t => {
     if (t.getHandlerFunction() === 'dailyCheckboxSync') ScriptApp.deleteTrigger(t);
@@ -109,23 +99,22 @@ function uninstallDailyCheckboxSyncTrigger() {
 }
 
 // ---------------------------------------------------------------------------
-// Per-game sync logic
+// 单游戏同步逻辑
 // ---------------------------------------------------------------------------
 
 /**
- * For one game: fetches Steam's unlocked achievements + the Notion guide page's checkbox
- * list, name-matches them, and checks the matches.
- * Returns the log rows produced this run (each row is [timestamp, AppID, Name,
- * Achievement name, result description]).
+ * 对一款游戏:拉Steam已解锁成就 + 拉Notion攻略页面的checkbox列表,
+ * 按名字匹配,对匹配到的自动勾选。
+ * 返回本次运行产生的日志行(每行 [时间戳, AppID, 游戏名, 成就名, 结果描述])。
  */
 function processGameCheckboxSync_(appid, gameName, url) {
   const logEntries = [];
 
   let unlocked;
   try {
-    unlocked = getUnlockedAchievements(appid); // reuses steam_guides_sync.gs
+    unlocked = getUnlockedAchievements(appid); // 复用 steam_guides_sync.gs
   } catch (err) {
-    logEntries.push([new Date(), appid, gameName, '', 'Skipped - could not fetch Steam unlock data: ' + err]);
+    logEntries.push([new Date(), appid, gameName, '', '跳过 - 无法获取Steam解锁数据: ' + err]);
     return logEntries;
   }
   if (!unlocked || unlocked.length === 0) return logEntries;
@@ -134,7 +123,7 @@ function processGameCheckboxSync_(appid, gameName, url) {
   try {
     pageId = extractNotionPageId_(url);
   } catch (err) {
-    logEntries.push([new Date(), appid, gameName, '', 'Skipped - could not parse the Notion link: ' + err]);
+    logEntries.push([new Date(), appid, gameName, '', '跳过 - 无法解析Notion链接: ' + err]);
     return logEntries;
   }
 
@@ -142,12 +131,12 @@ function processGameCheckboxSync_(appid, gameName, url) {
   try {
     todos = fetchAllToDoBlocks_(pageId);
   } catch (err) {
-    logEntries.push([new Date(), appid, gameName, '', 'Skipped - could not read the Notion page (check whether the integration is connected to it): ' + err]);
+    logEntries.push([new Date(), appid, gameName, '', '跳过 - 无法读取Notion页面(检查integration是否已连接到该页面): ' + err]);
     return logEntries;
   }
 
   if (todos.length === 0) {
-    logEntries.push([new Date(), appid, gameName, '', 'Skipped - no checkboxes found on the page (may be a database-only/notes-only page, needs manual handling)']);
+    logEntries.push([new Date(), appid, gameName, '', '跳过 - 页面上没有找到checkbox(可能是纯数据库/纯笔记页面,需要手动处理)']);
     return logEntries;
   }
 
@@ -165,19 +154,14 @@ function processGameCheckboxSync_(appid, gameName, url) {
       const todoNorm = normalizeText_(todo.text);
       if (!todoNorm) continue;
 
-      // Prefix matching (even with a boundary-character check) still isn't strict enough:
-      // a short achievement name can be a strict prefix of a different, unrelated, harder
-      // achievement's name that happens to share its first few characters. If the short
-      // name's real checkbox has already been checked (so it's no longer in the pool to
-      // match against), the algorithm could end up checking the wrong "cousin
-      // achievement's" checkbox instead - one that's actually still locked.
-      // Fixed by requiring an **exact match**: split the checkbox text into "title
-      // candidate segments" (on <br>-converted line breaks, and on a colon/dash within a
-      // single line), and only count it as a match if the achievement name exactly equals
-      // one of those candidate segments - no more accepting "prefix + boundary looks ok" as
-      // a weak match. (Splitting on line breaks first also naturally handles achievement
-      // names that themselves contain a colon, since the colon sits before the line break
-      // and survives intact in that line's candidate segment.)
+      // 前缀匹配(哪怕加边界字符检查)仍然不够严格:一个短的成就名可以是另一个不相关的、
+      // 更难的成就名的严格前缀——两者恰好前几个字相同。如果短成就名的真实checkbox已经被
+      // 勾选了(不再在待匹配池里),算法就可能错误地勾选到那个"表亲成就"的checkbox——
+      // 而那个成就实际上还没解锁。
+      // 修正方案:改为**精确匹配**——把checkbox文本按"标题候选片段"拆分(先按<br>转换
+      // 出来的换行拆,再在单行内按冒号/破折号拆),成就名必须严格等于其中一个候选片段才算
+      // 匹配,不再接受"前缀+边界看起来对"的弱匹配。(先按换行拆也自然处理了成就名本身含
+      // 冒号的情况,因为冒号在换行之前,会完整地保留在这一行的候选片段里。)
       const candidates = extractTitleCandidates_(todoNorm);
       const isMatch =
         (nameCnNorm && candidates.indexOf(nameCnNorm) !== -1) ||
@@ -187,11 +171,11 @@ function processGameCheckboxSync_(appid, gameName, url) {
         claimedBlockIds[todo.id] = true;
         try {
           notionApiRequest_('patch', '/blocks/' + todo.id, { to_do: { checked: true } });
-          logEntries.push([new Date(), appid, gameName, ach.nameCn || ach.nameEn, 'Checked: ' + todo.text.slice(0, 60)]);
+          logEntries.push([new Date(), appid, gameName, ach.nameCn || ach.nameEn, '已勾选: ' + todo.text.slice(0, 60)]);
         } catch (err) {
-          logEntries.push([new Date(), appid, gameName, ach.nameCn || ach.nameEn, 'Check failed: ' + err]);
+          logEntries.push([new Date(), appid, gameName, ach.nameCn || ach.nameEn, '勾选失败: ' + err]);
         }
-        break; // this achievement is handled - no need to keep looking for other same-named checkboxes
+        break; // 这个成就已处理完毕,不需要继续找其他同名的checkbox
       }
     }
   });
@@ -199,7 +183,7 @@ function processGameCheckboxSync_(appid, gameName, url) {
   return logEntries;
 }
 
-/** Appends log rows to the "Sync Log" tab, creating it first if it doesn't exist. */
+/** 把日志行追加到"Sync Log"标签页,没有就自动创建。 */
 function writeSyncLog_(entries) {
   if (!entries || entries.length === 0) return;
   const ss = SpreadsheetApp.getActive();
@@ -213,41 +197,34 @@ function writeSyncLog_(entries) {
 }
 
 // ---------------------------------------------------------------------------
-// Notion API helper functions
+// Notion API 辅助函数
 // ---------------------------------------------------------------------------
 
 /**
- * Extracts the page ID (standard dashed UUID format, which the Notion API requires) from
- * a Notion link stored in the GUIDES sheet.
- * Handles links whose trailing ID may or may not have dashes, and may or may not have a
- * trailing ?query.
+ * 从 GUIDES 表里存的 Notion 链接中提取页面ID(标准带横线的UUID格式,Notion API要的就是这个)。
+ * 能处理结尾ID有没有横线、以及有没有 ?query 参数的情况。
  */
 function extractNotionPageId_(url) {
   const clean = String(url).split('?')[0];
   const match = clean.match(/([a-f0-9]{32}|[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/?$/i);
-  if (!match) throw new Error('Could not extract a Notion page ID from URL: ' + url);
+  if (!match) throw new Error('无法从URL中提取Notion页面ID: ' + url);
   const id = match[1].replace(/-/g, '');
   return id.slice(0, 8) + '-' + id.slice(8, 12) + '-' + id.slice(12, 16) + '-' + id.slice(16, 20) + '-' + id.slice(20);
 }
 
 /**
- * Recursively fetches every to_do-type child block under a block (including ones nested
- * inside containers like toggle/column blocks).
- * Returns [{id, text, checked}, ...]
+ * 递归拉取一个block下所有 to_do 类型的子block(包括嵌套在toggle/column等容器里的)。
+ * 返回 [{id, text, checked}, ...]
  *
- * Special handling for child pages: some games (e.g. Civilization VI) put their
- * achievement checklist in a child page under the main guide page (commonly titled
- * "Achievements"), rather than flattened directly into the main page - in that case, only
- * child pages whose title looks like an achievement list are recursed into; unrelated
- * child pages (e.g. "Retrospective"/"Tutorial") are not searched, to avoid wasted API
- * calls and false matches against unrelated content.
+ * 对子页面的特殊处理:部分游戏(比如《文明VI》)把成就checklist放在攻略主页下面的
+ * 子页面里(通常叫"成就")而不是直接展平在主页上——这种情况只会递归进入标题长得像
+ * 成就列表的子页面;不相关的子页面(比如"回顾"/"教程")不会搜,避免浪费API调用和
+ * 匹配到无关内容。
  *
- * Child databases (child_database - e.g. Crusader Kings III's original format, which
- * tracked achievements via an embedded database with a "Done" checkbox property instead
- * of markdown checkboxes) and links to other pages (link_to_page) are out of scope for
- * this function and are skipped when encountered - that kind of page needs entirely
- * different sync logic (querying database rows and updating a property, rather than
- * editing a block) - see PROJECT_CONTEXT.md.
+ * 子数据库(child_database——比如《十字军之王III》最初的形式,用嵌入的数据库+一个
+ * "Done" checkbox属性来追踪成就,而不是markdown checkbox)以及指向其他页面的链接
+ * (link_to_page)不在这个函数的处理范围内,遇到直接跳过——那种页面需要完全不同的
+ * 同步逻辑(查数据库行、更新属性,而不是编辑block),参见PROJECT_CONTEXT.md。
  */
 function fetchAllToDoBlocks_(blockId, results) {
   results = results || [];
@@ -266,7 +243,7 @@ function fetchAllToDoBlocks_(blockId, results) {
       }
 
       if (block.type === 'child_page') {
-        if (/成就|achievement/i.test(block.child_page.title || '')) { // matches "成就" (Chinese for "achievement") too - guide pages are bilingual
+        if (/成就|achievement/i.test(block.child_page.title || '')) { // 匹配"成就"(achievement的中文)和"achievement"——攻略页面是中英双语的
           fetchAllToDoBlocks_(block.id, results);
         }
         return;
@@ -287,10 +264,9 @@ function richTextToPlain_(richText) {
 }
 
 /**
- * Lowercases, strips markdown bold asterisks, normalizes literal <br> into a real
- * newline, and collapses extra whitespace - but **keeps** punctuation (colons, dashes,
- * newlines, etc.), since extractTitleCandidates_ relies on that punctuation to find
- * segment boundaries; it can't be stripped outright.
+ * 转小写、去掉markdown加粗星号、把字面量 <br> 规范为真实换行、压缩多余空白——
+ * 但**保留**标点符号(冒号、破折号、换行等),因为 extractTitleCandidates_ 要靠这些
+ * 标点来找分段边界,不能直接删掉。
  */
 function normalizeText_(s) {
   if (!s) return '';
@@ -303,22 +279,16 @@ function normalizeText_(s) {
 }
 
 /**
- * Splits a checkbox's text into "title candidate segments," used to do an **exact** match
- * against an achievement name (rather than a prefix/substring match, which would let a
- * short achievement name incorrectly match a different, longer achievement name that
- * merely happens to share the same first few characters).
+ * 把checkbox的文本拆成"标题候选片段",用来对成就名做**精确**匹配(而不是前缀/substring匹配,
+ * 后者会让短成就名错误地匹配到另一个恰好前几个字相同但实际不同的更长成就名)。
  *
- * Split priority:
- * 1. Split on line breaks first (corresponding to a "title<br>description" page format
- *    converted to a real newline; also naturally handles a two-line "English name /
- *    localized name / description" layout as two separate candidates). This also
- *    naturally supports an achievement name that itself contains a colon, since the
- *    colon sits before the line break and stays intact in that line's candidate segment.
- * 2. If the whole text is a single line separating title and description with a colon or
- *    dash (pages that don't use <br>, e.g. "Location: the location's secret."), the part
- *    before the first colon/dash is also added as a candidate.
- * 3. The whole original text is also a candidate (in case there's no description at all
- *    and the entire checkbox line is just the achievement name).
+ * 拆分优先级:
+ * 1. 先按换行拆(对应"标题<br>描述"页面格式被转成真实换行;也自然支持"英文名/本地化名/
+ *    描述"各占一行的双行布局,拆出两个独立候选片段)。成就名本身含冒号的情况也自然被处理
+ *    了,因为冒号在换行之前,会完整保留在这一行的候选片段里。
+ * 2. 如果整段文字是单行、用冒号或破折号分隔标题和描述(没用<br>的页面,比如
+ *    "位置:这个位置的秘密"),在第一步拆出的基础之上,冒号/破折号前面的部分也作为候选。
+ * 3. 整段原文也是一个候选(以防根本没有描述、整个checkbox行就是纯粹的成就名的情况)。
  */
 function extractTitleCandidates_(text) {
   const candidates = [];
@@ -336,14 +306,13 @@ function extractTitleCandidates_(text) {
 }
 
 /**
- * Unified Notion API call wrapper. Reads the token from Script Properties (never
- * hardcoded in code).
- * method: 'get' | 'patch' etc.; path: starts with /blocks/..., no domain.
+ * 统一的 Notion API 调用封装。token从Script Properties读取(不写在代码里)。
+ * method: 'get' | 'patch' 等; path: 以 /blocks/... 开头,不加域名。
  */
 function notionApiRequest_(method, path, payload) {
   const token = PropertiesService.getScriptProperties().getProperty('NOTION_TOKEN');
   if (!token) {
-    throw new Error('NOTION_TOKEN is not set. Add it under Project Settings (gear icon) -> Script Properties, with your Notion Internal Integration secret as the value');
+    throw new Error('NOTION_TOKEN 未设置。请在项目设置(齿轮图标) -> Script Properties 里添加,值为你的 Notion Internal Integration secret');
   }
   const options = {
     method: method,
@@ -361,12 +330,12 @@ function notionApiRequest_(method, path, payload) {
 
   if (code === 429) {
     Utilities.sleep(1000);
-    return notionApiRequest_(method, path, payload); // simple single retry
+    return notionApiRequest_(method, path, payload); // 简单重试一次
   }
 
   const body = JSON.parse(res.getContentText());
   if (code >= 400) {
-    throw new Error('Notion API error ' + code + ': ' + (body.message || res.getContentText()));
+    throw new Error('Notion API 错误 ' + code + ': ' + (body.message || res.getContentText()));
   }
   return body;
 }

@@ -1,30 +1,23 @@
 /**
- * Steam achievement Dashboard (a separate file, in the same Apps Script project as
- * steam_achievement_sync.gs)
+ * Steam 成就 Dashboard(独立文件,和 steam_achievement_sync.gs 放在同一个 Apps Script 项目里)
  * ------------------------------------------------
- * Usage:
- * 1. In the same Apps Script project, create this file (paste this content in), then
- *    create an HTML file named "Dashboard" (must be exactly that, no .html extension -
- *    Apps Script auto-recognizes it as HTML), and paste Dashboard.html's contents into it
- * 2. Being in the same project, this can use the CONFIG from steam_achievement_sync.gs
- *    directly, no duplicate configuration needed
- * 3. Deploy as a web app: top-right "Deploy" -> "New deployment" -> type "Web app"
- *    - Execute as: "Me"
- *    - Who has access: pick based on your needs (e.g. "Only myself" is most private;
- *      "Anyone with the link" if you want to share it - note that anyone with the link
- *      can then see your Steam data)
- * 4. Deploying gives you a URL - that's your dashboard link. Once sheet data updates,
- *    just refresh the page; no redeploy needed (unless you change these two files' code)
+ * 用法:
+ * 1. 在同一个 Apps Script 项目里新建这个文件(粘贴这份内容),再新建一个 HTML 文件叫
+ *    "Dashboard"(文件名必须是这个,不带.html后缀,Apps Script 自动识别为HTML文件),
+ *    把 Dashboard.html 的内容粘进去
+ * 2. 因为在同一个项目里,可以直接用 steam_achievement_sync.gs 里的 CONFIG,不用重复配置
+ * 3. 部署为网页应用:右上角"部署" -> "新建部署" -> 类型选"网页应用"
+ *    - 执行身份:选"我"
+ *    - 访问权限:按你需求选(比如"仅我自己"最私密;想分享给别人看选"知道链接的任何人",
+ *      注意这样任何拿到链接的人都能看到你的Steam数据)
+ * 4. 部署后会给你一个网址,那就是你的 dashboard 链接,以后表格数据更新了直接刷新页面就行,
+ *    不需要重新部署(除非改了这两个文件的代码)
  *
- * Guides feature: the GUIDES tab (AppID / Name / Guide link / Updated date) stores each
- * game's guide-page link, auto-created on the first call to getDashboardData() if it
- * doesn't exist yet.
- * Guide content itself lives in an external tool (Notion or Google Docs both work -
- * doesn't matter where, only a link is stored in the sheet). Notion is recommended,
- * since pasting markdown text auto-converts "- [ ]" into real checkable to-do blocks,
- * no extra steps needed.
- * Just paste the guide page's share link into the "Guide link" column, one URL per row -
- * no risk of multi-line paste getting split across rows.
+ * 攻略功能:GUIDES 标签页(AppID / 游戏名 / 攻略链接 / 更新日期)存每款游戏的攻略页面链接,
+ * 没有这个标签页的话第一次调用 getDashboardData() 会自动创建。
+ * 攻略内容放在外部工具里(Notion、Google Doc都行,存哪都一样,只是存个链接进表格),
+ * 推荐Notion,因为粘贴markdown文本时会自动把"- [ ]"识别转换成真正可勾选的to-do块,不用额外操作。
+ * 把攻略页面的分享链接粘贴进"攻略链接"这一列就行,一行一个URL,不会有多行粘贴被拆行的问题。
  */
 
 function doGet(e) {
@@ -35,8 +28,8 @@ function doGet(e) {
 }
 
 /**
- * Called by Dashboard.html via google.script.run - reads the RAW DATA sheet and shapes
- * it into the JSON structure the frontend needs.
+ * 供 Dashboard.html 通过 google.script.run 调用,读取 RAW DATA 表格,
+ * 整理成前端要用的 JSON 结构。
  */
 function getDashboardData() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -52,7 +45,7 @@ function getDashboardData() {
     data.forEach(row => {
       const appid = row[CONFIG.APPID_COL - 1];
       const name = row[CONFIG.NAME_COL - 1];
-      if (!appid && !name) return; // skip blank rows
+      if (!appid && !name) return; // 跳过空行
 
       const achievedRaw = row[CONFIG.ACHIEVED_COL - 1];
       const totalRaw = row[CONFIG.TOTAL_COL - 1];
@@ -92,8 +85,7 @@ function getDashboardData() {
 }
 
 /**
- * Called when clicking the heart icon on the Dashboard: toggles favorite status for an
- * appid, writes it back to the sheet, and returns the new state.
+ * 从Dashboard点星标调用:切换某个appid的喜爱状态,写回表格,返回切换后的新状态。
  */
 function toggleFavorite(appid) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -117,9 +109,8 @@ function toggleFavorite(appid) {
 }
 
 /**
- * Called when clicking the star icon on the Dashboard: toggles "spotlight" status for an
- * appid, writes it back to the sheet, and returns the new state.
- * Games marked this way get pinned to the top of the Dashboard.
+ * 从Dashboard点星标调用:切换某个appid的"重点关注"状态,写回表格,返回切换后的新状态。
+ * 标记了这个的游戏会在Dashboard里置顶显示。
  */
 function togglePriority(appid) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -143,12 +134,10 @@ function togglePriority(appid) {
 }
 
 /**
- * On-demand lookup: which achievements are still missing for a given appid (with icon,
- * name, description).
- * Prefers the ACHIEVEMENTS sheet data already batch-synced by syncAchievementSchema()
- * (avoids an extra network call for achievement definitions), only doing a live lookup
- * for "which ones you've actually unlocked" (GetPlayerAchievements).
- * Falls back to a live double-lookup if this game has no ACHIEVEMENTS sheet data yet.
+ * 按需查询:某个appid还差哪些成就没解锁(带图标、名字、描述)。
+ * 优先用 syncAchievementSchema() 已经批量同步好的 ACHIEVEMENTS 表数据(不用再联网查一次成就定义),
+ * 只需要实时查一次"你具体解锁了哪些"(GetPlayerAchievements)。
+ * 如果 ACHIEVEMENTS 表里还没有这个游戏的数据,退回到实时双查询方式。
  */
 function getMissingAchievements(appid) {
   const cached = getCachedAchievementSchema(appid);
@@ -218,8 +207,7 @@ function getMissingAchievements(appid) {
 }
 
 /**
- * Reads the already-synced achievement detail for an appid from the ACHIEVEMENTS sheet,
- * returns null if there isn't any.
+ * 从 ACHIEVEMENTS 表读取某个appid已经同步好的成就详情,没有就返回null。
  */
 function getCachedAchievementSchema(appid) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.ACHIEVEMENTS_SHEET_NAME);
@@ -242,7 +230,7 @@ function getCachedAchievementSchema(appid) {
 }
 
 /**
- * Ensures the GUIDES tab exists (stores each game's guide-page link), auto-created if missing.
+ * 确保 GUIDES 标签页存在(存每款游戏对应的攻略Google Doc链接),没有就自动创建。
  */
 function getOrCreateGuidesSheet() {
   const ss = SpreadsheetApp.getActive();
@@ -258,7 +246,7 @@ function getOrCreateGuidesSheet() {
 }
 
 /**
- * Returns an appid -> guide-link map from the GUIDES sheet, for getDashboardData() to use.
+ * 返回GUIDES表里 appid -> Google Doc链接 的映射,给getDashboardData()用。
  */
 function getGuideUrlMap() {
   const sheet = getOrCreateGuidesSheet();

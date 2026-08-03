@@ -1,47 +1,43 @@
 /**
- * Steam API debugging/testing tools (a separate file from the main sync script
- * steam_achievement_sync.gs)
+ * Steam API 调试/测试工具(独立文件,和正式同步脚本 steam_achievement_sync.gs 分开)
  * ------------------------------------------------
- * Usage:
- * 1. In the same Apps Script project, create a new file (left file list "+" -> Script),
- *    name it whatever (e.g. test), and paste this content in
- * 2. Being in the same project, this can reuse CONFIG's STEAM_API_KEY / STEAM_ID directly
- * 3. Delete this file whenever you want - it won't affect the main script
+ * 用法:
+ * 1. 在同一个 Apps Script 项目里,新建一个文件(左侧文件列表 "+" -> Script),
+ *    命名随意(比如 test),把这个文件内容粘贴进去
+ * 2. 因为和正式脚本在同一个项目里,可以直接复用 CONFIG 里的 STEAM_API_KEY / STEAM_ID
+ * 3. 想删的时候直接删掉这个文件就行,不会影响正式脚本
  */
 
 /**
- * Logs the raw response of the achievement endpoint for a given appid, so you can see
- * exactly what Steam returned.
- * Usage: change appid to the number you want to test, then just run this function
- * (no arguments needed).
+ * 把某个appid的成就接口原始返回内容打到日志里,方便直接看Steam返回了什么。
+ * 用法:把 appid 换成你要测试的数字,直接运行这个函数(不用传参)。
  */
 function debugRawAchievements() {
-  const appid = 47890; // <-- change to the appid you want to test
+  const appid = 47890; // <-- 改成你要测试的appid
 
   const url = `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/`
     + `?appid=${appid}&key=${CONFIG.STEAM_API_KEY}&steamid=${CONFIG.STEAM_ID}&format=json`;
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   Logger.log('appid: ' + appid);
-  Logger.log('HTTP status: ' + res.getResponseCode());
-  Logger.log('Raw response: ' + res.getContentText());
+  Logger.log('HTTP状态码: ' + res.getResponseCode());
+  Logger.log('原始返回内容: ' + res.getContentText());
 }
 
 /**
- * Logs the raw response of the store endpoint (the one used to look up game names) for a
- * given appid.
+ * 把商店接口(反查游戏名用的那个)针对某个appid的原始返回打到日志里。
  */
 function debugRawAppDetails() {
-  const appid = 47890; // <-- change to the appid you want to test
+  const appid = 47890; // <-- 改成你要测试的appid
 
   const url = 'https://store.steampowered.com/api/appdetails?appids=' + appid + '&l=schinese';
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
   Logger.log('appid: ' + appid);
-  Logger.log('HTTP status: ' + res.getResponseCode());
-  Logger.log('Raw response: ' + res.getContentText());
+  Logger.log('HTTP状态码: ' + res.getResponseCode());
+  Logger.log('原始返回内容: ' + res.getContentText());
 }
 
 /**
- * Logs the raw response of GetOwnedGames (note: this can be a lot of data, the log will be long).
+ * 把 GetOwnedGames 的原始返回打到日志里(注意:数据量可能很大,日志会很长)。
  */
 function debugRawOwnedGames() {
   const url = `https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/`
@@ -49,33 +45,30 @@ function debugRawOwnedGames() {
     + `&include_appinfo=true&include_played_free_games=true&format=json&l=schinese`
     + `&skip_unvetted_apps=false`;
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-  Logger.log('HTTP status: ' + res.getResponseCode());
-  Logger.log('Raw response: ' + res.getContentText());
+  Logger.log('HTTP状态码: ' + res.getResponseCode());
+  Logger.log('原始返回内容: ' + res.getContentText());
 }
 
 /**
- * Diffs two GetOwnedGames calls (skip_unvetted_apps=true vs false) and lists which
- * appids only show up in the false version (i.e. games Steam hides by default under
- * "Unvetted/Profile Features Limited").
+ * 对比 skip_unvetted_apps=true / false 两次调用的差异,列出哪些appid只在false版本里出现
+ * (也就是被Steam默认隐藏的"Unvetted/Profile Features Limited"游戏)。
  */
 function debugCompareUnvetted() {
   const result = fetchOwnedGamesWithUnvettedFlag();
-  Logger.log('Full list game count: ' + result.games.length);
-  Logger.log('Appids flagged Unvetted: ' + JSON.stringify(Array.from(result.unvettedAppIds)));
+  Logger.log('完整列表游戏数: ' + result.games.length);
+  Logger.log('被标记为Unvetted的游戏appid列表: ' + JSON.stringify(Array.from(result.unvettedAppIds)));
   const unvettedNames = result.games
     .filter(g => result.unvettedAppIds.has(String(g.appid)))
     .map(g => g.appid + ': ' + g.name);
-  Logger.log('Corresponding game names:\n' + unvettedNames.join('\n'));
+  Logger.log('对应游戏名:\n' + unvettedNames.join('\n'));
 }
 
 /**
- * For diagnosing store-page scraping failures: fetches the store page for a given appid
- * and reports the HTTP status, page length, whether it contains the apphub_AppName
- * keyword, and the <title> tag content - useful for telling apart a page-structure issue
- * from being blocked outright.
+ * 排查商店网页抓取失败用:把某个appid的商店页面抓回来,看看HTTP状态码、页面长度、
+ * 是否含有 apphub_AppName 关键词、以及 <title> 标签内容,方便判断是页面结构问题还是被拦截了。
  */
 function debugStorePageHtml() {
-  const appid = 1366540; // <-- change to the appid you want to test; this default is Dyson Sphere Program
+  const appid = 1366540; // <-- 改成你要测试的appid,这个默认是《戴森球计划》
 
   const url = 'https://store.steampowered.com/app/' + appid + '/?l=schinese';
   const res = UrlFetchApp.fetch(url, {
@@ -85,36 +78,35 @@ function debugStorePageHtml() {
   });
   const html = res.getContentText();
 
-  Logger.log('HTTP status: ' + res.getResponseCode());
-  Logger.log('Page length: ' + html.length);
-  Logger.log('Contains apphub_AppName: ' + html.includes('apphub_AppName'));
-  Logger.log('Contains age-verification keyword: ' + (html.includes('agecheck') || html.includes('agegate') || html.includes('请验证您的年龄')));
+  Logger.log('HTTP状态码: ' + res.getResponseCode());
+  Logger.log('页面长度: ' + html.length);
+  Logger.log('是否包含 apphub_AppName: ' + html.includes('apphub_AppName'));
+  Logger.log('是否包含年龄验证关键词: ' + (html.includes('agecheck') || html.includes('agegate') || html.includes('请验证您的年龄')));
 
   const titleMatch = html.match(/<title>([^<]*)<\/title>/);
-  Logger.log('<title> tag content: ' + (titleMatch ? titleMatch[1] : 'not found'));
+  Logger.log('<title>标签内容: ' + (titleMatch ? titleMatch[1] : '未找到'));
 
   const idx = html.indexOf('apphub_AppName');
   if (idx >= 0) {
-    Logger.log('HTML around apphub_AppName: ' + html.substring(Math.max(0, idx - 50), idx + 150));
+    Logger.log('apphub_AppName 附近的HTML片段: ' + html.substring(Math.max(0, idx - 50), idx + 150));
   }
 }
 
 /**
- * For building an achievement guide checklist: dumps the full achievement list for a
- * given appid (official localized text, if available), including each achievement's
- * name, description, and hidden flag. Copy the log output to hand off to an LLM to draft
- * that game's checklist, instead of manually searching/copying from a web page each time.
+ * 给"做成就攻略清单"用的:把某个appid的完整成就列表(官方简体中文,如果有的话)倒出来,
+ * 包括每个成就的名字、描述、是否隐藏成就。跑完把日志复制给Claude,就能做成对应游戏的checklist,
+ * 不用每次都手动去网页上搜/复制。
  */
 function debugDumpAchievementSchema() {
-  const appid = 2185060; // <-- change to the appid you want to look up
+  const appid = 2185060; // <-- 改成你要查的游戏appid
 
   const url = `https://api.steampowered.com/ISteamUserStats/GetSchemaForGame/v2/`
     + `?key=${CONFIG.STEAM_API_KEY}&appid=${appid}&l=schinese&format=json`;
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-  Logger.log('HTTP status: ' + res.getResponseCode());
+  Logger.log('HTTP状态码: ' + res.getResponseCode());
 
   if (res.getResponseCode() !== 200) {
-    Logger.log('Request failed, raw response: ' + res.getContentText());
+    Logger.log('请求失败,原始返回: ' + res.getContentText());
     return;
   }
 
@@ -122,14 +114,14 @@ function debugDumpAchievementSchema() {
   const achievements = (data.game && data.game.availableGameStats && data.game.availableGameStats.achievements) || [];
 
   if (achievements.length === 0) {
-    Logger.log('No achievement data found, raw response: ' + res.getContentText());
+    Logger.log('没有查到成就数据,原始返回: ' + res.getContentText());
     return;
   }
 
-  Logger.log('appid ' + appid + ' has ' + achievements.length + ' achievements:\n');
+  Logger.log('appid ' + appid + ' 共 ' + achievements.length + ' 个成就:\n');
   achievements.forEach((a, i) => {
-    Logger.log((i + 1) + '. [' + a.name + '] ' + (a.displayName || '(no name)')
-      + (a.hidden === 1 ? ' [HIDDEN ACHIEVEMENT]' : '')
-      + '\n   Description: ' + (a.description || '(no description, likely a hidden achievement)'));
+    Logger.log((i + 1) + '. [' + a.name + '] ' + (a.displayName || '(无名字)')
+      + (a.hidden === 1 ? ' 【隐藏成就】' : '')
+      + '\n   描述: ' + (a.description || '(无描述,大概率是隐藏成就)'));
   });
 }

@@ -1,27 +1,24 @@
 /**
- * Guide-link sync tool: called remotely by Claude Code (or any HTTP client) through a
- * separate Web App deployment (its own deployment, access "Anyone", independent of and
- * unaffected by the Dashboard's deployment), to sync guide links from Notion into the
- * GUIDES tab without manual copy-pasting.
+ * 攻略链接同步工具:给 Claude Code 通过独立的 Web App 部署(单独部署,
+ * 访问权限"任何人",和 Dashboard 的部署分开、互不影响)远程调用,
+ * 把 Notion 里的攻略链接同步进 GUIDES 标签页,不用手动复制粘贴。
  *
- * Security relies on the SYNC_SECRET random token: a request body without the correct
- * token is rejected outright.
- * Note: this token is as sensitive as the Steam API key - it lives in Script Properties,
- * never in code, never committed to a public repo.
- * Setup: Project Settings (gear icon) -> Script Properties -> add SYNC_SECRET, with a
- * value you generate yourself (e.g. run `openssl rand -hex 32`).
+ * 安全性靠 SYNC_SECRET 这个随机token:请求体里不带对的token直接拒绝。
+ * 注意:这个token和Steam API Key一样是敏感信息,存在Script Properties里,
+ * 不要写进代码里,不要提交到公开仓库。
+ * 设置方法:项目设置(齿轮图标) -> Script Properties -> 添加 SYNC_SECRET,
+ * 值自己生成(比如跑 openssl rand -hex 32)。
  */
 const SYNC_SECRET = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
 
 /**
- * POST entry point: JSON request body shaped { token, action, payload }.
- * Supported actions: listOwnedGames / listGuideRows / upsertGuideLinks
+ * POST入口:{ token, action, payload } 格式的JSON请求体。
+ * action 支持: listOwnedGames / listGuideRows / upsertGuideLinks
  */
 function doPost(e) {
   let body;
   try {
-    // e.postData.contents has a decoding bug with multi-byte UTF-8 characters;
-    // specifying the encoding explicitly is more reliable
+    // e.postData.contents 对多字节UTF-8字符解码有bug,显式指定编码更可靠
     body = JSON.parse(e.postData.getDataAsString('UTF-8'));
   } catch (err) {
     return jsonResponse_({ error: 'invalid JSON body' });
@@ -67,20 +64,20 @@ function jsonResponse_(obj) {
 }
 
 /**
- * Returns every game {appid, name} held in the RAW DATA sheet, for matching a game name to its appid.
+ * 返回 RAW DATA 表里持有的全部游戏 {appid, name},用于按游戏名匹配 appid。
  */
 function listOwnedGames() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  const data = sheet.getRange(2, 2, lastRow - 1, 2).getValues(); // B=AppID, C=Name
+  const data = sheet.getRange(2, 2, lastRow - 1, 2).getValues(); // B=AppID, C=游戏名
   return data
     .filter(r => r[0])
     .map(r => ({ appid: String(r[0]), name: r[1] }));
 }
 
 /**
- * Returns all current rows in the GUIDES sheet, for comparison before syncing.
+ * 返回 GUIDES 表当前所有行,用于同步前对比。
  */
 function listGuideRows() {
   const sheet = getOrCreateGuidesSheet();
@@ -93,10 +90,9 @@ function listGuideRows() {
 }
 
 /**
- * Batch write/update guide links. entries: [{appid, name, url}]
- * Matched against existing rows by appid: updates the link+date if found, appends a new
- * row otherwise.
- * Returns {updated: [...], appended: [...]}
+ * 批量写入/更新攻略链接。entries: [{appid, name, url}]
+ * 按 appid 匹配已有行:存在则更新链接+日期,不存在则追加新行。
+ * 返回 {updated: [...], appended: [...]}
  */
 function upsertGuideLinks(entries) {
   const sheet = getOrCreateGuidesSheet();
@@ -134,12 +130,10 @@ function upsertGuideLinks(entries) {
 }
 
 /**
- * Appends a Status='Manual' row to the RAW DATA sheet (e.g. for a family-shared game not
- * in the Steam owned-games list).
- * entry: {appid, name, achieved (optional, default 0), total (optional, default 'N/A')}
- * Manual rows are never overwritten by runBatch/rebuildSheetFromApi's automatic
- * achievement sync - their completion counts have to be maintained by hand.
- * Errors if the appid already exists rather than overwriting (to avoid clobbering existing data).
+ * 在 RAW DATA 表里追加一行 Status='Manual' 的游戏(比如家庭共享、不在Steam owned列表里的游戏)。
+ * entry: {appid, name, achieved (可选,默认0), total (可选,默认'N/A')}
+ * Manual状态的行不会被 runBatch/rebuildSheetFromApi 的自动成就同步覆盖,需要手动维护完成数。
+ * appid已存在则直接报错,不做覆盖(避免误伤已有数据)。
  */
 function addManualGame(entry) {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
@@ -149,7 +143,7 @@ function addManualGame(entry) {
   if (lastRow >= 2) {
     const existingAppIds = sheet.getRange(2, CONFIG.APPID_COL, lastRow - 1, 1).getValues().flat().map(String);
     if (existingAppIds.includes(appid)) {
-      throw new Error('appid ' + appid + ' is already in RAW DATA, not adding a duplicate');
+      throw new Error('appid ' + appid + ' 已经在 RAW DATA 里了,不重复添加');
     }
   }
 
@@ -169,19 +163,18 @@ function addManualGame(entry) {
 }
 
 /**
- * Returns the list of unlocked achievements for an appid, with zh/en names/descriptions
- * (looked up from the ACHIEVEMENTS sheet), for Claude Code to match against checkboxes
- * on a Notion guide page.
- * Reuses the existing GetPlayerAchievements call logic from steam_achievement_sync.gs.
+ * 返回某个appid已解锁的成就列表,带中英文名字/描述(从ACHIEVEMENTS表查),
+ * 给Claude Code拿去匹配Notion攻略页面里的checkbox用。
+ * 复用 steam_achievement_sync.gs 里已有的 GetPlayerAchievements 调用逻辑。
  */
 function getUnlockedAchievements(appid) {
   appid = String(appid);
-  const stats = fetchAchievementStats(appid); // from steam_achievement_sync.gs
+  const stats = fetchAchievementStats(appid); // 来自 steam_achievement_sync.gs
   if (stats.noAchievementSystem) {
-    throw new Error('appid ' + appid + ' has no achievement data (may have no achievement system, or Steam says this account has no stats)');
+    throw new Error('appid ' + appid + ' 查不到成就数据(可能没有成就系统,或Steam判定这个账号没有stats)');
   }
   if (stats.retry) {
-    throw new Error('appid ' + appid + ' is rate-limited (429), try again later');
+    throw new Error('appid ' + appid + ' 被限流(429),稍后再试');
   }
 
   const achSheet = getOrCreateAchievementsSheet();
@@ -196,7 +189,7 @@ function getUnlockedAchievements(appid) {
     });
   }
 
-  // fetchAchievementStats currently only returns a summary count; re-fetch the raw list here to get per-achievement achieved status
+  // fetchAchievementStats 目前只返回汇总数,这里重新拉一次原始列表拿逐条 achieved 状态
   const url = `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/`
     + `?appid=${appid}&key=${CONFIG.STEAM_API_KEY}&steamid=${CONFIG.STEAM_ID}&format=json`;
   const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
@@ -218,10 +211,8 @@ function getUnlockedAchievements(appid) {
 }
 
 /**
- * Returns the full achievement list for an appid (regardless of unlock status), with
- * zh/en names/descriptions/hidden flag (from the ACHIEVEMENTS sheet) plus the real
- * unlock status (GetPlayerAchievements). For writing/fixing a guide page's achievement
- * checklist from scratch.
+ * 返回某个appid的完整成就列表(不管是否解锁),带中英文名字/描述/是否隐藏成就(ACHIEVEMENTS表)
+ * + 真实解锁状态(GetPlayerAchievements)。用于从头重写/修正一份攻略页面的成就清单。
  */
 function getAllAchievementsForGame(appid) {
   appid = String(appid);
@@ -244,7 +235,7 @@ function getAllAchievementsForGame(appid) {
     });
   }
   if (defs.length === 0) {
-    throw new Error('appid ' + appid + ' has no record in the ACHIEVEMENTS sheet - run syncAchievementSchema first to fill it in');
+    throw new Error('appid ' + appid + ' 在 ACHIEVEMENTS 表里没有记录,先跑 syncAchievementSchema 补齐');
   }
 
   const url = `https://api.steampowered.com/ISteamUserStats/GetPlayerAchievements/v0001/`
