@@ -4,12 +4,9 @@
  * 把 Notion 里的攻略链接同步进 GUIDES 标签页,不用手动复制粘贴。
  *
  * 安全性靠 SYNC_SECRET 这个随机token:请求体里不带对的token直接拒绝。
- * 注意:这个token和Steam API Key一样是敏感信息,存在Script Properties里,
- * 不要写进代码里,不要提交到公开仓库。
- * 设置方法:项目设置(齿轮图标) -> Script Properties -> 添加 SYNC_SECRET,
- * 值自己生成(比如跑 openssl rand -hex 32)。
+ * 注意:这个token和Steam API Key一样是敏感信息,不要提交到公开仓库。
  */
-const SYNC_SECRET = PropertiesService.getScriptProperties().getProperty('SYNC_SECRET');
+const SYNC_SECRET = 'ec42e19f8b93e51a75289f3d97fd08497d12ba8810168852fd6b3b54c4c68a11';
 
 /**
  * POST入口:{ token, action, payload } 格式的JSON请求体。

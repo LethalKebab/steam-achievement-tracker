@@ -7,9 +7,7 @@
  * 使用前准备:
  * 1. 打开这个 Google Sheet -> 扩展程序(Extensions) -> Apps Script
  * 2. 把这个文件的内容整个粘贴进去(替换默认的 Code.gs 内容)
- * 3. 项目设置(齿轮图标) -> Script Properties -> 添加两个: STEAM_API_KEY / STEAM_ID
- *    (Steam API Key 在 https://steamcommunity.com/dev/apikey 获取;
- *    STEAM_ID 是你的 SteamID64,在 https://steamid.io 查)
+ * 3. 填写下面 CONFIG 里的 STEAM_API_KEY 和 STEAM_ID
  * 4. 运行一次 setup()(会要求你授权,点允许即可)
  * 5. 运行一次 rebuildSheetFromApi() 完成初始铺表
  * 6. 运行 createTrigger() 设置定时任务,之后就是全自动的了
@@ -31,11 +29,9 @@
  */
 
 // ============ 配置区 ============
-// STEAM_API_KEY / STEAM_ID 不会写死在代码里——从 Script Properties 读取
-// (项目设置 -> Script Properties),这样代码可以公开发布,不会泄露个人信息。
 const CONFIG = {
-  STEAM_API_KEY: PropertiesService.getScriptProperties().getProperty('STEAM_API_KEY'),
-  STEAM_ID: PropertiesService.getScriptProperties().getProperty('STEAM_ID'),
+  STEAM_API_KEY: '09B677D9003CBA25A901750AF31AB182',
+  STEAM_ID: '76561198219091068',
   SHEET_NAME: 'RAW DATA',
   ACHIEVEMENTS_SHEET_NAME: 'ACHIEVEMENTS', // 存全部游戏完整成就详情的独立标签页
   UNVETTED_COL: 1, // A列:Status标记。'Unvetted'=Steam默认隐藏的游戏(汇总统计会排除);'Manual'=人工记录、锁定不再自动同步的行
@@ -89,7 +85,7 @@ function ensureHeaders() {
 }
 
 function hasChineseChars(str) {
-  return /[一-鿿]/.test(String(str));
+  return /[\u4e00-\u9fff]/.test(String(str));
 }
 
 /**

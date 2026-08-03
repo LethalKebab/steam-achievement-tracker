@@ -88,6 +88,107 @@ function getDashboardData() {
 }
 
 /**
+ * 从Dashboard"添加游戏"框按名字搜索,返回匹配的候选{appid, name}列表,
+ * 省得用户自己去查AppID。用Steam商店的storesearch接口(不需要API key),
+ * 只保留type==='app'的结果(排除季票/捆绑包这类'sub'条目)。
+ * 同名游戏可能有多个结果(本体/DLC/体验版/纪念品套装等),具体挑哪个交给用户自己看名字判断。
+ */
+function searchSteamGames(query) {
+  query = String(query).trim();
+  if (!query) return [];
+
+  const url = 'https://store.steampowered.com/api/storesearch/?term=' + encodeURIComponent(query) + '&l=schinese&cc=US';
+  const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+  if (res.getResponseCode() !== 200) return [];
+
+  let data;
+  try {
+    data = JSON.parse(res.getContentText());
+  } catch (e) {
+    return [];
+  }
+
+  return (data.items || [])
+    .filter(item => item.type === 'app')
+    .slice(0, 10)
+    .map(item => ({ appid: String(item.id), name: item.name }));
+}
+
+/**
+ * 从Dashboard手动添加一个新游戏,不用切回表格。appid必填;name留空的话
+ * 用fetchAppName()自动取(syncNewGames加新游戏用的同一个函数)。
+ * 添加时顺便实时查一次成就数据,能查到就直接填上;查不到(限流等临时错误)
+ * 就留空,交给下一次runBatch自然重试。新行Status留空(正常参与每日自动同步)——
+ * 如果其实是家庭共享游戏,加完之后从Dashboard点Manual/家庭两个标记就行。
+ * 返回的对象结构和getDashboardData()里单个game条目一致,方便前端直接拼进列表。
+ */
+function addGame(appid, name) {
+  appid = String(appid).trim();
+  if (!/^\d+$/.test(appid)) return { error: 'AppID必须是纯数字' };
+
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+
+  if (lastRow >= CONFIG.HEADER_ROW) {
+    const existingAppIds = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.APPID_COL, lastRow - CONFIG.HEADER_ROW + 1, 1)
+      .getValues().flat().map(String);
+    if (existingAppIds.indexOf(appid) !== -1) return { error: '这个appid已经在表格里了' };
+  }
+
+  const resolvedName = (name && String(name).trim()) ? String(name).trim() : (fetchAppName(appid) || ('AppID ' + appid));
+  const row = lastRow + 1;
+  sheet.getRange(row, CONFIG.NAME_COL).setValue(resolvedName);
+  sheet.getRange(row, CONFIG.APPID_COL).setValue(appid);
+  sheet.getRange(row, CONFIG.UNVETTED_COL).setValue('Manual');
+
+  const result = {
+    appid: appid, name: resolvedName, achieved: null, total: null, rate: null,
+    unvetted: false, manual: true, family: false, favorite: false, priority: false,
+    newAchDaysAgo: null, guideUrl: ''
+  };
+
+  const stats = fetchAchievementStats(appid);
+  if (stats.noAchievementSystem) {
+    sheet.getRange(row, CONFIG.TOTAL_COL).setValue('N/A');
+    result.total = 'N/A';
+  } else if (!stats.retry) {
+    const rate = stats.total > 0 ? stats.achieved / stats.total : 0;
+    sheet.getRange(row, CONFIG.ACHIEVED_COL).setValue(stats.achieved);
+    sheet.getRange(row, CONFIG.TOTAL_COL).setValue(stats.total);
+    sheet.getRange(row, CONFIG.RATE_COL).setValue(rate);
+    sheet.getRange(row, CONFIG.RATE_COL).setNumberFormat('0.00%');
+    result.achieved = stats.achieved;
+    result.total = stats.total;
+    result.rate = rate;
+  }
+  // stats.retry(429限流等临时错误):achieved/total留空,下次runBatch会自然重试
+
+  return result;
+}
+
+/**
+ * 从Dashboard删除一行游戏——彻底从表格移除这一行(deleteRow,不是清空内容)。
+ * 前端点删除按钮时已经有confirm()二次确认,这里不再重复确认。
+ * 只删RAW DATA这一行本身;GUIDES/ACHIEVEMENTS表里对应appid的数据不会跟着清理,
+ * 留着不影响其他游戏,之后重新添加同一个appid的话还能直接复用。
+ */
+function deleteGame(appid) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.HEADER_ROW) return { error: '表格没有数据' };
+
+  const appidVals = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.APPID_COL, lastRow - CONFIG.HEADER_ROW + 1, 1).getValues();
+  for (let i = 0; i < appidVals.length; i++) {
+    if (String(appidVals[i][0]) === String(appid)) {
+      sheet.deleteRow(CONFIG.HEADER_ROW + i);
+      return { deleted: true, appid: String(appid) };
+    }
+  }
+
+  return { error: '没有在表格里找到这个appid' };
+}
+
+/**
  * 从Dashboard点星标调用:切换某个appid的喜爱状态,写回表格,返回切换后的新状态。
  */
 function toggleFavorite(appid) {

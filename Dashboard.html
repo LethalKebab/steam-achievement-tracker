@@ -94,6 +94,58 @@
       flex-wrap: wrap;
       align-items: center;
     }
+    .add-game-row {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .add-game-btn {
+      background: var(--accent);
+      color: #0e141b;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .add-game-btn:hover { opacity: 0.9; }
+    .add-game-btn:disabled { opacity: 0.5; cursor: default; }
+    .add-game-msg { font-size: 12px; }
+    .add-game-msg.error { color: var(--low); }
+    .add-game-msg.success { color: var(--good); }
+    #gameSearchBox { width: 260px; }
+    .game-search-results {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: -6px 0 14px 0;
+      max-width: 480px;
+    }
+    .game-search-result {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 6px 10px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .game-search-result:hover { border-color: var(--accent); }
+    .game-search-result img {
+      width: 46px;
+      height: 22px;
+      object-fit: cover;
+      border-radius: 2px;
+      background: #0e141b;
+      flex-shrink: 0;
+    }
+    .game-search-result span { font-size: 13px; }
+    .game-search-result .appid-hint { color: var(--text-dim); font-size: 12px; }
     input[type="text"] {
       background: var(--panel);
       border: 1px solid var(--border);
@@ -152,6 +204,18 @@
     .icon-btn.active-heart { color: var(--low); }
     .icon-btn.active-star { color: var(--mid); }
     .icon-btn:hover { opacity: 0.8; }
+    .delete-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      color: var(--text-dim);
+      opacity: 0.35;
+      flex-shrink: 0;
+      padding: 0 4px;
+      margin-left: auto;
+    }
+    .delete-btn:hover { opacity: 1; color: var(--low); }
     .game-thumb {
       width: 64px;
       height: 30px;
@@ -319,6 +383,27 @@
       display: inline-block;
     }
     .ach-guide-link:hover { text-decoration: underline; }
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 100;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.show { display: flex; }
+    .modal-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px 28px;
+      text-align: center;
+      max-width: 400px;
+    }
+    .modal-box .game-name { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 4px; }
+    .modal-box .appid-hint { margin-bottom: 20px; }
+    .modal-box .modal-btns { display: flex; gap: 10px; justify-content: center; }
   </style>
 </head>
 <body>
@@ -376,6 +461,23 @@
     <label class="checkbox">
       <input type="checkbox" id="hideNoAch"> 隐藏无成就系统的游戏
     </label>
+  </div>
+
+  <div class="add-game-row">
+    <input type="text" id="gameSearchBox" placeholder="添加新游戏...">
+    <span class="add-game-msg" id="addGameMsg"></span>
+  </div>
+  <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
+
+  <div class="modal-overlay" id="addConfirmModal">
+    <div class="modal-box">
+      <div style="font-size:13px; color:var(--text-dim); margin-bottom:8px;">确认将这款游戏添加到列表？</div>
+      <div class="game-name" id="confirmGameName"></div>
+      <div class="modal-btns">
+        <button class="add-game-btn" id="confirmAddBtn">确认</button>
+        <button class="add-game-btn" id="cancelAddBtn" style="background:var(--panel-alt); color:var(--text-dim);">取消</button>
+      </div>
+    </div>
   </div>
 
   <table id="gameTable">
@@ -575,6 +677,7 @@
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + newAchBadge + '</div>'
           + guideBtn
+          + '<button class="delete-btn" data-delete-appid="' + g.appid + '" title="删除这一行">🗑</button>'
           + '</div>';
 
         const canExpand = activeTab === 'incomplete' && g.total !== 'N/A' && g.total !== null && g.appid;
@@ -678,6 +781,32 @@
             game.family = !game.family;
             render();
           }).toggleFamily(appid);
+        });
+      });
+
+      body.querySelectorAll('[data-delete-appid]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const appid = btn.dataset.deleteAppid;
+          const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
+          if (!game) return;
+          if (!confirm('确定要删除《' + game.name + '》吗?这会从表格里彻底移除这一行,无法撤销。')) return;
+
+          btn.disabled = true;
+          google.script.run.withSuccessHandler(function(result) {
+            if (result && result.error) {
+              btn.disabled = false;
+              alert(result.error);
+              return;
+            }
+            allGames = allGames.filter(function(g){ return String(g.appid) !== String(appid); });
+            if (expandedAppid === String(appid)) expandedAppid = null;
+            document.getElementById('cardTotal').textContent = allGames.length;
+            render();
+          }).withFailureHandler(function(err) {
+            btn.disabled = false;
+            alert('删除失败: ' + err.message);
+          }).deleteGame(appid);
         });
       });
 
@@ -787,6 +916,102 @@
     document.getElementById('priorityOnly').addEventListener('change', render);
     document.getElementById('hideUnvetted').addEventListener('change', render);
     document.getElementById('hideNoAch').addEventListener('change', render);
+
+    function addSelectedGame(appid, name) {
+      const msg = document.getElementById('addGameMsg');
+      msg.textContent = '添加中...';
+      msg.className = 'add-game-msg';
+
+      google.script.run.withSuccessHandler(function(result) {
+        if (result && result.error) {
+          msg.textContent = result.error;
+          msg.className = 'add-game-msg error';
+          return;
+        }
+        allGames.push(result);
+        msg.textContent = '已添加: ' + result.name;
+        msg.className = 'add-game-msg success';
+        document.getElementById('cardTotal').textContent = allGames.length;
+        render();
+      }).withFailureHandler(function(err) {
+        msg.textContent = '添加失败: ' + err.message;
+        msg.className = 'add-game-msg error';
+      }).addGame(appid, name);
+    }
+
+    function renderSearchResults(items) {
+      const box = document.getElementById('gameSearchResults');
+      if (!items || items.length === 0) {
+        box.style.display = 'none';
+        box.innerHTML = '';
+        return;
+      }
+      box.style.display = 'flex';
+      box.innerHTML = items.map(function(g) {
+        return '<div class="game-search-result" data-appid="' + g.appid + '" data-name="' + escapeHtml(g.name) + '">'
+          + '<img src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+          + '<span>' + escapeHtml(g.name) + ' <span class="appid-hint">(' + g.appid + ')</span></span>'
+          + '</div>';
+      }).join('');
+
+      box.querySelectorAll('.game-search-result').forEach(function(el) {
+        el.addEventListener('click', function() {
+          // 选中后弹窗确认,不直接添加
+          const appid = el.dataset.appid;
+          const name = el.dataset.name;
+          document.getElementById('confirmGameName').textContent = name;
+          document.getElementById('addConfirmModal').dataset.appid = appid;
+          document.getElementById('addConfirmModal').dataset.name = name;
+          document.getElementById('addConfirmModal').classList.add('show');
+        });
+      });
+    }
+
+    function runGameSearch() {
+      const query = document.getElementById('gameSearchBox').value.trim();
+      const msg = document.getElementById('addGameMsg');
+      if (!query) { renderSearchResults([]); msg.textContent = ''; return; }
+
+      msg.textContent = '搜索中...';
+      msg.className = 'add-game-msg';
+      google.script.run.withSuccessHandler(function(items) {
+        msg.textContent = (items && items.length === 0) ? '没有找到匹配的游戏' : '';
+        msg.className = 'add-game-msg';
+        renderSearchResults(items);
+      }).withFailureHandler(function(err) {
+        msg.textContent = '搜索失败: ' + err.message;
+        msg.className = 'add-game-msg error';
+      }).searchSteamGames(query);
+    }
+
+    let searchTimeout = null;
+    document.getElementById('gameSearchBox').addEventListener('input', function() {
+      clearTimeout(searchTimeout);
+      searchTimeout = setTimeout(runGameSearch, 300);
+    });
+    document.getElementById('gameSearchBox').addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { clearTimeout(searchTimeout); runGameSearch(); }
+    });
+
+    document.getElementById('confirmAddBtn').addEventListener('click', function() {
+      const modal = document.getElementById('addConfirmModal');
+      const appid = modal.dataset.appid;
+      const name = modal.dataset.name;
+      if (!appid) return;
+      modal.classList.remove('show');
+      renderSearchResults([]);
+      document.getElementById('gameSearchBox').value = '';
+      addSelectedGame(appid, name);
+    });
+
+    document.getElementById('cancelAddBtn').addEventListener('click', function() {
+      document.getElementById('addConfirmModal').classList.remove('show');
+    });
+
+    // Click outside modal to dismiss
+    document.getElementById('addConfirmModal').addEventListener('click', function(e) {
+      if (e.target === this) this.classList.remove('show');
+    });
 
     google.script.run.withSuccessHandler(function(data) {
       allGames = data.games;
