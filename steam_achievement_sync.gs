@@ -7,8 +7,8 @@
  * 使用前准备:
  * 1. 打开这个 Google Sheet -> 扩展程序(Extensions) -> Apps Script
  * 2. 把这个文件的内容整个粘贴进去(替换默认的 Code.gs 内容)
- * 3. 填写下面 CONFIG 里的 STEAM_API_KEY 和 STEAM_ID
- * 4. 运行一次 setup()(会要求你授权,点允许即可)
+ * 3. 在 Project Settings → Script Properties 添加 STEAM_API_KEY 和 STEAM_ID
+ * 4. 运行一次 setup()(会要求你授权,点允许即可,setup()会检查Script Properties是否已配置)
  * 5. 运行一次 rebuildSheetFromApi() 完成初始铺表
  * 6. 运行 createTrigger() 设置定时任务,之后就是全自动的了
  *
@@ -57,6 +57,20 @@ const CONFIG = {
 // ============ 初始化 ============
 function setup() {
   const props = PropertiesService.getScriptProperties();
+
+  // Validate Script Properties before anything else — catch missing config early
+  const key = CONFIG.STEAM_API_KEY;
+  const sid = CONFIG.STEAM_ID;
+  if (!key || !sid) {
+    throw new Error(
+      'Missing Script Properties.\n\n' +
+      'Go to Project Settings (gear icon) → Script Properties and add:\n' +
+      '  STEAM_API_KEY = <your Steam Web API key from https://steamcommunity.com/dev/apikey>\n' +
+      '  STEAM_ID = <your SteamID64 from https://steamid.io>\n\n' +
+      'Then run setup() again.'
+    );
+  }
+
   if (!props.getProperty('CURSOR')) {
     props.setProperty('CURSOR', '0');
   }
