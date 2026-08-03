@@ -17,6 +17,8 @@ clasp open        # Open the Apps Script project in the browser
 
 After `clasp push`, code is live immediately for script functions, but Web App deployments (Dashboard, guide-sync endpoint) need a separate `clasp deploy -i <id>` to update their fixed URLs.
 
+**If you also maintain a separate local checkout of this same Apps Script project** (e.g. a private working copy with a different file set): `clasp push` does not preserve files that are live but missing from the folder you're pushing from — it silently deletes them. Before pushing from either checkout, diff the two folders' file lists first. This bit us on 2026-08-03: a push from a sibling folder missing `steam_daily_checkbox_sync.gs` deleted that file from the live project until it was caught and restored the same day.
+
 ## Architecture: two separate Web App deployments
 
 The project has TWO independent Web App deployments, both built from the same Apps Script project but serving different audiences and access levels:
@@ -48,14 +50,26 @@ All secrets live in Script Properties (`Project Settings → Script Properties` 
 
 1. `store.steampowered.com/api/appdetails`'s `name` field **ignores the `l=` param** — Chinese names require scraping the store page HTML (`fetchAppNameFromStorePage`).
 2. Store-page scraping rate-limits aggressively; send an age-verification cookie or age-gated games return empty pages.
-3. `GetPlayerAchievements` returning HTTP 400 = "no stats for this account" (normal signal, don't retry). Only HTTP 429 is real rate-limiting.
-4. The Google Sheets UI splits pasted multi-line text across cells — why GUIDES stores only links, never long text.
+3. `GetPlayerAchievements` returning HTTP 400 = "no stats for this account" (normal signal, don't retry). Only HTTP 429 is real rate-limiting — everything else should also be retried next cycle, not treated as permanent.
+4. `GetPlayerAchievements` can also return HTTP **403** `"Profile is not public"` for one *specific* game even when the account's overall profile is public. That's a per-game "Game Details" privacy toggle on Steam's side — not fixable in code, and retrying will never succeed until the privacy setting changes on Steam itself.
+5. A game can disappear from `GetOwnedGames` entirely (delisted free titles, lapsed family-sharing access) while `GetPlayerAchievements` still returns its full permanent stats. Absence from `GetOwnedGames` does not mean "no achievement data exists" — check `GetPlayerAchievements` directly before concluding a game can't be tracked.
+6. Determining whether Steam currently classifies an *owned* appid as Unvetted requires the exact two-call comparison `fetchOwnedGamesWithUnvettedFlag()` does (`skip_unvetted_apps=false` minus `=true`) — a single plain `GetOwnedGames` call defaults to the vetted-only view and won't tell you this. `steam_test_debug.gs`'s `debugCompareUnvetted()` already wraps this; use it instead of re-deriving it.
+7. Family Sharing achievements are recorded per **playing** account, not per license owner. If a shared game is actually played on a different family member's account, `GetPlayerAchievements` for *your* configured `STEAM_ID` will correctly and permanently show 0 progress on it — that's expected, not a bug.
+8. The Google Sheets UI splits pasted multi-line text across cells — why GUIDES stores only links, never long text.
 
 ## Sheet schema (RAW DATA tab)
 
-Col A=Status (Unvetted/Manual) · B=AppID · C=Name · D=Achieved count · E=Total achievements · F=Completion % · G=Favorite (♥) · H=Spotlight (★) · I=Achievements-last-updated date
+Col A=Status (Unvetted/Manual) · B=AppID · C=Name · D=Achieved count · E=Total achievements · F=Completion % · G=Favorite (♥) · H=Spotlight (★) · I=Achievements-last-updated date · J=Family-shared (not self-owned)
 
 Data starts at row 2 (row 1 = headers). AppID is the primary key.
+
+Column J is a plain informational boolean, fully decoupled from Status — it never affects sync behavior. Toggle it from the Dashboard's "家庭" badge, or via the `migrateFamilyGames` HTTP action. It exists because `'Manual'` status conflates two genuinely separate concerns (see below), and a game can need "not self-owned" as a fact without needing to be excluded from daily sync.
+
+### `'Manual'` does two unrelated jobs — know which one you actually need
+
+`runBatch` skips a row purely on `Status === 'Manual'`. Separately, `rebuildSheetFromApi()` re-stamps `'Manual'` onto any row found in `manualStatusAppIds`, specifically to override Steam's live Unvetted classification on rebuild ([steam_achievement_sync.gs](steam_achievement_sync.gs), search `manualStatusAppIds`). For a game you actually **own**, `'Manual'` is the only way to lock it against Unvetted flip-flopping — but that also disables its daily achievement sync, with no way to get one without the other today.
+
+What actually determines whether a row *survives* `rebuildSheetFromApi()` is **not** Status — it's purely `!ownedAppIdSet.has(appid)`. Any row whose appid isn't in the current `GetOwnedGames` snapshot is carried over verbatim regardless of Status, so clearing `'Manual'` on a non-owned (family-shared) row does not risk it being dropped on rebuild. `hardResetFromApi()` is the opposite extreme: it has no preservation logic at all and drops every non-owned row unconditionally — confirm before ever running it.
 
 ## Critical: achievement name matching is exact-match only
 

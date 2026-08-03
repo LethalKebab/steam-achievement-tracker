@@ -34,7 +34,9 @@ appid为主键,数据源以 Steam API 为准(不是手动录入)。
 
 ## 表格结构(RAW DATA,当前列顺序)
 
-A=Status(Unvetted/Manual标记) / B=AppID / C=游戏名 / D=完成数 / E=成就总数 / F=完成率 / G=喜爱(♥) / H=重点关注(★) / I=成就更新日期
+A=Status(Unvetted/Manual标记) / B=AppID / C=游戏名 / D=完成数 / E=成就总数 / F=完成率 / G=喜爱(♥) / H=重点关注(★) / I=成就更新日期 / J=家庭共享(非自购,纯信息标记)
+
+Status(A列)和Family(J列)是两件独立的事——前者决定`runBatch`要不要跳过这行,后者纯粹是给自己看的"这游戏不是我买的"标记,互不影响。这个区分、以及`rebuildSheetFromApi`真正的保留判断逻辑,详见 `.claude/skills/steam-apps-script-dev/`。
 
 ## 目前进度
 
@@ -52,6 +54,7 @@ A=Status(Unvetted/Manual标记) / B=AppID / C=游戏名 / D=完成数 / E=成就
 2. **判断要不要另开session**:预估读写量明显超过当前会话量级,或者是纯重复性、可脱离上下文独立执行的任务,就建议开新session。改一两个具体checkbox这种小任务当场做就行。
 3. **新session怎么接上**:靠这份文档 + `.claude/skills/`——按当前要做的任务加载对应skill,不用重新读整个.gs文件或重新发明逻辑。
 4. **验证优先于假设**:不要assume工具调用成功=内容正确,做完之后重新读一遍结果确认(至少两次踩过这个坑,细节见git历史)。
+5. **如果本地还有另一个指向同一个Apps Script项目(同一个scriptId)的文件夹**:`clasp push`不会保留"远端有、本地这份没有"的文件——会直接删掉。两边文件清单不一致时,从任一边push前先diff一下,或者干脆先`clasp pull`到一个临时目录看看线上真实状态。2026-08-03这天因为这个原因把`steam_daily_checkbox_sync.gs`从线上删掉过一次,当天发现并补救。
 
 ## 重要提醒
 

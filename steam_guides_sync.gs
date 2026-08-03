@@ -49,6 +49,12 @@ function doPost(e) {
       case 'getAllAchievementsForGame':
         result = getAllAchievementsForGame(body.payload.appid);
         break;
+      case 'setGameStatus':
+        result = setGameStatus(body.payload.appid, body.payload.status);
+        break;
+      case 'migrateFamilyGames':
+        result = migrateFamilyGames(body.payload.appids);
+        break;
       default:
         return jsonResponse_({ error: 'unknown action: ' + body.action });
     }
@@ -64,16 +70,17 @@ function jsonResponse_(obj) {
 }
 
 /**
- * 返回 RAW DATA 表里持有的全部游戏 {appid, name},用于按游戏名匹配 appid。
+ * 返回 RAW DATA 表里持有的全部游戏 {appid, name, status, achieved, total},
+ * 用于按游戏名匹配 appid,以及排查某一行为什么没被 runBatch 自动同步。
  */
 function listOwnedGames() {
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
-  const data = sheet.getRange(2, 2, lastRow - 1, 2).getValues(); // B=AppID, C=游戏名
+  const data = sheet.getRange(2, 1, lastRow - 1, 5).getValues(); // A=Status, B=AppID, C=游戏名, D=完成数, E=成就总数
   return data
-    .filter(r => r[0])
-    .map(r => ({ appid: String(r[0]), name: r[1] }));
+    .filter(r => r[1])
+    .map(r => ({ status: r[0] || '', appid: String(r[1]), name: r[2], achieved: r[3], total: r[4] }));
 }
 
 /**
@@ -160,6 +167,58 @@ function addManualGame(entry) {
   if (rate !== '') sheet.getRange(row, CONFIG.RATE_COL).setValue(rate);
 
   return { row: row, appid: appid, name: entry.name };
+}
+
+/**
+ * 改一行的Status(A列)。用于纠正误设的Status,比如一款游戏当初被当成
+ * 家庭共享/需要Manual维护加进来,后来发现其实账号自己就能正常查到成就数据,
+ * 改回''(空)后 runBatch 就会重新接管每日自动同步。
+ * status 传 '' / 'Unvetted' / 'Manual' 之一。
+ */
+function setGameStatus(appid, status) {
+  appid = String(appid);
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('表格没有数据');
+
+  const appidVals = sheet.getRange(2, CONFIG.APPID_COL, lastRow - 1, 1).getValues();
+  for (let i = 0; i < appidVals.length; i++) {
+    if (String(appidVals[i][0]) === appid) {
+      const row = i + 2;
+      sheet.getRange(row, CONFIG.UNVETTED_COL).setValue(status);
+      return { row: row, appid: appid, status: status };
+    }
+  }
+  throw new Error('没有在表格里找到appid ' + appid);
+}
+
+/**
+ * 批量把appid列表从Manual迁移成"家庭共享"分类:Status清空(J列打勾)。
+ * 用于纠正当初误用Manual标记、实际上账号自己能查到真实成就数据的家庭共享游戏——
+ * 迁移后 runBatch 会重新接管每日自动同步,J列(FAMILY_COL)只作为"非自购"的信息标记,
+ * 不影响任何自动化逻辑。appids: string[]
+ */
+function migrateFamilyGames(appids) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < 2) throw new Error('表格没有数据');
+
+  const appidVals = sheet.getRange(2, CONFIG.APPID_COL, lastRow - 1, 1).getValues();
+  const wanted = new Set(appids.map(String));
+  const migrated = [];
+
+  appidVals.forEach((r, i) => {
+    const appid = String(r[0]);
+    if (wanted.has(appid)) {
+      const row = i + 2;
+      sheet.getRange(row, CONFIG.UNVETTED_COL).setValue('');
+      sheet.getRange(row, CONFIG.FAMILY_COL).setValue(true);
+      migrated.push(appid);
+      wanted.delete(appid);
+    }
+  });
+
+  return { migrated: migrated, notFound: Array.from(wanted) };
 }
 
 /**

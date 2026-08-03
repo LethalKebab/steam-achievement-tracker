@@ -10,7 +10,7 @@ Connect your Steam account once, and every day your library and achievement prog
 - **A Dashboard for browsing** — a simple web page to skim your games, mark favorites (♥) and spotlights (★), and see progress at a glance without opening a spreadsheet.
 - **A spreadsheet for digging in** — full per-achievement detail (names, descriptions, unlock status) if you want to sort, filter, or build your own views.
 - **Guide links in one place** — an optional tab that points at your written achievement guides (e.g. in Notion), plus an optional daily sync that checks off guide steps as you actually unlock them in-game.
-- **Handles the edge cases Steam's API can't** — shared-library games and manually-corrected entries are tracked without being overwritten by the daily sync. See [Known limitations](#known-limitations) below.
+- **Handles the edge cases Steam's API can't** — shared-library games and manually-corrected entries are tracked without being overwritten by the daily sync, editable right from the Dashboard. See [Known limitations](#known-limitations) below.
 
 It's entirely self-hosted on Google's free tier — your Sheet, your Apps Script project, your data. No accounts to make anywhere else, no service watching your library but you.
 
@@ -44,14 +44,15 @@ That's it — from here it just runs.
 
 ## Sheet schema (`RAW DATA` tab)
 
-`A`=Status · `B`=AppID · `C`=Name · `D`=Achieved · `E`=Total · `F`=Completion % · `G`=Favorite (♥) · `H`=Spotlight (★) · `I`=Last updated
+`A`=Status · `B`=AppID · `C`=Name · `D`=Achieved · `E`=Total · `F`=Completion % · `G`=Favorite (♥) · `H`=Spotlight (★) · `I`=Last updated · `J`=Family-shared (not self-owned)
 
 ## Known limitations
 
-Steam's API is the source of truth for almost everything, but a few things can't be pulled automatically and are tracked via the Status column (`A`) instead:
+Steam's API is the source of truth for almost everything, but a few things can't be pulled automatically and are tracked via the Status column (`A`) or the Family flag (`J`) instead:
 
-- **`Unvetted`** — games Steam hides from the owned-games API by default. Still auto-synced, just excluded from your aggregate stats.
-- **`Manual`** — rows entered by hand and protected from being overwritten by the daily sync, e.g. Family Library Sharing games (Steam's API only reports games *you* own) or corrections you've made yourself.
+- **`Unvetted`** (Status) — games Steam hides from the owned-games API by default. Still auto-synced, just excluded from your aggregate stats.
+- **`Manual`** (Status) — for the rare case where Steam genuinely can't give *your* account real data for a game: most commonly a Family Library Sharing title that a *different* family member actually plays (Steam tracks achievements per account, not per license, so your own account will always read 0 on it). These rows are entered and edited by hand from the Dashboard, and the daily sync always skips them.
+- **Family (`J`, the Dashboard's "家庭" badge)** — a separate, purely informational flag for the more common shared/gifted-game case: one *you* actually play, so Steam's API does return your real progress even though the game isn't in your owned-games list. Use this instead of `Manual` so the game keeps getting auto-synced like any other — the flag just reminds you it's not self-purchased.
 - Games with no in-game achievements are left as "no achievement system," not 0/0.
 - The optional Notion checkbox sync only ticks a box on an *exact* title match, to avoid ever marking the wrong achievement — guide pages with unusual formatting may need spot-checking.
 

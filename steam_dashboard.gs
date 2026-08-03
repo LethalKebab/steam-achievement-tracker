@@ -40,7 +40,7 @@ function getDashboardData() {
 
   const games = [];
   if (numRows > 0) {
-    const lastCol = Math.max(CONFIG.UNVETTED_COL, CONFIG.RATE_COL, CONFIG.APPID_COL, CONFIG.NAME_COL, CONFIG.FAVORITE_COL, CONFIG.PRIORITY_COL, CONFIG.NEW_ACH_DATE_COL);
+    const lastCol = Math.max(CONFIG.UNVETTED_COL, CONFIG.RATE_COL, CONFIG.APPID_COL, CONFIG.NAME_COL, CONFIG.FAVORITE_COL, CONFIG.PRIORITY_COL, CONFIG.NEW_ACH_DATE_COL, CONFIG.FAMILY_COL);
     const data = sheet.getRange(CONFIG.HEADER_ROW, 1, numRows, lastCol).getValues();
     data.forEach(row => {
       const appid = row[CONFIG.APPID_COL - 1];
@@ -54,6 +54,7 @@ function getDashboardData() {
       const favoriteRaw = row[CONFIG.FAVORITE_COL - 1];
       const priorityRaw = row[CONFIG.PRIORITY_COL - 1];
       const newAchDateRaw = row[CONFIG.NEW_ACH_DATE_COL - 1];
+      const familyRaw = row[CONFIG.FAMILY_COL - 1];
 
       games.push({
         appid: appid || '',
@@ -62,6 +63,8 @@ function getDashboardData() {
         total: (totalRaw === 'N/A') ? 'N/A' : ((typeof totalRaw === 'number') ? totalRaw : null),
         rate: (typeof rateRaw === 'number') ? rateRaw : null,
         unvetted: statusRaw === 'Unvetted',
+        manual: statusRaw === 'Manual',
+        family: familyRaw === true || familyRaw === 'TRUE',
         favorite: favoriteRaw === true || favoriteRaw === 'TRUE',
         priority: priorityRaw === true || priorityRaw === 'TRUE',
         newAchDaysAgo: (newAchDateRaw instanceof Date)
@@ -127,6 +130,94 @@ function togglePriority(appid) {
       const newVal = !(current === true || current === 'TRUE');
       sheet.getRange(row, CONFIG.PRIORITY_COL).setValue(newVal);
       return { priority: newVal };
+    }
+  }
+
+  return { error: '没有在表格里找到这个appid' };
+}
+
+/**
+ * 从Dashboard切换某个appid的"家庭共享/非自购"标记(纯信息用途,J列)。
+ * 和Status完全独立,不影响runBatch是否同步——只是让你自己知道这游戏不是自己买的。
+ */
+function toggleFamily(appid) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.HEADER_ROW) return { error: '表格没有数据' };
+
+  const numRows = lastRow - CONFIG.HEADER_ROW + 1;
+  const appidVals = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.APPID_COL, numRows, 1).getValues();
+
+  for (let i = 0; i < numRows; i++) {
+    if (String(appidVals[i][0]) === String(appid)) {
+      const row = CONFIG.HEADER_ROW + i;
+      const current = sheet.getRange(row, CONFIG.FAMILY_COL).getValue();
+      const newVal = !(current === true || current === 'TRUE');
+      sheet.getRange(row, CONFIG.FAMILY_COL).setValue(newVal);
+      return { family: newVal };
+    }
+  }
+
+  return { error: '没有在表格里找到这个appid' };
+}
+
+/**
+ * 从Dashboard切换某个appid的Manual状态:设为Manual后 runBatch 会跳过这行,
+ * 不再自动同步成就数据(给家庭共享、不在Steam owned列表里的游戏用)。
+ */
+function setManualStatus(appid, isManual) {
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.HEADER_ROW) return { error: '表格没有数据' };
+
+  const numRows = lastRow - CONFIG.HEADER_ROW + 1;
+  const appidVals = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.APPID_COL, numRows, 1).getValues();
+
+  for (let i = 0; i < numRows; i++) {
+    if (String(appidVals[i][0]) === String(appid)) {
+      const row = CONFIG.HEADER_ROW + i;
+      sheet.getRange(row, CONFIG.UNVETTED_COL).setValue(isManual ? 'Manual' : '');
+      return { manual: isManual };
+    }
+  }
+
+  return { error: '没有在表格里找到这个appid' };
+}
+
+/**
+ * 从Dashboard手动编辑Manual游戏的完成数/成就总数(家庭共享游戏没有Steam API数据,
+ * 只能手动维护),写回表格并按同样的公式重算完成率。只允许改Status为Manual的行,
+ * 避免误改到还在被 runBatch 自动同步的行。
+ */
+function setManualAchievements(appid, achieved, total) {
+  achieved = Number(achieved);
+  total = Number(total);
+  if (!isFinite(achieved) || !isFinite(total) || achieved < 0 || total < 0) {
+    return { error: '数值无效' };
+  }
+  if (achieved > total) {
+    return { error: '完成数不能大于成就总数' };
+  }
+
+  const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.HEADER_ROW) return { error: '表格没有数据' };
+
+  const numRows = lastRow - CONFIG.HEADER_ROW + 1;
+  const appidVals = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.APPID_COL, numRows, 1).getValues();
+
+  for (let i = 0; i < numRows; i++) {
+    if (String(appidVals[i][0]) === String(appid)) {
+      const row = CONFIG.HEADER_ROW + i;
+      if (sheet.getRange(row, CONFIG.UNVETTED_COL).getValue() !== 'Manual') {
+        return { error: '只能编辑Manual状态的游戏' };
+      }
+      const rate = total > 0 ? achieved / total : 0;
+      sheet.getRange(row, CONFIG.ACHIEVED_COL).setValue(achieved);
+      sheet.getRange(row, CONFIG.TOTAL_COL).setValue(total);
+      sheet.getRange(row, CONFIG.RATE_COL).setValue(rate);
+      sheet.getRange(row, CONFIG.RATE_COL).setNumberFormat('0.00%');
+      return { achieved: achieved, total: total, rate: rate };
     }
   }
 

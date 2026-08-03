@@ -47,6 +47,10 @@ const CONFIG = {
   FAVORITE_COL: 7, // G列:喜爱标记(♥),TRUE/FALSE,在Dashboard上点爱心切换
   PRIORITY_COL: 8, // H列:重点关注标记(★),TRUE/FALSE,在Dashboard上点星标切换,标记的游戏会置顶显示
   NEW_ACH_DATE_COL: 9, // I列:成就总数比上次记录变多的日期(说明游戏更新加了新成就),用于Dashboard提醒
+  FAMILY_COL: 10, // J列:家庭共享/非自购标记,TRUE/FALSE,纯信息用途,和Status完全独立——
+                  // 不影响runBatch是否同步(那个只看Status是不是'Manual')。
+                  // 用于"账号自己能查到真实成就数据、但游戏本身不在GetOwnedGames里"的情况
+                  // (比如家庭共享库的游戏),这类行应该Status留空(正常每日同步),只在这列打标记
   HEADER_ROW: 2,   // 数据从第几行开始
   BATCH_SIZE: 1000,       // 上限设高一点,真正兜底的是下面的 MAX_RUNTIME_MS
   MAX_RUNTIME_MS: 4.5 * 60 * 1000,
@@ -76,8 +80,9 @@ function ensureHeaders() {
   sheet.getRange(1, CONFIG.FAVORITE_COL).setValue('喜爱');
   sheet.getRange(1, CONFIG.PRIORITY_COL).setValue('重点关注');
   sheet.getRange(1, CONFIG.NEW_ACH_DATE_COL).setValue('成就更新日期');
+  sheet.getRange(1, CONFIG.FAMILY_COL).setValue('家庭共享(非自购)');
 
-  const headerCols = [CONFIG.APPID_COL, CONFIG.NAME_COL, CONFIG.ACHIEVED_COL, CONFIG.TOTAL_COL, CONFIG.RATE_COL, CONFIG.UNVETTED_COL, CONFIG.FAVORITE_COL, CONFIG.PRIORITY_COL, CONFIG.NEW_ACH_DATE_COL];
+  const headerCols = [CONFIG.APPID_COL, CONFIG.NAME_COL, CONFIG.ACHIEVED_COL, CONFIG.TOTAL_COL, CONFIG.RATE_COL, CONFIG.UNVETTED_COL, CONFIG.FAVORITE_COL, CONFIG.PRIORITY_COL, CONFIG.NEW_ACH_DATE_COL, CONFIG.FAMILY_COL];
   headerCols.forEach(col => {
     sheet.getRange(1, col).setFontWeight('bold');
   });
@@ -213,26 +218,28 @@ function getExistingAppIds(sheet) {
 function runBatch() {
   const startTime = Date.now();
   const sheet = SpreadsheetApp.getActive().getSheetByName(CONFIG.SHEET_NAME);
-  const lastRow = sheet.getLastRow();
   const props = PropertiesService.getScriptProperties();
-  let cursor = parseInt(props.getProperty('CURSOR') || '0', 10);
 
+  // 用最后有appid的行作为真正的数据尾行,避免 getLastRow() 被空白残留行撑大
+  const lastRow = findLastDataRow(sheet);
   const totalDataRows = lastRow - CONFIG.HEADER_ROW + 1;
   if (totalDataRows <= 0) return;
 
+  let cursor = parseInt(props.getProperty('CURSOR') || '0', 10);
+  if (cursor >= totalDataRows) cursor = 0;
+
   const startCursor = cursor;
   let processed = 0;
+  let wrapped = false;
 
   while (processed < CONFIG.BATCH_SIZE) {
     if (Date.now() - startTime > CONFIG.MAX_RUNTIME_MS) break;
-    if (cursor >= totalDataRows) cursor = 0;
 
     const row = CONFIG.HEADER_ROW + cursor;
     const appid = sheet.getRange(row, CONFIG.APPID_COL).getValue();
-    const currentTotal = sheet.getRange(row, CONFIG.TOTAL_COL).getValue();
     const status = sheet.getRange(row, CONFIG.UNVETTED_COL).getValue();
 
-    if (appid && currentTotal !== 'N/A' && status !== 'Manual') {
+    if (appid && status !== 'Manual') {
       try {
         updateRowForGame(sheet, row, appid);
       } catch (e) {
@@ -243,12 +250,34 @@ function runBatch() {
 
     cursor++;
     processed++;
+
+    if (cursor >= totalDataRows) {
+      cursor = 0;
+      wrapped = true;  // 走完一圈了,下面的行今天已经处理过,该停了
+    }
+    if (wrapped && cursor >= startCursor) break;
   }
 
+  // 完整走完一圈就把游标重置到0,第二天从头开始
+  if (wrapped && cursor >= startCursor) cursor = 0;
   props.setProperty('CURSOR', String(cursor));
   Logger.log('本次处理范围: 第' + (CONFIG.HEADER_ROW + startCursor) + '行 到 第' + (CONFIG.HEADER_ROW + cursor - 1)
     + '行 (共' + processed + '行, 表格总数据行数=' + totalDataRows + ')');
   updateSummaryStats();
+}
+
+/**
+ * 扫描 B 列(AppID)找到最后一个有 appid 的行号,不依赖 getLastRow()
+ * (getLastRow 可能被残留空白行撑大,导致 runBatch 游标在空行上空转)。
+ */
+function findLastDataRow(sheet) {
+  const lastRow = sheet.getLastRow();
+  if (lastRow < CONFIG.HEADER_ROW) return lastRow;
+  const appids = sheet.getRange(CONFIG.HEADER_ROW, CONFIG.APPID_COL, lastRow - CONFIG.HEADER_ROW + 1, 1).getValues();
+  for (let i = appids.length - 1; i >= 0; i--) {
+    if (appids[i][0]) return CONFIG.HEADER_ROW + i;
+  }
+  return CONFIG.HEADER_ROW - 1; // 一行数据都没有
 }
 
 /**
@@ -545,13 +574,19 @@ function fetchAchievementStats(appid) {
   const code = res.getResponseCode();
 
   if (code === 429) {
-    Logger.log('appid ' + appid + ' -> HTTP 429 限流,先留空,下次重试');
+    Logger.log('appid ' + appid + ' -> HTTP 429 限流,下次重试');
     return { retry: true };
   }
 
-  if (code !== 200) {
-    Logger.log('appid ' + appid + ' -> HTTP ' + code + ' (Steam判定无成就数据,标记N/A)');
+  // HTTP 400 是 Steam 的标准信号:这款游戏对这个账号没有 stats 数据(参见 PROJECT_CONTEXT.md)
+  if (code === 400) {
+    Logger.log('appid ' + appid + ' -> HTTP 400 (Steam判定无成就数据,标记N/A)');
     return { noAchievementSystem: true };
+  }
+
+  if (code !== 200) {
+    Logger.log('appid ' + appid + ' -> HTTP ' + code + ' (临时错误,下次重试)');
+    return { retry: true };
   }
 
   const data = JSON.parse(res.getContentText());
