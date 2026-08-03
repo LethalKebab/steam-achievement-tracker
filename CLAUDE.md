@@ -61,22 +61,24 @@ Triggers use a **cursor** (stored in ScriptProperties) to resume where the last 
 
 There are **two** separate Web App deployments. Use `clasp deploy -i <id>` to update in-place (keeps the same URL). Never use bare `clasp deploy` — it creates a new deployment with a new URL.
 
-| Deployment | Deployment ID | Access | Purpose |
-|---|---|---|---|
-| Dashboard | `AKfycbyabwGIsTm8DqY8u5mfiMfuXipbMhZH59_4lVD3Zxu-Fe98xw2mhje_8nB7tegNcNSR` | `MYSELF` | Browser Dashboard (`doGet`) |
-| Guides sync | `AKfycbwqNFbW4s0apNYVr6C9_U48a8TbPOS71uNxSdCJqWE_h-BhgKImb8hbUIj8Ce5JOpgi` | `ANYONE_ANONYMOUS` | HTTP endpoint (`doPost`) |
+| Deployment | Access | Purpose |
+|---|---|---|
+| Dashboard | `MYSELF` | Browser Dashboard (`doGet`) |
+| Guides sync | `ANYONE_ANONYMOUS` | HTTP endpoint (`doPost`) |
+
+Get your deployment IDs with `clasp deployments` after creating each one via the Apps Script editor (Deploy → New deployment → Web app).
 
 **After any Dashboard change** (HTML or `steam_dashboard.gs`):
 ```bash
 clasp push
-clasp deploy -i AKfycbyabwGIsTm8DqY8u5mfiMfuXipbMhZH59_4lVD3Zxu-Fe98xw2mhje_8nB7tegNcNSR
+clasp deploy -i <your-dashboard-deployment-id>
 ```
 
 **After any Guides sync change** (see procedure below — requires access swap):
 ```bash
 # Edit appsscript.json: change access to ANYONE_ANONYMOUS
 clasp push
-clasp deploy -i AKfycbwqNFbW4s0apNYVr6C9_U48a8TbPOS71uNxSdCJqWE_h-BhgKImb8hbUIj8Ce5JOpgi
+clasp deploy -i <your-guides-sync-deployment-id>
 # Edit appsscript.json: change access back to MYSELF
 clasp push
 ```

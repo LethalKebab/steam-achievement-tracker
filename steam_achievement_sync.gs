@@ -29,9 +29,11 @@
  */
 
 // ============ 配置区 ============
+// STEAM_API_KEY / STEAM_ID: set in Apps Script editor → Project Settings → Script Properties
+// (never hardcode real values here — this repo is public)
 const CONFIG = {
-  STEAM_API_KEY: '09B677D9003CBA25A901750AF31AB182',
-  STEAM_ID: '76561198219091068',
+  get STEAM_API_KEY() { return PropertiesService.getScriptProperties().getProperty('STEAM_API_KEY') || ''; },
+  get STEAM_ID() { return PropertiesService.getScriptProperties().getProperty('STEAM_ID') || ''; },
   SHEET_NAME: 'RAW DATA',
   ACHIEVEMENTS_SHEET_NAME: 'ACHIEVEMENTS', // 存全部游戏完整成就详情的独立标签页
   UNVETTED_COL: 1, // A列:Status标记。'Unvetted'=Steam默认隐藏的游戏(汇总统计会排除);'Manual'=人工记录、锁定不再自动同步的行
