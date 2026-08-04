@@ -28,7 +28,7 @@ clasp pull     # Pull latest from Apps Script
 | `steam_achievements_detail.gs` | `syncAchievementSchema()` — pulls full achievement definitions (CN+EN) into ACHIEVEMENTS sheet |
 | `steam_dashboard.gs` | `doGet()` serves Dashboard; `getDashboardData()`, `searchSteamGames()`, `addGame()`, `deleteGame()`, `toggleFavorite()`, `togglePriority()`, `setManualStatus()`, `setManualAchievements()`, `toggleFamily()`, `getMissingAchievements()` |
 | `Dashboard.html` | Frontend SPA — reads via `google.script.run.getDashboardData()`, renders sortable/filterable table |
-| `steam_guides_sync.gs` | Separate Web App (`doPost`) for HTTP-based remote calls (Notion↔GUIDES sync, plus RAW DATA read/fix actions — `listOwnedGames`, `addManualGame`, `setGameStatus`, `migrateFamilyGames`, `getUnlockedAchievements`, `getAllAchievementsForGame`). Deployed with `ANYONE_ANONYMOUS` access |
+| `steam_guides_sync.gs` | Separate Web App (`doPost`) for HTTP-based remote calls (Notion↔GUIDES sync, plus RAW DATA read/fix actions — `listOwnedGames`, `addManualGame`, `setGameStatus`, `migrateFamilyGames`, `getUnlockedAchievements`, `getAllAchievementsForGame`, `deleteGuideRow`). Also owns `syncGuidesFromNotion()`, which auto-discovers Notion guide pages via their `appid:` line and links them into GUIDES (daily trigger, installed via `installAutoGuideSyncTrigger()`). Deployed with `ANYONE_ANONYMOUS` access |
 | `steam_daily_checkbox_sync.gs` | Independent daily trigger (`dailyCheckboxSync`, installed via `installDailyCheckboxSyncTrigger()`): auto-checks Notion guide checkboxes for achievements unlocked on Steam. Calls Notion's API directly using a `NOTION_TOKEN` Script Property (not in source). See file header for exact-match rules. |
 | `steam_test_debug.gs` | Debug helpers for raw Steam API inspection |
 
@@ -40,6 +40,8 @@ Defined in `steam_achievement_sync.gs` `CONFIG` object:
 - `HEADER_ROW: 2` — data starts at row 2
 - `MAX_RUNTIME_MS: 4.5 * 60 * 1000` — per-trigger time cap
 
+`steam_guides_sync.gs` has its own secret, `SYNC_SECRET` (a separate top-level `const` in that file) — same rule applies: Script Property only, never hardcoded. It authenticates every `doPost` call to that endpoint.
+
 ## RAW DATA sheet layout
 
 A=Status / B=AppID / C=Game Name / D=Achieved / E=Total / F=Rate / G=Favorite(♥) / H=Priority(★) / I=New Ach Date / J=Family-shared (not self-owned)
@@ -50,12 +52,15 @@ Column J (`FAMILY_COL`) is a plain informational boolean, fully decoupled from S
 
 ## Daily triggers
 
-Set up by `createTrigger()`:
-- `runBatch` at 2am — cycles through all games, updates achievement counts
-- `syncNewGames` at 3am — detects and adds newly owned games
-- `syncAchievementSchema` at 4am — refreshes ACHIEVEMENTS detail sheet
+| Time | Function | Installed via |
+|---|---|---|
+| 2am | `runBatch` — cycles through all games, updates achievement counts | `createTrigger()` |
+| 3am | `syncNewGames` — detects and adds newly owned games | `createTrigger()` |
+| 4am | `syncAchievementSchema` — refreshes ACHIEVEMENTS detail sheet | `createTrigger()` |
+| 7am | `syncGuidesFromNotion` — finds new Notion guide pages, links them into GUIDES | `installAutoGuideSyncTrigger()` in `steam_guides_sync.gs` |
+| 8am | `dailyCheckboxSync` — ticks Notion guide checkboxes for newly-unlocked achievements | `installDailyCheckboxSyncTrigger()` in `steam_daily_checkbox_sync.gs` |
 
-Triggers use a **cursor** (stored in ScriptProperties) to resume where the last run left off. `runBatch` wraps around when it reaches the end.
+The 2am/3am/4am triggers use a **cursor** (stored in ScriptProperties) to resume where the last run left off; `runBatch` wraps around when it reaches the end. The 7am/8am triggers are independent daily jobs that reprocess their full scope from scratch each run, no cursor.
 
 ## Deployment notes
 
@@ -108,3 +113,4 @@ To update the Guides endpoint: temporarily set `webapp.access` to `ANYONE_ANONYM
 - **What actually survives `rebuildSheetFromApi()` is *not* Status.** The preservation rule is purely `!ownedAppIdSet.has(appid)` — any row whose appid isn't in the current `GetOwnedGames` snapshot gets carried over verbatim, regardless of whether Status is `'Manual'`, `'Unvetted'`, or empty. So clearing `'Manual'` on a non-owned (e.g. family-shared) row does **not** put it at risk of being dropped on rebuild.
 - **`hardResetFromApi()` has zero preservation for anything** — it rewrites the whole sheet purely from `GetOwnedGames`, silently dropping every family-shared/manual/non-owned row regardless of Status. Confirm before ever running it; there's no flag that protects a row from it.
 - **`clasp push` does not preserve files that exist live but not in your local folder** — it silently deletes them from the live project. When in doubt, `clasp pull` into a throwaway scratch folder first to see what's actually live before pushing.
+- **`clasp pull`/`clasp clone` write script files as `.js` unless `.clasp.json` sets `"fileExtension": "gs"`.** If a `.js` file lands in a folder that already has the same-named `.gs` file, `clasp push`/`clasp pull` both start failing with a file-conflict error — it looks like the remote has a duplicate, but it's actually a local one. Fix: delete the stray `.js` copy. `.clasp.json.example` now pins `fileExtension` to prevent this from recurring; if your personal `.clasp.json` predates that, add it there too.

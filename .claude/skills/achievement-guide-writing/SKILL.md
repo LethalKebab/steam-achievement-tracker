@@ -1,6 +1,6 @@
 ---
 name: achievement-guide-writing
-description: Use when writing or editing a Steam achievement guide for this project (Notion page or local .md file like sultans_game_achievements.md) — covers the checkbox-per-achievement rule required by the daily sync job, and when screenshots are worth embedding.
+description: Use when writing, rewriting, or editing a Steam achievement guide for this project (Notion page or local .md file like sultans_game_achievements.md) — covers the checkbox-per-achievement rule required by the daily sync job, when screenshots are worth embedding, and the full workflow for authoring a new guide from Steam + wiki data (pulling ground truth, sourcing wiki content, writing/replacing Notion content, verifying).
 ---
 
 # 写/改 Steam 成就攻略页的规则
@@ -16,7 +16,7 @@ description: Use when writing or editing a Steam achievement guide for this proj
 - 把"全部已达成、比较无聊"的一整组成就写成一段不带 checkbox 的说明文字
 - 把一整类成就(如"声望类共39个")写成纯文字总结
 
-**原因**:Notion markdown 里一行只有开头第一个 `[ ]`/`[x]` 会渲染成真正可交互的 checkbox,`/` 后面的会被转义成字面文本 `\[x\]`。而"把已解锁成就同步进 Notion 攻略页 checkbox"这个日常任务(`steam_guides_sync.gs` 的 `getUnlockedAchievements` action,见 `PROJECT_CONTEXT.md`)是靠精确匹配 `- [ ] **成就中文名**` 这样的行首文字来打勾的——合并写或者纯文字总结的内容,同步脚本根本找不到。
+**原因**:Notion markdown 里一行只有开头第一个 `[ ]`/`[x]` 会渲染成真正可交互的 checkbox,`/` 后面的会被转义成字面文本 `\[x\]`。而"把已解锁成就同步进 Notion 攻略页 checkbox"这个日常任务(`steam_guides_sync.gs` 的 `getUnlockedAchievements` action,见 `PROJECT_CONTEXT.md`)是靠精确匹配 `- [ ] **成就中文名**` 这样的行首文字来打勾的——合并写或者纯文字总结的内容,同步脚本根本找不到。这也是为什么攻略统一用 checkbox 列表、不用 Notion 内嵌数据库(embedded database):内嵌数据库没法被同步脚本解析,而逐条写真实攻略文字的价值也比数据库表格更高(参考实现:CK3 那次 188 个成就从内嵌数据库改写成 checkbox 格式)。
 
 ### 子任务/子收集品:用嵌套 checkbox
 
@@ -36,7 +36,7 @@ description: Use when writing or editing a Steam achievement guide for this proj
 
 ### 写后验证
 
-写完之后**一定要重新 fetch 页面验证 checkbox 真的落地了**,不要假设 `notion-update-page` 调用成功=内容正确。
+写完之后**一定要重新 fetch 页面验证 checkbox 真的落地了**,不要假设 `notion-update-page` 调用成功=内容正确。更完整的验证步骤见规则九末尾。
 
 ---
 
@@ -65,7 +65,7 @@ description: Use when writing or editing a Steam achievement guide for this proj
 
 **标准格式**:`- [x] **成就名**<br>官方成就描述(可选)<br>自己的攻略/心得(可选)`
 
-三段都写在同一个 bullet 里用 `<br>` 换行,不单独起小标题。
+三段都写在同一个 bullet 里用 `<br>` 换行,不单独起小标题。如果参考的 wiki 对这个成就有明确的难度评级,顺手带一句到"自己的攻略/心得"里(比如"难度:较高"),不用单独起字段。
 
 **描述和心得的取舍**:
 - **纯剧情推进自动解锁的成就**:只写名字即可
@@ -108,7 +108,7 @@ description: Use when writing or editing a Steam achievement guide for this proj
 
 ### 4.1 开头:极简
 
-**只需要一行 `appid: NNNNNN`**,单独一行放在最前面(同步脚本用来匹配游戏,必须保留)。
+**只需要一行 `appid: NNNNNN`**,单独一行放在最前面(GUIDES-sync 脚本(`syncGuidesFromNotion`,见 `steam-guide-sync` skill)靠这行匹配 Notion 页面和 Steam appid,没有这行页面永远不会被自动收进 GUIDES 表,也就不会出现在 Dashboard 的攻略链接里)。
 
 **绝对不要**在开头写:大标题、成就统计、剧透警告、中文名字来源说明、攻略参考来源段落、新手建议。
 
@@ -119,6 +119,8 @@ description: Use when writing or editing a Steam achievement guide for this proj
 分节按游戏自身的成就分类来(主线/支线/收集/战斗/杂项等),分类方式跟着游戏本身走。
 
 节标题不要标注"共N个, M项未完成"之类的统计数字。
+
+如果要按分类(比如按 DLC)给已有的成就列表分组,优先用规则九提到的 `update_content` 精确定位插入分组标题,不要整页重新转录。
 
 ### 4.3 结尾:写完就停
 
@@ -165,9 +167,9 @@ DLC 成就当作游戏的普通一节来处理,不要写成"DLC: XXX(3个成就,
 
 ### 8.1 确定成就列表和勾选状态
 
-1. 调用 `getAllAchievementsForGame(appid)` (steam_guides_sync.gs 的 HTTP endpoint),拿到该游戏全部成就的中英文名 + 真实解锁状态
+1. 调用 `getAllAchievementsForGame(appid)` (steam_guides_sync.gs 的 HTTP endpoint,见 `steam-guide-sync` skill),拿到该游戏全部成就的中英文名 + 真实解锁状态
 2. 如果 ACHIEVEMENTS 表还没有这个 appid 的记录,会报错提示先跑 `syncAchievementSchema`
-3. 用这个数据来写 checkbox 的 `[x]`/`[ ]` 状态
+3. 用这个数据来写 checkbox 的 `[x]`/`[ ]` 状态——这是唯一权威数据源,不要凭印象猜
 
 ### 8.2 确定成就分类
 
@@ -185,9 +187,37 @@ DLC 成就当作游戏的普通一节来处理,不要写成"DLC: XXX(3个成就,
 - NGA/贴吧中文社区讨论
 - 优先用信息密度高、有具体步骤的攻略
 
+**大型 wiki 页面的抓取方式**:直接用 `WebFetch` 抓大页面容易被截断(观察到的现象,大概率是摘要模型 + 15 分钟缓存的限制导致的),改用 Browser pane 的 `get_page_text(max_chars=400000)`;内容量接近或超过这个上限,先存成文件再读,不要指望一次工具调用能拿到完整内容。
+
+### 8.4 大型游戏:把匹配工作委托给子 agent
+
+成就数量多(100+)的游戏,"把每条 Steam 成就匹配到对应 wiki 条目、消化改写成攻略文字"这一步体量大、但对主对话没有额外的判断价值,适合委托给一个后台 sub-agent(sonnet 足够)去读完整 wiki 内容、逐条匹配、写攻略文字,不用在主对话里一条条做。**子 agent 交回结果前,应该自己先按规则九末尾的验证步骤检查一遍**,尤其是勾选状态是否跟 8.1 拿到的真实 `achieved` 数据一致——不要假设子 agent 的匹配和转写没有出错就直接交回。
+
 ---
 
-## 规则九:写完后自检清单
+## 规则九:用 `notion-update-page` 写入/替换内容
+
+### 9.1 选对命令
+
+- **整页重写**(比如把内嵌数据库转成 checkbox 列表、从头换一版攻略):用 `replace_content`。原页面如果有内嵌数据库或其他块要清掉,必须带 `allow_deleting_content=true`,否则调用会报错拒绝执行。
+- **插入/追加**(比如开头加 `appid:` 行):用 `insert_content`,`position={"type":"start"}` 插到最前面,`{"type":"end"}` 追加到最后。
+- **局部精确替换**(比如给已有成就列表按 DLC 分组插入标题、修正个别 checkbox、改一两句攻略文字):用 `update_content` 的 `content_updates`,每条给 old_str/new_str 做精确匹配替换。比整页重新转录风险低得多——重新转录几十 KB 内容,出现转写错误的概率远高于对几个分组边界做定点插入。
+
+### 9.2 大内容分批写
+
+内容量接近单次调用的长度上限时,不要硬塞一次 `replace_content`,拆成 `replace_content` 打头 + 后续 `insert_content` 接着写完,避免内容被截断。
+
+### 9.3 写完之后的验证(不要假设调用成功=内容正确)
+
+- **checkbox 真的落地了**:重新 fetch 页面确认(规则一已经提过,这里是完整版)。
+- **勾选状态跟真实数据一致**:对照 8.1 从 `getAllAchievementsForGame`/`getUnlockedAchievements` 拿到的真实 `achieved` 布尔值,逐条核对,不要凭猜测或凭 wiki 描述判断解锁状态。
+- **分组标题落在了正确的成就前面**:如果做了按 DLC/分类分组,重新 fetch 确认每个标题插入的位置没有偏移。
+- **HTML-like 语法(如 `<details>`)有没有被转义**:Notion API 有时会把内容里的 `<`/`>` 原样转成字面文本 `&lt;`/`&gt;`,而不是真正生成对应的块——只有重新读取页面实际内容才能发现这个问题,不能假设写入的是自己发送的那段 markdown。
+- **原页面有 API 保留不了的内容,先跟用户说清楚再丢弃**:比如 bookmark 块,Notion API 有时只暴露一个自引用锚点、拿不到真实的目标 URL——发现这种"这块内容会被替换掉但救不回来"的情况,应该在操作前告知用户,而不是操作完之后才发现丢了。
+
+---
+
+## 规则十:写完后自检清单
 
 1. [ ] 每个成就都是独立的 `- [x]` / `- [ ]` checkbox 行?
 2. [ ] 没有任何合并行(如 `[x] A / [x] B / [x] C`)?
@@ -204,3 +234,6 @@ DLC 成就当作游戏的普通一节来处理,不要写成"DLC: XXX(3个成就,
 13. [ ] 子任务/子收集品用嵌套 checkbox 而非纯文字列表?
 14. [ ] 互斥成就标注了冲突警告?
 15. [ ] 有背景/perk 要求的成就标注了前置条件?
+16. [ ] 勾选状态逐条核对过真实 `achieved` 数据,不是凭印象/wiki 描述判断的?
+17. [ ] 用了 `<details>` 等 HTML-like 语法的,重新 fetch 确认没有被转义成字面文本?
+18. [ ] 原页面有 API 保留不了的内容(如 bookmark 块)的,已经跟用户说清楚了?
