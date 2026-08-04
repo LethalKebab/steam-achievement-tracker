@@ -41,6 +41,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), path containment check |
 | `lib/csv.js` | CSV parse/serialize, spreadsheet import, CSV export |
 | `Dashboard.html` | Frontend SPA. Reads via `rpc.getDashboardData()`, renders a sortable/filterable table |
+| `docs/` | User-facing docs: `configuration.md`, `data.md`, `guides.md`. README stays setup-only — put reference material here |
 
 ### The frontend ↔ backend contract
 

@@ -38,6 +38,8 @@
 - `lib/notion.js` / `lib/markdown.js` —— 两种攻略后端
 - `lib/csv.js` —— CSV 解析/序列化、从 Sheet 导出的数据导入、导出
 - `test/matching.test.js` —— 匹配规则的回归测试(`node --test`)
+- `docs/` —— 给用户看的文档:`configuration.md`(配置项)、`data.md`(数据库/导入导出/Steam 查不到的情况)、
+  `guides.md`(攻略 checkbox 同步)。README 只留装起来要用的东西,参考性内容都放这里
 - `guides/` 目录 —— 已经做好的游戏成就攻略(Markdown),写法规则见
   `.claude/skills/achievement-guide-writing/SKILL.md`
 
