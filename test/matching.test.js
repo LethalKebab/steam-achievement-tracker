@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 
 import { normalizeText, extractTitleCandidates, matchAchievements } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
-import { parseCsv, toCsv } from '../lib/csv.js';
+import { parseCsv, toCsv, tabName } from '../lib/csv.js';
 import { extractNotionPageId, normalizeNotionId } from '../lib/notion.js';
 
 const ach = (nameCn, nameEn = '') => ({ nameCn, nameEn, apiname: nameCn });
@@ -156,5 +156,20 @@ describe('CSV', () => {
       ['苏丹的游戏', '有,逗号和"引号"'],
     ];
     assert.deepEqual(parseCsv(toCsv(rows)), rows);
+  });
+});
+
+describe('CSV 文件名识别', () => {
+  test('只看标签页名,表格名里的关键词不能干扰', () => {
+    // 表格叫 "Steam Achievement Tracker" 的时候,RAW DATA 的导出文件名里也有 achievement——
+    // 按整个文件名匹配会把 games 表当成 achievements 表导进去,整张表变垃圾数据
+    assert.equal(tabName('Steam Achievement Tracker - RAW DATA.csv'), 'rawdata');
+    assert.equal(tabName('Steam Achievement Tracker - ACHIEVEMENTS.csv'), 'achievements');
+    assert.equal(tabName('Steam Achievement Tracker - GUIDES.csv'), 'guides');
+  });
+
+  test('没有 " - " 分隔的文件名退回用整个名字', () => {
+    assert.equal(tabName('RAW DATA.csv'), 'rawdata');
+    assert.equal(tabName('guides.csv'), 'guides');
   });
 });
