@@ -4,12 +4,10 @@ Track your Steam achievement progress automatically, without babysitting a sprea
 
 Point it at your Steam account once. Your library and achievement progress live in a local SQLite file, and a local web Dashboard shows it all at a glance.
 
-> **Coming from the Google Apps Script version?** It's been replaced — this is the same tool rebuilt to run entirely on your own machine. See [Migrating from the Sheet version](#migrating-from-the-sheet-version) to bring your ♥/★/family/Manual markers across, and [What changed](#what-changed-from-the-apps-script-version) for the full mapping. The old implementation is still in history at `7e29470` if you'd rather keep using it.
-
 ## What you get
 
 - **Your whole library, always current** — every owned game, achievement counts, and completion % refreshed by one command (or automatically when you open the Dashboard).
-- **A Dashboard for browsing** — the same web UI as before: skim your games, mark favorites (♥) and spotlights (★), see progress at a glance. Now served from `localhost` instead of a Google deployment.
+- **A Dashboard for browsing** — skim your games, mark favorites (♥) and spotlights (★), see progress at a glance. Served from `localhost`, so it opens instantly and no one else can reach it.
 - **Full per-achievement detail** — names, descriptions, unlock status for your whole library, queryable with plain SQL or exportable to CSV.
 - **Guide links in one place** — an optional daily sync that ticks off guide checkboxes as you actually unlock achievements in-game. Works against Notion pages (the primary setup) or plain local markdown files.
 - **Handles the edge cases Steam's API can't** — shared-library games and manually-corrected entries are tracked without being overwritten by the sync, editable right from the Dashboard. See [Known limitations](#known-limitations).
@@ -41,7 +39,7 @@ node tracker.js serve    # opens the Dashboard at http://127.0.0.1:8777
 
 They're written to `config.json` (mode `600`, gitignored) and validated against Steam immediately, so a typo surfaces right away instead of halfway through your first sync. If you'd rather not have them on disk, `STEAM_API_KEY` / `STEAM_ID` environment variables override the file.
 
-That's the whole setup. There's no Sheet to create, no Apps Script editor, no `clasp`, no OAuth consent screen, no deployment, and no trigger installation.
+That's the whole setup — no account to create, no deployment, no scheduler to install.
 
 ## Daily use
 
@@ -57,7 +55,7 @@ node tracker.js log 30           # recent sync log
 node --test                      # run the test suite
 ```
 
-**Scheduling is deliberately absent.** Opening the Dashboard triggers a background sync when the data is more than `syncStaleHours` (default 12) old, and `sync` is there when you want it now. Set `syncStaleHours: 0` in `config.json` to disable the automatic one. Note the tradeoff: unlike the old 2am/3am/4am Apps Script triggers, nothing runs while your machine is asleep — sync happens when you show up. If you'd rather have a real daily job, a launchd plist calling `node tracker.js sync` gets you there.
+**Scheduling is deliberately absent.** Opening the Dashboard triggers a background sync when the data is more than `syncStaleHours` (default 12) old, and `sync` is there when you want it now. Set `syncStaleHours: 0` in `config.json` to disable the automatic one. The tradeoff: nothing runs while your machine is asleep — sync happens when you show up. If you'd rather have a real daily job, a launchd plist calling `node tracker.js sync` gets you there.
 
 ## Configuration
 
@@ -78,34 +76,42 @@ node --test                      # run the test suite
 }
 ```
 
-## Migrating from the Sheet version
+## Importing from a spreadsheet
 
-Your ♥ favorites, ★ spotlights, family-shared flags, `Manual` rows and hand-entered achievement counts **cannot be recovered from Steam's API** — they only exist in your old Sheet. Bring them over before you start:
+If you already track this in a spreadsheet, `import` brings it in. Worth doing before your first sync, because ♥ favorites, ★ spotlights, family-shared flags, `Manual` rows and hand-entered achievement counts **cannot be recovered from Steam's API** — importing is the only way to keep them.
 
-1. In the Google Sheet, for each of the `RAW DATA`, `ACHIEVEMENTS`, and `GUIDES` tabs: **File → Download → Comma-separated values (.csv)**.
-2. Put all three CSVs in one folder.
+1. Export each sheet as CSV, with `RAW DATA`, `ACHIEVEMENTS`, or `GUIDES` in the filename.
+2. Put them in one folder.
 3. `node tracker.js import ~/Downloads/steam-csvs`
 
-Import reads by column position (not header text), understands `TRUE`/`FALSE`, `45.00%`, and `N/A`, and is idempotent — re-running it after fixing something in the Sheet just overwrites those columns again. Then run `node tracker.js sync` to refresh everything Steam *can* tell you.
+Expected columns, read **by position** rather than by header text:
+
+| Sheet | Columns |
+|---|---|
+| `RAW DATA` | Status, AppID, Name, Achieved, Total, Rate, Favorite, Spotlight, NewAchDate, Family |
+| `ACHIEVEMENTS` | AppID, Game, ApiName, NameCN, NameEN, Description, Hidden, IconURL |
+| `GUIDES` | AppID, Game, URL, (type), Updated |
+
+It understands `TRUE`/`FALSE`, `45.00%`, `1,000` and `N/A`, and is idempotent — fix something in the spreadsheet, re-run, and those columns are overwritten again. Then `node tracker.js sync` fills in everything Steam *can* tell you. `node tracker.js export` writes the same three files back out.
 
 ## Data
 
 `data/steam.db` — one SQLite file, gitignored. Open it with anything (`sqlite3 data/steam.db`):
 
-| Table | Was | Holds |
-|---|---|---|
-| `games` | `RAW DATA` tab | one row per appid: name, achieved/total, rate, status, ♥/★/family flags |
-| `achievements` | `ACHIEVEMENTS` tab | per-achievement detail, CN + EN names, hidden flag, icon URL |
-| `guides` | `GUIDES` tab | appid → guide location, plus `kind` (`notion` or `local`) |
-| `sync_log` | `Sync Log` tab | every checkbox change/skip/failure, for after-the-fact auditing |
-| `meta` | Script Properties | last sync timestamp |
+| Table | Holds |
+|---|---|
+| `games` | one row per appid: name, achieved/total, rate, status, ♥/★/family flags |
+| `achievements` | per-achievement detail, CN + EN names, hidden flag, icon URL |
+| `guides` | appid → guide location, plus `kind` (`notion` or `local`) |
+| `sync_log` | every checkbox change/skip/failure, for after-the-fact auditing |
+| `meta` | last sync timestamp and other odds and ends |
 
-Two intentional differences from the Sheet schema:
+Two schema decisions worth knowing before you write queries against it:
 
-- **No `'N/A'` string in a numeric column.** Games with no achievement system have `has_achievements = 0` and `NULL` counts.
-- **`Manual` is split in two.** `status` is what you see and sort by; `sync_locked` is what actually makes the sync skip a row. They move together from the Dashboard, so nothing changes day to day — but the old "you can't lock a row against Unvetted flip-flopping without also killing its daily sync" bind (documented at length in the old `CLAUDE.md`) is now just `UPDATE games SET sync_locked = 0`.
+- **"No achievement system" is `has_achievements = 0` with `NULL` counts** — not a `0` total, and not a string in a numeric column.
+- **`status` and `sync_locked` are separate columns.** `status` is the label you see and sort by (`''` / `Unvetted` / `Manual`); `sync_locked` is what actually makes a sync skip the row. The Dashboard moves both together, but you can lock the label while keeping the daily refresh: `UPDATE games SET sync_locked = 0 WHERE appid = '...'`.
 
-Want a spreadsheet again for ad-hoc poking? `node tracker.js export` writes the three tables back out as CSV.
+Want a spreadsheet for ad-hoc poking? `node tracker.js export` writes all three tables out as CSV.
 
 ## Guides
 
@@ -139,33 +145,13 @@ Steam's API is the source of truth for almost everything, but a few things can't
 | `lib/db.js` | SQLite schema and accessors |
 | `lib/server.js` | Local HTTP server: serves the Dashboard, dispatches `/api/*` |
 | `lib/api.js` | Dashboard backend methods (same names/shapes the frontend already called) |
-| `lib/rpc-shim.js` | Turns `google.script.run` into `fetch` so `Dashboard.html` needed no rewrite |
+| `lib/rpc.js` | Served to the browser; turns `rpc.…method(args)` calls into `POST /api/method` |
 | `lib/guides.js` | Achievement↔checkbox matching rules + both guide backends |
 | `lib/notion.js`, `lib/markdown.js` | The two guide backends |
 | `lib/csv.js` | Sheet-export import + CSV export |
-| `Dashboard.html` | Frontend, unchanged from the Apps Script version apart from one `<script>` tag |
+| `Dashboard.html` | Frontend: sortable/filterable table, favorites, per-game achievement detail |
 | `test/` | `node --test` suite, focused on the matching rules |
 | `guides/` | Example achievement guide write-ups |
-
-## What changed from the Apps Script version
-
-| Was | Now |
-|---|---|
-| Google Sheet (3 tabs + Sync Log) | `data/steam.db` (SQLite) |
-| Script Properties | `config.json` / env vars |
-| `HtmlService` + `google.script.run` | `node:http` + `POST /api/<method>` (via `lib/rpc-shim.js`) |
-| 5 time-based triggers (2/3/4/7/8am) | sync-on-open + `node tracker.js sync` |
-| `runBatch` cursor + 4.5-minute cap | one full pass — the cap only existed for Apps Script's 6-minute limit |
-| `clasp push` / two deployments / access-swap dance | *nothing* |
-| `steam_guides_sync.gs` HTTP endpoint + `SYNC_SECRET` | *nothing* — read `data/steam.db` or use the CLI directly |
-| `steam_test_debug.gs` | plain `node -e` against `lib/steam.js` |
-
-The old Apps Script implementation is still in git history — the last commit before the port is `7e29470`:
-
-```bash
-git show 7e29470:steam_achievement_sync.gs   # read a single old file
-git checkout 7e29470                         # or check out the whole old tree
-```
 
 ## Using this with Claude Code
 

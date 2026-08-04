@@ -5,21 +5,21 @@ description: Read/write the guides table (appid <-> guide location) and pull aut
 
 # Guide + game data access
 
-There is no HTTP endpoint any more. The old `steam_guides_sync.gs` `doPost` Web App (with its `SYNC_SECRET`, its `ANYONE_ANONYMOUS` deployment, and the redirect-following dance) existed **only** because Claude Code was outside Google's sandbox and needed a way in. Everything now runs locally, so read the SQLite file or call `lib/*` directly.
+Everything lives in `data/steam.db`, so read it with SQL or call `lib/*` directly — there's no service or API layer in between.
 
 ## Reading data — prefer SQL
 
 ```bash
-# match a game name to its appid (was: listOwnedGames)
+# match a game name to its appid
 sqlite3 data/steam.db "SELECT appid, name, status, achieved, total FROM games WHERE name LIKE '%苏丹%'"
 
-# current guide registrations (was: listGuideRows)
+# current guide registrations
 sqlite3 data/steam.db "SELECT appid, name, kind, url, updated FROM guides ORDER BY appid"
 
 # why isn't this row syncing?  → sync_locked, not status, is what the sync checks
 sqlite3 data/steam.db "SELECT appid, name, status, sync_locked FROM games WHERE appid = '999999'"
 
-# a game's achievement definitions (was: getAllAchievementsForGame, minus live unlock state)
+# a game's achievement definitions (definitions only — unlock state is a live Steam call)
 sqlite3 data/steam.db "SELECT api_name, name_cn, name_en, hidden FROM achievements WHERE appid = '3117820'"
 ```
 
@@ -41,15 +41,14 @@ For "rewrite a guide's whole checklist from scratch" you want *all* achievements
 
 ## Writing data
 
-| Old HTTP action | Now |
+| Task | How |
 |---|---|
-| `upsertGuideLinks(entries)` | `upsertGuide(db, {appid, name, url, kind})` in `lib/db.js` — **overwrites name and url together**, don't write only the url or renamed games keep stale names (this was a real regression once) |
-| `syncGuidesFromNotion` | `node tracker.js guides --notion` |
-| `deleteGuideRow(appid)` | `deleteGuide(db, appid)`, or `DELETE FROM guides WHERE appid = ?` |
-| `addManualGame(entry)` | Dashboard "添加游戏" box, or `insertGame(db, {appid, name, status: 'Manual', syncLocked: 1})` |
-| `setGameStatus(appid, status)` | `setGameField(db, appid, 'status', ...)` — remember `sync_locked` is a separate column now |
-| `migrateFamilyGames(appids)` | `UPDATE games SET status = '', sync_locked = 0, family = 1 WHERE appid IN (...)` |
-| `installAutoGuideSyncTrigger` | gone — there are no schedulers; run `node tracker.js guides` when you want it |
+| register/update a guide link | `upsertGuide(db, {appid, name, url, kind})` in `lib/db.js` — **writes name and url together**; writing only the url leaves renamed games with stale names (this regressed once) |
+| discover new Notion guide pages | `node tracker.js guides --notion` |
+| remove a guide | `deleteGuide(db, appid)`, or `DELETE FROM guides WHERE appid = ?` |
+| add a hand-maintained game | Dashboard "添加游戏" box, or `insertGame(db, {appid, name, status: 'Manual', syncLocked: 1})` |
+| change a row's label | `setGameField(db, appid, 'status', ...)` — remember `sync_locked` is a separate column |
+| reclassify as family-shared | `UPDATE games SET status = '', sync_locked = 0, family = 1 WHERE appid IN (...)` |
 
 Before reclassifying a `Manual` row as family-shared, confirm the account can actually see real data: call `fetchPlayerAchievements` for that appid and check whether the `achieved` numbers are *your* progress (all zeros usually means a different family member plays it). See `PROJECT_CONTEXT.md` pitfall #6.
 

@@ -6,15 +6,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steam achievement auto-tracker, running **entirely locally**: SQLite data store + Node CLI + a local HTTP server for the HTML Dashboard. Tracks achievement completion across the user's whole Steam library.
 
-This was a Google Apps Script + Google Sheet project until it was ported to run locally. The Apps Script implementation is still in git history — `git show 7e29470:steam_achievement_sync.gs` and friends, or `git checkout 7e29470` for the whole tree. If you find documentation, comments, or skills still referring to `clasp`, Script Properties, `doPost`, or Sheet tabs, that's stale — fix it.
-
 See `PROJECT_CONTEXT.md` for background, task lists, and known issues.
 
 ## Stack constraints
 
 - **Zero dependencies, by design.** Node built-ins only: `node:sqlite` for storage, global `fetch` for HTTP, `node:http` for the server, `node:test` for tests. Do not add an npm dependency without a strong reason — "no install step" is a feature of this project, not an accident.
 - Requires **Node 24+** (`node:sqlite` availability).
-- ES modules (`"type": "module"`). Real `import`/`export` — unlike the Apps Script version, files do *not* share a global scope.
+- ES modules (`"type": "module"`).
 
 ## Development workflow
 
@@ -24,7 +22,7 @@ node --test                 # test suite (test/matching.test.js)
 node --check lib/foo.js     # syntax check
 ```
 
-There is no build, no push, no deploy. Editing a file and re-running the command is the whole loop. `serve` does not hot-reload — restart it after changing `lib/` (`Dashboard.html` and `lib/rpc-shim.js` are re-read per request, so a browser refresh picks those up).
+There is no build, no push, no deploy. Editing a file and re-running the command is the whole loop. `serve` does not hot-reload — restart it after changing `lib/` (`Dashboard.html` and `lib/rpc.js` are re-read per request, so a browser refresh picks those up).
 
 ## File architecture
 
@@ -37,17 +35,16 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `lib/sync.js` | `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, `fullSync`, `computeAgcrStats` |
 | `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check |
 | `lib/api.js` | The 10 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
-| `lib/rpc-shim.js` | Served at `/_rpc.js`. Proxies `google.script.run.…` chains to `fetch('/api/…')` |
+| `lib/rpc.js` | Served at `/_rpc.js`. Proxies `rpc.…` chains to `fetch('/api/…')`, plus the sync status bar |
 | `lib/guides.js` | Achievement↔checkbox matching rules, both guide backends, guide discovery |
 | `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking |
 | `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), path containment check |
-| `lib/csv.js` | CSV parse/serialize, Sheet-export import, CSV export |
-| `Dashboard.html` | Frontend SPA. Unchanged from the Apps Script version except one `<script src="/_rpc.js">` tag |
+| `lib/csv.js` | CSV parse/serialize, spreadsheet import, CSV export |
+| `Dashboard.html` | Frontend SPA. Reads via `rpc.getDashboardData()`, renders a sortable/filterable table |
 
-### Why the shim exists
+### The frontend ↔ backend contract
 
-`Dashboard.html` has ~1000 lines of app code making 11 calls shaped like
-`google.script.run.withSuccessHandler(fn).withFailureHandler(fn).method(args)`. Rather than rewrite all of it, `lib/rpc-shim.js` provides an object with that exact shape backed by `fetch`. **Keep the contract:** a method that returns `{error: '...'}` is a *successful* call (the frontend inspects `result.error` itself); only network/thrown failures go to the failure handler. If you add a Dashboard method, add it to `lib/api.js` — the shim needs no changes, it proxies any name.
+`Dashboard.html` makes 11 calls shaped like `rpc.withSuccessHandler(fn).withFailureHandler(fn).method(args)`, served by `lib/rpc.js`. **Keep the contract:** a method that returns `{error: '...'}` is a *successful* call (the frontend inspects `result.error` itself); only network/thrown failures reach the failure handler. Adding a Dashboard method means adding it to `lib/api.js` — `rpc.js` proxies any name and needs no changes.
 
 ## Key config
 
@@ -66,18 +63,18 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 
 - `status`: `''` (normal), `'Unvetted'` (Steam Profile Features Limited), `'Manual'` (hand-maintained).
 - `has_achievements = 0` replaces the old `'N/A'` string in the numeric total column. `NULL` means "not synced yet".
-- **`sync_locked` is what the sync actually checks**, not `status`. This is the fix for a documented Apps Script wart where `'Manual'` conflated "skip daily sync" with "lock against Unvetted re-classification" and you couldn't have one without the other. The Dashboard still moves both together (`setManualStatus` sets both), so default behavior is unchanged; the columns can now diverge deliberately.
+- **`sync_locked` is what the sync actually checks**, not `status`. They are separate columns because "skip the daily achievement sync" and "pin this row's label against Steam re-classifying it Unvetted" are different wishes — conflate them and you cannot have one without the other. The Dashboard moves both together (`setManualStatus` sets both); diverge them by hand when you actually want to.
 - `family` is purely informational and never affects sync behavior. It exists because "not in `GetOwnedGames`" and "should skip achievement sync" are two *different* facts.
 
 ## Sync behavior
 
-`fullSync` runs three phases in order, with no cursor and no runtime cap — those existed only to work around Apps Script's 6-minute execution limit, and removing them also removed the old "sorting shifts what the cursor points at" hazard.
+`fullSync` runs three phases in order over the whole library, with no cursor and no runtime cap. Ctrl+C mid-run is safe — each game is committed as it completes, so re-running only redoes work that was in flight.
 
 1. **`syncLibrary`** — new owned games get inserted (with a name lookup); existing *owned* rows get their `Unvetted` stamp refreshed, except `'Manual'` ones. Rows whose appid is **not** in the current `GetOwnedGames` snapshot are left completely untouched — that's the preservation rule (it keys off ownership, not `status`).
 2. **`syncAchievementStats`** — every row with `sync_locked = 0` gets its counts refreshed. A total higher than last time stamps `new_ach_date` (the Dashboard's "new achievements" badge).
 3. **`syncAchievementSchema`** — per-achievement detail for games that are new to the `achievements` table or bumped in the last 7 days; skips games at exactly 100% and games with no achievement system.
 
-There is no destructive rebuild/hard-reset command. `syncLibrary` subsumes the useful half of the old `rebuildSheetFromApi()`, and the old `hardResetFromApi()` (which silently dropped every family-shared/manual row) is deliberately not ported.
+There is deliberately no destructive rebuild/reset command. `syncLibrary` reconciles against Steam without discarding rows, and a "wipe and repopulate from `GetOwnedGames`" helper would silently drop every family-shared and manually-maintained row — data the API cannot give back.
 
 ## Steam API quirks
 
@@ -110,5 +107,5 @@ The design deliberately prefers a missed checkbox over a wrong one.
 - **Notion page identity must use the normalized UUID**, never raw URL text — Notion sometimes prefixes URLs with a title slug, so the same page's URL differs between queries. Comparing raw URLs once caused already-linked pages to be treated as new and overwrite curated names (`normalizeNotionId` in `lib/notion.js`).
 - **One appid, one guide backend.** Markdown discovery won't overwrite a registered Notion guide unless `--force`.
 - **Local guide paths are contained to `guidesDir`** (`resolveGuidePath`). Keep that check if you touch it — `guides.url` is data.
-- **Documentation drifting from code is a real failure mode here.** `SYNC_SECRET` sat hardcoded in a public repo for months while three docs claimed it was in Script Properties, because nobody checked the source. Verify against code, not docs.
+- **Documentation drifting from code is a real failure mode here.** A secret once sat hardcoded in this public repo for months while three separate docs claimed it was read from config, because nobody checked the source. Verify against code, not docs.
 - **`localDate()` not `toISOString().slice(0,10)`** for user-facing dates — the latter is UTC and will be off by a day in the evening.

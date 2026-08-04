@@ -4,7 +4,7 @@
  * 跑法:node --test(零依赖,用 Node 内置的 node:test)
  *
  * 这里锁住的是整个项目最容易被"顺手放宽一下"改坏的地方:匹配必须**精确**。
- * 原版就踩过一次坑——用前缀匹配的时候,一个短成就名可能是另一个更难的、
+ * 踩过的坑:用前缀匹配的时候,一个短成就名可能是另一个更难的、
  * 实际还没解锁的成就名的前缀,结果勾错了 checkbox。
  */
 import { test, describe } from 'node:test';
@@ -58,7 +58,7 @@ describe('matchAchievements —— 精确匹配', () => {
     assert.equal(matchAchievements([ach('', 'Taste')], todos).length, 1);
   });
 
-  test('短成就名不会错误匹配到"以它为前缀"的另一个成就(原版踩过的坑)', () => {
+  test('短成就名不会错误匹配到"以它为前缀"的另一个成就(踩过的坑)', () => {
     // "明日" 是 "明日之星" 的严格前缀:前缀匹配会勾错,精确匹配必须拒绝
     const todos = [todo(1, '**明日之星**(Rising Star) — 完成第1章')];
     assert.equal(matchAchievements([ach('明日', 'Rising')], todos).length, 0);
@@ -161,9 +161,9 @@ describe('CSV', () => {
 });
 
 describe('CSV 文件名识别', () => {
-  test('只看标签页名,表格名里的关键词不能干扰', () => {
+  test('只看工作表名,表格名里的关键词不能干扰', () => {
     // 表格叫 "Steam Achievement Tracker" 的时候,RAW DATA 的导出文件名里也有 achievement——
-    // 按整个文件名匹配会把 games 表当成 achievements 表导进去,整张表变垃圾数据
+    // 按整个文件名匹配会把 games 数据当成 achievements 导进去,整张表变垃圾数据
     assert.equal(tabName('Steam Achievement Tracker - RAW DATA.csv'), 'rawdata');
     assert.equal(tabName('Steam Achievement Tracker - ACHIEVEMENTS.csv'), 'achievements');
     assert.equal(tabName('Steam Achievement Tracker - GUIDES.csv'), 'guides');

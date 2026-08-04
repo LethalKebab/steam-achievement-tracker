@@ -1,18 +1,17 @@
 # Steam 成就自动化追踪项目 — 项目背景说明
 
-给 Claude Code 快速上下文用。这个项目最早在 claude.ai 网页对话里搭起来,后来挪到 Claude Code,
-再后来从 Google Apps Script + Google Sheet **整体改成了本地运行**(2026-08-03),
-本地版已经合进 `main`——旧的 Apps Script 版本留在提交 `7e29470` 及以前的历史里。
+给 Claude Code 快速上下文用。这个项目全部跑在本地:一个 SQLite 文件 + 一套 Node CLI +
+一个只监听 127.0.0.1 的网页 Dashboard,零依赖、不需要任何外部账号。
 
 ## 项目是什么
 
 一套自动追踪 Steam 游戏成就完成度的系统,全部跑在本地,由三部分组成:
 
 1. **SQLite 数据库**(`data/steam.db`,唯一权威数据)—— 四张表:
-   - `games` —— 全库游戏的成就完成度、♥/★/家庭共享标记、Manual 状态(原 `RAW DATA` 标签页)
+   - `games` —— 全库游戏的成就完成度、♥/★/家庭共享标记、Manual 状态
    - `achievements` —— 全库游戏的完整官方成就详情(中英文名字都存,中文优先展示)
    - `guides` —— 每款游戏对应的攻略位置(Notion 链接或本地 md 文件名,只存指针不存正文)
-   - `sync_log` —— checkbox 同步的逐条结果,事后复查用(原 `Sync Log` 标签页)
+   - `sync_log` —— checkbox 同步的逐条结果,事后复查用
 2. **Node CLI**(`tracker.js` + `lib/*.js`)—— 同步引擎、攻略同步、导入导出,零依赖
 3. **网页 Dashboard**(`Dashboard.html`,由 `lib/server.js` 起的本地 HTTP 服务提供,只监听 127.0.0.1)
 
@@ -21,8 +20,7 @@
 - **零依赖是刻意的**:只用 Node 内置模块(`node:sqlite` 存数据、内置 `fetch` 调 API、
   `node:http` 起服务、`node:test` 跑测试)。加 npm 依赖需要很强的理由——"不用 install"
   本身就是这个项目的卖点之一
-- 需要 **Node 24+**(`node:sqlite` 的可用性),ES modules,文件之间是真的 `import`,
-  不再是 Apps Script 那种共享全局作用域
+- 需要 **Node 24+**(`node:sqlite` 的可用性),ES modules
 - 敏感信息(Steam API Key / SteamID64 / Notion token)存在 `config.json`(权限 600,
   已 gitignore),或者用环境变量覆盖。**仓库是公开的,绝对不能提交进源码**
 - appid 为主键,数据源以 Steam API 为准(不是手动录入)
@@ -35,7 +33,7 @@
 - `lib/db.js` —— SQLite 表结构和访问函数
 - `lib/server.js` —— 本地 HTTP 服务,`/api/*` 分发,后台同步状态
 - `lib/api.js` —— Dashboard 的 10 个后端方法,**函数名和返回结构必须和 `Dashboard.html` 调的一致**
-- `lib/rpc-shim.js` —— 把 `google.script.run` 转成 `fetch`,所以前端那一千行没改
+- `lib/rpc.js` —— 发给浏览器的那份:把 `rpc.xxx(args)` 转成 `POST /api/xxx`,外加同步进度提示条
 - `lib/guides.js` —— 成就名↔checkbox 的匹配规则、两种攻略后端的调度、攻略发现
 - `lib/notion.js` / `lib/markdown.js` —— 两种攻略后端
 - `lib/csv.js` —— CSV 解析/序列化、从 Sheet 导出的数据导入、导出
@@ -74,10 +72,9 @@
    Notion 的页面 URL 有时会带标题 slug 前缀,同一个页面两次查询返回的 URL 文本可能不一样。
    攻略同步最初按 URL 原文比对"是否已在攻略表里",导致大量已存在的页面被误判成新页面、
    覆盖写入了本来整理好的 name/url。已修复:改用 `normalizeNotionId`(`lib/notion.js`)
-9. **文档写的和代码实际做的可能不一致,光看文档不算验证**:`SYNC_SECRET` 曾经以明文硬编码在
-   `steam_guides_sync.gs` 里,从项目"公开发布"那次提交起就一直躺在公开仓库里,
-   尽管三份文档都写着它应该跟 STEAM_API_KEY 一样存 Script Properties——没人实际去源码里确认过。
-   (本地版已经没有这个 endpoint 和这个 secret 了。)
+9. **文档写的和代码实际做的可能不一致,光看文档不算验证**:曾经有个 secret 三份文档都写着
+   "从配置里读",实际却明文硬编码在源码里,跟着公开仓库躺了好几个月——没人真去源码确认过。
+   涉及凭据/权限的说法,一律回去看代码
 10. **成就名匹配 checkbox 必须精确匹配,不能用 substring/prefix**——踩过两轮误勾的坑,
     详见 `CLAUDE.md` 的 "Guide checkbox matching" 一节和 `test/matching.test.js`。
     这条规则被测试锁住了,改 `lib/guides.js` 之后记得跑 `node --test`
@@ -96,21 +93,20 @@
 ## 目前架构现状
 
 - 核心同步管线(库同步、成就完成数、成就详情、Dashboard 展示、♥/★ 标记)都已经跑通,
-  跑一条 `node tracker.js sync` 就是全量,不再有游标/分批/4.5 分钟上限那套东西
-  (那些纯粹是为了绕开 Apps Script 单次执行 6 分钟限制)
+  跑一条 `node tracker.js sync` 就是全量:没有游标、没有分批、没有单次时长上限,
+  中途 Ctrl+C 也不会丢已经写进库的数据
 - 攻略功能:Notion 是主用法(带 `appid: NNNNNN` 开头行的页面,`node tracker.js guides`
   自动发现并登记),本地 markdown 是第二种后端(`guides/*.md`,同样靠 `appid:` 行发现)。
   `node tracker.js checkbox-sync` 把 Steam 解锁状态同步成攻略里的 ✅,两种后端共用同一份匹配规则
-- **定时任务没有了**:改成"打开 Dashboard 时数据超过 12 小时就后台自动同步" + 手动跑 CLI。
-  代价是机器睡着的时候不会同步(原来的 Apps Script trigger 在 Google 云上 24 小时跑),
-  想要真的每日后台任务需要自己配一个 launchd plist 调 `node tracker.js sync`
+- **没有定时任务**:数据超过 12 小时的话打开 Dashboard 会后台自动同步一次,平时手动跑 CLI。
+  代价是没有常驻服务,机器睡着的时候不会同步;想要真的每日后台任务,
+  自己配一个 launchd plist 调 `node tracker.js sync`
 - 已知还没写攻略的游戏(Notion 攻略数据库里存在、但还没有攻略内容/appid 行):
   Xenoblade Chronicles X、三相奇谈、以闪亮之名、最强祖师、月圆之夜、燕云十六声
 - 已知待处理:Notion 里"苏丹的游戏"有一个重复页面(旧的那个,url 含 `1d31fee6...`)需要手动删除
-- 迁移状态(2026-08-03):Sheet 数据已全量导入本地(310 款游戏 / 9461 条成就详情 / 96 条攻略),
-  AGCR 和原表格算出来一致(77.438%)。Apps Script 那边的 8am `dailyCheckboxSync` trigger 已删
-  (它还带着老的、会误勾同名成就的匹配逻辑);2/3/4/7am 那几个先留着让 Sheet 继续更新当备份,
-  等不需要了再删——删掉之后 Sheet 就不再是活备份了,记得先 `node tracker.js export` 存一份 CSV
+- 已知待处理:Google 表格那边还留着几个每天更新表格的定时任务,当额外备份用。不需要了就去
+  Apps Script 的触发器页面删掉;删之前先 `node tracker.js export` 存一份 CSV,
+  因为删完表格就不再自动更新了
 
 ## 可能的下一步
 

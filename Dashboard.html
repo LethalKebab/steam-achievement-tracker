@@ -496,8 +496,7 @@
 
   <div id="favGrid" class="fav-grid" style="display:none;"></div>
 
-  <!-- 本地版:把 google.script.run 转成对本地 HTTP 服务的 fetch 调用。
-       有了它下面这一千行前端代码不用改一个字,见 lib/rpc-shim.js -->
+  <!-- rpc:把 rpc.xxx(args) 转成 POST /api/xxx,见 lib/rpc.js -->
   <script src="/_rpc.js"></script>
 
   <script>
@@ -591,7 +590,7 @@
           if (!game) return;
           game.favorite = !game.favorite;
           render();
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (result && typeof result.favorite === 'boolean') game.favorite = result.favorite;
           }).withFailureHandler(function() {
             game.favorite = !game.favorite;
@@ -726,7 +725,7 @@
           if (!game) return;
           game.favorite = !game.favorite; // 先本地乐观更新,界面立刻响应
           render();
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (result && typeof result.favorite === 'boolean') game.favorite = result.favorite;
           }).withFailureHandler(function() {
             game.favorite = !game.favorite; // 失败了就改回去
@@ -743,7 +742,7 @@
           if (!game) return;
           game.priority = !game.priority; // 先本地乐观更新,界面立刻响应
           render();
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (result && typeof result.priority === 'boolean') game.priority = result.priority;
           }).withFailureHandler(function() {
             game.priority = !game.priority; // 失败了就改回去
@@ -761,7 +760,7 @@
           const newManual = !game.manual;
           game.manual = newManual;
           render();
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (result && typeof result.manual === 'boolean') game.manual = result.manual;
           }).withFailureHandler(function() {
             game.manual = !game.manual;
@@ -779,7 +778,7 @@
           const newFamily = !game.family;
           game.family = newFamily;
           render();
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (result && typeof result.family === 'boolean') game.family = result.family;
           }).withFailureHandler(function() {
             game.family = !game.family;
@@ -797,7 +796,7 @@
           if (!confirm('确定要删除《' + game.name + '》吗?这会从本地数据库里彻底删掉这一行,无法撤销。')) return;
 
           btn.disabled = true;
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (result && result.error) {
               btn.disabled = false;
               alert(result.error);
@@ -840,7 +839,7 @@
             game.rate = prevRate;
             render();
           }
-          google.script.run.withSuccessHandler(function(result) {
+          rpc.withSuccessHandler(function(result) {
             if (!result || result.error) revert(); // 服务器端校验没过(比如完成数>总数),改回去
           }).withFailureHandler(revert).setManualAchievements(appid, achieved, total);
         });
@@ -852,7 +851,7 @@
           expandedAppid = (expandedAppid === appid) ? null : appid;
           if (expandedAppid && !missingAchCache[expandedAppid]) {
             missingAchCache[expandedAppid] = { loading: true };
-            google.script.run.withSuccessHandler(function(data) {
+            rpc.withSuccessHandler(function(data) {
               missingAchCache[appid] = data;
               if (expandedAppid === appid) render();
             }).withFailureHandler(function(err) {
@@ -926,7 +925,7 @@
       msg.textContent = '添加中...';
       msg.className = 'add-game-msg';
 
-      google.script.run.withSuccessHandler(function(result) {
+      rpc.withSuccessHandler(function(result) {
         if (result && result.error) {
           msg.textContent = result.error;
           msg.className = 'add-game-msg error';
@@ -978,7 +977,7 @@
 
       msg.textContent = '搜索中...';
       msg.className = 'add-game-msg';
-      google.script.run.withSuccessHandler(function(items) {
+      rpc.withSuccessHandler(function(items) {
         msg.textContent = (items && items.length === 0) ? '没有找到匹配的游戏' : '';
         msg.className = 'add-game-msg';
         renderSearchResults(items);
@@ -1017,7 +1016,7 @@
       if (e.target === this) this.classList.remove('show');
     });
 
-    google.script.run.withSuccessHandler(function(data) {
+    rpc.withSuccessHandler(function(data) {
       allGames = data.games;
       document.getElementById('cardTotal').textContent = data.totalGames;
       document.getElementById('cardAvg').textContent = data.avgRounded || '-';

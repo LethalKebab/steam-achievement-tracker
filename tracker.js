@@ -3,13 +3,13 @@
  * Steam 成就追踪器 —— 本地版命令行入口
  * ------------------------------------------------
  * 零依赖:只用 Node 内置模块(node:sqlite 存数据,内置 fetch 调 Steam API,
- * node:http 起 Dashboard),不需要 npm install,也不需要 Google 账号 / clasp / 部署。
+ * node:http 起 Dashboard),不需要 npm install,不需要任何外部账号或部署。
  *
  *   node tracker.js init            填 Steam 凭据(只需要跑一次;--notion 填 Notion token)
  *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情)
  *   node tracker.js serve           起本地 Dashboard,数据太旧会自动后台同步
  *   node tracker.js status          看一眼当前数据和 AGCR
- *   node tracker.js import <目录>   从 Google Sheet 导出的 CSV 导入历史数据
+ *   node tracker.js import <目录>   从表格导出的 CSV 导入数据
  *   node tracker.js export [目录]   把三张表导出成 CSV
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
@@ -134,10 +134,9 @@ async function cmdInitNotion() {
   try {
     const cfg = loadConfig();
     console.log('\n配置 Notion 攻略同步\n');
-    console.log('token 从哪来:如果你之前用过 Apps Script 版本,直接复用同一个,不用新建 integration');
-    console.log('  (它已经连好了那些攻略页面):');
-    console.log('  打开 Google Sheet → 扩展程序 → Apps Script → 项目设置(齿轮)→ 脚本属性 → NOTION_TOKEN');
-    console.log('  没有的话:https://www.notion.so/my-integrations 新建一个 Internal Integration\n');
+    console.log('token 从哪来:https://www.notion.so/my-integrations 新建一个 Internal Integration,');
+    console.log('复制它的 secret。然后把攻略页面(或它们共同的父页面)加到这个 integration 的');
+    console.log('connections 里:Notion 页面右上角 ••• → Connections → 加上它,否则 API 会返回 404。\n');
 
     const token = await io.askSecret('Notion Integration Token(输入不会显示): ');
     if (!token) throw new Error('没输入 token');
@@ -219,7 +218,7 @@ async function cmdInit() {
     }
 
     console.log('\n接下来:');
-    console.log('  node tracker.js import <csv目录>   ← 如果你有旧的 Google Sheet 数据,先导入(保住♥/★/家庭/Manual标记)');
+    console.log('  node tracker.js import <csv目录>   ← 有表格里的历史数据就先导入(♥/★/家庭/Manual 标记只能靠这个带过来)');
     console.log('  node tracker.js sync               ← 首次全量同步(库大的话要几分钟)');
     console.log('  node tracker.js serve              ← 打开 Dashboard');
   } finally {
@@ -399,7 +398,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               sync --schema               只同步成就详情
   node tracker.js serve [--port 8777]     起本地 Dashboard(数据超过 12 小时会自动后台同步)
   node tracker.js status                  当前数据概览 + AGCR
-  node tracker.js import <目录>            从 Google Sheet 导出的 CSV 导入历史数据
+  node tracker.js import <目录>            从表格导出的 CSV 导入数据
   node tracker.js export [目录]            三张表导出成 CSV(默认 exports/)
   node tracker.js guides [--notion|--local|--all]
                                           发现攻略页面并登记进 guides 表
