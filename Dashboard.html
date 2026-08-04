@@ -490,11 +490,15 @@
       </tr>
     </thead>
     <tbody id="gameTableBody">
-      <tr><td colspan="4" class="loading">正在从表格读取数据...</td></tr>
+      <tr><td colspan="4" class="loading">正在读取数据...</td></tr>
     </tbody>
   </table>
 
   <div id="favGrid" class="fav-grid" style="display:none;"></div>
+
+  <!-- 本地版:把 google.script.run 转成对本地 HTTP 服务的 fetch 调用。
+       有了它下面这一千行前端代码不用改一个字,见 lib/rpc-shim.js -->
+  <script src="/_rpc.js"></script>
 
   <script>
     let allGames = [];
@@ -790,7 +794,7 @@
           const appid = btn.dataset.deleteAppid;
           const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
           if (!game) return;
-          if (!confirm('确定要删除《' + game.name + '》吗?这会从表格里彻底移除这一行,无法撤销。')) return;
+          if (!confirm('确定要删除《' + game.name + '》吗?这会从本地数据库里彻底删掉这一行,无法撤销。')) return;
 
           btn.disabled = true;
           google.script.run.withSuccessHandler(function(result) {
@@ -1019,7 +1023,7 @@
       document.getElementById('cardAvg').textContent = data.avgRounded || '-';
       document.getElementById('cardAvgPrecise').textContent = data.avgPrecise ? ('精确值: ' + data.avgPrecise) : '';
       document.getElementById('cardPerfect').textContent = data.perfectCount;
-      document.getElementById('lastUpdated').textContent = '数据来自 RAW DATA 表格 · 页面加载时间: ' + data.lastUpdated;
+      document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
       renderNewAchTable();
       render();
     }).withFailureHandler(function(err) {

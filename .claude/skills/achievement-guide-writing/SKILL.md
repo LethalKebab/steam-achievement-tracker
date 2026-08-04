@@ -16,7 +16,7 @@ description: Use when writing, rewriting, or editing a Steam achievement guide f
 - 把"全部已达成、比较无聊"的一整组成就写成一段不带 checkbox 的说明文字
 - 把一整类成就(如"声望类共39个")写成纯文字总结
 
-**原因**:Notion markdown 里一行只有开头第一个 `[ ]`/`[x]` 会渲染成真正可交互的 checkbox,`/` 后面的会被转义成字面文本 `\[x\]`。而"把已解锁成就同步进 Notion 攻略页 checkbox"这个日常任务(`steam_guides_sync.gs` 的 `getUnlockedAchievements` action,见 `PROJECT_CONTEXT.md`)是靠精确匹配 `- [ ] **成就中文名**` 这样的行首文字来打勾的——合并写或者纯文字总结的内容,同步脚本根本找不到。这也是为什么攻略统一用 checkbox 列表、不用 Notion 内嵌数据库(embedded database):内嵌数据库没法被同步脚本解析,而逐条写真实攻略文字的价值也比数据库表格更高(参考实现:CK3 那次 188 个成就从内嵌数据库改写成 checkbox 格式)。
+**原因**:Notion markdown 里一行只有开头第一个 `[ ]`/`[x]` 会渲染成真正可交互的 checkbox,`/` 后面的会被转义成字面文本 `\[x\]`。而"把已解锁成就同步进攻略页 checkbox"这个日常任务(`node tracker.js checkbox-sync`,见 `steam-checkbox-sync` skill)是靠精确匹配 `- [ ] **成就中文名**` 这样的行首文字来打勾的——合并写或者纯文字总结的内容,同步脚本根本找不到。这也是为什么攻略统一用 checkbox 列表、不用 Notion 内嵌数据库(embedded database):内嵌数据库没法被同步脚本解析,而逐条写真实攻略文字的价值也比数据库表格更高(参考实现:CK3 那次 188 个成就从内嵌数据库改写成 checkbox 格式)。
 
 ### 子任务/子收集品:用嵌套 checkbox
 
@@ -167,7 +167,7 @@ DLC 成就当作游戏的普通一节来处理,不要写成"DLC: XXX(3个成就,
 
 ### 8.1 确定成就列表和勾选状态
 
-1. 调用 `getAllAchievementsForGame(appid)` (steam_guides_sync.gs 的 HTTP endpoint,见 `steam-guide-sync` skill),拿到该游戏全部成就的中英文名 + 真实解锁状态
+1. 读 `achievements` 表拿该游戏全部成就的中英文名,再用 `SteamClient.fetchPlayerAchievements(appid)` 拿真实解锁状态,按 api_name 拼起来(具体命令见 `steam-guide-sync` skill)
 2. 如果 ACHIEVEMENTS 表还没有这个 appid 的记录,会报错提示先跑 `syncAchievementSchema`
 3. 用这个数据来写 checkbox 的 `[x]`/`[ ]` 状态——这是唯一权威数据源,不要凭印象猜
 

@@ -1,41 +1,63 @@
 ---
 name: steam-guide-sync
-description: Read/write the Notion GUIDES table (appid <-> guide link) and pull authoritative Steam achievement data via the steam_guides_sync.gs HTTP endpoint. Use when matching game names to appids, upserting guide links, adding a manually-tracked game, or fetching a game's unlocked/full achievement list for guide-writing.
+description: Read/write the guides table (appid <-> guide location) and pull authoritative Steam achievement data for guide-writing. Use when matching game names to appids, registering guide pages, adding a manually-tracked game, fixing a row's status, or fetching a game's unlocked/full achievement list.
 ---
 
-# Steam guide-sync HTTP endpoint
+# Guide + game data access
 
-`steam_guides_sync.gs`'s `doPost(e)` is a **separate, standalone Web App deployment** (not the Dashboard deployment) meant for HTTP calls from Claude Code — not `clasp run` (that needs a bound GCP project). Auth is a `SYNC_SECRET` token, stored in Script Properties (never in source) and as sensitive as the Steam API key: never commit it or paste it into chat.
+There is no HTTP endpoint any more. The old `steam_guides_sync.gs` `doPost` Web App (with its `SYNC_SECRET`, its `ANYONE_ANONYMOUS` deployment, and the redirect-following dance) existed **only** because Claude Code was outside Google's sandbox and needed a way in. Everything now runs locally, so read the SQLite file or call `lib/*` directly.
 
-## Available actions (all reuse existing functions in steam_guides_sync.gs — don't rewrite them)
+## Reading data — prefer SQL
 
-- `listOwnedGames` — every appid+name in RAW DATA. Use to match a game name to its appid.
-- `listGuideRows` — current GUIDES table rows (appid/name/link/updated date).
-- `upsertGuideLinks(entries)` — batch write/update guide links, matched by appid. `entries: [{appid, name, url}]`.
-  **Must overwrite column B (name) together with the link/date, not just the link** — otherwise renamed games never get their name column fixed. (Already fixed once; don't regress.)
-- `addManualGame(entry)` — adds a RAW DATA row with `Status=Manual` (family-shared / not in the Steam owned list). `entry: {appid, name, achieved?, total?}`. Errors if appid already exists — never overwrites.
-- `setGameStatus(appid, status)` — directly corrects a row's Status (column A). `status` is `''`/`'Unvetted'`/`'Manual'`.
-- `migrateFamilyGames(appids)` — batch-reclassifies appids from `Manual` to the family-shared pattern: clears Status (hands the row back to `runBatch`) and checks column J (`FAMILY_COL`). Use when a `Manual` row turns out to have real achievement data after all — see `PROJECT_CONTEXT.md`'s "已经踩过的坑" for the diagnostic method.
-- `getUnlockedAchievements(appid)` — only the **unlocked** achievements for an appid, zh+en names/descriptions, from the ACHIEVEMENTS table. Use for "sync Steam's real unlock state into a Notion checkbox page."
-- `getAllAchievementsForGame(appid)` — **all** achievements for an appid with real `achieved` booleans on each. Use for "rewrite/author an achievement guide from scratch." Errors if ACHIEVEMENTS has no row for this appid yet — run `syncAchievementSchema` first.
-- `deleteGuideRow(appid)` — removes a row from GUIDES by appid. Only removes the first match — if duplicate rows share an appid, call it once per duplicate.
-- `syncGuidesFromNotion` — no payload. Queries the Notion "Overview" database in full, matches pages to GUIDES by a normalized Notion page ID (not raw URL text — Notion sometimes prefixes URLs with a title slug, which makes the same page's URL differ between calls), and for any page not yet linked, reads its content for a leading `appid: NNNNNN` line and upserts it into GUIDES via `upsertGuideLinks`. Installed as a **daily 7am trigger** via `installAutoGuideSyncTrigger` (below) — usually you don't need to call this manually. A page with no `appid:` line is silently skipped every run, not retried with an error; it needs the guide actually written first (see `achievement-guide-writing` skill).
-- `installAutoGuideSyncTrigger` — no payload. (Re)installs the daily 7am trigger for `syncGuidesFromNotion`, replacing any existing one for that handler. One-time setup call.
+```bash
+# match a game name to its appid (was: listOwnedGames)
+sqlite3 data/steam.db "SELECT appid, name, status, achieved, total FROM games WHERE name LIKE '%苏丹%'"
 
-Adding a new action = add the function to `steam_guides_sync.gs` + wire it into the `doPost` switch, then redeploy (see below).
+# current guide registrations (was: listGuideRows)
+sqlite3 data/steam.db "SELECT appid, name, kind, url, updated FROM guides ORDER BY appid"
 
-## Deploying changes to this endpoint
+# why isn't this row syncing?  → sync_locked, not status, is what the sync checks
+sqlite3 data/steam.db "SELECT appid, name, status, sync_locked FROM games WHERE appid = '999999'"
 
-This deployment's access must be `ANYONE_ANONYMOUS` (so it works without a browser login), while `appsscript.json`'s `webapp.access` defaults to `MYSELF` (that default is for the Dashboard's own separate deployment). Every time you change this endpoint's code:
+# a game's achievement definitions (was: getAllAchievementsForGame, minus live unlock state)
+sqlite3 data/steam.db "SELECT api_name, name_cn, name_en, hidden FROM achievements WHERE appid = '3117820'"
+```
 
-1. Temporarily set `access` to `ANYONE_ANONYMOUS` in `appsscript.json`
-2. `clasp push`
-3. `clasp deploy -i <this-endpoint's-deploymentId>`
-4. Set `access` back to `MYSELF`
-5. `clasp push` again
+`node tracker.js status` and `node tracker.js guides` give the same information in summary form.
 
-Skipping this dance either breaks the endpoint's permissions or accidentally makes the Dashboard's own production deployment public — don't shortcut it.
+## Live unlock state (needs a Steam call)
 
-## Calling the endpoint over HTTP
+`achievements` holds the *definitions*; whether **you** unlocked each one is a live query. `lib/guides.js`'s `getUnlockedAchievements(db, steam, appid)` combines both — unlocked-only, with CN+EN names pulled from the `achievements` table. Use it for "sync Steam's real unlock state into a guide."
 
-Apps Script Web App POST requests return a 302 redirect to `script.googleusercontent.com/macros/echo?...`. **The redirect must be followed with GET, not POST** (that echo endpoint just returns an already-computed result; a POST there 405s). `curl -L` / `--post302`-style tools mishandle this. In PowerShell, use `HttpClientHandler(AllowAutoRedirect=false)`, read the `Location` header, then issue your own GET — and set UTF-8 explicitly on both request and response to avoid mangling Chinese text.
+```bash
+node --input-type=module -e "
+import {loadConfig} from './lib/config.js'; import {openDb} from './lib/db.js';
+import {SteamClient} from './lib/steam.js'; import {getUnlockedAchievements} from './lib/guides.js';
+const c = loadConfig(); const db = openDb(c.dbPath);
+console.log(await getUnlockedAchievements(db, new SteamClient(c), '3117820'));"
+```
+
+For "rewrite a guide's whole checklist from scratch" you want *all* achievements with real `achieved` flags: read `achievements` for the definitions and `SteamClient.fetchPlayerAchievements(appid)` for the flags, then join on `api_name`/`apiname`. If `achievements` has no rows for that appid yet, run `node tracker.js sync --schema` first.
+
+## Writing data
+
+| Old HTTP action | Now |
+|---|---|
+| `upsertGuideLinks(entries)` | `upsertGuide(db, {appid, name, url, kind})` in `lib/db.js` — **overwrites name and url together**, don't write only the url or renamed games keep stale names (this was a real regression once) |
+| `syncGuidesFromNotion` | `node tracker.js guides --notion` |
+| `deleteGuideRow(appid)` | `deleteGuide(db, appid)`, or `DELETE FROM guides WHERE appid = ?` |
+| `addManualGame(entry)` | Dashboard "添加游戏" box, or `insertGame(db, {appid, name, status: 'Manual', syncLocked: 1})` |
+| `setGameStatus(appid, status)` | `setGameField(db, appid, 'status', ...)` — remember `sync_locked` is a separate column now |
+| `migrateFamilyGames(appids)` | `UPDATE games SET status = '', sync_locked = 0, family = 1 WHERE appid IN (...)` |
+| `installAutoGuideSyncTrigger` | gone — there are no schedulers; run `node tracker.js guides` when you want it |
+
+Before reclassifying a `Manual` row as family-shared, confirm the account can actually see real data: call `fetchPlayerAchievements` for that appid and check whether the `achieved` numbers are *your* progress (all zeros usually means a different family member plays it). See `PROJECT_CONTEXT.md` pitfall #6.
+
+## Guide registration rules
+
+A page/file counts as a guide iff its content starts with an `appid: NNNNNN` line. `node tracker.js guides` discovers both backends:
+
+- `--notion` queries `notion.overviewDbId`, skips pages already registered (compared by **normalized page ID**, never raw URL text — Notion adds title slugs to URLs, and comparing raw URLs once caused already-linked pages to be re-added and overwrite curated names), then reads the first 10 blocks of each new page looking for the `appid:` line. Notion's search API only indexes titles, not body blocks, which is why it must read blocks instead of searching.
+- `--local` scans `guides/*.md` for the same line. **It will not overwrite a Notion registration for the same appid unless you pass `--force`** — one appid, one backend, and Notion is the primary setup.
+
+A page with no `appid:` line is silently skipped every run, not retried as an error — it needs the guide actually written first (see `achievement-guide-writing`).

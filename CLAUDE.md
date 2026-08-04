@@ -4,113 +4,111 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Steam achievement auto-tracker: Google Sheet (data store) + Google Apps Script (backend, multiple `.gs` files) + HTML Dashboard (frontend). Tracks achievement completion across the user's entire Steam library.
+Steam achievement auto-tracker, running **entirely locally**: SQLite data store + Node CLI + a local HTTP server for the HTML Dashboard. Tracks achievement completion across the user's whole Steam library.
 
-See `PROJECT_CONTEXT.md` for full background, task lists, and known issues.
+This was a Google Apps Script + Google Sheet project until it was ported to run locally (the Apps Script implementation is in git history on `main`). If you find documentation, comments, or skills still referring to `clasp`, Script Properties, `doPost`, or Sheet tabs, that's stale — fix it.
+
+See `PROJECT_CONTEXT.md` for background, task lists, and known issues.
+
+## Stack constraints
+
+- **Zero dependencies, by design.** Node built-ins only: `node:sqlite` for storage, global `fetch` for HTTP, `node:http` for the server, `node:test` for tests. Do not add an npm dependency without a strong reason — "no install step" is a feature of this project, not an accident.
+- Requires **Node 24+** (`node:sqlite` availability).
+- ES modules (`"type": "module"`). Real `import`/`export` — unlike the Apps Script version, files do *not* share a global scope.
 
 ## Development workflow
 
 ```bash
-clasp push     # Push local .gs/.html files to Apps Script (does NOT preserve triggers)
-clasp pull     # Pull latest from Apps Script
+node tracker.js <command>   # everything is a subcommand; see tracker.js header or `node tracker.js help`
+node --test                 # test suite (test/matching.test.js)
+node --check lib/foo.js     # syntax check
 ```
 
-- All `.gs` files in the project share a single global scope in Apps Script — functions call each other across files without imports.
-- This is NOT a Node.js project. No `import`/`export`, no `require`, no npm.
-- After `clasp push`, triggers persist but if you recreate them, run `createTrigger()` in the Apps Script editor.
-- The script is bound to a Google Sheet. `SpreadsheetApp.getActive()` is the entry point to all sheet operations.
+There is no build, no push, no deploy. Editing a file and re-running the command is the whole loop. `serve` does not hot-reload — restart it after changing `lib/` (`Dashboard.html` and `lib/rpc-shim.js` are re-read per request, so a browser refresh picks those up).
 
 ## File architecture
 
 | File | Role |
 |---|---|
-| `steam_achievement_sync.gs` | Core sync: `runBatch()` (daily cursor-based achievement refresh), `syncNewGames()`, `updateRowForGame()`, `rebuildSheetFromApi()`/`hardResetFromApi()`, Steam API wrappers, trigger setup |
-| `steam_achievements_detail.gs` | `syncAchievementSchema()` — pulls full achievement definitions (CN+EN) into ACHIEVEMENTS sheet |
-| `steam_dashboard.gs` | `doGet()` serves Dashboard; `getDashboardData()`, `searchSteamGames()`, `addGame()`, `deleteGame()`, `toggleFavorite()`, `togglePriority()`, `setManualStatus()`, `setManualAchievements()`, `toggleFamily()`, `getMissingAchievements()` |
-| `Dashboard.html` | Frontend SPA — reads via `google.script.run.getDashboardData()`, renders sortable/filterable table |
-| `steam_guides_sync.gs` | Separate Web App (`doPost`) for HTTP-based remote calls (Notion↔GUIDES sync, plus RAW DATA read/fix actions — `listOwnedGames`, `addManualGame`, `setGameStatus`, `migrateFamilyGames`, `getUnlockedAchievements`, `getAllAchievementsForGame`, `deleteGuideRow`). Also owns `syncGuidesFromNotion()`, which auto-discovers Notion guide pages via their `appid:` line and links them into GUIDES (daily trigger, installed via `installAutoGuideSyncTrigger()`). Deployed with `ANYONE_ANONYMOUS` access |
-| `steam_daily_checkbox_sync.gs` | Independent daily trigger (`dailyCheckboxSync`, installed via `installDailyCheckboxSyncTrigger()`): auto-checks Notion guide checkboxes for achievements unlocked on Steam. Calls Notion's API directly using a `NOTION_TOKEN` Script Property (not in source). See file header for exact-match rules. |
-| `steam_test_debug.gs` | Debug helpers for raw Steam API inspection |
+| `tracker.js` | CLI dispatch: `init`, `sync`, `serve`, `status`, `guides`, `checkbox-sync`, `import`, `export`, `log` |
+| `lib/config.js` | `config.json` load/save, env-var overrides, required-field errors with setup hints |
+| `lib/db.js` | SQLite schema + all table accessors. `openDb()` is idempotent (safe `CREATE TABLE IF NOT EXISTS`) |
+| `lib/steam.js` | `SteamClient`: owned games (+Unvetted diff), player achievements, schema, name lookup, store search |
+| `lib/sync.js` | `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, `fullSync`, `computeAgcrStats` |
+| `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check |
+| `lib/api.js` | The 10 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
+| `lib/rpc-shim.js` | Served at `/_rpc.js`. Proxies `google.script.run.…` chains to `fetch('/api/…')` |
+| `lib/guides.js` | Achievement↔checkbox matching rules, both guide backends, guide discovery |
+| `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking |
+| `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), path containment check |
+| `lib/csv.js` | CSV parse/serialize, Sheet-export import, CSV export |
+| `Dashboard.html` | Frontend SPA. Unchanged from the Apps Script version except one `<script src="/_rpc.js">` tag |
+
+### Why the shim exists
+
+`Dashboard.html` has ~1000 lines of app code making 11 calls shaped like
+`google.script.run.withSuccessHandler(fn).withFailureHandler(fn).method(args)`. Rather than rewrite all of it, `lib/rpc-shim.js` provides an object with that exact shape backed by `fetch`. **Keep the contract:** a method that returns `{error: '...'}` is a *successful* call (the frontend inspects `result.error` itself); only network/thrown failures go to the failure handler. If you add a Dashboard method, add it to `lib/api.js` — the shim needs no changes, it proxies any name.
 
 ## Key config
 
-Defined in `steam_achievement_sync.gs` `CONFIG` object:
-- `STEAM_API_KEY` / `STEAM_ID` — real credentials (never commit publicly)
-- `SHEET_NAME: 'RAW DATA'` — primary data sheet
-- `HEADER_ROW: 2` — data starts at row 2
-- `MAX_RUNTIME_MS: 4.5 * 60 * 1000` — per-trigger time cap
+`config.json` (gitignored, mode 600), read via `lib/config.js`. Env vars `STEAM_API_KEY` / `STEAM_ID` / `NOTION_TOKEN` / `PORT` override it.
 
-`steam_guides_sync.gs` has its own secret, `SYNC_SECRET` (a separate top-level `const` in that file) — same rule applies: Script Property only, never hardcoded. It authenticates every `doPost` call to that endpoint.
+- `steamApiKey` / `steamId` — required for anything touching Steam
+- `language` (default `schinese`) — affects game and achievement names
+- `port` (8777), `syncStaleHours` (12, `0` disables sync-on-open), `requestDelayMs` (300)
+- `notion.token`, `notion.overviewDbId` — guide sync only. The DB ID used to be hardcoded in source; it's config now.
 
-## RAW DATA sheet layout
+**Never hardcode credentials, and never commit `config.json` or `data/`.** Both are gitignored. The repo is public.
 
-A=Status / B=AppID / C=Game Name / D=Achieved / E=Total / F=Rate / G=Favorite(♥) / H=Priority(★) / I=New Ach Date / J=Family-shared (not self-owned)
+## Data model (`games` table)
 
-Status values: empty (normal), `'Unvetted'` (Steam Profile Features Limited), `'Manual'` (hand-added, never auto-synced by `runBatch`).
+`appid` (PK) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at`
 
-Column J (`FAMILY_COL`) is a plain informational boolean, fully decoupled from Status — it never affects sync behavior. It exists because "not in `GetOwnedGames`" and "should skip achievement auto-sync" are two *different* facts that Status alone can't represent (see "Manual vs Unvetted are two separate concerns" below). Toggle it from the Dashboard's "家庭" badge, or via the `migrateFamilyGames` HTTP action.
+- `status`: `''` (normal), `'Unvetted'` (Steam Profile Features Limited), `'Manual'` (hand-maintained).
+- `has_achievements = 0` replaces the old `'N/A'` string in the numeric total column. `NULL` means "not synced yet".
+- **`sync_locked` is what the sync actually checks**, not `status`. This is the fix for a documented Apps Script wart where `'Manual'` conflated "skip daily sync" with "lock against Unvetted re-classification" and you couldn't have one without the other. The Dashboard still moves both together (`setManualStatus` sets both), so default behavior is unchanged; the columns can now diverge deliberately.
+- `family` is purely informational and never affects sync behavior. It exists because "not in `GetOwnedGames`" and "should skip achievement sync" are two *different* facts.
 
-## Daily triggers
+## Sync behavior
 
-| Time | Function | Installed via |
-|---|---|---|
-| 2am | `runBatch` — cycles through all games, updates achievement counts | `createTrigger()` |
-| 3am | `syncNewGames` — detects and adds newly owned games | `createTrigger()` |
-| 4am | `syncAchievementSchema` — refreshes ACHIEVEMENTS detail sheet | `createTrigger()` |
-| 7am | `syncGuidesFromNotion` — finds new Notion guide pages, links them into GUIDES | `installAutoGuideSyncTrigger()` in `steam_guides_sync.gs` |
-| 8am | `dailyCheckboxSync` — ticks Notion guide checkboxes for newly-unlocked achievements | `installDailyCheckboxSyncTrigger()` in `steam_daily_checkbox_sync.gs` |
+`fullSync` runs three phases in order, with no cursor and no runtime cap — those existed only to work around Apps Script's 6-minute execution limit, and removing them also removed the old "sorting shifts what the cursor points at" hazard.
 
-The 2am/3am/4am triggers use a **cursor** (stored in ScriptProperties) to resume where the last run left off; `runBatch` wraps around when it reaches the end. The 7am/8am triggers are independent daily jobs that reprocess their full scope from scratch each run, no cursor.
+1. **`syncLibrary`** — new owned games get inserted (with a name lookup); existing *owned* rows get their `Unvetted` stamp refreshed, except `'Manual'` ones. Rows whose appid is **not** in the current `GetOwnedGames` snapshot are left completely untouched — that's the preservation rule (it keys off ownership, not `status`).
+2. **`syncAchievementStats`** — every row with `sync_locked = 0` gets its counts refreshed. A total higher than last time stamps `new_ach_date` (the Dashboard's "new achievements" badge).
+3. **`syncAchievementSchema`** — per-achievement detail for games that are new to the `achievements` table or bumped in the last 7 days; skips games at exactly 100% and games with no achievement system.
 
-## Deployment notes
-
-There are **two** separate Web App deployments. Use `clasp deploy -i <id>` to update in-place (keeps the same URL). Never use bare `clasp deploy` — it creates a new deployment with a new URL.
-
-| Deployment | Access | Purpose |
-|---|---|---|
-| Dashboard | `MYSELF` | Browser Dashboard (`doGet`) |
-| Guides sync | `ANYONE_ANONYMOUS` | HTTP endpoint (`doPost`) |
-
-Get your deployment IDs with `clasp deployments` after creating each one via the Apps Script editor (Deploy → New deployment → Web app).
-
-**After any Dashboard change** (HTML or `steam_dashboard.gs`):
-```bash
-clasp push
-clasp deploy -i <your-dashboard-deployment-id>
-```
-
-**After any Guides sync change** (see procedure below — requires access swap):
-```bash
-# Edit appsscript.json: change access to ANYONE_ANONYMOUS
-clasp push
-clasp deploy -i <your-guides-sync-deployment-id>
-# Edit appsscript.json: change access back to MYSELF
-clasp push
-```
-
-To update the Guides endpoint: temporarily set `webapp.access` to `ANYONE_ANONYMOUS` in `appsscript.json` → push → deploy → change back to `MYSELF` → push again. If you skip the access swap, the Dashboard deployment will also become public, or the Guides endpoint won't work for HTTP calls.
+There is no destructive rebuild/hard-reset command. `syncLibrary` subsumes the useful half of the old `rebuildSheetFromApi()`, and the old `hardResetFromApi()` (which silently dropped every family-shared/manual row) is deliberately not ported.
 
 ## Steam API quirks
 
-- `GetPlayerAchievements` returns HTTP **400** = game genuinely has no stats for this account. All other non-200 codes are treated as transient and retried.
-- `GetPlayerAchievements` returns HTTP **403** `"Profile is not public"` for a *specific game* even when the overall Steam profile is public — this is a per-game "Game Details" privacy toggle on Steam's side, not a code bug and not fixable here. It falls into the same "treated as transient, retried" bucket as any other non-200/non-400 code, but retrying will never succeed until the privacy setting is changed on Steam itself (Edit Profile → Privacy Settings).
-- `appdetails` JSON endpoint's `name` field ignores `l=` param (Steam bug) — `fetchAppName()` falls back to scraping the store page HTML for Chinese titles.
-- Store page scraping needs age-verification cookies (`birthtime`, `mature_content`, etc.).
-- `GetPlayerAchievements` 429 = rate limit, retried. 400 = no stats, marked N/A. Everything else (403 included) = retried next cycle.
-- A game can vanish from `GetOwnedGames` entirely (e.g. a small free title gets delisted, or family-sharing access to it lapses) while `GetPlayerAchievements` still returns its full, permanent stats forever. "Not in `GetOwnedGames`" does **not** imply "no real achievement data" — always check `GetPlayerAchievements` directly before assuming a game can't be tracked.
-- Determining whether Steam currently classifies an *owned* appid as "Unvetted" requires replicating `fetchOwnedGamesWithUnvettedFlag()`'s exact two-call comparison (`skip_unvetted_apps=false` minus `skip_unvetted_apps=true`) — a single plain `GetOwnedGames` call does not tell you this, and silently defaults to the vetted-only view. `steam_test_debug.gs`'s `debugCompareUnvetted()` already does exactly this — run that instead of re-deriving it with raw API calls.
-- Family Sharing achievements are recorded per **playing** account, not per license owner. If a shared game is actually played by a different family member's Steam account, `CONFIG.STEAM_ID`'s `GetPlayerAchievements` call will correctly and permanently show 0 progress on it — that's not a bug to fix, it's the only account this tool can ever see.
+These are verified and hard-won — don't re-derive them, and don't "simplify" the handling:
+
+- `GetPlayerAchievements` HTTP **400** = this game genuinely has no stats for this account. A normal signal, **not** an error, do not retry.
+- HTTP **429** = real rate limiting, retry next cycle. Everything else non-200 is also treated as transient.
+- HTTP **403** `"Profile is not public"` can come back for *one specific game* even when the profile is public — a per-game "Game Details" privacy toggle on Steam's side. Falls in the retry bucket, but retrying never succeeds until the setting changes on Steam.
+- `appdetails`'s `name` field **ignores the `l=` param** (Steam bug) — Chinese names require scraping the store page HTML (`fetchAppNameFromStorePage`), with age-verification cookies and a deliberately loose regex (the class attribute can carry multiple classes).
+- Determining whether an owned appid is currently Unvetted **requires two `GetOwnedGames` calls** (`skip_unvetted_apps=false` minus `=true`). A single plain call silently returns the vetted-only view. `fetchOwnedGamesWithUnvettedFlag()` is the only correct way to ask.
+- `GetOwnedGames` omits free games unless `include_played_free_games=true` (already set).
+- A game can disappear from `GetOwnedGames` while `GetPlayerAchievements` keeps returning its full permanent stats. "Not owned" ≠ "no achievement data" — check achievements directly before concluding a game can't be tracked.
+- Family Sharing achievements are recorded per **playing** account. If a shared game is actually played on someone else's account, your `steamId` will correctly and permanently show 0 on it. Not a bug to chase.
+
+## Guide checkbox matching — do not loosen this
+
+Matching an unlocked achievement to a guide checkbox is **exact equality against extracted title candidate segments**. Never substring, never prefix. Two separate rounds of false positives were only fixed by this rule:
+
+1. an achievement name appearing inside an unrelated achievement's *description*, and
+2. a short achievement name being a strict *prefix* of a different, harder achievement's name — which mis-ticked the harder one once the short one's own box was already checked.
+
+`extractTitleCandidates()` splits checkbox text into candidates (by line, then by colon/dash, plus the `中文名(English Name)` pattern) and requires the achievement name to *equal* one of them. Adding a new candidate-extraction rule is fine; weakening the equality check is not. `test/matching.test.js` pins both failure modes — run `node --test` after touching `lib/guides.js`.
+
+The design deliberately prefers a missed checkbox over a wrong one.
 
 ## Known pitfalls
 
-- **Games marked `'N/A'`** (column E) are retried every `runBatch` cycle — not permanent. They get `'N/A'` again if Steam still says no stats; harmless.
-- **`'Manual'` status** games are never touched by `runBatch` or `syncNewGames`.
-- **`sortSheetByCompletion()`** changes physical row order. The cursor is a row index, so sorting shifts which game the cursor points to. This self-corrects after a full cycle.
-- **Multi-line paste** into Google Sheets splits into multiple rows — GUIDES sheet only stores URLs to avoid this.
-- **Apps Script `DocumentApp`** can't create native checkable checklists — guides live in Notion, not Google Docs.
-- **A one-off tool called `detectAndLockManualEdits()` (deleted 2026-08-03, was `steam_detect_manual_edits.gs`) is almost certainly why so many non-owned games ended up incorrectly `'Manual'` in the first place** — it unconditionally locked any appid not in `GetOwnedGames` to `'Manual'`, with no check for whether `GetPlayerAchievements` could still return real data for it. If a similar "auto-lock non-owned rows" script ever gets rewritten, it must check achievement data first, not just ownership — that's the whole reason `FAMILY_COL` exists now instead.
-- **`'Manual'` vs Unvetted-lock are two different concerns that currently share one flag.** `runBatch` skips a row purely on `Status === 'Manual'`. Separately, `rebuildSheetFromApi()` re-stamps `'Manual'` onto any row whose appid is found in `manualStatusAppIds` *specifically to override Steam's live Unvetted classification* ([steam_achievement_sync.gs:121](steam_achievement_sync.gs)). That means for a game you **own**, setting `'Manual'` is the only way to lock it against Unvetted flip-flopping — but doing so also disables its daily achievement sync, with no way to get one without the other today. If you need both, that requires a real code change (a separate lock column), not just clearing/setting Status.
-- **What actually survives `rebuildSheetFromApi()` is *not* Status.** The preservation rule is purely `!ownedAppIdSet.has(appid)` — any row whose appid isn't in the current `GetOwnedGames` snapshot gets carried over verbatim, regardless of whether Status is `'Manual'`, `'Unvetted'`, or empty. So clearing `'Manual'` on a non-owned (e.g. family-shared) row does **not** put it at risk of being dropped on rebuild.
-- **`hardResetFromApi()` has zero preservation for anything** — it rewrites the whole sheet purely from `GetOwnedGames`, silently dropping every family-shared/manual/non-owned row regardless of Status. Confirm before ever running it; there's no flag that protects a row from it.
-- **`clasp push` does not preserve files that exist live but not in your local folder** — it silently deletes them from the live project. When in doubt, `clasp pull` into a throwaway scratch folder first to see what's actually live before pushing.
-- **`clasp pull`/`clasp clone` write script files as `.js` unless `.clasp.json` sets `"fileExtension": "gs"`.** If a `.js` file lands in a folder that already has the same-named `.gs` file, `clasp push`/`clasp pull` both start failing with a file-conflict error — it looks like the remote has a duplicate, but it's actually a local one. Fix: delete the stray `.js` copy. `.clasp.json.example` now pins `fileExtension` to prevent this from recurring; if your personal `.clasp.json` predates that, add it there too.
+- **Games with `has_achievements = 0` are retried on every sync**, not permanently excluded. They get re-marked if Steam still says no stats; harmless.
+- **`sync_locked = 1` rows are never touched by any sync phase.** If a row "won't update," check that first.
+- **Notion page identity must use the normalized UUID**, never raw URL text — Notion sometimes prefixes URLs with a title slug, so the same page's URL differs between queries. Comparing raw URLs once caused already-linked pages to be treated as new and overwrite curated names (`normalizeNotionId` in `lib/notion.js`).
+- **One appid, one guide backend.** Markdown discovery won't overwrite a registered Notion guide unless `--force`.
+- **Local guide paths are contained to `guidesDir`** (`resolveGuidePath`). Keep that check if you touch it — `guides.url` is data.
+- **Documentation drifting from code is a real failure mode here.** `SYNC_SECRET` sat hardcoded in a public repo for months while three docs claimed it was in Script Properties, because nobody checked the source. Verify against code, not docs.
+- **`localDate()` not `toISOString().slice(0,10)`** for user-facing dates — the latter is UTC and will be off by a day in the evening.

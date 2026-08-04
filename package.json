@@ -1,0 +1,19 @@
+{
+  "name": "steam-achievement-tracker",
+  "version": "2.0.0",
+  "description": "Track your Steam achievement progress locally — no Google account, no deployment, zero dependencies",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "bin": {
+    "steam-tracker": "./tracker.js"
+  },
+  "scripts": {
+    "start": "node tracker.js serve",
+    "sync": "node tracker.js sync",
+    "status": "node tracker.js status"
+  },
+  "dependencies": {}
+}

@@ -1,5 +1,8 @@
-# Personal Apps Script project binding - each user creates their own via `clasp create`/`clasp clone`
-.clasp.json
+# 本地配置:Steam API Key / SteamID64 / Notion token 都在这里,绝对不能提交
+config.json
 
-# clasp local build/cache artifacts
-.clasprc.json
+# 本地数据库(SQLite + WAL 临时文件)
+data/
+
+# CSV 导入导出的中间文件
+exports/
