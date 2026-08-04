@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steam achievement auto-tracker, running **entirely locally**: SQLite data store + Node CLI + a local HTTP server for the HTML Dashboard. Tracks achievement completion across the user's whole Steam library.
 
-This was a Google Apps Script + Google Sheet project until it was ported to run locally (the Apps Script implementation is in git history on `main`). If you find documentation, comments, or skills still referring to `clasp`, Script Properties, `doPost`, or Sheet tabs, that's stale — fix it.
+This was a Google Apps Script + Google Sheet project until it was ported to run locally. The Apps Script implementation is still in git history — `git show 7e29470:steam_achievement_sync.gs` and friends, or `git checkout 7e29470` for the whole tree. If you find documentation, comments, or skills still referring to `clasp`, Script Properties, `doPost`, or Sheet tabs, that's stale — fix it.
 
 See `PROJECT_CONTEXT.md` for background, task lists, and known issues.
 

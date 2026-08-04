@@ -1,7 +1,8 @@
 # Steam 成就自动化追踪项目 — 项目背景说明
 
 给 Claude Code 快速上下文用。这个项目最早在 claude.ai 网页对话里搭起来,后来挪到 Claude Code,
-再后来从 Google Apps Script + Google Sheet **整体改成了本地运行**(2026-08-03)。
+再后来从 Google Apps Script + Google Sheet **整体改成了本地运行**(2026-08-03),
+本地版已经合进 `main`——旧的 Apps Script 版本留在提交 `7e29470` 及以前的历史里。
 
 ## 项目是什么
 

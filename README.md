@@ -4,7 +4,7 @@ Track your Steam achievement progress automatically, without babysitting a sprea
 
 Point it at your Steam account once. Your library and achievement progress live in a local SQLite file, and a local web Dashboard shows it all at a glance.
 
-> **Coming from the Google Apps Script version?** It's gone — this is the same tool rebuilt to run entirely on your own machine. See [Migrating from the Sheet version](#migrating-from-the-sheet-version) to bring your ♥/★/family/Manual markers across, and [What changed](#what-changed-from-the-apps-script-version) for the full mapping.
+> **Coming from the Google Apps Script version?** It's been replaced — this is the same tool rebuilt to run entirely on your own machine. See [Migrating from the Sheet version](#migrating-from-the-sheet-version) to bring your ♥/★/family/Manual markers across, and [What changed](#what-changed-from-the-apps-script-version) for the full mapping. The old implementation is still in history at `7e29470` if you'd rather keep using it.
 
 ## What you get
 
@@ -160,7 +160,12 @@ Steam's API is the source of truth for almost everything, but a few things can't
 | `steam_guides_sync.gs` HTTP endpoint + `SYNC_SECRET` | *nothing* — read `data/steam.db` or use the CLI directly |
 | `steam_test_debug.gs` | plain `node -e` against `lib/steam.js` |
 
-The old Apps Script implementation is still in git history on the `main` branch if you need to refer back to it.
+The old Apps Script implementation is still in git history — the last commit before the port is `7e29470`:
+
+```bash
+git show 7e29470:steam_achievement_sync.gs   # read a single old file
+git checkout 7e29470                         # or check out the whole old tree
+```
 
 ## Using this with Claude Code
 
