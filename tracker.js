@@ -13,6 +13,7 @@
  *   node tracker.js export [目录]   把三张表导出成 CSV
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
+ *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js log [n]         看最近的同步日志
  */
 import { createInterface } from 'node:readline/promises';
@@ -27,7 +28,7 @@ import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
 import { serve } from './lib/server.js';
 import { NotionClient } from './lib/notion.js';
-import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown } from './lib/guides.js';
+import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks } from './lib/guides.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -356,6 +357,50 @@ async function cmdCheckboxSync() {
   }
 }
 
+/**
+ * 只读审计:找勾错的 checkbox(和 checkbox-sync 找漏勾正好相反)。
+ * 不写任何东西,所以不需要 --dry-run。
+ */
+async function cmdAudit() {
+  const { config, db, steam } = withSteam();
+  const notion = new NotionClient(config);
+  const p = progressPrinter();
+
+  console.log('审计已勾选的 checkbox:找"勾上了但成就其实没解锁"的(只读,不会改任何东西)\n');
+  const { results, totals, candidates } = await auditGuideTicks(db, steam, {
+    notion,
+    config,
+    appid: positional[0] ?? null,
+    onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
+  });
+  p.done();
+
+  for (const r of results) {
+    if (r.skipped) {
+      console.log(`  ⏭  ${r.name} —— 跳过:${r.skipped}`);
+      continue;
+    }
+    if (r.wrong.length === 0) continue;
+    console.log(`\n  ❌ ${r.name}(已勾 ${r.ticked} 个,其中 ${r.wrong.length} 个对应的成就没解锁)`);
+    for (const w of r.wrong) {
+      console.log(`     ${w.name}(${w.apiName},按${w.via === 'description' ? '描述' : '名字'}对上的)`);
+      console.log(`       ${w.text.replace(/\s+/g, ' ').slice(0, 70)}`);
+    }
+  }
+
+  console.log(
+    `\n审计完 ${totals.games}/${candidates} 款游戏,检查了 ${totals.ticked} 个已勾选的 checkbox`
+  );
+  console.log(`  确认勾错:${totals.wrong} 个`);
+  // 覆盖范围要如实说:对不上的没结论,不能让"0 个勾错"看起来比实际覆盖更强
+  console.log(`  对不上具体成就、没下结论:${totals.unresolved} 个(攻略文字既没抄描述原文、名字也不唯一)`);
+  if (totals.skipped) console.log(`  跳过的游戏:${totals.skipped} 款(见上面)`);
+  if (totals.wrong > 0) {
+    console.log('\n勾错的框需要手动取消勾选——checkbox-sync 只会勾上、从不取消,修不了自己的错。');
+    console.log('取消之前先自己确认一遍:也可能是你自己有意勾的(比如标记"计划要做")。');
+  }
+}
+
 function cmdImport() {
   const dir = positional[0];
   if (!dir) throw new Error('用法:node tracker.js import <放 CSV 的目录>');
@@ -404,6 +449,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
                                           发现攻略页面并登记进 guides 表
   node tracker.js checkbox-sync [appid]   把 Steam 已解锁成就同步成攻略里的 ✅
               checkbox-sync --dry-run     只算不写,先看会勾掉哪些(Notion 勾选不可撤销)
+  node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
   node tracker.js log [n]                 最近 n 条同步日志
 
 配置:${CONFIG_PATH}(gitignore 里,别提交)
@@ -420,6 +466,7 @@ const COMMANDS = {
   status: cmdStatus,
   guides: cmdGuides,
   'checkbox-sync': cmdCheckboxSync,
+  audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,
   log: cmdLog,

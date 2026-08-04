@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames } from '../lib/guides.js';
+import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
 import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
 import { openDb, getGame } from '../lib/db.js';
@@ -277,5 +277,64 @@ describe('同名成就(真实数据里踩到的:鬼谷八荒)', () => {
     const db = seed();
     const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_OTHER']));
     assert.ok(!unsafe.has('一鸣惊人'));
+  });
+});
+
+describe('审计:把 checkbox 反查到具体成就', () => {
+  const def = (api, cn, en, desc) => ({ api_name: api, name_cn: cn, name_en: en, description: desc });
+
+  // 系列成就:描述开头完全一样,只有数字不同。这是"按前缀匹配"翻车的地方
+  const TIERED = [
+    def('DMG_1', '牛刀小试', 'Damage1', '不触发天命特效，单发攻击造成100点伤害'),
+    def('DMG_2', '威力一击', 'Damage2', '不触发天命特效，单发攻击造成500点伤害'),
+    def('DMG_3', '致命一击', 'Damage3', '不触发天命特效，单发攻击造成1000点伤害'),
+  ];
+
+  test('系列成就:低档位的框要对到低档位,不能对到还没解锁的高档位', () => {
+    // 真实事故:审计用"描述前 14 字"匹配,把这个正确勾上的 100 点档
+    // 算到了 500 点档头上,凭空报出一个假的"勾错"
+    const hit = resolveTodoToAchievement('牛刀小试 不触发天命特效，单发攻击造成100点伤害', TIERED);
+    assert.equal(hit?.def.api_name, 'DMG_1');
+  });
+
+  test('系列成就:每一档都能各自对上', () => {
+    for (const [text, want] of [
+      ['威力一击 不触发天命特效，单发攻击造成500点伤害', 'DMG_2'],
+      ['致命一击 不触发天命特效，单发攻击造成1000点伤害', 'DMG_3'],
+    ]) {
+      assert.equal(resolveTodoToAchievement(text, TIERED)?.def.api_name, want);
+    }
+  });
+
+  test('描述抄了原文 → 按描述对上(最可信的那一层)', () => {
+    const hit = resolveTodoToAchievement('新年快乐：在打特定怪物的战斗中，投掷爆竹作为最后一击。补充说明若干', [
+      def('ach_241', '新年快乐', 'Happy New Year', '在打特定怪物的战斗中，投掷爆竹作为最后一击。'),
+    ]);
+    assert.equal(hit?.def.api_name, 'ach_241');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('攻略把描述改写过 → 退回按名字对,名字唯一才算', () => {
+    const defs = [def('A', '隐秘大师', 'Sneaky', '在不被发现的情况下完成整个章节')];
+    const hit = resolveTodoToAchievement('隐秘大师(Sneaky) — 全程别被看见', defs);
+    assert.equal(hit?.def.api_name, 'A');
+    assert.equal(hit?.via, 'name');
+  });
+
+  test('同名成就 → 不下结论(返回 null),不能猜', () => {
+    const defs = [
+      def('A', '妙手空空', 'Skilled Thief', '偷窃10次'),
+      def('B', '妙手空空', 'Skilled Thief', '通关且偷窃100次'),
+    ];
+    assert.equal(resolveTodoToAchievement('妙手空空·通关100次版(Skilled Thief)', defs), null);
+  });
+
+  test('两个成就描述一模一样 → 也不下结论', () => {
+    const defs = [def('A', '甲', 'A', '做同一件事'), def('B', '乙', 'B', '做同一件事')];
+    assert.equal(resolveTodoToAchievement('随便什么 做同一件事', defs), null);
+  });
+
+  test('完全对不上的文字 → null', () => {
+    assert.equal(resolveTodoToAchievement('这一行只是章节标题', TIERED), null);
   });
 });

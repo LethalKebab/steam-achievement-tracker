@@ -50,6 +50,24 @@ A game is eligible if it has a registered guide, has an achievement system, and 
 
 Note the sync only ever **ticks** boxes, never unticks. It can't undo a box that was ticked wrongly — that's a manual fix.
 
+## Auditing for wrong ticks
+
+`checkbox-sync` only ever ticks, so it can't repair a box that was ticked wrongly. `audit` looks in the opposite direction — for boxes that are ticked while the achievement is still locked:
+
+```bash
+node tracker.js audit            # everything
+node tracker.js audit 570780     # one game
+```
+
+Read-only; it never writes, so there's no `--dry-run`. It only examines games below 100%, since every box in a fully-completed game is legitimately ticked.
+
+To decide *which* achievement a given checkbox refers to, it needs an unambiguous handle, and it will only use one of two:
+
+1. the achievement's **full description**, quoted in the checkbox text, when that description is unique in the game;
+2. the achievement's **name**, when that name maps to exactly one achievement.
+
+If neither applies, the box is counted as undetermined and reported as such — never guessed. That's why output distinguishes "confirmed wrong" from "couldn't tell": on a 310-game library, 1,175 ticked boxes resolved cleanly and 65 didn't, and claiming the latter were fine would have been a lie. Writing guides so they quote the official description verbatim is what keeps that second number small.
+
 ## How matching works, and why it's strict
 
 An unlocked achievement is matched to a checkbox by **exact equality** against candidate segments extracted from the checkbox text. Never substring, never prefix.
