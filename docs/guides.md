@@ -79,7 +79,17 @@ This strictness is deliberate and was arrived at the hard way. Loose matching pr
 1. an achievement name appearing inside an unrelated achievement's *description*, and
 2. a short achievement name being a strict *prefix* of a different, harder achievement — which mis-ticked the harder one once the short one's own box was already checked.
 
-There's a third case exact matching can't solve on its own: some games contain **two different achievements with identical names**. If only one is unlocked, there's no way to tell from names alone which checkbox belongs to it, so the whole name is skipped and logged. If both are unlocked, any assignment is correct and it proceeds normally.
+There's a third case exact matching can't solve on its own: some games contain **two different achievements with identical names**. If only one is unlocked, names alone can't say which checkbox belongs to it. If both are unlocked, any assignment is correct and it proceeds normally.
+
+**The fix for that is in how you write the guide, not in the code.** If a checkbox quotes the achievement's official description verbatim, and that description is unique in the game, the box is unambiguously about that achievement — so the sync can tick it correctly even though the names collide. That's why the recommended shape is:
+
+```
+- [ ] **成就名**
+      official description, copied verbatim
+      your own notes and tips
+```
+
+The name (on its own line, or followed by a colon or dash) is what lets the box be ticked; the verbatim description is what lets it be *verified*, and what rescues same-name pairs. Paraphrasing the description costs you both. Do **not** disambiguate by adding a suffix to the name (`妙手空空·通关100次版`) — that stops the name matching exactly, so neither box can ever be ticked.
 
 The rule throughout: **a missed checkbox is better than a wrong one.** If you tighten or loosen any of this, run `node --test` — `test/matching.test.js` pins all three failure modes.
 

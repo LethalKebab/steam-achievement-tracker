@@ -36,7 +36,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check |
 | `lib/api.js` | The 10 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
 | `lib/rpc.js` | Served at `/_rpc.js`. Proxies `rpc.…` chains to `fetch('/api/…')`, plus the sync status bar |
-| `lib/guides.js` | Achievement↔checkbox matching rules, both guide backends, guide discovery |
+| `lib/guides.js` | Achievement↔checkbox matching (both directions), both guide backends, guide discovery, `auditGuideTicks` |
 | `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking |
 | `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), path containment check |
 | `lib/csv.js` | CSV parse/serialize, spreadsheet import, CSV export |
@@ -100,9 +100,23 @@ Matching an unlocked achievement to a guide checkbox is **exact equality against
 
 `extractTitleCandidates()` splits checkbox text into candidates (by line, then by colon/dash, plus the `中文名(English Name)` pattern) and requires the achievement name to *equal* one of them. Adding a new candidate-extraction rule is fine; weakening the equality check or removing the ambiguity gate is not. `test/matching.test.js` pins all three failure modes — run `node --test` after touching `lib/guides.js`.
 
+**The one way out of case 3 is the description.** `matchAchievements` runs two passes: ambiguous names first, resolvable *only* by the checkbox quoting the achievement's full description when that description is unique in the game (then the box is unambiguously about that achievement); then exact name matching for everything else. Description-first is deliberate — it is the more precise signal, so it claims its box before name matching could take it. This is why the guide-writing convention is `**name**` / verbatim official description / your own notes, and why paraphrasing the description has a real cost. See `.claude/skills/achievement-guide-writing/SKILL.md`.
+
 The design deliberately prefers a missed checkbox over a wrong one.
 
 **Always `checkbox-sync --dry-run` before a real run.** Ticking a Notion box can't be undone automatically, and failure mode 3 above was caught by a dry run before it wrote anything. Sync only ever ticks, never unticks, so it cannot repair its own mistakes.
+
+## Reverse lookup (the `audit` command)
+
+`checkbox-sync` asks "where does this achievement go?"; `audit` asks the opposite — "which achievement is this ticked box about, and is it actually unlocked?" That's `resolveTodoToAchievement()`, and it accepts only two unambiguous handles: the achievement's full description when unique in the game, or a name that maps to exactly one achievement. Anything else is reported as undetermined rather than guessed, and **the undetermined count is always printed** — "0 wrong" would otherwise imply coverage the audit doesn't have.
+
+**Never map by description *prefix*.** A first draft of this matched the first 14 characters, which collapses tiered achievement families ("deal 100/500/1000 damage", "fill in every page of X's report card"): a correctly-ticked easy tier gets attributed to its locked harder sibling. On real data that produced 4 false findings out of 5 — the same bug class as the name-prefix one above, in a different disguise. `test/matching.test.js` pins the tiered-family case.
+
+## Don't cry wolf in the log
+
+When the sync can't act, think about whether that's *actionable* before logging it. Ambiguous-name groups whose boxes are already correctly ticked used to log "needs manual review" on every single run — a permanent false alarm, which is worse than no alarm because it trains you to ignore the log. `nameGroupAlreadySatisfied()` now silences those, and they speak up again if a second same-named achievement gets unlocked without its box ticked.
+
+That helper uses loose substring matching, which is banned in the tick path. The distinction is intentional and commented at the call site: **it decides whether to print a line, never whether to write.** Getting it wrong costs one log line; getting the tick path wrong corrupts the user's notes. Keep new heuristics on the correct side of that line.
 
 ## Known pitfalls
 
@@ -117,7 +131,16 @@ The design deliberately prefers a missed checkbox over a wrong one.
 
 ## Current state and open items
 
-The core pipeline (library sync, achievement counts, achievement detail, Dashboard, ♥/★ flags) is done and in daily use. Guide sync works against both backends. Known outstanding items:
+The core pipeline (library sync, achievement counts, achievement detail, Dashboard, ♥/★ flags) is done and in daily use. Guide sync works against both backends, Notion is configured, and the whole guide corpus has been audited.
+
+**Verified baseline as of 2026-08-04** — re-derive rather than trust if a lot has changed since, but don't redo this work blindly:
+
+- `checkbox-sync --dry-run` across all eligible games proposes **0** ticks, and `audit` reports **0** confirmed-wrong out of ~1,175 ticked boxes. Notion and Steam agree.
+- **~65 ticked boxes are permanently undetermined** by `audit` (out of ~1,240). They paraphrase the official description instead of quoting it, so the reverse lookup can't attribute them. They tick fine by name; they just can't be verified. Fixing that means editing those guide pages, not the code.
+- **Three boxes were ticked wrongly and have been un-ticked** (Civ VI 亦敌亦友, CK3 春风得意, 古剑奇谭 新年快乐) — recorded in `sync_log` as `人工修正`. The first two were same-name mis-ticks; don't be surprised by un-ticks in the log's history.
+- **Same-name guide formatting is already handled:** Civ VI and CK3 already quote descriptions verbatim, and 鬼谷八荒's two `妙手空空` boxes were rewritten from suffixed names to name + verbatim description. All three now resolve correctly and will tick automatically when a second twin unlocks. **Don't "fix" these pages again.**
+
+Known outstanding items:
 
 - **Guides not yet written** — these pages exist in the Notion guide database but have no `appid:` line yet, so guide discovery skips them every run (expected, not an error): Xenoblade Chronicles X, 三相奇谈, 以闪亮之名, 最强祖师, 月圆之夜, 燕云十六声.
 - **A duplicate Notion page** for 苏丹的游戏 (the older one, URL contains `1d31fee6…`) needs deleting by hand.
