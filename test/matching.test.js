@@ -15,7 +15,8 @@ import { tmpdir } from 'node:os';
 
 import { normalizeText, extractTitleCandidates, matchAchievements } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
-import { parseCsv, toCsv, tabName } from '../lib/csv.js';
+import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
+import { openDb, getGame } from '../lib/db.js';
 import { extractNotionPageId, normalizeNotionId } from '../lib/notion.js';
 
 const ach = (nameCn, nameEn = '') => ({ nameCn, nameEn, apiname: nameCn });
@@ -171,5 +172,36 @@ describe('CSV 文件名识别', () => {
   test('没有 " - " 分隔的文件名退回用整个名字', () => {
     assert.equal(tabName('RAW DATA.csv'), 'rawdata');
     assert.equal(tabName('guides.csv'), 'guides');
+  });
+});
+
+describe('CSV 数值解析', () => {
+  test('千位分隔符不能让成就数变成 null(真实数据里踩到过:1,000 个成就的游戏)', () => {
+    // Sheet 导出的是显示值,所以四位数会带逗号
+    const rows = parseCsv('Status,AppID,名字,完成数,成就总数,完成率\n,4164310,这是谐音梗,"1,000","1,000",100.00%\n');
+    assert.equal(rows[1][3], '1,000', '解析出来还是带逗号的原文');
+    // importGames 用的转换逻辑必须能吃下它 —— 这里直接验行为:导入后 total 应该是 1000
+    const db = openDb(':memory:');
+    const f = join(tmpdir(), 'sat-csv-comma.csv');
+    writeFileSync(f, toCsv(rows));
+    importGames(db, f);
+    const g = getGame(db, '4164310');
+    assert.equal(g.achieved, 1000);
+    assert.equal(g.total, 1000);
+    rmSync(f, { force: true });
+  });
+
+  test("'N/A' 要变成 has_achievements=0,而不是 total=0", () => {
+    const db = openDb(':memory:');
+    const f = join(tmpdir(), 'sat-csv-na.csv');
+    writeFileSync(f, toCsv([
+      ['Status', 'AppID', '名字', '完成数', '成就总数'],
+      ['', '294100', 'RimWorld', '', 'N/A'],
+    ]));
+    importGames(db, f);
+    const g = getGame(db, '294100');
+    assert.equal(g.has_achievements, 0);
+    assert.equal(g.total, null);
+    rmSync(f, { force: true });
   });
 });
