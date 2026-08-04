@@ -262,7 +262,18 @@ describe('同名成就(真实数据里踩到的:鬼谷八荒)', () => {
     assert.ok(unsafe.has('skilled thief'), '英文名也应该被判为不安全');
     const m = matchAchievements(unlockedOne, todos, { unsafeNames: unsafe });
     assert.equal(m.length, 0, '不能勾任何 checkbox');
-    assert.equal(m.skippedAmbiguous.length, 1, '要报告跳过了,不能静默');
+    // 已解锁那个的框(隐秘10次版)本来就勾着 → 该勾的已经勾够了,不用提醒。
+    // 每次跑都报一条"需人工核对"而其实无事可做,只会让人以后不看日志。
+    assert.equal(m.skippedAmbiguous.length, 0, '这一组已经满足了,应该静默');
+  });
+
+  test('同名成就一个都还没勾 → 要报告,不能静默', () => {
+    const db = seed();
+    const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_160101']));
+    const noneTicked = todos.map((t) => ({ ...t, checked: false }));
+    const m = matchAchievements(unlockedOne, noneTicked, { unsafeNames: unsafe });
+    assert.equal(m.length, 0, '还是不能瞎勾');
+    assert.equal(m.skippedAmbiguous.length, 1, '解锁了却一个框都没勾 → 该提醒');
   });
 
   test('同名成就全部解锁 → 怎么配都对,照常匹配', () => {
@@ -336,5 +347,58 @@ describe('审计:把 checkbox 反查到具体成就', () => {
 
   test('完全对不上的文字 → null', () => {
     assert.equal(resolveTodoToAchievement('这一行只是章节标题', TIERED), null);
+  });
+});
+
+describe('同名成就:攻略抄了描述原文就能救回来', () => {
+  // 同一个游戏两个成就名字完全一样,只有描述不同。
+  // 只靠名字永远分不出来(见上面的 findAmbiguousNames),但如果 checkbox 里抄了
+  // 完整的官方描述,框指的是哪个成就就没有二义性了。
+  const DEFS = [
+    { api_name: 'A', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '偷窃10次且未被察觉' },
+    { api_name: 'B', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '通关且成功偷窃100次' },
+  ];
+  const unsafe = new Set(['妙手空空', 'skilled thief']);
+  const unlockedA = [{ apiname: 'A', nameCn: '妙手空空', nameEn: 'Skilled Thief' }];
+
+  test('抄了描述原文 → 勾中正确的那个框,不碰另一个', () => {
+    const todos = [
+      { key: 1, text: '**妙手空空**<br>偷窃10次且未被察觉<br>提示:开局就能做', checked: false },
+      { key: 2, text: '**妙手空空**<br>通关且成功偷窃100次<br>提示:要二周目', checked: false },
+    ];
+    const m = matchAchievements(unlockedA, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 1);
+    assert.equal(m[0].key, 1, '应该勾解锁了的那个(A=偷窃10次),不是还没解锁的 B');
+    assert.equal(m[0].via, 'description');
+    assert.equal(m.skippedAmbiguous.length, 0);
+  });
+
+  test('只改写、没抄描述原文 → 仍然放弃,不猜', () => {
+    const todos = [
+      { key: 1, text: '**妙手空空·隐秘10次版**(偷偷摸摸拿十次东西)', checked: false },
+      { key: 2, text: '**妙手空空·通关100次版**(打完再拿一百次)', checked: false },
+    ];
+    const m = matchAchievements(unlockedA, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 0);
+    assert.equal(m.skippedAmbiguous.length, 1);
+  });
+
+  test('已解锁那个的框早就勾上了 → 不会去勾另一个还没解锁的', () => {
+    const todos = [
+      { key: 1, text: '**妙手空空**<br>偷窃10次且未被察觉', checked: true },
+      { key: 2, text: '**妙手空空**<br>通关且成功偷窃100次', checked: false },
+    ];
+    const m = matchAchievements(unlockedA, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 0, '这才是最初那个 bug 的核心场景,必须一个都不勾');
+  });
+
+  test('名字唯一的成就不受第一遍影响,照旧按名字匹配', () => {
+    const defs = [...DEFS, { api_name: 'C', name_cn: '一鸣惊人', name_en: 'Debut', description: '首次出场' }];
+    const todos = [{ key: 9, text: '**一鸣惊人**(Debut) — 首次出场', checked: false }];
+    const m = matchAchievements([{ apiname: 'C', nameCn: '一鸣惊人', nameEn: 'Debut' }], todos, {
+      unsafeNames: unsafe, defs,
+    });
+    assert.equal(m.length, 1);
+    assert.equal(m[0].via, 'name');
   });
 });
