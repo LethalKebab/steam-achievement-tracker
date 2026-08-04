@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes } from '../lib/guides.js';
+import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
 import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
 import { openDb, getGame } from '../lib/db.js';
@@ -232,5 +232,50 @@ describe('checkbox 同步的预演模式', () => {
     assert.match(real[0].result, /^已勾选/);
     assert.match(readFileSync(full, 'utf8'), /- \[x\] \*\*体验\*\*/);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+describe('同名成就(真实数据里踩到的:鬼谷八荒)', () => {
+  // 《鬼谷八荒》有两个成就中英文名完全一样:妙手空空 / Skilled Thief
+  //   ACHIEVEMENT_160101 = 隐秘偷窃10次   → 已解锁
+  //   ACHIEVEMENT_300020 = 通关且偷窃100次 → 没解锁
+  // 已解锁那个的 checkbox 早就被勾上、退出了待匹配池,于是同一个名字会去匹配
+  // 另一个**还没解锁**的 checkbox —— 勾错。精确匹配挡不住完全同名。
+  const seed = () => {
+    const db = openDb(':memory:');
+    const ins = db.prepare('INSERT INTO achievements (appid, api_name, name_cn, name_en) VALUES (?,?,?,?)');
+    ins.run('1468810', 'ACHIEVEMENT_160101', '妙手空空', 'Skilled Thief');
+    ins.run('1468810', 'ACHIEVEMENT_300020', '妙手空空', 'Skilled Thief');
+    ins.run('1468810', 'ACHIEVEMENT_OTHER', '一鸣惊人', 'Debut');
+    return db;
+  };
+  const todos = [
+    { key: 1, text: '妙手空空·隐秘10次版(隐秘偷窃10次)', checked: true },
+    { key: 2, text: '妙手空空·通关100次版(Skilled Thief) — 通关且偷窃100次。', checked: false },
+  ];
+  const unlockedOne = [{ apiname: 'ACHIEVEMENT_160101', nameCn: '妙手空空', nameEn: 'Skilled Thief' }];
+
+  test('只解锁了同名成就中的一个 → 整个名字放弃,绝不勾另一个', () => {
+    const db = seed();
+    const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_160101']));
+    assert.ok(unsafe.has('妙手空空'), '中文名应该被判为不安全');
+    assert.ok(unsafe.has('skilled thief'), '英文名也应该被判为不安全');
+    const m = matchAchievements(unlockedOne, todos, { unsafeNames: unsafe });
+    assert.equal(m.length, 0, '不能勾任何 checkbox');
+    assert.equal(m.skippedAmbiguous.length, 1, '要报告跳过了,不能静默');
+  });
+
+  test('同名成就全部解锁 → 怎么配都对,照常匹配', () => {
+    const db = seed();
+    const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_160101', 'ACHIEVEMENT_300020']));
+    assert.equal(unsafe.size, 0);
+    const both = [...unlockedOne, { apiname: 'ACHIEVEMENT_300020', nameCn: '妙手空空', nameEn: 'Skilled Thief' }];
+    assert.equal(matchAchievements(both, todos, { unsafeNames: unsafe }).length, 1);
+  });
+
+  test('名字唯一的成就不受影响', () => {
+    const db = seed();
+    const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_OTHER']));
+    assert.ok(!unsafe.has('一鸣惊人'));
   });
 });
