@@ -22,6 +22,8 @@ See [[feedback_achievement_exact_match]] (global memory) for the incident histor
 
 — were only fully fixed by `extractTitleCandidates()`, which splits each checkbox's text into title *candidate segments* and requires the achievement name to **exactly equal** one of them. Partial/substring/prefix matching on this data reintroduces both bug classes. **Do not reach for it again, here or in any other tool touching this data.**
 
+There is a **third** variant that exact matching cannot fix, found 2026-08-03: some games contain two distinct achievements with *identical* names in both languages. 鬼谷八荒 has two `妙手空空 / Skilled Thief` (steal stealthily 10× — unlocked; clear game + steal 100× — not unlocked). The unlocked one's checkbox was already ticked and therefore out of the candidate pool, so its achievement matched the *other*, still-unearned checkbox. `findAmbiguousNames()` now refuses any name shared by several achievements unless *all* of them are unlocked, and logs the skip. **12 such collisions exist across 11 games in this library** — CK3, Civ VI, Cities: Skylines, PUBG, 古剑奇谭二 (two), 雨世界, Plague Inc, Farm Together, Sword and Fairy 6, 了不起的修仙模拟器 — so this gate is load-bearing, not defensive clutter.
+
 Candidate segments are split by: line breaks (including literal `<br>`), then the first colon or dash within a line (half-width ` - ` and full-width ` — ` / ` – ` / `——`), plus the whole string, plus — for the `中文名(English Name)` shape common in the local markdown guides — the Chinese and English halves separately. Adding a new *extraction* rule is fine; weakening the *equality* check is not.
 
 `test/matching.test.js` pins both historical failure modes plus the extraction rules. **Run `node --test` after touching `lib/guides.js`.**
@@ -42,7 +44,8 @@ The design deliberately prefers a missed checkbox (no match found) over a wrong 
 ## Usage
 
 ```bash
-node tracker.js checkbox-sync 3117820   # one game — start here
+node tracker.js checkbox-sync --dry-run # read-only preview — ALWAYS do this first
+node tracker.js checkbox-sync 3117820   # one game
 node tracker.js checkbox-sync           # every eligible game
 node tracker.js log 30                  # what it did (also in the sync_log table)
 ```
