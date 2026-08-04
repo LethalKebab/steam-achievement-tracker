@@ -5,7 +5,7 @@
  * 零依赖:只用 Node 内置模块(node:sqlite 存数据,内置 fetch 调 Steam API,
  * node:http 起 Dashboard),不需要 npm install,也不需要 Google 账号 / clasp / 部署。
  *
- *   node tracker.js init            填 Steam 凭据(只需要跑一次)
+ *   node tracker.js init            填 Steam 凭据(只需要跑一次;--notion 填 Notion token)
  *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情)
  *   node tracker.js serve           起本地 Dashboard,数据太旧会自动后台同步
  *   node tracker.js status          看一眼当前数据和 AGCR
@@ -19,6 +19,7 @@ import { createInterface } from 'node:readline/promises';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { stdin, stdout } from 'node:process';
+import { Writable } from 'node:stream';
 
 import { loadConfig, saveConfig, ROOT, CONFIG_PATH } from './lib/config.js';
 import { openDb, allGames, allGuides, countGames, getMeta, recentSyncLog } from './lib/db.js';
@@ -83,7 +84,101 @@ function withSteam({ requireSteam = true } = {}) {
 // 命令
 // ---------------------------------------------------------------------------
 
+/**
+ * 读一行但**不回显**——token 不该留在终端 scrollback 里,也不该进 shell history。
+ * 提示语自己写到 stdout,readline 的输出走一个可静音的 Writable。
+ */
+function makeSecretReader() {
+  // stdin 不是终端(管道输入/CI)的时候不能开 terminal 模式,否则 readline 收不到行、
+  // question() 永远不 resolve,整个进程挂住。这种情况下也没有回显要遮,直接普通读。
+  const isTty = Boolean(stdin.isTTY);
+  let muted = false;
+  const out = new Writable({
+    write(chunk, enc, cb) {
+      if (!muted) stdout.write(chunk);
+      cb();
+    },
+  });
+  const rl = createInterface({ input: stdin, output: isTty ? out : stdout, terminal: isTty });
+
+  // 用异步迭代器逐行取,不用 rl.question():管道输入时整块数据会一次到达,
+  // readline 会连着抛出所有 'line' 事件,后面那个 question() 还没注册就把行丢了、
+  // 于是永远不 resolve。迭代器带队列,不会漏行。
+  const lines = rl[Symbol.asyncIterator]();
+  const nextLine = async () => ((await lines.next()).value ?? '').trim();
+
+  return {
+    ask: async (prompt) => {
+      stdout.write(prompt);
+      return nextLine();
+    },
+    askSecret: async (prompt) => {
+      stdout.write(prompt);
+      muted = true;
+      const v = await nextLine();
+      muted = false;
+      if (isTty) stdout.write('\n');
+      return v;
+    },
+    close: () => rl.close(),
+  };
+}
+
+/**
+ * `init --notion`:配置攻略同步用的 Notion token。
+ * 输入不回显,而且**当场验证**——token 本身 + 那个数据库能不能访问,
+ * 分开报错,因为这两件事的修法完全不同(换 token vs. 去 Notion 加 connection)。
+ */
+async function cmdInitNotion() {
+  const io = makeSecretReader();
+  try {
+    const cfg = loadConfig();
+    console.log('\n配置 Notion 攻略同步\n');
+    console.log('token 从哪来:如果你之前用过 Apps Script 版本,直接复用同一个,不用新建 integration');
+    console.log('  (它已经连好了那些攻略页面):');
+    console.log('  打开 Google Sheet → 扩展程序 → Apps Script → 项目设置(齿轮)→ 脚本属性 → NOTION_TOKEN');
+    console.log('  没有的话:https://www.notion.so/my-integrations 新建一个 Internal Integration\n');
+
+    const token = await io.askSecret('Notion Integration Token(输入不会显示): ');
+    if (!token) throw new Error('没输入 token');
+
+    const dbDefault = cfg.notion?.overviewDbId || '';
+    const dbId =
+      (await io.ask(`攻略数据库 ID${dbDefault ? `(回车用 ${dbDefault})` : ''}: `)) || dbDefault;
+
+    const probe = new NotionClient({ notion: { token, overviewDbId: dbId } });
+
+    stdout.write('\n正在验证 token…');
+    const me = await probe.request('get', '/users/me');
+    console.log(`\r✅ token 可用:integration「${me.name || me.bot?.workspace_name || '未命名'}」        `);
+
+    let dbOk = false;
+    if (dbId) {
+      stdout.write('正在验证数据库访问…');
+      try {
+        const pages = await probe.queryGuideDatabase(dbId);
+        console.log(`\r✅ 数据库可访问:里面有 ${pages.length} 个页面        `);
+        dbOk = true;
+      } catch (err) {
+        console.log(`\r⚠️  数据库访问失败:${err.message}`);
+        console.log('   token 本身是好的,所以问题在权限或 ID:');
+        console.log('   Notion 里打开那个数据库(或它的父页面)→ 右上角 ••• → Connections → 加上这个 integration');
+      }
+    }
+
+    saveConfig({ notion: { token, overviewDbId: dbId } });
+    console.log(`\n✅ 已写入 ${CONFIG_PATH}(权限 600,已 gitignore,不会被提交)`);
+    console.log('\n接下来:');
+    console.log('  node tracker.js guides --notion             ← 应该报「新增 0 条」');
+    console.log('  node tracker.js checkbox-sync --dry-run     ← 只算不写,先看会勾掉哪些');
+    if (!dbOk && dbId) console.log('\n(数据库那一步没通过的话,上面两条命令会失败,先按提示加 connection)');
+  } finally {
+    io.close();
+  }
+}
+
 async function cmdInit() {
+  if (flags.has('--notion')) return cmdInitNotion();
   const rl = createInterface({ input: stdin, output: stdout });
   try {
     const current = loadConfig();
@@ -297,6 +392,7 @@ function cmdHelp() {
 Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
 
   node tracker.js init                    填 Steam API Key 和 SteamID64(跑一次)
+              init --notion               填 Notion token(只有要用攻略同步才需要)
   node tracker.js sync                    全量同步:库 + 成就完成数 + 成就详情
               sync --library              只检查新游戏
               sync --achievements         只刷成就完成数
