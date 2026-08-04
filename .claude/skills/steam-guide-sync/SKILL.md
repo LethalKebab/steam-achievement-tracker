@@ -50,7 +50,7 @@ For "rewrite a guide's whole checklist from scratch" you want *all* achievements
 | change a row's label | `setGameField(db, appid, 'status', ...)` — remember `sync_locked` is a separate column |
 | reclassify as family-shared | `UPDATE games SET status = '', sync_locked = 0, family = 1 WHERE appid IN (...)` |
 
-Before reclassifying a `Manual` row as family-shared, confirm the account can actually see real data: call `fetchPlayerAchievements` for that appid and check whether the `achieved` numbers are *your* progress (all zeros usually means a different family member plays it). See `PROJECT_CONTEXT.md` pitfall #6.
+Before reclassifying a `Manual` row as family-shared, confirm the account can actually see real data: call `fetchPlayerAchievements` for that appid and check whether the `achieved` numbers are *your* progress (all zeros usually means a different family member plays it). See the `status` / `sync_locked` / `family` notes in `docs/data.md`.
 
 ## Guide registration rules
 

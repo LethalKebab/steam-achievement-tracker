@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steam achievement auto-tracker, running **entirely locally**: SQLite data store + Node CLI + a local HTTP server for the HTML Dashboard. Tracks achievement completion across the user's whole Steam library.
 
-See `PROJECT_CONTEXT.md` for background, task lists, and known issues.
+User-facing docs live in `docs/` (`configuration.md`, `data.md`, `guides.md`); `README.md` is deliberately setup-only. Task-scoped guides for specific jobs are in `.claude/skills/`.
 
 ## Stack constraints
 
@@ -92,14 +92,17 @@ These are verified and hard-won — don't re-derive them, and don't "simplify" t
 
 ## Guide checkbox matching — do not loosen this
 
-Matching an unlocked achievement to a guide checkbox is **exact equality against extracted title candidate segments**. Never substring, never prefix. Two separate rounds of false positives were only fixed by this rule:
+Matching an unlocked achievement to a guide checkbox is **exact equality against extracted title candidate segments**. Never substring, never prefix. Three rounds of false positives produced this rule:
 
-1. an achievement name appearing inside an unrelated achievement's *description*, and
-2. a short achievement name being a strict *prefix* of a different, harder achievement's name — which mis-ticked the harder one once the short one's own box was already checked.
+1. an achievement name appearing inside an unrelated achievement's *description*;
+2. a short achievement name being a strict *prefix* of a different, harder achievement's name — which mis-ticked the harder one once the short one's own box was already checked; and
+3. **two achievements in the same game with genuinely identical names.** Exact matching cannot fix this one: the unlocked twin's box gets ticked, leaves the candidate pool, and the same name then matches the *other*, still-unearned box. `findAmbiguousNames()` therefore refuses any name shared by several achievements unless *all* of them are unlocked, and logs the skip rather than staying silent. This is not rare — a 310-game library had 12 such collisions across 11 games.
 
-`extractTitleCandidates()` splits checkbox text into candidates (by line, then by colon/dash, plus the `中文名(English Name)` pattern) and requires the achievement name to *equal* one of them. Adding a new candidate-extraction rule is fine; weakening the equality check is not. `test/matching.test.js` pins both failure modes — run `node --test` after touching `lib/guides.js`.
+`extractTitleCandidates()` splits checkbox text into candidates (by line, then by colon/dash, plus the `中文名(English Name)` pattern) and requires the achievement name to *equal* one of them. Adding a new candidate-extraction rule is fine; weakening the equality check or removing the ambiguity gate is not. `test/matching.test.js` pins all three failure modes — run `node --test` after touching `lib/guides.js`.
 
 The design deliberately prefers a missed checkbox over a wrong one.
+
+**Always `checkbox-sync --dry-run` before a real run.** Ticking a Notion box can't be undone automatically, and failure mode 3 above was caught by a dry run before it wrote anything. Sync only ever ticks, never unticks, so it cannot repair its own mistakes.
 
 ## Known pitfalls
 
@@ -110,3 +113,20 @@ The design deliberately prefers a missed checkbox over a wrong one.
 - **Local guide paths are contained to `guidesDir`** (`resolveGuidePath`). Keep that check if you touch it — `guides.url` is data.
 - **Documentation drifting from code is a real failure mode here.** A secret once sat hardcoded in this public repo for months while three separate docs claimed it was read from config, because nobody checked the source. Verify against code, not docs.
 - **`localDate()` not `toISOString().slice(0,10)`** for user-facing dates — the latter is UTC and will be off by a day in the evening.
+- **Guide text never goes in the database** — only a pointer. Guides have to stay human-editable and tickable where they live; the `guides` table tracks *where*, never *what*.
+
+## Current state and open items
+
+The core pipeline (library sync, achievement counts, achievement detail, Dashboard, ♥/★ flags) is done and in daily use. Guide sync works against both backends. Known outstanding items:
+
+- **Guides not yet written** — these pages exist in the Notion guide database but have no `appid:` line yet, so guide discovery skips them every run (expected, not an error): Xenoblade Chronicles X, 三相奇谈, 以闪亮之名, 最强祖师, 月圆之夜, 燕云十六声.
+- **A duplicate Notion page** for 苏丹的游戏 (the older one, URL contains `1d31fee6…`) needs deleting by hand.
+- **Leftover spreadsheet automation** — a few daily jobs still update an old Google Sheet as a secondary backup. When they're no longer wanted, delete them from that project's Apps Script triggers page; run `node tracker.js export` first, since the sheet stops updating afterwards.
+- **Ideas, not commitments** — write the missing guides, enrich the Dashboard, or add a launchd plist if sync-on-open isn't enough.
+
+## Working on this efficiently
+
+1. **Bulk repetitive external calls are disproportionately expensive.** Notion has no batch-update API, so "add one line to forty pages" is forty round trips — and each one carries the whole conversation history. Before starting that kind of job, say roughly how many calls it will take and offer to do it in a fresh session.
+2. **Rule of thumb for a fresh session:** if the content to read/write clearly exceeds what's already in context, or the task is purely repetitive and needs no history, suggest starting clean. Small one-off edits are fine inline.
+3. **Verification beats assumption.** A successful tool call does not mean the content is right — see the Notion page-ID and documentation-drift pitfalls above. Re-read results after bulk writes or overwrites, and prefer a read-only preview (`--dry-run`, a SELECT) before anything that writes outside this repo.
+
