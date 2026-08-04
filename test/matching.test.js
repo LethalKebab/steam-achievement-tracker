@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { normalizeText, extractTitleCandidates, matchAchievements } from '../lib/guides.js';
+import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
 import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
 import { openDb, getGame } from '../lib/db.js';
@@ -203,5 +203,34 @@ describe('CSV 数值解析', () => {
     assert.equal(g.has_achievements, 0);
     assert.equal(g.total, null);
     rmSync(f, { force: true });
+  });
+});
+
+describe('checkbox 同步的预演模式', () => {
+  const dir = join(tmpdir(), 'sat-dry-test');
+  const file = 'g.md';
+
+  test('--dry-run 报告会勾哪些,但一个字节都不写', async () => {
+    mkdirSync(dir, { recursive: true });
+    const full = join(dir, file);
+    const before = '# t\n\nappid: 123\n\n- [ ] **体验**(Taste) — 描述\n- [ ] **自由**(Freedom) — 描述\n';
+    writeFileSync(full, before);
+
+    const db = openDb(':memory:');
+    db.prepare("INSERT INTO achievements (appid, api_name, name_cn, name_en) VALUES ('123','A','体验','Taste')").run();
+    const steam = { delay: 0, fetchPlayerAchievements: async () => ({ achievements: [{ apiname: 'A', achieved: 1 }] }) };
+    const guide = { appid: '123', url: file, kind: 'local' };
+    const config = { guidesDir: dir };
+
+    const dry = await syncGameCheckboxes(db, steam, guide, 'G', { notion: null, config, dryRun: true });
+    assert.equal(dry.length, 1);
+    assert.match(dry[0].result, /^【预演】/);
+    assert.equal(readFileSync(full, 'utf8'), before, '预演不能改文件');
+
+    // 去掉 dryRun 之后才真的写
+    const real = await syncGameCheckboxes(db, steam, guide, 'G', { notion: null, config });
+    assert.match(real[0].result, /^已勾选/);
+    assert.match(readFileSync(full, 'utf8'), /- \[x\] \*\*体验\*\*/);
+    rmSync(dir, { recursive: true, force: true });
   });
 });

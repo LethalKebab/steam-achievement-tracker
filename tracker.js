@@ -12,7 +12,7 @@
  *   node tracker.js import <目录>   从 Google Sheet 导出的 CSV 导入历史数据
  *   node tracker.js export [目录]   把三张表导出成 CSV
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
- *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅
+ *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
  *   node tracker.js log [n]         看最近的同步日志
  */
 import { createInterface } from 'node:readline/promises';
@@ -226,18 +226,39 @@ async function cmdCheckboxSync() {
   const { config, db, steam } = withSteam();
   const notion = new NotionClient(config);
   const appid = positional[0] ?? null;
+  const dryRun = flags.has('--dry-run');
   const p = progressPrinter();
+
+  if (dryRun) console.log('预演模式:只读攻略页面算出会勾哪些,不写任何东西\n');
 
   const r = await checkboxSync(db, steam, {
     notion,
     config,
     appid,
+    dryRun,
     onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
   });
   p.done(`检查了 ${r.checked} 款游戏,产生 ${r.logs.length} 条日志`);
-  for (const l of r.logs) console.log(`  [${l.gameName}] ${l.achievement || '—'} → ${l.result}`);
+
+  // 按游戏分组打印,几百条的时候平铺看不清
+  const byGame = new Map();
+  for (const l of r.logs) {
+    if (!byGame.has(l.gameName)) byGame.set(l.gameName, []);
+    byGame.get(l.gameName).push(l);
+  }
+  for (const [game, logs] of byGame) {
+    console.log(`\n  ${game}(${logs.length} 条)`);
+    for (const l of logs) console.log(`    ${l.achievement || '—'} → ${l.result}`);
+  }
+
   if (r.checked === 0) {
     console.log('  (没有符合条件的游戏:需要有攻略登记、有成就系统、且还没 100% 完成)');
+  } else if (dryRun) {
+    const willCheck = r.logs.filter((l) => l.result.startsWith('【预演】')).length;
+    console.log(
+      `\n预演结束:会勾选 ${willCheck} 个 checkbox。确认没问题就去掉 --dry-run 再跑一次。` +
+        '\n(Notion 的勾选没法自动撤销,建议先只跑一款游戏:checkbox-sync <appid>)'
+    );
   }
 }
 
@@ -287,6 +308,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js guides [--notion|--local|--all]
                                           发现攻略页面并登记进 guides 表
   node tracker.js checkbox-sync [appid]   把 Steam 已解锁成就同步成攻略里的 ✅
+              checkbox-sync --dry-run     只算不写,先看会勾掉哪些(Notion 勾选不可撤销)
   node tracker.js log [n]                 最近 n 条同步日志
 
 配置:${CONFIG_PATH}(gitignore 里,别提交)
