@@ -1016,19 +1016,27 @@
       if (e.target === this) this.classList.remove('show');
     });
 
-    rpc.withSuccessHandler(function(data) {
-      allGames = data.games;
-      document.getElementById('cardTotal').textContent = data.totalGames;
-      document.getElementById('cardAvg').textContent = data.avgRounded || '-';
-      document.getElementById('cardAvgPrecise').textContent = data.avgPrecise ? ('精确值: ' + data.avgPrecise) : '';
-      document.getElementById('cardPerfect').textContent = data.perfectCount;
-      document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
-      renderNewAchTable();
-      render();
-    }).withFailureHandler(function(err) {
-      document.getElementById('gameTableBody').innerHTML =
-        '<tr><td colspan="4" class="empty">读取数据失败: ' + err.message + '</td></tr>';
-    }).getDashboardData();
+    function loadDashboard() {
+      rpc.withSuccessHandler(function(data) {
+        allGames = data.games;
+        document.getElementById('cardTotal').textContent = data.totalGames;
+        document.getElementById('cardAvg').textContent = data.avgRounded || '-';
+        document.getElementById('cardAvgPrecise').textContent = data.avgPrecise ? ('精确值: ' + data.avgPrecise) : '';
+        document.getElementById('cardPerfect').textContent = data.perfectCount;
+        document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
+        renderNewAchTable();
+        render();
+      }).withFailureHandler(function(err) {
+        document.getElementById('gameTableBody').innerHTML =
+          '<tr><td colspan="4" class="empty">读取数据失败: ' + err.message + '</td></tr>';
+      }).getDashboardData();
+    }
+
+    loadDashboard();
+
+    // 后台同步结束后 lib/rpc.js 会调这个就地刷新数据。暴露成全局是故意的:
+    // 用 location.reload() 会把搜索词、筛选勾选、排序状态全清掉,那些是用户自己设的。
+    window.reloadDashboard = loadDashboard;
   </script>
 </body>
 </html>
