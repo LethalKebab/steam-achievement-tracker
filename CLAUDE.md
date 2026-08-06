@@ -22,6 +22,8 @@ node --test                 # test suite (test/matching.test.js)
 node --check lib/foo.js     # syntax check
 ```
 
+Commit messages are Chinese or English, whichever suits the change. This is settled — don't raise it.
+
 There is no build, no push, no deploy. Editing a file and re-running the command is the whole loop. `serve` does not hot-reload — restart it after changing `lib/` (`Dashboard.html` and `lib/rpc.js` are re-read per request, so a browser refresh picks those up).
 
 ## File architecture
