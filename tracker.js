@@ -322,15 +322,18 @@ async function cmdCheckboxSync() {
   const notion = new NotionClient(config);
   const appid = positional[0] ?? null;
   const dryRun = flags.has('--dry-run');
+  const cascade = !flags.has('--no-cascade');
   const p = progressPrinter();
 
   if (dryRun) console.log('预演模式:只读攻略页面算出会勾哪些,不写任何东西\n');
+  if (!cascade) console.log('已关闭子步骤联动:只按成就名/描述匹配勾选\n');
 
   const r = await checkboxSync(db, steam, {
     notion,
     config,
     appid,
     dryRun,
+    cascade,
     onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
   });
   p.done(`检查了 ${r.checked} 款游戏,产生 ${r.logs.length} 条日志`);
@@ -449,6 +452,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
                                           发现攻略页面并登记进 guides 表
   node tracker.js checkbox-sync [appid]   把 Steam 已解锁成就同步成攻略里的 ✅
               checkbox-sync --dry-run     只算不写,先看会勾掉哪些(Notion 勾选不可撤销)
+              checkbox-sync --no-cascade  别联动勾选嵌套的子步骤 checkbox
   node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
   node tracker.js log [n]                 最近 n 条同步日志
 

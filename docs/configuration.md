@@ -12,6 +12,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "language": "schinese",     // language for game + achievement names from Steam
   "port": 8777,               // Dashboard port
   "syncStaleHours": 12,       // auto-sync when opening the Dashboard if data is older; 0 = never
+  "syncGuidesOnServe": true,  // also look for new guide pages when opening the Dashboard
   "requestDelayMs": 300,      // pause between Steam API calls
   "dbPath": "data/steam.db",  // relative to the project root
   "guidesDir": "guides",      // where local markdown guides live
@@ -28,6 +29,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 **`language`** — passed to Steam as the `l=` parameter, so it changes the names you see for games and achievements. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a full sync in the background and shows a progress bar in the corner of the page. Set it to `0` if you'd rather only ever sync manually.
+
+**`syncGuidesOnServe`** — when `serve` starts it also runs guide discovery, the same thing `node tracker.js guides` does: scan `guides/*.md` and the Notion guide database for pages carrying an `appid:` line, and register any new ones so their links appear on the Dashboard. Deliberately **not** gated by `syncStaleHours` — you often create a guide page minutes after a sync, when achievement data is still fresh, and the link needs to show up now rather than in twelve hours. It needs no Steam credentials, and a failure (expired Notion token, API down) is logged and otherwise ignored. Costs a couple of Notion API calls per start, plus one page read per not-yet-registered page; set it to `false` to skip it.
 
 **`requestDelayMs`** — the pause between Steam API calls. If a sync reports games "留待重试" (left for retry), you're being rate-limited: raise this to 500–800 and run again. Lowering it makes syncs faster but risks HTTP 429s.
 
