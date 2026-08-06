@@ -133,6 +133,8 @@ description: Use when writing, rewriting, or editing a Steam achievement guide f
 
 **绝对不要**在开头写:大标题、成就统计、剧透警告、中文名字来源说明、攻略参考来源段落、新手建议。
 
+**"不写大标题"只对 Notion 页面成立。** 本地 `*_achievements.md` **必须**有一行 `# 游戏名` —— `syncGuidesFromMarkdown` 是拿前 15 行里第一个 `^#` 当攻略名字的(没有就退化成文件名),而 Notion 页面的名字来自 title 属性、不需要正文里再写一遍。少了这行,guides 表里的名字会变成第一个小节标题(踩过:登记成了 `# 一、店铺日常与鉴定`)。
+
 如果确实有非常重要的参考攻略链接,可以在 `appid` 下面贴一两个链接,但不组织成"参考来源"段落。
 
 ### 4.2 分节:按游戏自身的成就分类走
@@ -185,6 +187,17 @@ DLC 成就当作游戏的普通一节来处理,不要写成"DLC: XXX(3个成就,
 ---
 
 ## 规则八:写攻略前的准备工作
+
+### 8.0 先决定写到哪个后端 —— 默认 Notion
+
+**只要 Notion 是连着的**(`config.json` 里有 `notion.token`),新攻略就**建在 Notion 的 Overview 数据库里**,不要默认写本地 `guides/*.md`。除非另有交代:
+
+- `Status` 属性填 **`Not started`**。这个属性记的是**游戏**的进度,不是攻略写没写(数据库里好几个标 Done 的游戏其实还没写攻略)
+- 页面 **icon** 设成这个游戏的图片。可靠来源是 `GetOwnedGames` 返回的 `img_icon_url`(一段 hash),拼成
+  `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/<appid>/<hash>.jpg` —— 别猜 CDN 路径,设之前先 HEAD 一下确认是 200 + image/*,不然只会留一个破图 icon
+- 建完页面跑 `node tracker.js guides --notion` 登记,然后**重新 fetch 页面**验证(规则九末尾)
+
+原因:Overview 数据库是攻略的主存放处(近百个页面,本地只有 2 个早期文件)。**一个 appid 只能有一个后端**,所以先写成本地 md 之后还得删掉重写成 Notion 页面,白跑一趟。
 
 ### 8.1 确定成就列表和勾选状态
 

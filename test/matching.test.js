@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement } from '../lib/guides.js';
+import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement, collectSubStepTicks } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
 import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
 import { openDb, getGame } from '../lib/db.js';
@@ -123,6 +123,105 @@ describe('本地 markdown 后端', () => {
     // 幂等:再跑一次不该有任何变化
     assert.equal(applyChecks(file, [4]), 0);
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('缩进的 checkbox 挂到上一层(parent 指向父行,和 Notion 的嵌套 to_do 对齐)', () => {
+    const dir2 = join(tmpdir(), 'sat-md-nested');
+    const f = join(dir2, 'n.md');
+    mkdirSync(dir2, { recursive: true });
+    writeFileSync(
+      f,
+      [
+        '- [ ] **父成就**',
+        '  - [ ] 子步骤 1',
+        '    - [ ] 子步骤 1.1',
+        '  - [x] 子步骤 2',
+        '- [ ] **另一个成就**',
+      ].join('\n')
+    );
+    const t = loadTodos(f);
+    assert.equal(t.length, 5);
+    assert.equal(t[0].parent, null, '顶层没有父');
+    assert.equal(t[1].parent, t[0].key, '一层缩进挂到父成就');
+    assert.equal(t[2].parent, t[1].key, '两层缩进挂到上一层子步骤');
+    assert.equal(t[3].parent, t[0].key, '回到一层缩进,重新挂回父成就');
+    assert.equal(t[4].parent, null, '下一个顶层成就不该继承前面的父');
+    rmSync(dir2, { recursive: true, force: true });
+  });
+});
+
+/**
+ * 子步骤联动是本项目唯一"宁可多勾"的地方(见 collectSubStepTicks 的注释),
+ * 所以边界必须钉死:没有"父成就确实解锁"的证据时,一个子步骤都不能勾。
+ */
+describe('子步骤联动勾选', () => {
+  const defs = [
+    { api_name: 'allTech', name_cn: '笨手笨脚', name_en: 'Butterfingers', description: '每种技术都至少失败过一次' },
+  ];
+  const parentText = '**笨手笨脚**\n每种技术都至少失败过一次';
+  const unlocked = new Set(['allTech']);
+
+  test('父成就这次被匹配上 → 它下面没勾的子步骤一起勾,已勾的不重复', () => {
+    const todos = [
+      { key: 1, text: parentText, checked: false, parent: null },
+      { key: 2, text: '技巧 A', checked: false, parent: 1 },
+      { key: 3, text: '技巧 B', checked: true, parent: 1 },
+    ];
+    const matches = [{ key: 1, achievement: ach('笨手笨脚'), text: parentText, via: 'name' }];
+    const subs = collectSubStepTicks(todos, matches, { defs, unlockedApiNames: unlocked });
+    assert.deepEqual(subs.map((s) => s.key), [2]);
+  });
+
+  test('父成就早就勾上了、这次没有新 match → 仍然联动(否则功能对历史攻略等于没用)', () => {
+    const todos = [
+      { key: 1, text: parentText, checked: true, parent: null },
+      { key: 2, text: '技巧 A', checked: false, parent: 1 },
+    ];
+    const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: unlocked });
+    assert.deepEqual(subs.map((s) => s.key), [2]);
+  });
+
+  test('父成就其实没解锁(框却勾着)→ 一个子步骤都不勾', () => {
+    const todos = [
+      { key: 1, text: parentText, checked: true, parent: null },
+      { key: 2, text: '技巧 A', checked: false, parent: 1 },
+    ];
+    const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: new Set() });
+    assert.equal(subs.length, 0);
+  });
+
+  test('父框没勾、也不在这次 matches 里 → 没有证据,不联动', () => {
+    const todos = [
+      { key: 1, text: parentText, checked: false, parent: null },
+      { key: 2, text: '技巧 A', checked: false, parent: 1 },
+    ];
+    const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: unlocked });
+    assert.equal(subs.length, 0);
+  });
+
+  test('父框反查不到唯一成就(攻略没抄描述、名字也对不上)→ 不联动', () => {
+    const todos = [
+      { key: 1, text: '随手写的一行说明', checked: true, parent: null },
+      { key: 2, text: '技巧 A', checked: false, parent: 1 },
+    ];
+    const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: unlocked });
+    assert.equal(subs.length, 0);
+  });
+
+  test('子步骤自己还有子步骤,一路往下勾', () => {
+    const todos = [
+      { key: 1, text: parentText, checked: true, parent: null },
+      { key: 2, text: '子步骤 1', checked: false, parent: 1 },
+      { key: 3, text: '子步骤 1.1', checked: false, parent: 2 },
+    ];
+    const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: unlocked });
+    assert.deepEqual(subs.map((s) => s.key).sort(), [2, 3]);
+  });
+
+  test('完全没有嵌套的老攻略:不产生任何联动勾选', () => {
+    const todos = [todo(1, parentText, true), todo(2, '**另一个成就**')];
+    const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: unlocked });
+    assert.equal(subs.length, 0, 'parent 全是 undefined,行为必须和以前一模一样');
   });
 });
 

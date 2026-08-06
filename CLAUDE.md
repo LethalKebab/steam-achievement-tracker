@@ -33,12 +33,12 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `lib/db.js` | SQLite schema + all table accessors. `openDb()` is idempotent (safe `CREATE TABLE IF NOT EXISTS`) |
 | `lib/steam.js` | `SteamClient`: owned games (+Unvetted diff), player achievements, schema, name lookup, store search |
 | `lib/sync.js` | `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, `fullSync`, `computeAgcrStats` |
-| `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check |
+| `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check, guide discovery on start |
 | `lib/api.js` | The 10 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
 | `lib/rpc.js` | Served at `/_rpc.js`. Proxies `rpc.…` chains to `fetch('/api/…')`, plus the sync status bar |
 | `lib/guides.js` | Achievement↔checkbox matching (both directions), both guide backends, guide discovery, `auditGuideTicks` |
 | `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking |
-| `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), path containment check |
+| `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), indentation → `parent` linkage, path containment check |
 | `lib/csv.js` | CSV parse/serialize, spreadsheet import, CSV export |
 | `Dashboard.html` | Frontend SPA. Reads via `rpc.getDashboardData()`, renders a sortable/filterable table |
 | `docs/` | User-facing docs: `configuration.md`, `data.md`, `guides.md`. README stays setup-only — put reference material here |
@@ -75,6 +75,8 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 2. **`syncAchievementStats`** — every row with `sync_locked = 0` gets its counts refreshed. A total higher than last time stamps `new_ach_date` (the Dashboard's "new achievements" badge).
 3. **`syncAchievementSchema`** — per-achievement detail for games that are new to the `achievements` table or bumped in the last 7 days; skips games at exactly 100% and games with no achievement system.
 
+**`serve` also runs guide discovery on start** (`syncGuides()` in `lib/server.js`, off via `syncGuidesOnServe: false`) — the same work as `node tracker.js guides`. It is deliberately **outside** the `syncStaleHours` gate and needs no Steam credentials: a guide page created minutes after a sync must show its Dashboard link immediately, and gating it on staleness would hide new pages for hours. `fullSync` itself does **not** touch guides — a new Notion page will never be discovered by achievement syncing alone, which is why this hook exists at all. Failures are logged and swallowed; a dead Notion token must not take the Dashboard down with it.
+
 There is deliberately no destructive rebuild/reset command. `syncLibrary` reconciles against Steam without discarding rows, and a "wipe and repopulate from `GetOwnedGames`" helper would silently drop every family-shared and manually-maintained row — data the API cannot give back.
 
 ## Steam API quirks
@@ -105,6 +107,19 @@ Matching an unlocked achievement to a guide checkbox is **exact equality against
 The design deliberately prefers a missed checkbox over a wrong one.
 
 **Always `checkbox-sync --dry-run` before a real run.** Ticking a Notion box can't be undone automatically, and failure mode 3 above was caught by a dry run before it wrote anything. Sync only ever ticks, never unticks, so it cannot repair its own mistakes.
+
+### Nested sub-step checkboxes (`collectSubStepTicks`)
+
+Guides nest sub-steps under an achievement — individual shrines, individual techniques, one line per side-quest. Two things were true and both were wrong:
+
+1. **The backends disagreed.** `loadTodos`'s regex is `/^\s*[-*]\s*\[/`, so local markdown always read indented boxes; `fetchAllToDoBlocks` pushed a `to_do` and `continue`d, so Notion never descended into one. Identical guide content behaved differently by backend. Notion now recurses, and both backends set `parent` on each todo (Notion: the enclosing to-do's block id; markdown: inferred from an indentation stack). Containers like `toggle` pass `parent` through unchanged — a checkbox inside a toggle inside an achievement is still that achievement's sub-step.
+2. **Sub-steps could never be auto-ticked.** They aren't achievements; Steam has no data for them and their names match nothing. Name matching can't reach them, ever.
+
+So `collectSubStepTicks` ticks them by **inheritance**: if the parent achievement is known unlocked, its nested boxes get ticked. Evidence of "known unlocked" is only ever (a) a match made this run, or (b) an already-ticked box that `resolveTodoToAchievement` maps to a uniquely-identified, genuinely unlocked achievement. Without (b) the feature would be useless — most achievements were ticked in earlier runs.
+
+**This is the one place in the codebase that prefers over-ticking, and it is deliberately inconsistent with the rule above.** The assumption "parent unlocked ⇒ every listed sub-step was done" holds for *all-of* achievements ("fail every technique at least once") and **fails for *any-of* achievements** — "reach an ending" with nine endings listed underneath would falsely tick eight. The code cannot distinguish them. Mitigations, all of which should stay: cascade is skippable with `--no-cascade`, every cascaded tick is logged as `已勾选子步骤(父成就已解锁)` so `sync_log` can be re-read afterwards, and `--dry-run` lists them separately. If you write a guide whose sub-steps are alternatives rather than requirements, don't nest them under the achievement.
+
+Two consequences elsewhere. `checkboxSync` will consider a 100%-complete game when cascade is on — all achievements unlocked is exactly when sub-steps are most likely ticked-worthy — **but only if that game has rows in `achievements`**, because recognising a parent needs `resolveTodoToAchievement`, which needs names/descriptions. `syncAchievementSchema` deliberately skips games at exactly 100%, and measured against the real database **55 of 55** guide-having perfect games have no schema at all. Widening the filter unconditionally cost 55 wasted page reads plus 55 Steam calls per run and could never tick anything; the `achievementsFor(...).length > 0` guard keeps the candidate count at 42 and starts including a perfect game automatically if its schema ever gets synced. Second, `auditGuideTicks` ignores ticked sub-step boxes that resolve to no achievement — counting them as "undetermined" would drown the one number that measures real audit coverage. A nested box that *does* resolve to an achievement is still audited normally.
 
 ## Reverse lookup (the `audit` command)
 
