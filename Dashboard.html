@@ -253,6 +253,10 @@
       background: rgba(164,208,7,0.15);
       color: var(--good);
     }
+    .badge-played {
+      background: rgba(102,192,244,0.15);
+      color: var(--accent);
+    }
     .badge-btn {
       display: inline-block;
       font-size: 11px;
@@ -500,6 +504,13 @@
   <script src="/_rpc.js"></script>
 
   <script>
+    // 多久之内算"最近在玩":这个窗口同时管置顶和徽章,两处必须一致,
+    // 否则会出现"排在最上面但没有徽章说明为什么"的怪状态
+    const RECENT_PLAY_DAYS = 14;
+    const isRecentlyPlayed = function(g) {
+      return g.playedDaysAgo !== null && g.playedDaysAgo <= RECENT_PLAY_DAYS;
+    };
+
     let allGames = [];
     let sortKey = 'rate';
     let sortDir = -1;
@@ -646,7 +657,14 @@
         return sortDir * ((av > bv) - (av < bv));
       });
 
-      // 重点关注(星标)的游戏置顶,组内保持原来的排序结果
+      // 置顶分两层,组内都保持上面排好的顺序:
+      //   1. 重点关注(★)—— 手动选的,永远压过自动判断
+      //   2. 最近在玩 —— 自动的,只在★之下抢位置
+      // 最近在玩的内部按"多久之前玩的"再排一次,今天玩的排最前面
+      const recent = rows.filter(isRecentlyPlayed)
+        .sort(function(a, b){ return a.playedDaysAgo - b.playedDaysAgo; });
+      const rest = rows.filter(function(g){ return !isRecentlyPlayed(g); });
+      rows = recent.concat(rest);
       rows = rows.filter(function(g){ return g.priority; }).concat(rows.filter(function(g){ return !g.priority; }));
 
       const body = document.getElementById('gameTableBody');
@@ -667,6 +685,9 @@
         const newAchBadge = (g.newAchDaysAgo !== null && g.newAchDaysAgo <= 30)
           ? '<span class="badge badge-new">🆕 ' + g.newAchDaysAgo + '天前新增成就</span>'
           : '';
+        const playedBadge = isRecentlyPlayed(g)
+          ? '<span class="badge badge-played">🎮 ' + (g.playedDaysAgo === 0 ? '今天在玩' : g.playedDaysAgo + '天前玩过') + '</span>'
+          : '';
         const heartClass = 'icon-btn' + (g.favorite ? ' active-heart' : '');
         const starChar = g.priority ? '★' : '☆';
         const starClass = 'icon-btn' + (g.priority ? ' active-star' : '');
@@ -678,7 +699,7 @@
           + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '">' + starChar + '</button>'
           + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '">' + heartSvg(g.favorite) + '</button>'
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-          + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + newAchBadge + '</div>'
+          + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
           + guideBtn
           + '<button class="delete-btn" data-delete-appid="' + g.appid + '" title="删除这一行">🗑</button>'
           + '</div>';
