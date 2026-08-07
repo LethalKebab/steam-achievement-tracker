@@ -18,9 +18,9 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at`
+`appid` (primary key) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at`
 
-Two decisions worth knowing before you write queries:
+Three decisions worth knowing before you write queries:
 
 - **"This game has no achievements" is `has_achievements = 0` with `NULL` counts** — not a `0` total, and not a string like `N/A` sitting in a numeric column. `total IS NULL AND has_achievements IS NULL` means "not synced yet", which is a different thing.
 - **`status` and `sync_locked` are separate columns.** `status` is the label you see and sort by (`''`, `Unvetted`, `Manual`); `sync_locked` is what actually makes a sync skip the row. The Dashboard moves both together, but you can keep the label while re-enabling the daily refresh:
@@ -30,6 +30,14 @@ Two decisions worth knowing before you write queries:
   ```
 
   If a row stubbornly won't update, check `sync_locked` first — that's almost always why.
+
+- **`last_played` and `stats_checked_at` drive which rows the automatic sync bothers to check** (see `sweepBudget` in [configuration.md](configuration.md)). `last_played` is Steam's `rtime_last_played` as it stood the last time we successfully read that game; `stats_checked_at` is when that read happened. Both are written **only after a real answer from Steam** — a rate-limited game leaves them alone, so it stays first in line next time rather than being recorded as "already checked".
+
+  `stats_checked_at` is deliberately not `updated_at`: `updated_at` moves whenever the row changes at all, including when you toggle ♥ or ★ from the Dashboard, so it can't answer "when did we last ask Steam about this". To force a game back to the front of the queue:
+
+  ```sql
+  UPDATE games SET stats_checked_at = NULL WHERE appid = '...';
+  ```
 
 ## What Steam can't tell us
 

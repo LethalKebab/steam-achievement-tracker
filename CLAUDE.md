@@ -43,6 +43,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), indentation → `parent` linkage, path containment check |
 | `lib/csv.js` | CSV parse/serialize, spreadsheet import, CSV export |
 | `Dashboard.html` | Frontend SPA. Reads via `rpc.getDashboardData()`, renders a sortable/filterable table |
+| ↳ row order | Two pin layers over the chosen sort: **★ priority beats 🎮 recently-played** — the manual choice always outranks the automatic signal. `RECENT_PLAY_DAYS` (14) governs both the pin and the badge; keep them on one constant or a row can sort to the top with nothing explaining why. Recently-played rows sort by `playedDaysAgo` among themselves. |
 | `docs/` | User-facing docs: `configuration.md`, `data.md`, `guides.md`. README stays setup-only — put reference material here |
 
 ### The frontend ↔ backend contract
@@ -56,28 +57,54 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 - `steamApiKey` / `steamId` — required for anything touching Steam
 - `language` (default `schinese`) — affects game and achievement names
 - `port` (8777), `syncStaleHours` (12, `0` disables sync-on-open), `requestDelayMs` (300)
+- `sweepBudget` (40), `maxStatsAgeDays` (7), `perfectGameMaxAgeDays` (3) — phase 2 sampling, see "Sync behavior". Only the Dashboard auto-sync and `sync --fast` read these; plain `sync` ignores them.
 - `notion.token`, `notion.overviewDbId` — guide sync only. The DB ID used to be hardcoded in source; it's config now.
 
 **Never hardcode credentials, and never commit `config.json` or `data/`.** Both are gitignored. The repo is public.
 
 ## Data model (`games` table)
 
-`appid` (PK) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at`
+`appid` (PK) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at`
 
 - `status`: `''` (normal), `'Unvetted'` (Steam Profile Features Limited), `'Manual'` (hand-maintained).
 - `has_achievements = 0` replaces the old `'N/A'` string in the numeric total column. `NULL` means "not synced yet".
 - **`sync_locked` is what the sync actually checks**, not `status`. They are separate columns because "skip the daily achievement sync" and "pin this row's label against Steam re-classifying it Unvetted" are different wishes — conflate them and you cannot have one without the other. The Dashboard moves both together (`setManualStatus` sets both); diverge them by hand when you actually want to.
 - `family` is purely informational and never affects sync behavior. It exists because "not in `GetOwnedGames`" and "should skip achievement sync" are two *different* facts.
+- **`last_played` / `stats_checked_at` are the sampling state for phase 2** (see below). `last_played` is `rtime_last_played` as of the last *successful* read; `stats_checked_at` is when that read happened. `updated_at` cannot substitute — it moves on any row change, including a ♥ toggle from the Dashboard, so it can't answer "when did we last ask Steam". Written by `markStatsChecked()`, never on a `retry`.
+- New columns need `ALTER TABLE`, not just an edit to `SCHEMA`. `SCHEMA` is `CREATE TABLE IF NOT EXISTS` and does nothing to an existing table — `migrate()` in `lib/db.js` walks `ADDED_COLUMNS` against `PRAGMA table_info`. Add to **both** when adding a column.
 
 ## Sync behavior
 
 `fullSync` runs three phases in order over the whole library, with no cursor and no runtime cap. Ctrl+C mid-run is safe — each game is committed as it completes, so re-running only redoes work that was in flight.
 
 1. **`syncLibrary`** — new owned games get inserted (with a name lookup); existing *owned* rows get their `Unvetted` stamp refreshed, except `'Manual'` ones. Rows whose appid is **not** in the current `GetOwnedGames` snapshot are left completely untouched — that's the preservation rule (it keys off ownership, not `status`).
-2. **`syncAchievementStats`** — every row with `sync_locked = 0` gets its counts refreshed. A total higher than last time stamps `new_ach_date` (the Dashboard's "new achievements" badge).
+2. **`syncAchievementStats`** — refreshes counts for rows with `sync_locked = 0`. A total higher than last time stamps `new_ach_date` (the Dashboard's "new achievements" badge). **Which rows get checked is decided by `selectStatsTargets()` — see "Phase 2 sampling" below.**
 3. **`syncAchievementSchema`** — per-achievement detail for games that are new to the `achievements` table or bumped in the last 7 days; skips games at exactly 100% and games with no achievement system.
 
 **`serve` also runs guide discovery on start** (`syncGuides()` in `lib/server.js`, off via `syncGuidesOnServe: false`) — the same work as `node tracker.js guides`. It is deliberately **outside** the `syncStaleHours` gate and needs no Steam credentials: a guide page created minutes after a sync must show its Dashboard link immediately, and gating it on staleness would hide new pages for hours. `fullSync` itself does **not** touch guides — a new Notion page will never be discovered by achievement syncing alone, which is why this hook exists at all. Failures are logged and swallowed; a dead Notion token must not take the Dashboard down with it.
+
+### Phase 2 sampling — `achieved` and `total` do not change for the same reasons
+
+This is the whole design, and getting it wrong loses data *silently* (a skipped row doesn't error, it just leaves a stale number on the Dashboard forever):
+
+- **`achieved` is a fact about the account.** It cannot change unless you played. Gating on `rtime_last_played` is exactly correct for it.
+- **`total` is a fact about the game.** A developer patch adds achievements with zero playtime, which drops a 100% game below 100%. **Gating that on `rtime` is simply wrong**, and was the flaw in the first version of this design.
+
+So `selectStatsTargets()` unions three groups:
+
+1. **played** — `rtime_last_played` exceeds the stored `last_played`. Keeps `achieved` exact.
+2. **unowned** — appid absent from the `GetOwnedGames` snapshot (family-shared / delisted / hand-added). No timestamp exists for these, so they are checked every run. Freezing them out would contradict the "a game can vanish from `GetOwnedGames` while `GetPlayerAchievements` keeps working" quirk below.
+3. **sweep** — rows overdue for a re-check, capped at `sweepBudget` per run. This is the only thing that catches a retro-added achievement, so **do not remove it as an optimisation.**
+
+Details that are load-bearing:
+
+- **The sweep sorts by *overdue ratio* (`age / itsOwnDeadline`), not by absolute age.** Perfect games expire in 3 days and everything else in 7; sorting by raw age lets an 8-day-old ordinary game jump ahead of a 4-day-old perfect one, which makes the shorter deadline decorative. Pinned in `test/selection.test.js`.
+- **`markStatsChecked` is never called on a `retry`.** Recording a rate-limited game as "just checked" would push it to the back of the queue and turn throttling into silent data loss.
+- **A row with no baseline (`stats_checked_at IS NULL`) is always checked, uncapped.** The first run after this migration is therefore a full ~160 s sync; every run after is ~8 s. That is intended — there is nothing to compare against until the baseline exists.
+- **No `playSnapshot` ⇒ check everything.** `node tracker.js sync` deliberately stays a true full sync; `sync --fast` and the Dashboard's auto-sync opt in by passing `selection`. Keep that escape hatch.
+- **Thresholds are targets, not guarantees** — `sweepBudget` binds first. At 40 with the Dashboard opened ~twice daily the cycle lands on the intended 3/7 days; at once daily it stretches to ~5/11.5. Measured, not estimated.
+
+**`stats.bumped` must stay visible.** It was computed and thrown away on the Dashboard path for a while (only the CLI printed it) — which is backwards, since a retro-added achievement is precisely the change you cannot notice on your own. It now reaches `syncState` → the status bar, and that notice deliberately does **not** auto-dismiss.
 
 There is deliberately no destructive rebuild/reset command. `syncLibrary` reconciles against Steam without discarding rows, and a "wipe and repopulate from `GetOwnedGames`" helper would silently drop every family-shared and manually-maintained row — data the API cannot give back.
 
@@ -137,7 +164,9 @@ That helper uses loose substring matching, which is banned in the tick path. The
 
 ## Known pitfalls
 
-- **Games with `has_achievements = 0` are retried on every sync**, not permanently excluded. They get re-marked if Steam still says no stats; harmless.
+- **The 🎮 recently-played badge can never appear on a family-shared / delisted row.** It derives from `last_played`, which comes from `GetOwnedGames`; rows absent from that response have no timestamp at all and Steam offers no other source. Looks like a bug, isn't one.
+- **Games with `has_achievements = 0` are retried**, not permanently excluded. They get re-marked if Steam still says no stats; harmless. `GetOwnedGames`'s `has_community_visible_stats` flag predicts this set exactly (verified 26/26 on the real library) and skipping them would save 26 calls per full pass — **this was considered and deliberately rejected.** The moment a game adds achievements is the moment that flag flips, and by then we'd have stopped asking. Trading a permanent blind spot for ~11 s is a bad deal.
+- **`test/matching.test.js` and `test/selection.test.js` cover different failure classes.** Matching protects the user's *notes* (a wrong tick corrupts a guide). Selection protects the user's *data* (a skipped row silently freezes a number). Both fail quietly in production, which is why both are pinned.
 - **`sync_locked = 1` rows are never touched by any sync phase.** If a row "won't update," check that first.
 - **Notion page identity must use the normalized UUID**, never raw URL text — Notion sometimes prefixes URLs with a title slug, so the same page's URL differs between queries. Comparing raw URLs once caused already-linked pages to be treated as new and overwrite curated names (`normalizeNotionId` in `lib/notion.js`).
 - **One appid, one guide backend.** Markdown discovery won't overwrite a registered Notion guide unless `--force`.
