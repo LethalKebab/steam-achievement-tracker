@@ -6,7 +6,7 @@
  * node:http 起 Dashboard),不需要 npm install,不需要任何外部账号或部署。
  *
  *   node tracker.js init            填 Steam 凭据(只需要跑一次;--notion 填 Notion token)
- *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情)
+ *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情;--fast 只查该查的)
  *   node tracker.js serve           起本地 Dashboard,数据太旧会自动后台同步
  *   node tracker.js status          看一眼当前数据和 AGCR
  *   node tracker.js import <目录>   从表格导出的 CSV 导入数据
@@ -228,20 +228,38 @@ async function cmdInit() {
 }
 
 async function cmdSync() {
-  const { db, steam } = withSteam();
+  const { config, db, steam } = withSteam();
   const p = progressPrinter();
   const onProgress = makeProgressHandler(p);
   const only = ['library', 'achievements', 'schema'].filter((f) => flags.has('--' + f));
 
-  console.log('开始同步(Ctrl+C 可以随时停,已经写进库的数据不会丢)\n');
+  // 默认全量:命令行得留一个"跑完肯定什么都不漏"的入口。
+  // --fast 用和 Dashboard 自动同步一样的取样规则(见 lib/sync.js selectStatsTargets)
+  const selection = flags.has('--fast')
+    ? {
+        sweepBudget: config.sweepBudget,
+        maxStatsAgeDays: config.maxStatsAgeDays,
+        perfectGameMaxAgeDays: config.perfectGameMaxAgeDays,
+      }
+    : null;
+
+  console.log(
+    selection
+      ? '开始同步(--fast:只查玩过的 + 轮换复查一批)\n'
+      : '开始同步(Ctrl+C 可以随时停,已经写进库的数据不会丢)\n'
+  );
   const t0 = Date.now();
 
   if (only.length === 0) {
-    const r = await fullSync(db, steam, { onProgress });
+    const r = await fullSync(db, steam, { onProgress, selection });
     p.done();
     console.log(`  库:owned ${r.library.ownedCount} 款(Unvetted ${r.library.unvettedCount} 款),新增 ${r.library.added.length} 款,Unvetted 标记更新 ${r.library.restamped} 处`);
     if (r.library.added.length) console.log(`     新增:${r.library.added.map((a) => a.name).join('、')}`);
     console.log(`  成就完成数:更新 ${r.stats.updated} 款,无成就系统 ${r.stats.noSystem} 款,留待重试 ${r.stats.retried} 款`);
+    const s = r.stats.selection;
+    if (s.gated) {
+      console.log(`     取样:查了 ${s.total} 款(玩过 ${s.played} / 不在 owned ${s.unowned} / 轮换复查 ${s.swept})` + (s.sweepPending ? `,${s.sweepPending} 款排队等下次` : ''));
+    }
     if (r.stats.bumped.length) console.log(`     🆕 成就总数变多了(游戏更新):${r.stats.bumped.join('、')}`);
     console.log(`  成就详情:处理 ${r.schema.processed}/${r.schema.candidates} 款,查不到定义 ${r.schema.skippedNoSchema} 款`);
   } else {
@@ -441,6 +459,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js init                    填 Steam API Key 和 SteamID64(跑一次)
               init --notion               填 Notion token(只有要用攻略同步才需要)
   node tracker.js sync                    全量同步:库 + 成就完成数 + 成就详情
+              sync --fast                 只查玩过的 + 轮换复查一批(和 Dashboard 一样)
               sync --library              只检查新游戏
               sync --achievements         只刷成就完成数
               sync --schema               只同步成就详情
