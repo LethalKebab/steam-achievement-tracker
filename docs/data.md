@@ -1,6 +1,6 @@
 # The data
 
-Everything is in `data/steam.db`, a single SQLite file (gitignored). No server, no migrations to run — `openDb()` creates the tables if they're missing. Open it with anything:
+Everything is in `data/steam.db`, a single SQLite file (gitignored). `openDb()` creates the tables if they're missing and is safe to call repeatedly, so there is no separate migration step to run. Open the file with anything:
 
 ```bash
 sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DESC LIMIT 10"
