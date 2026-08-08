@@ -25,12 +25,15 @@ No build step, nothing to deploy — edit and re-run. `serve` doesn't hot-reload
 
 **`lib/api.js` method names and return shapes are a contract with `Dashboard.html`** (which calls them through `lib/rpc.js`). A method returning `{error: '...'}` is a *successful* call — the frontend checks `result.error` itself; only thrown/network errors hit the failure handler. New Dashboard method = add it to `lib/api.js`; `rpc.js` proxies any name and needs no change.
 
+**A page refresh never touches Steam.** `getDashboardData()` is a pure DB read, and the `syncStaleHours` check runs once at `serve` startup. Steam-facing syncs come from exactly one function, `startBackgroundSync()` in `lib/server.js` — used by both the startup auto-sync and the Dashboard's 立即同步 button (`api.startSync`). **Keep it one function:** it holds the only concurrency guard, and two entry points into `fullSync` would let a click during the startup sync run two of them over the same database. The button skips the staleness gate but keeps `selection`, so it's the sampled ~8 s sync.
+
 ## Sync phases (`lib/sync.js`)
 
 `fullSync` = `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, over the whole library in one pass. No cursor, no runtime cap; Ctrl+C is safe because each game is committed as it completes.
 
 - Rows whose appid is **not** in the current `GetOwnedGames` snapshot are left entirely untouched by `syncLibrary`. The preservation rule keys off *ownership*, not `status`.
 - `syncAchievementStats` skips rows on **`sync_locked = 1`**, not on `status`. If a row won't update, check that first.
+- **Which rows phase 2 checks is decided by `selectStatsTargets()`**, and only when a `selection` is passed (the Dashboard auto-sync and `sync --fast`; plain `node tracker.js sync` stays a true full pass). It unions *played* (`rtime_last_played` moved), *unowned* (absent from `GetOwnedGames`, so no timestamp exists), and a budgeted *sweep*. The split exists because `achieved` and `total` change for different reasons: `achieved` is a fact about the account and can't move without playing, but `total` is a fact about the *game* — a developer patch adds achievements with zero playtime — so gating `total` on `rtime` is simply wrong. The sweep is the only thing that catches that; don't remove it as an optimisation.
 - No destructive rebuild exists, deliberately: a "wipe and repopulate from `GetOwnedGames`" helper would silently drop every family-shared and manually-maintained row, and the API cannot give that data back.
 
 ## Steam Web API quirks (verified, don't re-discover)
@@ -80,8 +83,10 @@ sqlite3 data/steam.db "SELECT COUNT(*) FROM achievements WHERE appid = '3117820'
 
 ## `games` table schema
 
-`appid` (PK) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` (♥) / `priority` (★) / `family` / `new_ach_date` / `updated_at`
+`appid` (PK) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` (♥) / `priority` (★) / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at`
 
 - `status`: `''` normal, `'Unvetted'`, `'Manual'`
 - `has_achievements = 0` replaces the old `'N/A'` string in a numeric column; `NULL` = not synced yet
 - Toggle `family` from the Dashboard's "家庭" badge — see quirk #10 for why it's a separate column
+- `last_played` / `stats_checked_at` are the phase-2 sampling state. `updated_at` cannot substitute: it moves on *any* row change, including a ♥ toggle, so it can't answer "when did we last ask Steam about this game".
+- Adding a column needs an `ALTER TABLE`, not just an edit to `SCHEMA` — `SCHEMA` is `CREATE TABLE IF NOT EXISTS` and does nothing to an existing DB. Add to **both** `SCHEMA` and `ADDED_COLUMNS` in `lib/db.js`.

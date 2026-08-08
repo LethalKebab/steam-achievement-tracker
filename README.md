@@ -34,12 +34,14 @@ That's it. `init` saves your credentials to `config.json` (gitignored, readable 
 ## Everyday use
 
 ```bash
-node tracker.js serve     # the Dashboard (re-syncs in the background if data is over 12h old)
+node tracker.js serve     # the Dashboard (re-syncs on startup if data is over 12h old)
 node tracker.js sync      # refresh now
 node tracker.js status    # quick stats, no network
 ```
 
-There's no scheduled job — data refreshes when you open the Dashboard, or when you ask. Nothing runs while your machine is asleep. `node tracker.js help` lists every command.
+There's no scheduled job — data refreshes when you start `serve`, when you press **立即同步** on the Dashboard, or when you ask on the command line. Nothing runs while your machine is asleep.
+
+Note the staleness check happens when the **server starts**, not on every page view: refreshing the browser re-reads the local database but never contacts Steam. If you leave `serve` running for days, use the Dashboard's 立即同步 button to pull fresh data. `node tracker.js help` lists every command.
 
 ## Optional: guide checkboxes
 
