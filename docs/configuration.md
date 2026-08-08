@@ -31,7 +31,9 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 
 **`language`** — passed to Steam as the `l=` parameter, so it changes the names you see for games and achievements. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
 
-**`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a full sync in the background and shows a progress bar in the corner of the page. Set it to `0` if you'd rather only ever sync manually.
+**`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
+
+Either way, the **立即同步** button next to the "上次同步" line on the Dashboard starts a sync on demand, ignoring `syncStaleHours` entirely. It's the same background sync, so the usual progress bar and automatic refresh apply, and the button greys out while one is running — including a sync you started from the CLI or another tab.
 
 **`syncGuidesOnServe`** — when `serve` starts it also runs guide discovery, the same thing `node tracker.js guides` does: scan `guides/*.md` and the Notion guide database for pages carrying an `appid:` line, and register any new ones so their links appear on the Dashboard. Deliberately **not** gated by `syncStaleHours` — you often create a guide page minutes after a sync, when achievement data is still fresh, and the link needs to show up now rather than in twelve hours. It needs no Steam credentials, and a failure (expired Notion token, API down) is logged and otherwise ignored. Costs a couple of Notion API calls per start, plus one page read per not-yet-registered page; set it to `false` to skip it.
 
@@ -80,5 +82,5 @@ The server only ever listens on `127.0.0.1`, so the Dashboard is reachable from 
 
 There is no built-in scheduler. Two ways to get regular updates:
 
-- **Do nothing** — opening the Dashboard syncs in the background when data is stale (see `syncStaleHours` above).
+- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup.
 - **A real daily job** — on macOS, a launchd plist running `node tracker.js sync`. Note it only fires while the machine is awake; launchd will run a missed job on wake, but a machine that's off for a week syncs nothing.

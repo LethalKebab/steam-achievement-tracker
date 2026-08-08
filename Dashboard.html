@@ -34,6 +34,33 @@
       font-size: 13px;
       margin-bottom: 24px;
     }
+    .subtitle-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .subtitle-row .subtitle { margin-bottom: 0; }
+    .sync-btn {
+      background: var(--panel-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 5px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .sync-btn:hover:not(:disabled) {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #0e141b;
+    }
+    .sync-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .sync-btn:disabled { opacity: 0.5; cursor: default; }
+    .sync-msg { font-size: 12px; color: var(--text-dim); }
+    .sync-msg.error { color: var(--low); }
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -412,7 +439,12 @@
 </head>
 <body>
   <h1>Steam Achievement Tracker</h1>
-  <div class="subtitle" id="lastUpdated">加载中...</div>
+  <div class="subtitle-row">
+    <div class="subtitle" id="lastUpdated">加载中...</div>
+    <button class="sync-btn" id="syncNowBtn"
+            title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。">立即同步</button>
+    <span class="sync-msg" id="syncMsg"></span>
+  </div>
 
   <div class="cards">
     <div class="card">
@@ -1054,6 +1086,60 @@
     }
 
     loadDashboard();
+
+    // ---- 「立即同步」按钮 ----------------------------------------------------
+    // 这个按钮只负责"发起"。进度提示条、跑完后的就地刷新、新增成就提示,全都已经在
+    // lib/rpc.js 里为启动时的自动同步实现过了,手动同步复用同一套,这里不重复造。
+    const syncBtn = document.getElementById('syncNowBtn');
+    const syncMsg = document.getElementById('syncMsg');
+    // 点下去到第一次轮询确认 running 之间有最多 3 秒空窗,期间轮询可能还带着旧的
+    // running:false 回来,会把按钮闪回可点。这个标记就是盖住那段空窗的。
+    let syncStarting = false;
+
+    syncBtn.addEventListener('click', function() {
+      syncStarting = true;
+      syncBtn.disabled = true;
+      syncMsg.className = 'sync-msg';
+      syncMsg.textContent = '正在启动...';
+
+      rpc.withSuccessHandler(function(res) {
+        if (res && res.error) {
+          syncStarting = false;
+          syncBtn.disabled = false;
+          syncMsg.className = 'sync-msg error';
+          syncMsg.textContent = res.error;
+          return;
+        }
+        syncMsg.textContent = '';
+      }).withFailureHandler(function(err) {
+        syncStarting = false;
+        syncBtn.disabled = false;
+        syncMsg.className = 'sync-msg error';
+        syncMsg.textContent = '启动同步失败: ' + err.message;
+      }).startSync();
+    });
+
+    // lib/rpc.js 每 3 秒回调一次后台同步状态。按钮跟着后端的真实状态走,而不是自己记——
+    // 这样 CLI 或另一个标签页发起的同步同样会把按钮按下去,同步失败时也能解禁
+    // (失败那条路径故意不触发 reloadDashboard,只靠 loadDashboard 的话按钮就卡死了)。
+    let wasSyncRunning = false;
+    window.onSyncState = function(s) {
+      if (s.running) syncStarting = false;
+      syncBtn.disabled = s.running || syncStarting;
+      syncBtn.textContent = s.running ? '同步中...' : '立即同步';
+
+      // 只清掉"正在启动..."这类过程提示。错误必须留着:轮询每 3 秒来一次,
+      // 无条件清空会把刚显示出来的报错冲掉,而那是点击唯一的反馈。
+      // (真会撞上的场景:CLI 或另一个标签页刚发起同步,按钮这边还没轮询到就被点了)
+      if (s.running && !syncMsg.classList.contains('error')) syncMsg.textContent = '';
+
+      // 反过来,同步一跑完,"同步已经在跑了"这条就过期了——留着就是在报假警。
+      if (wasSyncRunning && !s.running) {
+        syncMsg.className = 'sync-msg';
+        syncMsg.textContent = '';
+      }
+      wasSyncRunning = s.running;
+    };
 
     // 后台同步结束后 lib/rpc.js 会调这个就地刷新数据。暴露成全局是故意的:
     // 用 location.reload() 会把搜索词、筛选勾选、排序状态全清掉,那些是用户自己设的。

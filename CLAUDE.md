@@ -36,7 +36,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `lib/steam.js` | `SteamClient`: owned games (+Unvetted diff), player achievements, schema, name lookup, store search |
 | `lib/sync.js` | `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, `fullSync`, `computeAgcrStats` |
 | `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check, guide discovery on start |
-| `lib/api.js` | The 10 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
+| `lib/api.js` | The 11 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
 | `lib/rpc.js` | Served at `/_rpc.js`. Proxies `rpc.…` chains to `fetch('/api/…')`, plus the sync status bar |
 | `lib/guides.js` | Achievement↔checkbox matching (both directions), both guide backends, guide discovery, `auditGuideTicks` |
 | `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking |
@@ -48,7 +48,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 
 ### The frontend ↔ backend contract
 
-`Dashboard.html` makes 11 calls shaped like `rpc.withSuccessHandler(fn).withFailureHandler(fn).method(args)`, served by `lib/rpc.js`. **Keep the contract:** a method that returns `{error: '...'}` is a *successful* call (the frontend inspects `result.error` itself); only network/thrown failures reach the failure handler. Adding a Dashboard method means adding it to `lib/api.js` — `rpc.js` proxies any name and needs no changes.
+`Dashboard.html` makes 12 calls shaped like `rpc.withSuccessHandler(fn).withFailureHandler(fn).method(args)`, served by `lib/rpc.js`. **Keep the contract:** a method that returns `{error: '...'}` is a *successful* call (the frontend inspects `result.error` itself); only network/thrown failures reach the failure handler. Adding a Dashboard method means adding it to `lib/api.js` — `rpc.js` proxies any name and needs no changes.
 
 ## Key config
 
@@ -103,6 +103,14 @@ Details that are load-bearing:
 - **A row with no baseline (`stats_checked_at IS NULL`) is always checked, uncapped.** The first run after this migration is therefore a full ~160 s sync; every run after is ~8 s. That is intended — there is nothing to compare against until the baseline exists.
 - **No `playSnapshot` ⇒ check everything.** `node tracker.js sync` deliberately stays a true full sync; `sync --fast` and the Dashboard's auto-sync opt in by passing `selection`. Keep that escape hatch.
 - **Thresholds are targets, not guarantees** — `sweepBudget` binds first. At 40 with the Dashboard opened ~twice daily the cycle lands on the intended 3/7 days; at once daily it stretches to ~5/11.5. Measured, not estimated.
+
+### The 「立即同步」 button
+
+A page refresh only re-reads SQLite — `getDashboardData()` never touches Steam — so the Dashboard has a manual sync button next to the "上次同步" line. It calls `api.startSync()` → `startBackgroundSync()` in `lib/server.js`, **the same function the startup auto-sync uses**. Keep it that way: one function means one concurrency guard, and the guard is the only thing stopping a click that lands during the startup sync from running two `fullSync`es over the same database.
+
+Two deliberate asymmetries with `maybeAutoSync`: the button **ignores `syncStaleHours`** (that gate answers "should we sync unprompted", and a click has already answered it), and it still passes `selection`, so it's the ~8 s sampled sync, not the ~160 s full one. `node tracker.js sync` remains the way to force a true full pass.
+
+The button owns no progress UI of its own — `lib/rpc.js`'s existing 3-second poll drives its label and disabled state through a `window.onSyncState` hook, alongside the status bar and the post-sync `reloadDashboard()`. That hook fires **before** every branch in the poll handler, because two of those branches (sync failed, user mid-edit) return early; hanging it off the end would strand the button on "同步中..." forever. Same reasoning as `reloadDashboard`: the frontend reflects the server's real sync state rather than tracking its own, so a sync started from the CLI or a second tab greys the button out too.
 
 **`stats.bumped` must stay visible.** It was computed and thrown away on the Dashboard path for a while (only the CLI printed it) — which is backwards, since a retro-added achievement is precisely the change you cannot notice on your own. It now reaches `syncState` → the status bar, and that notice deliberately does **not** auto-dismiss.
 
