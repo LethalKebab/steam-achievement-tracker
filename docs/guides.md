@@ -130,6 +130,8 @@ This strictness is deliberate and was arrived at the hard way. Loose matching pr
 
 There's a third case exact matching can't solve on its own: some games contain **two different achievements with identical names**. If only one is unlocked, names alone can't say which checkbox belongs to it. If both are unlocked, any assignment is correct and it proceeds normally.
 
+A name is disqualified individually, not the achievement as a whole. Most collisions are localization slips where only one language is affected — Plague Inc ships two achievements called 生化武器大师 whose English names are `Nano-Virus Master` and `Bioweapon Master` — so if the other language's name is unique, matching still uses it. The colliding name itself is never used either way.
+
 **The fix for that is in how you write the guide, not in the code.** If a checkbox quotes the achievement's official description verbatim, and that description is unique in the game, the box is unambiguously about that achievement — so the sync can tick it correctly even though the names collide. That's why the recommended shape is:
 
 ```

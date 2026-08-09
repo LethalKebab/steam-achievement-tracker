@@ -33,13 +33,21 @@ If you already track this in a spreadsheet, run `node tracker.js import <folder-
 
 ## Everyday use
 
-```bash
-node tracker.js serve     # the Dashboard (re-syncs on startup if data is over 12h old)
-node tracker.js sync      # refresh now
-node tracker.js status    # quick stats, no network
-```
+All commands are `node tracker.js <command>`. The **Network** column tells you which will be slow and which reach outside your machine.
 
-`node tracker.js help` lists every command.
+| Command | What it does | Network |
+|---|---|---|
+| `serve` | Opens the Dashboard on `127.0.0.1:8777`, and syncs in the background if the data is over 12h old | Steam + Notion |
+| `sync` | Refreshes the whole library, no sampling — slower, misses nothing | Steam |
+| `sync --fast` | Sampled refresh: the same work the Dashboard does on startup | Steam |
+| `status` | Completion stats and AGCR | — |
+| `log 30` | The last 30 things written to a guide | — |
+| `checkbox-sync --dry-run` | Previews which guide checkboxes would be ticked, writes nothing | Steam + Notion |
+| `checkbox-sync` | Ticks them | Steam + Notion |
+| `guide-status` | Aligns guide page status with completion | Notion |
+| `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
+
+`node tracker.js help` lists the rest.
 
 ## What runs when
 
@@ -56,13 +64,14 @@ Refreshing the browser does none of it — that re-reads the local database only
 
 ### What each one does
 
-**Find new guide pages** — scans your Notion guide database and `guides/*.md` for pages carrying an `appid:` line and registers the new ones. Deliberately not subject to the staleness check: a page you created five minutes ago should appear on the Dashboard now, not in twelve hours.
+| Job | What it does | How much it covers |
+|---|---|---|
+| **Find new guide pages** | Registers Notion pages and `guides/*.md` files carrying an `appid:` line | Every page, every `serve` start. Not gated by the staleness check, so a page you made five minutes ago appears now rather than in twelve hours |
+| **Library + achievement counts + detail** | The Steam sync, in three phases | Sampled: games you've played since last time, games Steam gives no play time for, and a rotating batch of the rest. A few seconds instead of a few minutes. `sync` skips the sampling and checks everything |
+| **Tick guide checkboxes** | Ticks boxes for achievements you've unlocked | Automatically: only games that changed in that run, so most Dashboard opens make no Notion calls at all. Nested sub-steps are not cascaded there — the command does that |
+| **Update guide page status** | `Done` once a game hits 100%, back to `Staged` if a patch adds achievements and drops it below | Every page, every `serve` start. It compares current state rather than watching for the moment of change, so it still runs when the sync is skipped |
 
-**Library + achievement counts + detail** — the actual Steam sync, in three phases. It runs at startup only when the last one finished more than `syncStaleHours` ago (12 by default); the 立即同步 button ignores that and always runs. Both use sampling, so a routine pass is a few seconds rather than a few minutes: it checks games you've played since last time, games Steam won't report a play time for, and a rotating batch of everything else. `node tracker.js sync` skips the sampling and checks the whole library — slower, but guaranteed to miss nothing. Details in [docs/configuration.md](docs/configuration.md).
-
-**Tick guide checkboxes** — ticks boxes for achievements you've unlocked. On the automatic path it only visits games that changed in that run, so most Dashboard opens make no Notion calls at all. It does not cascade to nested sub-steps there; the command does.
-
-**Update guide page status** — sets a Notion guide page to `Done` once the game hits 100%, and back to `Staged` if a patch adds achievements and drops it below. Runs on every `serve` start, including when the sync is skipped, because it compares current state rather than watching for the moment of change.
+Sampling thresholds and every switch above are in [docs/configuration.md](docs/configuration.md).
 
 ### Worth knowing
 

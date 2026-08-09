@@ -501,3 +501,81 @@ describe('同名成就:攻略抄了描述原文就能救回来', () => {
     assert.equal(m[0].via, 'name');
   });
 });
+
+describe('撞名闸门按名字关,不按成就关', () => {
+  // 全库 12 款撞名游戏里有 9 款**只撞一种语言** —— 是 Steam 本地化写错了,原名分得开。
+  // 以前只要有一种语言撞车,整个成就就被赶进"只能靠描述"那一趟,另一种语言里那个
+  // 完全唯一的名字白白浪费掉。分不出双胞胎的是**名字**,不是成就。
+  //
+  // 放宽的只有"别把唯一的名字一起扔掉"这一点;等值匹配本身一个字没动:
+  // 仍然要求完全相等,仍然不许子串、不许前缀,撞车的那个名字仍然一个都不许用。
+  const DEFS = [
+    { api_name: 'NANO', name_cn: '生化武器大师', name_en: 'Nano-Virus Master', description: '在终极困难模式下打败纳米病毒大师!' },
+    { api_name: 'BIO', name_cn: '生化武器大师', name_en: 'Bioweapon Master', description: '在终极困难模式下打败生化武器大师!' },
+  ];
+  const unsafe = new Set(['生化武器大师']); // 只有中文撞车
+  const nano = [{ apiname: 'NANO', nameCn: '生化武器大师', nameEn: 'Nano-Virus Master' }];
+
+  test('中文撞车、英文唯一 → 靠英文名勾上,而且不碰双胞胎的框', () => {
+    const todos = [
+      { key: 1, text: '生化武器大师(Nano-Virus Master)', checked: false },
+      { key: 2, text: '生化武器大师(Bioweapon Master)', checked: false },
+    ];
+    const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 1);
+    assert.equal(m[0].key, 1, '只能勾英文名对得上的那个');
+    assert.equal(m[0].via, 'name');
+  });
+
+  test('撞车的那个名字仍然一个都不许用', () => {
+    const todos = [{ key: 1, text: '生化武器大师', checked: false }];
+    const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 0, '框里只有撞名的那个名字 → 分不出是哪个,必须放弃');
+  });
+
+  test('靠没撞车的名字救回来的,不算"跳过" —— 不能报假警', () => {
+    const todos = [{ key: 1, text: '生化武器大师(Nano-Virus Master)', checked: false }];
+    const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 1);
+    assert.equal(m.skippedAmbiguous.length, 0, '配上了就不该再报"需人工核对"');
+  });
+
+  test('反过来一样:英文撞车、中文唯一(犹格索托斯的庭院的 "Text" 占位符)', () => {
+    const defs = [
+      { api_name: 'X', name_cn: '寻至世界两端', name_en: 'Text', description: 'd1' },
+      { api_name: 'Y', name_cn: '献给死神塔的花束', name_en: 'Text', description: 'd2' },
+    ];
+    const todos = [
+      { key: 1, text: '寻至世界两端', checked: false },
+      { key: 2, text: '献给死神塔的花束', checked: false },
+    ];
+    const m = matchAchievements([{ apiname: 'X', nameCn: '寻至世界两端', nameEn: 'Text' }], todos, {
+      unsafeNames: new Set(['text']), defs,
+    });
+    assert.equal(m.length, 1);
+    assert.equal(m[0].key, 1);
+    assert.equal(m[0].via, 'name');
+  });
+
+  test('两种语言都撞 → 照旧只能靠描述,真同名一点都不放宽', () => {
+    const defs = [
+      { api_name: 'A', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '偷窃10次且未被察觉' },
+      { api_name: 'B', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '通关且成功偷窃100次' },
+    ];
+    const todos = [{ key: 1, text: '妙手空空(Skilled Thief)', checked: false }];
+    const m = matchAchievements([{ apiname: 'A', nameCn: '妙手空空', nameEn: 'Skilled Thief' }], todos, {
+      unsafeNames: new Set(['妙手空空', 'skilled thief']), defs,
+    });
+    assert.equal(m.length, 0);
+    assert.equal(m.skippedAmbiguous.length, 1);
+  });
+
+  test('描述仍然优先于名字:两条路都通时走描述', () => {
+    const todos = [
+      { key: 1, text: '生化武器大师(Nano-Virus Master)\n在终极困难模式下打败纳米病毒大师!', checked: false },
+    ];
+    const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
+    assert.equal(m.length, 1);
+    assert.equal(m[0].via, 'description', '第一遍先跑 —— 描述比名字精确');
+  });
+});
