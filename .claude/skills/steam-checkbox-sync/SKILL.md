@@ -26,6 +26,10 @@ There is a **third** variant that exact matching cannot fix, found 2026-08-03: s
 
 Only **4** of those 12 have a registered guide (CK3, Civ VI, 鬼谷八荒, Plague Inc), and all four already quote unique official descriptions, so the description-first pass resolves them. The other 8 cost nothing until someone writes a guide for them — worth re-checking with the ambiguity query if a new guide lands for one.
 
+**Most collisions are localization bugs, not real same-names.** Only 3 of the 12 collide in *both* languages (鬼谷八荒, 古剑奇谭二, 了不起的修仙模拟器); 8 are Chinese-side bugs with distinct English names (Civ VI `Frenemy`/`Frenemies`, Plague Inc `Nano-Virus Master`/`Bioweapon Master`, Farm Together differing only by apostrophe glyph…), and 犹格索托斯的庭院 is the reverse — four achievements whose `name_en` is the placeholder `Text`.
+
+That distinction has teeth because **`isAmbiguous()` is per-achievement, not per-name**: if *either* name is in `unsafeNames`, the achievement skips name matching entirely, so a unique English name goes unused. Verified — a box reading exactly `Nano-Virus Master` does not match, even though that string is not in `unsafeNames`. Those guides tick only via their description quotes. Narrowing the gate to the specific colliding name would recover the signal without weakening the equality rule; it has not been done, and it touches the code with the worst false-positive history in the project, so treat it as a decision rather than a cleanup.
+
 Candidate segments are split by: line breaks (including literal `<br>`), then the first colon or dash within a line (half-width ` - ` and full-width ` — ` / ` – ` / `——`), plus the whole string, plus — for the `中文名(English Name)` shape common in the local markdown guides — the Chinese and English halves separately. Adding a new *extraction* rule is fine; weakening the *equality* check is not.
 
 `test/matching.test.js` pins both historical failure modes plus the extraction rules. **Run `node --test` after touching `lib/guides.js`.**
