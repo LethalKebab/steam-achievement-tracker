@@ -44,11 +44,9 @@ node tracker.js checkbox-sync             # everything eligible
 node tracker.js log 30                    # what it did
 ```
 
-**Dry-run before any manual full run.** Ticking a Notion checkbox can't be undone automatically, and a preview costs nothing but time. `--dry-run` reads the pages, runs the identical matching, prints exactly which boxes it would tick, and writes nothing — not even to `sync_log`.
+**Dry-run before any manual full run.** `--dry-run` reads the pages, runs the identical matching, prints exactly which boxes it would tick, and writes nothing — not even to `sync_log`. It earns the wait because the sync only ever **ticks**, never unticks: a wrongly ticked box cannot be undone automatically and has to be fixed by hand.
 
-A game is eligible if it has a registered guide, has an achievement system, and isn't already at 100%. Every run appends to `sync_log`, including skips and failures, so you can audit it later.
-
-Note the sync only ever **ticks** boxes, never unticks. It can't undo a box that was ticked wrongly — that's a manual fix.
+A game is eligible if it has a registered guide, has an achievement system, and isn't already at 100%. Every run appends to `sync_log`, including skips and failures.
 
 ## Automatic ticking
 
