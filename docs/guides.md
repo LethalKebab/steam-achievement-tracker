@@ -44,11 +44,60 @@ node tracker.js checkbox-sync             # everything eligible
 node tracker.js log 30                    # what it did
 ```
 
-**Always dry-run first.** Ticking a Notion checkbox can't be undone automatically, and a preview costs nothing but time. `--dry-run` reads the pages, runs the identical matching, prints exactly which boxes it would tick, and writes nothing — not even to `sync_log`.
+**Dry-run before any manual full run.** Ticking a Notion checkbox can't be undone automatically, and a preview costs nothing but time. `--dry-run` reads the pages, runs the identical matching, prints exactly which boxes it would tick, and writes nothing — not even to `sync_log`.
 
 A game is eligible if it has a registered guide, has an achievement system, and isn't already at 100%. Every run appends to `sync_log`, including skips and failures, so you can audit it later.
 
 Note the sync only ever **ticks** boxes, never unticks. It can't undo a box that was ticked wrongly — that's a manual fix.
+
+## Automatic ticking
+
+Opening the Dashboard, and the 「立即同步」 button on it, both run a tick pass once the achievement sync finishes. It is deliberately narrower than the manual command:
+
+- **Only games that changed in that run** — ones where your unlocked count went up, ones where the developer added achievements, and guide pages registered for the first time that run. Nothing changed means zero Notion calls, which is the usual case.
+- **No sub-step cascade.** Nested boxes under an achievement are only ticked by the manual command, where a dry-run is available first. See the cascade section below for why.
+- **Failures are soft.** An expired Notion token shows a notice on the Dashboard; it doesn't fail the achievement sync or take the page down.
+
+Every tick lands in `sync_log` exactly as the manual command's do, so `node tracker.js log 30` is the review path. The Dashboard also shows a notice naming the first few boxes it ticked, and that notice does not auto-dismiss.
+
+Both halves can be turned off in `config.json`:
+
+```json
+{ "checkboxSyncOnServe": false, "checkboxSyncOnServeCascade": true }
+```
+
+Set the first to `false` to go back to ticking only when you run the command yourself. The second turns the sub-step cascade *on* for the automatic path — off by default on purpose.
+
+One consequence worth knowing: a game that reaches 100% is normally skipped, but a game that reached 100% *in that run* is still visited. Otherwise the achievement that completes a game would never get its box ticked — by the next run the game is already at 100% and would be skipped forever.
+
+## Keeping guide status in step with completion
+
+A Notion guide page's `Status` property is kept aligned with how complete the game is, in both directions:
+
+- Reach 100% → **`Done`**
+- Drop below 100% → back to **`Staged`**
+
+```bash
+node tracker.js guide-status --dry-run   # what it would change
+node tracker.js guide-status             # do it
+```
+
+It also runs on the serve path, right after the checkbox tick — that ordering is deliberate, so a game that just completed gets its last boxes ticked *before* the page is marked done. Turn it off with `"guideStatusOnServe": false`.
+
+Dropping below 100% happens when a developer patches in new achievements. It's the one kind of change that occurs without you playing, so a page stuck on `Done` is exactly the case you'd never notice on your own.
+
+**The rules are written over current state, not over the moment of crossing.** That distinction is the whole design. Crossing 100% exists only once, inside a single sync; a run that sees it but can't write to Notion — no token on that machine, expired credentials, an interrupted process — would lose it forever, since every later run just sees the same value on both sides. Checking current state instead means the pass is idempotent, re-runnable, and repairs itself next time.
+
+The two directions are deliberately not equally aggressive:
+
+| | Touches | Leaves alone |
+|---|---|---|
+| Promote to `Done` | every status except `Done`, `Differed` included | — |
+| Demote to `Staged` | only `Done` | `Paused`, `In progress`, `Not started`, `Differed` |
+
+Promotion is safe to be blunt about: reaching 100% is objective. Demotion is narrow on purpose — a sub-100% page you've set to `Paused` is a decision you made, and rewriting it on every Dashboard open would have you and the tool overwriting each other indefinitely.
+
+Notion-kind guides only; local markdown has no status property. A game whose `total` becomes unknown — Steam reporting no achievement system — is never treated as having dropped below 100%.
 
 ## Auditing for wrong ticks
 

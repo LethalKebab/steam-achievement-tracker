@@ -39,9 +39,37 @@ node tracker.js sync      # refresh now
 node tracker.js status    # quick stats, no network
 ```
 
-There is no scheduled job. Data refreshes when you start `serve`, when you press **立即同步** on the Dashboard, or when you run `sync` on the command line. Nothing runs while your machine is asleep.
+`node tracker.js help` lists every command.
 
-The staleness check runs when the **server starts**, not on every page view: refreshing the browser re-reads the local database but does not contact Steam. If you leave `serve` running for days, use the Dashboard's 立即同步 button to pull fresh data. `node tracker.js help` lists every command.
+## What runs when
+
+**There is no scheduler, and nothing runs on a timer.** Everything is triggered by one of three things: starting `serve`, pressing **立即同步**, or running a command yourself. Nothing happens while your machine is asleep, and nothing happens while `serve` merely sits running — the Dashboard polls every 3 seconds, but only to redraw the progress bar, never to fetch anything.
+
+| | Starting `serve` | 立即同步 | Command line |
+|---|---|---|---|
+| **Find new guide pages** | every time | — | `guides` |
+| **Library + achievement counts + detail** | only if data is stale | every press | `sync`, `sync --fast` |
+| **Tick guide checkboxes** | after a sync, or if a new guide page turned up | after the sync | `checkbox-sync` |
+| **Update guide page status** | every time | after the sync | `guide-status` |
+
+Refreshing the browser does none of it — that re-reads the local database only. The staleness check happens once, when the **server starts**.
+
+### What each one does
+
+**Find new guide pages** — scans your Notion guide database and `guides/*.md` for pages carrying an `appid:` line and registers the new ones. Deliberately not subject to the staleness check: a page you created five minutes ago should appear on the Dashboard now, not in twelve hours.
+
+**Library + achievement counts + detail** — the actual Steam sync, in three phases. It runs at startup only when the last one finished more than `syncStaleHours` ago (12 by default); the 立即同步 button ignores that and always runs. Both use sampling, so a routine pass is a few seconds rather than a few minutes: it checks games you've played since last time, games Steam won't report a play time for, and a rotating batch of everything else. `node tracker.js sync` skips the sampling and checks the whole library — slower, but guaranteed to miss nothing. Details in [docs/configuration.md](docs/configuration.md).
+
+**Tick guide checkboxes** — ticks boxes for achievements you've unlocked. On the automatic path it only visits games that changed in that run, so most Dashboard opens make no Notion calls at all. It does not cascade to nested sub-steps there; the command does.
+
+**Update guide page status** — sets a Notion guide page to `Done` once the game hits 100%, and back to `Staged` if a patch adds achievements and drops it below. Runs on every `serve` start, including when the sync is skipped, because it compares current state rather than watching for the moment of change.
+
+### Worth knowing
+
+- **`node tracker.js sync` does not touch Notion.** It writes to the local database only — no checkbox ticks, no status changes. Those come from `serve`, from 立即同步, or from `checkbox-sync` / `guide-status` run directly.
+- **Leaving `serve` running for days does not keep it fresh.** Press 立即同步, or restart it.
+- The two Notion jobs need a token, and both can be turned off — see `checkboxSyncOnServe` and `guideStatusOnServe` in [docs/configuration.md](docs/configuration.md).
+- Everything written to Notion is recorded in the `sync_log` table: `node tracker.js log 30`.
 
 ## Optional: guide checkboxes
 
@@ -52,7 +80,10 @@ node tracker.js init --notion            # only if you use Notion
 node tracker.js guides                   # find your guide pages
 node tracker.js checkbox-sync --dry-run  # preview; always do this first
 node tracker.js checkbox-sync            # apply
+node tracker.js guide-status             # mark finished games' pages Done
 ```
+
+Once set up, both of these also run on their own — see [What runs when](#what-runs-when). Ticking a Notion checkbox cannot be undone automatically, so preview a manual full run with `--dry-run` first.
 
 Setup and behaviour: [docs/guides.md](docs/guides.md).
 

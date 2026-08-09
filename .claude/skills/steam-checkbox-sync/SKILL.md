@@ -50,7 +50,28 @@ node tracker.js checkbox-sync           # every eligible game
 node tracker.js log 30                  # what it did (also in the sync_log table)
 ```
 
-Every run — change, skip, or failure — is appended to the `sync_log` table (the old "Sync Log" sheet tab) for after-the-fact auditing. Nothing is scheduled: this runs when you run it.
+Every run — change, skip, or failure — is appended to the `sync_log` table (the old "Sync Log" sheet tab) for after-the-fact auditing.
+
+## The automatic path (`serve`)
+
+Since the auto-tick wiring, `checkboxSync` also runs from `lib/server.js` — once when `serve` starts and again after every 「立即同步」 click, chained onto the end of `startBackgroundSync()`. That is the **only** place in the project that writes to Notion without a `--dry-run` in front of it, so it is deliberately narrowed:
+
+- `appids` whitelist — only games whose `achieved`/`total` moved in that run (`stats.changedAppids`, fed by the new `gained` flag from `updateGameStats`) plus guide pages registered for the first time that run. Empty whitelist means zero external calls, and `appids: []` must never be read as "no filter" — see `selectCheckboxCandidates`.
+- `cascade: false` by default (`config.checkboxSyncOnServeCascade`), because the cascade is the one deliberately over-ticking path and the automatic route has no human gate.
+- Errors never propagate — they land in `syncState.tickError` and show as a Dashboard notice, separate from `syncState.error`, so a dead Notion token doesn't present as "achievement sync failed".
+- Kill switch: `config.checkboxSyncOnServe: false`.
+
+## Guide page status (`node tracker.js guide-status`)
+
+`syncGuideStatuses` keeps the Notion page's `Status` in step with completion, both ways: 100% → `Done`, below 100% → `Staged` (a patch added achievements). Also chained into the serve path after the tick pass (`guideStatusOnServe`) — that order matters, so a just-completed game gets its last boxes ticked before the page reads done.
+
+**Convergence, not transition.** Both rules are stated over current state, never over "a game that just crossed 100%". The crossing exists only inside the one sync that writes it; a run that observes it but can't write loses it forever, since later runs see the same value on both sides. This isn't theoretical — the one page needing demotion (Supermarket Together, 28/51) has `new_ach_date = NULL`, so a rule keyed on "we saw `total` grow" would never fire for it. Idempotency is pinned in `test/guide-status.test.js`: the pass runs on every Dashboard open, so a non-idempotent rule means repeated Notion writes.
+
+**Asymmetric by design.** Promotion overwrites everything but `Done`, `Differed` included. Demotion touches **only** `Done` — other sub-100% statuses are the user's workflow state, and rewriting them every run would make user and tool fight. Both are pinned.
+
+Property name/type/options come from `fetchGuideStatusSchema`, never hardcoded: Notion's `status` and `select` are distinct types with different write payloads (`{status:{name}}` vs `{select:{name}}`) and the wrong shape is rejected. Both `Done` and `Staged` are validated up front. This workspace's is `Status`, type `status`, options `Not started / Staged / Paused / In progress / Differed / Done`.
+
+`test/checkbox-selection.test.js` pins the candidate rules. Two of them are easy to break and fail silently: the empty-whitelist semantics above, and the rule that a game which *just* hit 100% is still visited (otherwise the completing achievement's box can never be ticked — by the next run the game is at 100% and gets skipped forever).
 
 ## Known structural cases
 

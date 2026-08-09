@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Steam achievement auto-tracker, running **entirely locally**: SQLite data store + Node CLI + a local HTTP server for the HTML Dashboard. Tracks achievement completion across the user's whole Steam library.
 
-User-facing docs live in `docs/` (`configuration.md`, `data.md`, `guides.md`); `README.md` is deliberately setup-only. Task-scoped guides for specific jobs are in `.claude/skills/`.
+User-facing docs live in `docs/` (`configuration.md`, `data.md`, `guides.md`). `README.md` covers **setup and everyday use** — including "What runs when", the trigger/cadence table for the automatic jobs, since knowing what the tool does on its own is part of using it day to day. Reference material (every config option, the data model, how matching works) goes in `docs/`. Task-scoped guides for specific jobs are in `.claude/skills/`.
 
 ## Stack constraints
 
@@ -30,21 +30,21 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 
 | File | Role |
 |---|---|
-| `tracker.js` | CLI dispatch: `init`, `sync`, `serve`, `status`, `guides`, `checkbox-sync`, `import`, `export`, `log` |
+| `tracker.js` | CLI dispatch: `init`, `sync`, `serve`, `status`, `guides`, `checkbox-sync`, `guide-status`, `audit`, `import`, `export`, `log` |
 | `lib/config.js` | `config.json` load/save, env-var overrides, required-field errors with setup hints |
 | `lib/db.js` | SQLite schema + all table accessors. `openDb()` is idempotent (safe `CREATE TABLE IF NOT EXISTS`) |
 | `lib/steam.js` | `SteamClient`: owned games (+Unvetted diff), player achievements, schema, name lookup, store search |
 | `lib/sync.js` | `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, `fullSync`, `computeAgcrStats` |
-| `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check, guide discovery on start |
+| `lib/server.js` | HTTP server (127.0.0.1 only), `/api/*` dispatch, background sync state + staleness check, guide discovery on start, auto checkbox tick after each sync |
 | `lib/api.js` | The 11 Dashboard methods. **Names and return shapes must match what `Dashboard.html` calls** |
 | `lib/rpc.js` | Served at `/_rpc.js`. Proxies `rpc.…` chains to `fetch('/api/…')`, plus the sync status bar |
-| `lib/guides.js` | Achievement↔checkbox matching (both directions), both guide backends, guide discovery, `auditGuideTicks` |
-| `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking |
+| `lib/guides.js` | Achievement↔checkbox matching (both directions), both guide backends, guide discovery, `auditGuideTicks`, `syncGuideStatuses` |
+| `lib/notion.js` | Notion API client, page-ID normalization, `to_do` block walking, status-property read/write |
 | `lib/markdown.js` | Local markdown guide backend (`- [ ]` → `- [x]`), indentation → `parent` linkage, path containment check |
 | `lib/csv.js` | CSV parse/serialize, spreadsheet import, CSV export |
 | `Dashboard.html` | Frontend SPA. Reads via `rpc.getDashboardData()`, renders a sortable/filterable table |
 | ↳ row order | Two pin layers over the chosen sort: **★ priority beats 🎮 recently-played** — the manual choice always outranks the automatic signal. `RECENT_PLAY_DAYS` (14) governs both the pin and the badge; keep them on one constant or a row can sort to the top with nothing explaining why. Recently-played rows sort by `playedDaysAgo` among themselves. |
-| `docs/` | User-facing docs: `configuration.md`, `data.md`, `guides.md`. README stays setup-only — put reference material here |
+| `docs/` | User-facing docs: `configuration.md`, `data.md`, `guides.md`. README covers setup + everyday use; reference material goes here |
 
 ### The frontend ↔ backend contract
 
@@ -58,6 +58,8 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 - `language` (default `schinese`) — affects game and achievement names
 - `port` (8777), `syncStaleHours` (12, `0` disables sync-on-open), `requestDelayMs` (300)
 - `sweepBudget` (40), `maxStatsAgeDays` (7), `perfectGameMaxAgeDays` (3) — phase 2 sampling, see "Sync behavior". Only the Dashboard auto-sync and `sync --fast` read these; plain `sync` ignores them.
+- `checkboxSyncOnServe` (true), `checkboxSyncOnServeCascade` (false) — the automatic tick pass, see "Automatic checkbox ticking". The cascade default deliberately differs from the CLI's.
+- `guideStatusOnServe` (true) — keep a guide page's `Status` in step with completion in both directions, see "Guide page status".
 - `notion.token`, `notion.overviewDbId` — guide sync only. The DB ID used to be hardcoded in source; it's config now.
 
 **Never hardcode credentials, and never commit `config.json` or `data/`.** Both are gitignored. The repo is public.
@@ -82,6 +84,8 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 3. **`syncAchievementSchema`** — per-achievement detail for games that are new to the `achievements` table or bumped in the last 7 days; skips games at exactly 100% and games with no achievement system.
 
 **`serve` also runs guide discovery on start** (`syncGuides()` in `lib/server.js`, off via `syncGuidesOnServe: false`) — the same work as `node tracker.js guides`. It is deliberately **outside** the `syncStaleHours` gate and needs no Steam credentials: a guide page created minutes after a sync must show its Dashboard link immediately, and gating it on staleness would hide new pages for hours. `fullSync` itself does **not** touch guides — a new Notion page will never be discovered by achievement syncing alone, which is why this hook exists at all. Failures are logged and swallowed; a dead Notion token must not take the Dashboard down with it.
+
+**The three startup jobs are sequenced, not concurrent** (`startupJobs()`). They used to be two fire-and-forget calls; they can't be any more, because each step feeds the next: discovery must finish before the sync knows which guide pages are new, and the tick pass must run after the achievement refresh or it matches against last run's unlock state. Still off the `listen` callback's critical path — the page opens immediately either way.
 
 ### Phase 2 sampling — `achieved` and `total` do not change for the same reasons
 
@@ -109,6 +113,8 @@ Details that are load-bearing:
 A page refresh only re-reads SQLite — `getDashboardData()` never touches Steam — so the Dashboard has a manual sync button next to the "上次同步" line. It calls `api.startSync()` → `startBackgroundSync()` in `lib/server.js`, **the same function the startup auto-sync uses**. Keep it that way: one function means one concurrency guard, and the guard is the only thing stopping a click that lands during the startup sync from running two `fullSync`es over the same database.
 
 Two deliberate asymmetries with `maybeAutoSync`: the button **ignores `syncStaleHours`** (that gate answers "should we sync unprompted", and a click has already answered it), and it still passes `selection`, so it's the ~8 s sampled sync, not the ~160 s full one. `node tracker.js sync` remains the way to force a true full pass.
+
+Sharing one function is also what gives the button its checkbox ticking for free — the tick pass hangs off `startBackgroundSync`'s completion, so both the startup sync and the button get it without a second call site.
 
 The button owns no progress UI of its own — `lib/rpc.js`'s existing 3-second poll drives its label and disabled state through a `window.onSyncState` hook, alongside the status bar and the post-sync `reloadDashboard()`. That hook fires **before** every branch in the poll handler, because two of those branches (sync failed, user mid-edit) return early; hanging it off the end would strand the button on "同步中..." forever. Same reasoning as `reloadDashboard`: the frontend reflects the server's real sync state rather than tracking its own, so a sync started from the CLI or a second tab greys the button out too.
 
@@ -143,7 +149,38 @@ Matching an unlocked achievement to a guide checkbox is **exact equality against
 
 The design deliberately prefers a missed checkbox over a wrong one.
 
-**Always `checkbox-sync --dry-run` before a real run.** Ticking a Notion box can't be undone automatically, and failure mode 3 above was caught by a dry run before it wrote anything. Sync only ever ticks, never unticks, so it cannot repair its own mistakes.
+**Always `checkbox-sync --dry-run` before a manual full run.** Ticking a Notion box can't be undone automatically, and failure mode 3 above was caught by a dry run before it wrote anything. Sync only ever ticks, never unticks, so it cannot repair its own mistakes.
+
+### Automatic checkbox ticking (the one unattended write path)
+
+`serve` and the 立即同步 button both run a tick pass after the achievement sync (`runCheckboxSync` in `lib/server.js`, off via `checkboxSyncOnServe: false`). **This is the only place in the project that writes to Notion without a dry-run in front of it**, so every narrowing below is load-bearing — do not widen one without replacing the safety it provided:
+
+- **`appids` whitelist, not the full candidate set.** Only rows whose `achieved`/`total` actually moved this run (`stats.changedAppids`, fed by the new `gained` flag out of `updateGameStats`) plus guide pages registered for the first time this run. A full pass is ~40 games × (1 Steam call + 1 Notion page read + 350 ms) on *every* Dashboard open, nearly always to find nothing. **`appids: []` means "run nothing", never "no filter"** — writing `appids?.length ? … : everything` turns the common case (nothing changed) into a full scan and silently undoes the whole design. Pinned in `test/checkbox-selection.test.js`.
+- **`gained` is false when there's no baseline.** On the first sync of a row, `achieved` goes `NULL → n`; counting that as "gained" would make the entire library a candidate on the run where that's most expensive.
+- **Cascade off by default here** (`checkboxSyncOnServeCascade`), unlike the CLI. The cascade is the one deliberately over-ticking path, and this route has no human gate in front of it.
+- **A game that hit 100% *this run* is still visited.** The 100%-skip used to be coupled to `cascade` in one expression; decoupling it was a real bug fix, not a tidy-up. With cascade off, the achievement that *completes* a game could never be ticked automatically — by the next run the game is at 100% and is skipped, forever. The `achievementsFor(...).length > 0` guard still applies (the 55/55 no-schema case), so this costs nothing on the games that rationale was about.
+- **Failures are soft and separate.** Errors go to `syncState.tickError`, never `syncState.error`. A dead Notion token must not present as "achievement sync failed" when the achievement data synced fine.
+
+Review is `sync_log` + `node tracker.js log` — the auto path writes the same rows the CLI does. The Dashboard also raises a notice naming the first few ticks, and like the `bumped` notice it **does not auto-dismiss**: it is reporting a write to the user's own notes.
+
+### Guide page status (`Done` ⇄ `Staged`)
+
+The Notion guide page's `Status` property is kept in step with completion, **both directions** — `syncGuideStatuses` in `lib/guides.js`, run by `node tracker.js guide-status` and, on the serve path, right after the tick pass (`guideStatusOnServe`).
+
+- 100% and not `Done` → **`Done`**.
+- Below 100% and currently `Done` → **`Staged`**. Effectively always a developer patch adding achievements, which is the one kind of change that happens without you playing.
+
+Load-bearing details:
+
+- **It converges on state; it does not watch for the transition.** Crossing 100% (in either direction) exists only for the instant `updateGameStats` writes it. Any run that observes it but cannot write — a CLI `sync` on a box with no Notion token, an interrupted process, an expired token — loses it permanently, because every later run sees the same value on both sides and can infer nothing. The rules are therefore stated over current state, which is idempotent, self-healing and re-runnable. **Do not "optimise" this into transition detection.** Measured proof: the one page that needed demoting (Supermarket Together, 28/51) has `new_ach_date = NULL`, so a rule gated on "we saw `total` grow" would never have fired for it at all.
+- Convergence is nearly free because `queryGuideDatabase` already pages through the whole database; it just used to throw the `Status` property away. Cost is ~3 API calls per run total, not per game.
+- **The two directions are deliberately asymmetric in how aggressive they are.** Promotion overwrites *everything* except `Done`, `Differed` included — completion beats a hand-set workflow state. Demotion touches *only* `Done`. A sub-100% page sitting at `Paused` / `In progress` / `Not started` / `Differed` is a state you chose, and rewriting it on every Dashboard open would put you and the tool in a loop overwriting each other. Pinned in `test/guide-status.test.js`.
+- The two rules are mutually exclusive by construction (`achieved >= total` vs `<`), so a page can never satisfy both and oscillate.
+- **A `total` of `NULL` is not "dropped below 100%".** `markNoAchievements` clears `total` when Steam says a game has no stats, and rate-limits/403s take the `retry` path and write nothing at all — so the `total > 0` guard is what stops a Steam hiccup from demoting a finished page.
+- **The property's *type* is read, never assumed.** Notion's `status` and `select` are different property types whose write payloads differ (`{status:{name}}` vs `{select:{name}}`), and the wrong one is rejected. `fetchGuideStatusSchema` reads name, type and options; **both** `Done` and `Staged` are validated up front, so a database missing one fails with a readable message instead of a Notion 400 halfway through.
+- Notion-kind guides only — local markdown has no status property. Failures are soft and land in `syncState.statusError`; `syncGuideStatuses` returns `applied` (writes that actually succeeded) so callers report direction without parsing log text.
+
+Ordering matters: status runs **after** the tick pass, so a game that just completed gets its last boxes ticked before the page is marked done. Marking a page `Done` over unticked boxes is the wrong end state.
 
 ### Nested sub-step checkboxes (`collectSubStepTicks`)
 
@@ -174,7 +211,8 @@ That helper uses loose substring matching, which is banned in the tick path. The
 
 - **The 🎮 recently-played badge can never appear on a family-shared / delisted row.** It derives from `last_played`, which comes from `GetOwnedGames`; rows absent from that response have no timestamp at all and Steam offers no other source. Looks like a bug, isn't one.
 - **Games with `has_achievements = 0` are retried**, not permanently excluded. They get re-marked if Steam still says no stats; harmless. `GetOwnedGames`'s `has_community_visible_stats` flag predicts this set exactly (verified 26/26 on the real library) and skipping them would save 26 calls per full pass — **this was considered and deliberately rejected.** The moment a game adds achievements is the moment that flag flips, and by then we'd have stopped asking. Trading a permanent blind spot for ~11 s is a bad deal.
-- **`test/matching.test.js` and `test/selection.test.js` cover different failure classes.** Matching protects the user's *notes* (a wrong tick corrupts a guide). Selection protects the user's *data* (a skipped row silently freezes a number). Both fail quietly in production, which is why both are pinned.
+- **The four test files cover different failure classes.** `matching.test.js` protects the user's *notes* (a wrong tick corrupts a guide). `selection.test.js` protects the user's *data* (a skipped row silently freezes a number). `checkbox-selection.test.js` protects *which guide pages get opened* — too wide burns dozens of Notion/Steam calls per Dashboard open, too narrow silently never ticks. `guide-status.test.js` protects *idempotency* — the status pass runs on every Dashboard open, so a rule that isn't a no-op the second time means repeated writes to Notion. All four fail quietly in production, which is why all four are pinned.
+- **`syncGuidesFromMarkdown`'s `added` includes re-registrations, not just new guides.** It re-upserts every local `.md` on each run and pushes all of them, with `action: 'appended' | 'updated'` telling them apart. `syncGuides` filters to `'appended'` before feeding the tick pass — without that filter every local guide looks newly-discovered on every start and the targeted tick degrades into a full local scan. The Notion side's `added` is already genuinely new-only (filtered by `existingIds`).
 - **`sync_locked = 1` rows are never touched by any sync phase.** If a row "won't update," check that first.
 - **Notion page identity must use the normalized UUID**, never raw URL text — Notion sometimes prefixes URLs with a title slug, so the same page's URL differs between queries. Comparing raw URLs once caused already-linked pages to be treated as new and overwrite curated names (`normalizeNotionId` in `lib/notion.js`).
 - **One appid, one guide backend.** Markdown discovery won't overwrite a registered Notion guide unless `--force`.
@@ -185,18 +223,25 @@ That helper uses loose substring matching, which is banned in the tick path. The
 
 ## Current state and open items
 
-The core pipeline (library sync, achievement counts, achievement detail, Dashboard, ♥/★ flags) is done and in daily use. Guide sync works against both backends, Notion is configured, and the whole guide corpus has been audited.
+The core pipeline (library sync, achievement counts, achievement detail, Dashboard, ♥/★ flags) is done and in daily use. Guide sync works against both backends, Notion is configured, and the whole guide corpus has been audited. Checkbox ticking now also happens automatically on Dashboard open and on 立即同步, scoped to what changed — see "Automatic checkbox ticking" for the constraints that keep that safe — and the same chain keeps each guide page's `Status` in step with completion, `Done` when a game is finished and back to `Staged` when a patch drops it below 100% (see "Guide page status").
 
-**Verified baseline as of 2026-08-04** — re-derive rather than trust if a lot has changed since, but don't redo this work blindly:
+**Verified baseline as of 2026-08-09** — every number below was re-measured on that date, not carried forward. Re-derive rather than trust if a lot has changed since, but don't redo this work blindly:
 
-- `checkbox-sync --dry-run` across all eligible games proposes **0** ticks, and `audit` reports **0** confirmed-wrong out of ~1,175 ticked boxes. Notion and Steam agree.
-- **~65 ticked boxes are permanently undetermined** by `audit` (out of ~1,240). They paraphrase the official description instead of quoting it, so the reverse lookup can't attribute them. They tick fine by name; they just can't be verified. Fixing that means editing those guide pages, not the code.
+- `checkbox-sync --dry-run` across all 44 eligible games proposes **0** ticks and produces 0 log lines — no skips, no failures, no ambiguous-name warnings. Notion and Steam agree.
+- `audit` covers **44/44** games and **1,190** ticked boxes: **0** confirmed-wrong, **64** undetermined. The undetermined ones paraphrase the official description instead of quoting it, so the reverse lookup can't attribute them. They tick fine by name; they just can't be verified. Fixing that means editing those guide pages, not the code. (The audit set is games *below* 100%, so this total falls as games complete — it is not a running tally of every box in the corpus.)
+- **The previous baseline (2026-08-04) had gone stale, and the drift was invisible.** By 2026-08-09, 空之轨迹 the 1st (appid 3447040, 28/43) had 10 unlocked achievements whose boxes were never ticked, because the only machine in use had no Notion token configured. Nothing errored — `checkbox-sync` simply never ran. **A clean recorded baseline is not evidence that the sync is running**; check `sync_log` has recent rows before believing it.
+- **Guide page `Status`:** 105 pages — 59 `Done`, 24 `Paused`, 12 `Not started`, 4 `In progress`, 3 `Staged`, 3 `Differed`. Of the 55 `Done` pages that map to a game with achievement data, **54 are exactly at 100%** — which is the evidence that `Status` tracks game completion here, not guide-writing progress. `guide-status --dry-run` finds exactly **two** pages out of step, one in each direction, and neither had been applied at the time of writing:
+  - Palworld (1623730, 75/75) `Staged` → `Done`
+  - Supermarket Together (2709570, 28/51) `Done` → `Staged`
+  The other 43 non-Done pages are genuinely unfinished games. Status was kept current by hand before the feature existed — don't assume a backlog.
+- **`config.json` is per-machine and gitignored.** The Windows checkout went without a Notion token for a while, which is what caused the drift above; `notion.overviewDbId` there is `<see config.json>` (the `🎯 Overview` database under the `Entertainment` page). An empty `sync_log` plus a suspiciously quiet Notion feature means the token, not a bug — check `notion.token` first. Note `saveConfig` requests mode `600`, which Windows does not honour.
 - **Three boxes were ticked wrongly and have been un-ticked** (Civ VI 亦敌亦友, CK3 春风得意, 古剑奇谭 新年快乐) — recorded in `sync_log` as `人工修正`. The first two were same-name mis-ticks; don't be surprised by un-ticks in the log's history.
 - **Same-name guide formatting is already handled:** Civ VI and CK3 already quote descriptions verbatim, and 鬼谷八荒's two `妙手空空` boxes were rewritten from suffixed names to name + verbatim description. All three now resolve correctly and will tick automatically when a second twin unlocks. **Don't "fix" these pages again.**
 
 Known outstanding items:
 
 - **Guides not yet written** — these pages exist in the Notion guide database but have no `appid:` line yet, so guide discovery skips them every run (expected, not an error): Xenoblade Chronicles X, 三相奇谈, 以闪亮之名, 最强祖师, 月圆之夜, 燕云十六声.
+- **Two guide pages are out of step with completion** — Palworld (`Staged`, 75/75) and Supermarket Together (`Done`, 28/51). One `node tracker.js guide-status` fixes both; the next `serve` start does it too, since the status pass converges on state rather than watching for a transition.
 - **A duplicate Notion page** for 苏丹的游戏 (the older one, URL contains `1d31fee6…`) needs deleting by hand.
 - **Leftover spreadsheet automation** — a few daily jobs still update an old Google Sheet as a secondary backup. When they're no longer wanted, delete them from that project's Apps Script triggers page; run `node tracker.js export` first, since the sheet stops updating afterwards.
 - **Ideas, not commitments** — write the missing guides, enrich the Dashboard, or add a launchd plist if sync-on-open isn't enough.

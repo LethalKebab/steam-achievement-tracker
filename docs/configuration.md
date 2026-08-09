@@ -13,6 +13,9 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "port": 8777,               // Dashboard port
   "syncStaleHours": 12,       // auto-sync when opening the Dashboard if data is older; 0 = never
   "syncGuidesOnServe": true,  // also look for new guide pages when opening the Dashboard
+  "checkboxSyncOnServe": true,        // also tick guide checkboxes for games that changed
+  "checkboxSyncOnServeCascade": false,// let that also tick nested sub-steps; off on purpose
+  "guideStatusOnServe": true,         // guide page Status ⇄ completion (Done / Staged)
   "requestDelayMs": 300,      // pause between Steam API calls
   "sweepBudget": 40,          // how many "not played, but check anyway" games per auto-sync; 0 = off
   "maxStatsAgeDays": 7,       // re-verify a game at least this often even if untouched
@@ -36,6 +39,24 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 Either way, the **立即同步** button next to the "上次同步" line on the Dashboard starts a sync on demand, ignoring `syncStaleHours` entirely. It's the same background sync, so the usual progress bar and automatic refresh apply, and the button greys out while one is running — including a sync you started from the CLI or another tab.
 
 **`syncGuidesOnServe`** — when `serve` starts it also runs guide discovery, the same thing `node tracker.js guides` does: scan `guides/*.md` and the Notion guide database for pages carrying an `appid:` line, and register any new ones so their links appear on the Dashboard. Deliberately **not** gated by `syncStaleHours` — you often create a guide page minutes after a sync, when achievement data is still fresh, and the link needs to show up now rather than in twelve hours. It needs no Steam credentials, and a failure (expired Notion token, API down) is logged and otherwise ignored. Costs a couple of Notion API calls per start, plus one page read per not-yet-registered page; set it to `false` to skip it.
+
+**`checkboxSyncOnServe`** — after the background sync finishes, tick guide checkboxes for the achievements it just found. Applies both to the sync that runs when `serve` starts and to the one behind the 立即同步 button. This is the only place in the project that writes to Notion without a `--dry-run` in front of it, which is why it is scoped tightly: it visits **only the games that changed in that run** — your unlocked count went up, the developer added achievements, or a guide page was registered for the first time that run. Nothing changed means no Notion calls at all, which is the common case. A full pass over every eligible game costs ~40 page reads and stays a manual `node tracker.js checkbox-sync`.
+
+Every tick is written to `sync_log` just like the manual command's, so `node tracker.js log 30` is the review path; the Dashboard also shows a notice naming the first few, which doesn't auto-dismiss. A Notion failure here is soft — it shows as its own notice and never turns into "sync failed", since the achievement data synced fine. Set to `false` to tick only when you run the command yourself.
+
+One deliberate exception to the usual rules: a game already at 100% is normally skipped, but one that hit 100% *in that run* is still visited. Without it, the achievement that completes a game could never have its box ticked automatically — by the next run the game is at 100% and would be skipped every time.
+
+**`checkboxSyncOnServeCascade`** — whether the automatic tick also cascades to nested sub-step checkboxes under an unlocked achievement. Defaults to `false`, unlike the manual command, which cascades unless you pass `--no-cascade`. The cascade assumes "parent unlocked ⇒ every sub-step listed under it was done", which is right for all-of achievements and wrong for any-of ones — nine endings listed under "reach an ending" would get eight false ticks. The manual command lets you check a `--dry-run` first; the automatic path has no such gate, so it stays off here.
+
+**`guideStatusOnServe`** — after the tick pass, keep each Notion guide page's `Status` in step with completion: `Done` when a game reaches 100%, back to `Staged` when it drops below. Runs on Dashboard open and after 立即同步, and standalone as `node tracker.js guide-status` (with `--dry-run`).
+
+Dropping below 100% means a developer patched in new achievements — the one kind of change that happens without you playing, and so the one you'd otherwise never spot.
+
+Both rules are written over *current state* rather than over the moment of crossing. Crossing happens once, inside one sync; if that particular run can't write to Notion, a transition-based rule would lose it permanently, because every later run only ever sees the same value on both sides. Checking current state makes the pass idempotent and self-repairing. It costs about three API calls per run regardless of library size — the page listing was already being fetched for guide discovery.
+
+The directions are not equally aggressive, on purpose. Promotion overwrites anything that isn't already `Done`, `Differed` included: completion wins over a hand-set workflow state. Demotion touches **only** `Done` — a sub-100% page you've marked `Paused` or `In progress` is a decision you made, and overwriting it on every Dashboard open would leave you and the tool fighting. A game whose achievement total becomes unknown isn't treated as a drop.
+
+Notion-kind guides only; local markdown has no status property. Set to `false` to leave the property alone.
 
 **`requestDelayMs`** — the pause between Steam API calls. If a sync reports games "留待重试" (left for retry), you're being rate-limited: raise this to 500–800 and run again. Lowering it makes syncs faster but risks HTTP 429s.
 
@@ -82,5 +103,5 @@ The server only ever listens on `127.0.0.1`, so the Dashboard is reachable from 
 
 There is no built-in scheduler. Two ways to get regular updates:
 
-- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup.
+- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), ticks the guide checkboxes for whatever that sync turned up (see `checkboxSyncOnServe`), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup.
 - **A real daily job** — on macOS, a launchd plist running `node tracker.js sync`. Note it only fires while the machine is awake; launchd will run a missed job on wake, but a machine that's off for a week syncs nothing.
