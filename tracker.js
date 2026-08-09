@@ -13,6 +13,7 @@
  *   node tracker.js export [目录]   把三张表导出成 CSV
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
+ *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js log [n]         看最近的同步日志
  */
@@ -28,7 +29,7 @@ import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
 import { serve } from './lib/server.js';
 import { NotionClient } from './lib/notion.js';
-import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks } from './lib/guides.js';
+import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -335,6 +336,28 @@ async function cmdGuides() {
   for (const g of allGuides(db)) console.log(`  ${g.appid.padEnd(8)} ${g.kind.padEnd(6)} ${g.name}`);
 }
 
+/**
+ * 让 Notion 攻略页状态和完成度对齐:打满 → Done,掉出 100% → Staged。
+ * 按当前状态收敛(不是抓"刚好这轮跨过 100%"的瞬间),所以重复跑是安全的 no-op。
+ */
+async function cmdGuideStatus() {
+  const { config, db } = withSteam({ requireSteam: false });
+  const notion = new NotionClient(config);
+  if (!notion.configured) {
+    return console.log('Notion:没配 token(config.json 的 notion.token / notion.overviewDbId)');
+  }
+  const dryRun = flags.has('--dry-run');
+  if (dryRun) console.log('预演模式:只算不写\n');
+
+  const r = await syncGuideStatuses(db, { notion, dryRun });
+  const up = r.updates.filter((u) => u.reason === 'complete').length;
+  const down = r.updates.filter((u) => u.reason === 'incomplete').length;
+  console.log(`攻略数据库 ${r.pages} 个页面:${up} 个该标 Done,${down} 个该退回 Staged`);
+  for (const l of r.logs) console.log(`  ${l.gameName} — ${l.result}`);
+  if (!r.updates.length) console.log('  (没有要改的,状态和完成度已经一致)');
+  else if (dryRun) console.log('\n确认没问题就去掉 --dry-run 再跑一次。');
+}
+
 async function cmdCheckboxSync() {
   const { config, db, steam } = withSteam();
   const notion = new NotionClient(config);
@@ -472,6 +495,8 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js checkbox-sync [appid]   把 Steam 已解锁成就同步成攻略里的 ✅
               checkbox-sync --dry-run     只算不写,先看会勾掉哪些(Notion 勾选不可撤销)
               checkbox-sync --no-cascade  别联动勾选嵌套的子步骤 checkbox
+  node tracker.js guide-status            攻略页状态对齐完成度(打满→Done,掉出100%→Staged)
+              guide-status --dry-run      只算不写,先看会改哪些
   node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
   node tracker.js log [n]                 最近 n 条同步日志
 
@@ -489,6 +514,7 @@ const COMMANDS = {
   status: cmdStatus,
   guides: cmdGuides,
   'checkbox-sync': cmdCheckboxSync,
+  'guide-status': cmdGuideStatus,
   audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,
