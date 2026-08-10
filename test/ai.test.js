@@ -408,3 +408,27 @@ test('多轮会话:历史留着(回灌重写要用),用量跨轮累加', async (
   assert.equal(s.usage.outputTokens, 100);
   assert.equal(s.cost().priced, true);
 });
+
+// ---------------------------------------------------------------------------
+// 自定义端点
+// ---------------------------------------------------------------------------
+
+test('baseUrl 可配置 —— 指向 Anthropic 兼容端点时用它,不用写死的地址', async () => {
+  // 实测(2026-08-10):DeepSeek 的 https://api.deepseek.com/anthropic 支持**服务端
+  // web_search**(回包里有 server_tool_use / web_search_tool_result,usage 里有计数)。
+  // 也就是说这一层原封不动就能给 DeepSeek 用上联网,不用另写一套
+  const fetchImpl = fakeFetch([okResponse(simpleMessage({ text: '好' }))]);
+  const p = new AnthropicProvider({ ...AI, baseUrl: 'https://api.deepseek.com/anthropic/' }, { fetchImpl });
+  await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] });
+  assert.equal(fetchImpl.calls[0].url, 'https://api.deepseek.com/anthropic/v1/messages', '结尾多余的斜杠要削掉');
+});
+
+test('配了 baseUrl 就不查模型名和供应商对不对得上', async () => {
+  // provider=anthropic 指向 DeepSeek 的兼容端点时,模型就叫 deepseek-v4-flash。
+  // 前缀检查在这种情况下只会误报
+  const { assertModelMatchesProvider } = await import('../lib/ai.js');
+  assert.throws(() => assertModelMatchesProvider('anthropic', 'deepseek-v4-flash'), /只改了一半/);
+  assert.doesNotThrow(() =>
+    assertModelMatchesProvider('anthropic', 'deepseek-v4-flash', { baseUrl: 'https://api.deepseek.com/anthropic' })
+  );
+});
