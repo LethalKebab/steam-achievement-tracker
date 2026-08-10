@@ -10,7 +10,7 @@ Everything runs on your own machine: the database is a file in this folder, cred
 
 **Node.js 24 or newer** — check with `node --version`. The project uses Node built-ins only, so there is nothing to install.
 
-The packaged Windows app bundles its own runtime and needs none of that. Building it is a separate step — see [launcher/README.md](launcher/README.md).
+The packaged Windows app bundles its own runtime, so it runs without a separate Node install. Building it is a separate step — see [launcher/README.md](launcher/README.md).
 
 ## Setup
 

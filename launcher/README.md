@@ -17,7 +17,7 @@ steam-achievement-tracker/
 └── SteamAchievementTracker.lnk                    ← gitignored shortcut; double-click this
 ```
 
-**The wrap never enumerates core files.** `extraResources` in `package.json` is a single rule with an *allow-list* filter (`tracker.js`, `package.json`, `*.html`, `lib/**/*`), so adding a Dashboard page or a `lib/` module is picked up automatically with no packaging edit. The allow-list is also the safety mechanism: `config.json` and `data/` can never be packaged, because they simply aren't on it — verify with `unzip -l dist/*.zip | grep config` after any change to that filter.
+**The wrap never enumerates core files.** `extraResources` in `package.json` is a single rule with an *allow-list* filter (`tracker.js`, `package.json`, `*.html`, `lib/**/*`), so adding a Dashboard page or a `lib/` module is picked up automatically with no packaging edit. The allow-list is also the safety mechanism: `config.json` and `data/` can never be packaged, because they aren't on it — verify with `unzip -l dist/*.zip | grep config` after any change to that filter.
 
 ## How it works
 
@@ -52,7 +52,7 @@ To hand this to someone: send them `dist/SteamAchievementTracker-<version>-win.z
 
 Releases exist so the people using the app can find updates by URL instead of waiting to be sent a file. The repo is public, so **a release is downloadable by anyone**, not only the people you meant to give it to — that's a known and accepted trade, not an oversight.
 
-**One version number.** `launcher/package.json` and the root `package.json` are kept equal; the launcher's value is what names the zip and what the release is tagged with. Bump both together, or the tag and the artifact disagree.
+**The release version is `launcher/package.json`'s**, and it is deliberately *not* the root `package.json`'s. The root version tracks the tracker itself, which reached 2.0.0 long before any of this was packaged; the app starts its own count at 1.0.0 because this is the first build anyone downloads. The launcher's value is what names the zip and what the tag must match — bump it, and tag exactly that.
 
 ```bash
 # 1. bump version in BOTH package.json files, then:
