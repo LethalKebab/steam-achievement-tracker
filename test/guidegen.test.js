@@ -103,9 +103,13 @@ function fakeProvider(replies) {
   };
 }
 
-const fakeSteam = (unlocked = ['A']) => ({
+const fakeSteam = (unlocked = ['A'], rarity = null) => ({
   async fetchPlayerAchievements() {
     return { achievements: DEFS.map((d) => ({ apiname: d.api_name, achieved: unlocked.includes(d.api_name) ? 1 : 0 })) };
+  },
+  // 全球解锁率是锦上添花的数据,拿不到就返回 null,流程照走
+  async fetchGlobalAchievementPercentages() {
+    return rarity;
   },
 });
 
@@ -463,5 +467,36 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
     assert.match(p, /位置 XXX/, '位置标注的固定写法');
     assert.match(p, /待确认/, '不写"推测/待确认"这类文档化备注');
     assert.match(p, /机制速查/, '成就列表前的机制速查');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 难度信号
+// ---------------------------------------------------------------------------
+
+describe('全球解锁率', () => {
+  test('标出来,而且直接说该写深还是带过 —— 不让模型自己换算', () => {
+    // 实测《部落幸存者》最难 1.1%、最易 64.5%,差 60 倍;不给这个信号时,
+    // 生成的心得字数只差不到一倍 —— 模型分不出哪条难,就把力气平摊了
+    const defs = [def('A', '大城堡', 'x'), def('B', '道路畅通', 'y')];
+    const list = buildAchievementList('部落幸存者', '1', defs, new Map([['A', 1.1], ['B', 64.5]]));
+    assert.match(list, /1\.1%.*这类要写深/);
+    assert.match(list, /64\.5%.*一两句带过/);
+    assert.match(list, /力气按它分配/, '光标数字不够,得说清楚拿它干什么');
+  });
+
+  test('拿不到解锁率时不留任何痕迹(整段说明也不出现)', () => {
+    const list = buildAchievementList('X', '1', [def('A', '甲', 'x')], null);
+    assert.doesNotMatch(list, /解锁率|%/);
+    assert.doesNotMatch(list, /力气按它分配/, '没有数据还讲怎么用数据,只会让模型困惑');
+  });
+
+  test('Steam 拿不到解锁率时,生成流程照走', async () => {
+    // 锦上添花的数据,不该因为它挂掉就不给人生成攻略
+    const { db, config } = freshEnv();
+    const r = await generateGuide(db, {
+      config, provider: fakeProvider([GOOD]), steam: fakeSteam(['A'], null), appid: '1',
+    });
+    assert.equal(r.ok, true);
   });
 });
