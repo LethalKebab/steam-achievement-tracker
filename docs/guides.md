@@ -39,7 +39,7 @@ If a game already has a Notion guide registered, a same-appid local `.md` is lef
 
 ### Having one written for you
 
-`node tracker.js guide-gen <appid>` has an AI research the game online and write the file, then validates the result against your actual achievement data and registers it. It needs an API key ([configuration](configuration.md#notes-on-individual-options)) and it costs money, so it asks before starting — `--dry-run` shows you the prompt and where the file would land without sending anything.
+`node tracker.js guide-gen <appid>` has an AI research the game online and write the file, then validates the result against your actual achievement data and registers it. It needs an API key ([configuration](configuration.md#notes-on-individual-options)) — either Anthropic or Gemini, and Gemini has a free tier if you'd rather not pay to try it. It asks before starting, and `--dry-run` shows you the prompt and where the file would land without sending anything.
 
 The checkboxes are **not** written by the model. It only ever emits `- [ ]`; the ticks are applied afterwards from your real unlock data, which makes "checked state equals real unlock state" impossible to get wrong rather than merely checkable. The `# 游戏名` and `appid:` header lines are written by the program too — a mis-transcribed appid would file the guide under a different game.
 

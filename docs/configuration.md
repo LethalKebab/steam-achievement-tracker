@@ -28,10 +28,10 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "overviewDbId": "…"
   },
 
-  "ai": {                     // only needed for AI guide generation — costs money
-    "provider": "anthropic",  // the only one wired up so far
-    "apiKey": "…",            // or the ANTHROPIC_API_KEY environment variable
-    "model": "claude-opus-5",
+  "ai": {                     // only needed for AI guide generation
+    "provider": "anthropic",  // "anthropic" (pay-as-you-go) or "gemini" (has a free tier)
+    "apiKey": "…",            // or ANTHROPIC_API_KEY / GEMINI_API_KEY, picked by provider
+    "model": "claude-opus-5", // claude-* for anthropic, gemini-* for gemini
     "effort": "high",         // low | medium | high | xhigh | max
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 100,   // refuse to generate above this — one context has to hold it
@@ -43,8 +43,11 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxContinuations": 5,    // server-tool loop resumes before giving up
     "maxRetries": 3,
     "requestTimeoutMs": 600000,
-    "fallbacks": true,        // re-run on another model if a safety classifier declines
-    "showThinking": false     // stream a summary of the reasoning; debugging only
+    "fallbacks": true,        // anthropic: re-run on another model if a classifier declines
+    "showThinking": false,    // stream a summary of the reasoning; debugging only
+
+    "geminiTools": ["google_search"],  // gemini: which server-side tools to declare
+    "geminiThinkingBudget": null       // gemini: unset means "don't send the field at all"
   }
 }
 ```
@@ -105,6 +108,16 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 Cost is reported after every run: model tokens are priced exactly, and the number of web searches is reported as a **count**, never folded into the dollar figure, because how search itself is billed hasn't been measured. A model with no price-table entry reports "no price table" rather than `$0.00`.
 
+**Choosing a provider.** `anthropic` is pay-as-you-go with no free allowance; `gemini` has a free tier, which makes it the cheaper way to try this out. Both satisfy the same hard requirement — server-side web search — so guide quality doesn't silently depend on which you picked. Switch with `ai.provider`, and change `ai.model` to match (`claude-*` vs `gemini-*`). If you don't know what model names your key can use, ask the API rather than guessing:
+
+```bash
+node tracker.js ai-check --models
+```
+
+**`geminiTools`** declares which server-side tools to hand Gemini; it's configurable rather than hard-coded because that provider was written without access to the API docs, so a renamed tool — or one your tier doesn't grant — is a config edit, not a code change. `google_search` alone is the default; adding `url_context` gets full page text rather than search results, at the risk of the whole request failing if your tier doesn't offer it. After any run, `ai-check` reports the search queries the model actually issued — declaring the tools and getting zero searches back is the real answer to "does my tier include grounding", and it's more reliable than any pricing page.
+
+Note that free tiers generally mean **your prompts may be used to improve the vendor's models**. For this project that would be your game library and achievement names. If that matters to you, use a paid tier.
+
 ## Environment variables
 
 These override the file, which is useful for one-off runs or if you'd rather not keep credentials on disk:
@@ -114,7 +127,8 @@ These override the file, which is useful for one-off runs or if you'd rather not
 | `STEAM_API_KEY` | `steamApiKey` |
 | `STEAM_ID` | `steamId` |
 | `NOTION_TOKEN` | `notion.token` |
-| `ANTHROPIC_API_KEY` | `ai.apiKey` |
+| `ANTHROPIC_API_KEY` | `ai.apiKey`, when `ai.provider` is `anthropic` |
+| `GEMINI_API_KEY` | `ai.apiKey`, when `ai.provider` is `gemini` |
 | `PORT` | `port` |
 
 ```bash
