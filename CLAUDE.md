@@ -262,6 +262,7 @@ Known outstanding items:
 
 - **Guides not yet written** — these pages exist in the Notion guide database but have no `appid:` line yet, so guide discovery skips them every run (expected, not an error): Xenoblade Chronicles X, 三相奇谈, 以闪亮之名, 最强祖师, 月圆之夜, 燕云十六声.
 - **Leftover spreadsheet automation** — a few daily jobs still update an old Google Sheet as a secondary backup. When they're no longer wanted, delete them from that project's Apps Script triggers page; run `node tracker.js export` first, since the sheet stops updating afterwards.
+- **AI 攻略生成** — designed in full, nothing built. Decisions, the reuse map, the ordering (a provider-search spike gates everything else), and the honest limits of what a machine gate can verify are in [docs/ai-guide-writing.md](docs/ai-guide-writing.md). **Read it before redesigning** — every choice there came out of a question-by-question pass, including the two that are easy to get wrong: the checked state is applied mechanically rather than written by the model, and unvalidated drafts must not land anywhere `syncGuidesFromMarkdown` will scan.
 - **Ideas, not commitments** — write the missing guides, enrich the Dashboard, or add a launchd plist if sync-on-open isn't enough.
 
 ## Working on this efficiently
