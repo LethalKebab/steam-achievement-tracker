@@ -10,6 +10,8 @@ Everything runs on your own machine: the database is a file in this folder, cred
 
 **Node.js 24 or newer** — check with `node --version`. The project uses Node built-ins only, so there is nothing to install.
 
+There is also a packaged Windows app that bundles its own runtime, for machines without Node or for anyone who'd rather not use a terminal. It runs this same code and has a first-run form in place of the setup commands below. Building it is a separate step — see [launcher/README.md](launcher/README.md).
+
 ## Setup
 
 You'll need two things from Steam, both one-time:
@@ -81,6 +83,7 @@ Refreshing the browser does none of it — that re-reads the local database only
 | [docs/data.md](docs/data.md) | what's in the database, importing/exporting CSV, what Steam can't tell us |
 | [docs/guides.md](docs/guides.md) | guide checkbox sync, Notion setup, how matching works |
 | [CLAUDE.md](CLAUDE.md) | architecture and conventions, for working on the code |
+| [launcher/README.md](launcher/README.md) | packaged Windows app for people without Node.js or a terminal — `cd launcher && npm run build`, then double-click `SteamAchievementTracker.lnk` at the repo root (build-it-yourself for now, no release published yet) |
 
 ## License
 

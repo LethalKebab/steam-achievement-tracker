@@ -31,7 +31,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | File | Role |
 |---|---|
 | `tracker.js` | CLI dispatch: `init`, `sync`, `serve`, `status`, `guides`, `checkbox-sync`, `guide-status`, `audit`, `import`, `export`, `log` |
-| `lib/config.js` | `config.json` load/save, env-var overrides, required-field errors with setup hints |
+| `lib/config.js` | `config.json` load/save, env-var overrides, required-field errors with setup hints. `TRACKER_DATA_DIR` env var redirects `config.json`/`data`/`guidesDir` only — never the code-asset `ROOT` used by `lib/server.js` — see `launcher/README.md` |
 | `lib/db.js` | SQLite schema + all table accessors. `openDb()` is idempotent (safe `CREATE TABLE IF NOT EXISTS`) |
 | `lib/steam.js` | `SteamClient`: owned games (+Unvetted diff), player achievements, schema, name lookup, store search |
 | `lib/sync.js` | `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, `fullSync`, `computeAgcrStats` |
@@ -45,10 +45,15 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 | `Dashboard.html` | Frontend SPA. Reads via `rpc.getDashboardData()`, renders a sortable/filterable table |
 | ↳ row order | Two pin layers over the chosen sort: **★ priority beats 🎮 recently-played** — the manual choice always outranks the automatic signal. `RECENT_PLAY_DAYS` (14) governs both the pin and the badge; keep them on one constant or a row can sort to the top with nothing explaining why. Recently-played rows sort by `playedDaysAgo` among themselves. |
 | `docs/` | User-facing docs: `configuration.md`, `data.md`, `guides.md`. README covers setup + everyday use; reference material goes here |
+| `Setup.html` | First-run credential form, served instead of `Dashboard.html` when `config.json` has no Steam credentials (see `/` handler in `lib/server.js`). Steam credentials + optional CSV import (GUI path to what `node tracker.js import` does) — no Notion fields, deliberately deferred |
+| `launcher/` | Electron shell (isolated `package.json`, own devDependencies) that spawns `tracker.js serve` as a child process and opens a window at it — packaging only, no business logic. See `launcher/README.md` |
+| ↳ packaging | `extraResources` is **one rule with an allow-list filter** (`tracker.js`, `package.json`, `*.html`, `lib/**/*`), never a file-by-file list — so new core files need no packaging edit, and `config.json`/`data/` can't leak into a build because they're not on the list. Build output is the repo-root `dist/` (gitignored); `launcher/postbuild.js` renames it, copies `local.config.json`, and writes the root `.lnk`. Packaged filenames are ASCII (`SteamAchievementTracker`) while all UI stays Chinese — Chinese filenames break `WScript.Shell`, `taskkill` output, and shell quoting |
 
 ### The frontend ↔ backend contract
 
 `Dashboard.html` makes 12 calls shaped like `rpc.withSuccessHandler(fn).withFailureHandler(fn).method(args)`, served by `lib/rpc.js`. **Keep the contract:** a method that returns `{error: '...'}` is a *successful* call (the frontend inspects `result.error` itself); only network/thrown failures reach the failure handler. Adding a Dashboard method means adding it to `lib/api.js` — `rpc.js` proxies any name and needs no changes.
+
+`Setup.html` uses the same `/api/<method>` contract via a plain `fetch`, not `rpc.js` (no need for the shim's sync-status polling). Its two methods, `completeSetup` and `getSetupStatus`, are the one place in `lib/api.js` that mutate `config`/`steam` in place rather than only touching `db` — necessary because `SteamClient` copies `steamApiKey`/`steamId` into instance fields at construction (`lib/steam.js`), so writing `config.json` alone wouldn't make the already-running process usable. If you add credentials to anything else that gets constructed once at server startup, the same staleness trap applies.
 
 ## Key config
 

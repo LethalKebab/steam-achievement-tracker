@@ -62,6 +62,8 @@ If you already track this in a spreadsheet, import it **before your first sync**
 2. Put them all in one folder.
 3. `node tracker.js import ~/Downloads/steam-csvs`
 
+The packaged app ([launcher/README.md](../launcher/README.md)) exposes the same step as an optional folder-path field on its first-run form, since it has no terminal to run the command from. It runs this identical import, and it validates before saving anything: a folder it can't read fails the whole form rather than saving credentials and leaving you past the point where importing still helps.
+
 Columns are read **by position**, not by header text, so translated or renamed headers are fine:
 
 | Sheet | Columns, in order |

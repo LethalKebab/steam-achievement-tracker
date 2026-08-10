@@ -21,9 +21,11 @@ node --test              # test/matching.test.js
 node --check lib/x.js    # syntax check
 ```
 
-No build step, nothing to deploy — edit and re-run. `serve` doesn't hot-reload `lib/`; restart it. `Dashboard.html` and `lib/rpc.js` are read per request, so a browser refresh is enough for those.
+No build step, nothing to deploy — edit and re-run. `serve` doesn't hot-reload `lib/`; restart it. `Dashboard.html` and `lib/rpc.js` are read per request, so a browser refresh is enough for those. (`launcher/` — the packaged Electron app — does have a build, but it only wraps this server and never needs touching to change the tracker; its packaging picks up new `*.html` and `lib/` files automatically. See `launcher/README.md`.)
 
 **`lib/api.js` method names and return shapes are a contract with `Dashboard.html`** (which calls them through `lib/rpc.js`). A method returning `{error: '...'}` is a *successful* call — the frontend checks `result.error` itself; only thrown/network errors hit the failure handler. New Dashboard method = add it to `lib/api.js`; `rpc.js` proxies any name and needs no change.
+
+`Setup.html` (served at `/setup` when credentials are missing) uses the same `/api/<method>` contract, but with a plain `fetch` rather than `rpc.js`. Its two methods are the only ones in `lib/api.js` that mutate `config` and `steam` in place instead of just touching `db`: `SteamClient` copies `steamApiKey`/`steamId` into instance fields when it's constructed, so writing `config.json` alone would leave the already-running server unable to sync until restarted. Any future path that accepts credentials at runtime hits the same trap.
 
 **A page refresh never touches Steam.** `getDashboardData()` is a pure DB read, and the `syncStaleHours` check runs once at `serve` startup. Steam-facing syncs come from exactly one function, `startBackgroundSync()` in `lib/server.js` — used by both the startup auto-sync and the Dashboard's 立即同步 button (`api.startSync`). **Keep it one function:** it holds the only concurrency guard, and two entry points into `fullSync` would let a click during the startup sync run two of them over the same database. The button skips the staleness gate but keeps `selection`, so it's the sampled ~8 s sync.
 

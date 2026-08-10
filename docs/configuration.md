@@ -1,6 +1,6 @@
 # Configuration
 
-Everything lives in `config.json` in the project root, created by `node tracker.js init`. It's gitignored and written with mode `600` (only your user can read it), because it holds your API credentials.
+Everything lives in `config.json` in the project root, created by `node tracker.js init` — or by the first-run form in the packaged app, which writes the same file. It's gitignored and written with mode `600` (only your user can read it), because it holds your API credentials. (`TRACKER_DATA_DIR`, below, can move where that file lives.)
 
 Only `steamApiKey` and `steamId` are required. Everything else has a working default — the file `init` writes contains just those two.
 
@@ -88,6 +88,16 @@ These override the file, which is useful for one-off runs or if you'd rather not
 ```bash
 STEAM_API_KEY=xxx STEAM_ID=yyy node tracker.js sync
 ```
+
+**`TRACKER_DATA_DIR`** works differently from the four above: it doesn't override a value inside `config.json`, it changes *where* `config.json`, `data/` and `guidesDir` are read from and written to. Without it, all three sit next to the code, which is what the sections above assume.
+
+It exists for the packaged Windows app ([launcher/README.md](../launcher/README.md)), which is a second copy of the code in its own folder and would otherwise keep its own separate database. Pointing it at an existing checkout makes both the app and the CLI read and write the same files:
+
+```bash
+TRACKER_DATA_DIR=/path/to/steam-achievement-tracker node tracker.js status
+```
+
+Code assets (`Dashboard.html`, `Setup.html`, `lib/rpc.js`) are never affected — they always load from wherever the running code is, so the variable cannot make one copy of the code serve another copy's pages. A path that doesn't exist is ignored by the launcher rather than used. Don't run the CLI and the packaged app against the same directory at the same time; the two will both write to one SQLite file.
 
 ## Changing the port
 
