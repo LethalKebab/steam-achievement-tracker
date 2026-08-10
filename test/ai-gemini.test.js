@@ -277,11 +277,26 @@ describe('错误信息要能照着做', () => {
     });
   });
 
-  test('429 说清楚免费层有每天那道上限(重试当天也没用)', async () => {
-    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: 'quota' } })]) });
+  test('429 说清楚免费层有每天那道上限', async () => {
+    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: 'quota exceeded, limit: 500' } })]) });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
       assert.match(e.message, /每天/);
       assert.equal(e.retryable, true);
+      return true;
+    });
+  });
+
+  test('limit: 0 是"这个模型不在这一档",不是"用完了" —— 而且不可重试', async () => {
+    // 实测踩到的(2026-08-10):免费层对 gemini-2.5-pro 就是 limit: 0。
+    // 两件事 Google 用同一个 429 报回来,混为一谈会让人白等一天,
+    // 而且退避重试三次纯属浪费
+    const msg = 'Quota exceeded for metric: generate_content_free_tier_requests, limit: 0, model: gemini-2.5-pro';
+    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: msg } })]) });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+      assert.equal(e.retryable, false, '等多久都不会恢复,重试没有意义');
+      assert.match(e.message, /不是用完了/);
+      assert.match(e.message, /--models/, '得告诉人怎么找一个能用的模型');
+      assert.doesNotMatch(e.message, /次日重置/, '说"等次日重置"会让人白等一天');
       return true;
     });
   });

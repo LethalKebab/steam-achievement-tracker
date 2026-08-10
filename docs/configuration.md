@@ -114,6 +114,8 @@ Cost is reported after every run: model tokens are priced exactly, and the numbe
 node tracker.js ai-check --models
 ```
 
+**On Gemini's free tier, pick a `flash` model.** Measured on 2026-08-10: the Pro models return `limit: 0` for the free-tier quota — that is not "you used it up", it means the model isn't in that tier at all, and waiting for a reset will never help. The error message says so and doesn't retry. The default (`gemini-flash-latest`) is an alias rather than a version number, because a pinned version goes stale — that exact default was wrong within three months. Pin a concrete version if you want reproducible output.
+
 **`geminiTools`** declares which server-side tools to hand Gemini; it's configurable rather than hard-coded because that provider was written without access to the API docs, so a renamed tool — or one your tier doesn't grant — is a config edit, not a code change. `google_search` alone is the default; adding `url_context` gets full page text rather than search results, at the risk of the whole request failing if your tier doesn't offer it. After any run, `ai-check` reports the search queries the model actually issued — declaring the tools and getting zero searches back is the real answer to "does my tier include grounding", and it's more reliable than any pricing page.
 
 Note that free tiers generally mean **your prompts may be used to improve the vendor's models**. For this project that would be your game library and achievement names. If that matters to you, use a paid tier.
