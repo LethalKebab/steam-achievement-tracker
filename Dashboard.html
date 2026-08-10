@@ -536,11 +536,28 @@
   <script src="/_rpc.js"></script>
 
   <script>
-    // 多久之内算"最近在玩":这个窗口同时管置顶和徽章,两处必须一致,
+    // 多久之内算"最近在玩"。徽章和置顶共用这一个窗口,不能各写各的,
     // 否则会出现"排在最上面但没有徽章说明为什么"的怪状态
     const RECENT_PLAY_DAYS = 14;
     const isRecentlyPlayed = function(g) {
       return g.playedDaysAgo !== null && g.playedDaysAgo <= RECENT_PLAY_DAYS;
+    };
+
+    // 置顶还要再加一个条件:这游戏得**确实有成就可追**。置顶的意思是"你最近在玩,
+    // 来看看还差哪些成就",对没有成就的游戏根本不成立,顶上去只会把真正要盯的挤下去。
+    //
+    // 条件写成"total 是个大于 0 的数字",而不是"total !== 'N/A'",因为"没有成就可追"
+    // 有三种长相,只挡掉一种等于没挡:
+    //   'N/A'  —— 确实没有成就系统(has_achievements = 0)
+    //   null   —— 还没同步到成就数。**新加进库的游戏就是这个状态**,而它恰恰又是
+    //             "最近在玩"的高发人群,不挡的话每次玩新游戏都会顶一个空行上去
+    //   0      —— 有成就系统但一个成就都没有
+    // 三种都是"现在没有进度可看",一视同仁。
+    //
+    // **只去掉置顶,不去掉徽章**:🎮 照常显示,它只陈述事实,不占位置。等成就数
+    // 同步进来(或者开发者补了成就),total 变成正数,它自己就会重新参与置顶。
+    const pinsToTop = function(g) {
+      return isRecentlyPlayed(g) && typeof g.total === 'number' && g.total > 0;
     };
 
     let allGames = [];
@@ -691,11 +708,11 @@
 
       // 置顶分两层,组内都保持上面排好的顺序:
       //   1. 重点关注(★)—— 手动选的,永远压过自动判断
-      //   2. 最近在玩 —— 自动的,只在★之下抢位置
+      //   2. 最近在玩且有成就系统 —— 自动的,只在★之下抢位置(见 pinsToTop)
       // 最近在玩的内部按"多久之前玩的"再排一次,今天玩的排最前面
-      const recent = rows.filter(isRecentlyPlayed)
+      const recent = rows.filter(pinsToTop)
         .sort(function(a, b){ return a.playedDaysAgo - b.playedDaysAgo; });
-      const rest = rows.filter(function(g){ return !isRecentlyPlayed(g); });
+      const rest = rows.filter(function(g){ return !pinsToTop(g); });
       rows = recent.concat(rest);
       rows = rows.filter(function(g){ return g.priority; }).concat(rows.filter(function(g){ return !g.priority; }));
 
