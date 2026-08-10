@@ -68,6 +68,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `sync --fast` | Sampled refresh — the same work the Dashboard does | Steam |
 | `status` | Completion stats and AGCR | — |
 | `log 30` | The last 30 things written to a guide | — |
+| `guide-lint [appid]` | Checks guides for achievements with no checkbox, and for formatting that blocks syncing | Notion |
 | `checkbox-sync --dry-run` | Previews which guide checkboxes would be ticked, writes nothing | Steam + Notion |
 | `checkbox-sync` | Ticks them | Steam + Notion |
 | `guide-status` | Aligns guide page status with completion | Notion |

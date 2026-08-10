@@ -30,6 +30,7 @@ import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, com
 import { serve } from './lib/server.js';
 import { NotionClient } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
+import { lintAllGuides } from './lib/guidelint.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -445,6 +446,94 @@ async function cmdAudit() {
   }
 }
 
+/** guidelint 的 code → 人话。逐份汇总和总表共用一套,免得两处叫法对不上 */
+const CODE_LABELS = {
+  'missing-checkbox': '成就没有 checkbox,永远勾不上',
+  'merged-line': '一行里写了多个 checkbox',
+  'ambiguous-no-description': '同名成就没抄描述,分不出是哪一个',
+  'checked-mismatch': '勾选状态和真实解锁不一致',
+  'missing-title': '本地攻略缺 `# 游戏名`',
+  'paraphrased-description': '描述不是原文照抄,audit 反查不了',
+  'stats-in-heading': '节标题里有会过期的统计数字',
+  'data-source-note': '写了勾选状态的数据来源',
+};
+
+/**
+ * 只读校验:攻略本身写得对不对(和 audit 查"勾错了没"、checkbox-sync 查"漏勾没"是三件事)。
+ * 不写数据库、不碰 Notion、不改本地 md,所以不需要 --dry-run。
+ */
+async function cmdGuideLint() {
+  // 默认不需要 Steam 凭据:只有 --checked 那条规则要真实解锁状态
+  const checkTicks = flags.has('--checked');
+  const { config, db, steam } = withSteam({ requireSteam: checkTicks });
+  const notion = new NotionClient(config);
+  const appid = positional[0] ?? null;
+  const p = progressPrinter();
+
+  console.log('校验攻略写法(只读,不会改任何东西)');
+  if (checkTicks) console.log('已开启勾选状态校验:每款游戏都要单独问一次 Steam,会慢不少\n');
+  else console.log('(勾选状态默认不校验,要的话加 --checked)\n');
+
+  const { results, totals } = await lintAllGuides(db, {
+    notion,
+    config,
+    steam: checkTicks ? steam : null,
+    appid,
+    onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
+  });
+  p.done();
+
+  // 指定了 appid 就把这一份的问题逐条列出来;否则每份只按类型报个数——
+  // 全量下光"缺 checkbox"和"描述没照抄"就有九百多条,平铺出来等于没有输出
+  const detail = Boolean(appid);
+  for (const r of results) {
+    if (r.skipped) {
+      if (detail) console.log(`  ⏭  ${r.name} —— 跳过:${r.skipped}`);
+      continue;
+    }
+    const { findings, stats } = r.lint;
+    if (findings.length === 0 && !detail) continue;
+
+    const mark = stats.errors ? '❌' : findings.length ? '⚠️ ' : '✅';
+    console.log(
+      `\n  ${mark} ${r.name}(${r.appid})  ${stats.covered}/${stats.achievements} 覆盖,${stats.todos} 个框`
+    );
+    if (detail) {
+      for (const f of findings) console.log(`     ${f.level === 'error' ? '✖' : '·'} ${f.message}`);
+      continue;
+    }
+    const byCode = new Map();
+    for (const f of findings) byCode.set(f.code, (byCode.get(f.code) ?? 0) + 1);
+    for (const [code, n] of [...byCode].sort((a, b) => b[1] - a[1])) {
+      console.log(`     ${String(n).padStart(4)}  ${CODE_LABELS[code] ?? code}`);
+    }
+  }
+  if (!detail && results.some((r) => !r.skipped && r.lint.findings.length)) {
+    console.log('\n  (逐条看某一份:guide-lint <appid>)');
+  }
+
+  console.log(
+    `\n校验了 ${totals.guides} 份攻略:${totals.noErrors} 份没有 error` +
+      `(其中 ${totals.clean} 份连 warn 都没有)`
+  );
+  if (totals.skipped) {
+    console.log(`  跳过 ${totals.skipped} 份(多半是 100% 通关的游戏,成就详情没同步,没有可比对的基准)`);
+  }
+  if (totals.achievements) {
+    const pct = ((totals.covered / totals.achievements) * 100).toFixed(1);
+    console.log(`  成就覆盖:${totals.covered}/${totals.achievements}(${pct}%)`);
+  }
+  const entries = Object.entries(totals.byCode).sort((a, b) => b[1] - a[1]);
+  if (entries.length) {
+    console.log(`\n  按问题类型:`);
+    for (const [code, n] of entries) {
+      console.log(`    ${String(n).padStart(4)}  ${CODE_LABELS[code] ?? code}`);
+    }
+  }
+  if (totals.errors === 0) console.log('\n没有 error。');
+  else console.log(`\n合计 ${totals.errors} 个 error、${totals.warnings} 个 warn。改的是攻略内容,不是代码。`);
+}
+
 function cmdImport() {
   const dir = positional[0];
   if (!dir) throw new Error('用法:node tracker.js import <放 CSV 的目录>');
@@ -498,6 +587,8 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js guide-status            攻略页状态对齐完成度(打满→Done,掉出100%→Staged)
               guide-status --dry-run      只算不写,先看会改哪些
   node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
+  node tracker.js guide-lint [appid]      校验攻略写法:成就有没有漏、格式对不对(只读)
+              guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
   node tracker.js log [n]                 最近 n 条同步日志
 
 配置:${CONFIG_PATH}(gitignore 里,别提交)
@@ -515,6 +606,7 @@ const COMMANDS = {
   guides: cmdGuides,
   'checkbox-sync': cmdCheckboxSync,
   'guide-status': cmdGuideStatus,
+  'guide-lint': cmdGuideLint,
   audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,
