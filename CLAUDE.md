@@ -152,7 +152,12 @@ Matching an unlocked achievement to a guide checkbox is **exact equality against
 2. a short achievement name being a strict *prefix* of a different, harder achievement's name — which mis-ticked the harder one once the short one's own box was already checked; and
 3. **two achievements in the same game with genuinely identical names.** Exact matching cannot fix this one: the unlocked twin's box gets ticked, leaves the candidate pool, and the same name then matches the *other*, still-unearned box. `findAmbiguousNames()` therefore refuses any name shared by several achievements unless *all* of them are unlocked, and logs the skip rather than staying silent. This is not rare — a 310-game library had 12 such collisions across 11 games.
 
-`extractTitleCandidates()` splits checkbox text into candidates (by line, then by colon/dash, plus the `中文名(English Name)` pattern) and requires the achievement name to *equal* one of them. Adding a new candidate-extraction rule is fine; weakening the equality check or removing the ambiguity gate is not.
+`extractTitleCandidates()` splits checkbox text into candidates (by line, then by colon/dash, plus the `中文名(English Name)` pattern, plus a trailing-punctuation-stripped variant of each) and requires the achievement name to *equal* one of them. Adding a new candidate-extraction rule is fine; weakening the equality check or removing the ambiguity gate is not.
+
+Two rules about *how* to add one, both learned the hard way (2026-08-10):
+
+- **Append, never replace.** The trailing-punctuation rule adds `秘密食材` alongside `秘密食材。` rather than rewriting it — achievements like 「白手起家。」 and 「胜利！」 have punctuation in their real names, so replacing would turn working matches into misses. Stripped variants go last so exact ones win first.
+- **Normalize the candidate side only, never the `defs` name index.** Adding stripped keys to the index would collide `X` with `X。`, and the ambiguity gate would then skip *both*. That trades "fails to tick" for "ticks the wrong one" — backwards from this project's whole bias.
 
 **The gate closes per name, not per achievement** — a colliding Chinese name does not disqualify a unique English one. See "Same-name collisions" under Current state for why (most collisions are localization bugs) and what that does *not* license. `test/matching.test.js` pins all three failure modes — run `node --test` after touching `lib/guides.js`.
 

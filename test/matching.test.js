@@ -65,6 +65,36 @@ describe('extractTitleCandidates', () => {
     assert.ok(c.includes('体验'), '中文名应该是候选');
     assert.ok(c.includes('taste'), '英文名应该是候选');
   });
+
+  test('攻略给成就名多写了句号,去掉句号后也算候选', () => {
+    // 2026-08-10 抽查 guidelint 的残留报错时发现的:攻略写「秘密食材。」,
+    // Steam 上叫「秘密食材」,精确相等因此不成立。
+    const c = extractTitleCandidates('秘密食材。\n在所有隐藏关卡获得三星。');
+    assert.ok(c.includes('秘密食材'), '去掉尾部句号后应该成为候选');
+  });
+
+  test('原样(带标点)仍然是候选 —— 成就名本身就带标点的不能被拆掉', () => {
+    // Card Shark 的「白手起家。」、文明 6 的「胜利！」名字里本来就有标点。
+    // 去标点的候选是**追加**的,原样那个必须还在,否则等于把能匹配的改成匹配不上。
+    const c = extractTitleCandidates('白手起家。');
+    assert.ok(c.includes('白手起家。'), '带标点的原样候选必须保留');
+    assert.ok(c.includes('白手起家'), '去标点的候选也要有');
+  });
+
+  test('去标点的候选排在原样后面(优先命中精确的那个)', () => {
+    const c = extractTitleCandidates('胜利！');
+    assert.ok(c.indexOf('胜利！') < c.indexOf('胜利'), '原样候选必须排在前面');
+  });
+
+  test('全是标点的行不会产出空候选', () => {
+    assert.equal(extractTitleCandidates('。。。').includes(''), false);
+  });
+
+  test('句中的标点不受影响(只去尾部)', () => {
+    const c = extractTitleCandidates('说到底,还是要氪。');
+    assert.ok(c.includes('说到底,还是要氪'), '尾部句号该去掉');
+    assert.equal(c.includes('说到底还是要氪'), false, '句中逗号不该动');
+  });
 });
 
 describe('matchAchievements —— 精确匹配', () => {
