@@ -48,6 +48,30 @@ To hand this to someone: send them `dist/SteamAchievementTracker-<version>-win.z
 
 **Filenames are ASCII on purpose.** `productName` is `SteamAchievementTracker`, while the window title and every UI string stay Chinese (`main.js`, `Dashboard.html`, `Setup.html`). Chinese *filenames* get converted through the ANSI codepage by a surprising number of tools: `WScript.Shell` can't create or target them (which is what broke the root shortcut), `taskkill` reports the process as `Steam ?????.exe`, and running the exe by path from a shell needs careful quoting. None of that affects what the user sees. Don't "restore" the Chinese product name without re-testing the shortcut.
 
+## Cutting a release
+
+Releases exist so the people using the app can find updates by URL instead of waiting to be sent a file. The repo is public, so **a release is downloadable by anyone**, not only the people you meant to give it to — that's a known and accepted trade, not an oversight.
+
+**One version number.** `launcher/package.json` and the root `package.json` are kept equal; the launcher's value is what names the zip and what the release is tagged with. Bump both together, or the tag and the artifact disagree.
+
+```bash
+# 1. bump version in BOTH package.json files, then:
+cd launcher && npm install --package-lock-only   # sync the lockfile
+npm run build
+
+# 2. verify the artifact before it goes anywhere public
+unzip -l ../dist/SteamAchievementTracker-<version>-win.zip | grep -i local.config   # must find nothing
+unzip -l ../dist/SteamAchievementTracker-<version>-win.zip | grep -iE "config.json|steam.db"  # must find nothing
+
+# 3. tag the exact commit the artifact was built from, then publish
+cd .. && git tag -a v<version> -m "..." && git push origin v<version>
+gh release create v<version> "dist/SteamAchievementTracker-<version>-win.zip" --notes-file <notes>
+```
+
+Build from a clean, committed tree so the tag actually corresponds to the binary — `dist/` is gitignored, so nothing else ties them together.
+
+Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, and that the **CSV import only appears on the first-run form** — a user who clicks past it has to fall back to the CLI, and after the first sync the ♥/★/family/Manual columns can't be recovered at all.
+
 ## Personal use: pointing the launcher at an existing CLI checkout
 
 If you already have a `data/`/`config.json` from running the CLI directly and don't want the launcher keeping a second, separate copy, create `launcher/local.config.json`:
