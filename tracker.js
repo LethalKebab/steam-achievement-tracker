@@ -36,10 +36,7 @@ import { serve } from './lib/server.js';
 import { NotionClient } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
-import {
-  createProvider, createSession, buildWebTools, checkResult,
-  formatUsage, serverToolCalls,
-} from './lib/ai.js';
+import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
 import { generateGuide, planGuide, buildSystemPrompt } from './lib/guidegen.js';
 import { importAll, exportAll } from './lib/csv.js';
 
@@ -574,6 +571,24 @@ async function cmdAiCheck() {
   const dry = flags.has('--dry');
   // --dry 不需要 key:它的用处正是"还没配 key 时先看清楚会发什么"
   const config = loadConfig({ required: dry ? [] : ['ai'] });
+
+  // --models:直接问 API 有哪些模型可用。写 Gemini 那家的时候文档拿不到,模型名只能靠
+  // 记忆猜,所以留了这条路——猜错了不用改代码,问一句就知道
+  if (flags.has('--models')) {
+    const provider = await createProvider(config);
+    if (typeof provider.listModels !== 'function') {
+      throw new Error(`${provider.name} 没有列模型的接口(目前只有 gemini 有)`);
+    }
+    const models = await provider.listModels();
+    console.log(`\n${provider.name} 上这个 key 能用的模型(${models.length} 个):\n`);
+    for (const m of models) {
+      const limits = m.inputLimit ? `  输入上限 ${m.inputLimit} / 输出上限 ${m.outputLimit}` : '';
+      console.log(`  ${m.name.padEnd(34)}${m.display}${limits}`);
+    }
+    console.log(`\n当前用的是 ${provider.model}。换的话改 config.json 的 ai.model。`);
+    return;
+  }
+
   const db = openDb(config.dbPath);
   const target = pickSmokeTarget(db, positional[0] ?? null);
   const def = target.defs.find((d) => d.description) ?? target.defs[0];
@@ -584,44 +599,36 @@ async function cmdAiCheck() {
   const question =
     `游戏《${target.name}》(appid ${target.appid})的成就「${achName}」` +
     (def.description ? `,官方描述是「${def.description}」` : '') +
-    '。先用 web_search 找攻略,再用 web_fetch 抓其中一页的正文读一读,然后用三句话讲清楚怎么拿到它。';
+    // 不点名具体工具:两家的工具叫法不一样,写死一家的名字会让另一家看不懂
+    '。请先上网搜一下这个成就的攻略,能抓到正文的话读一读,然后用三句话讲清楚怎么拿到它。';
 
-  const tools = buildWebTools(config.ai);
   // --dry 不发请求,所以没配 key 也要能走完组装。真跑那条路上 loadConfig 已经拦过了
   const ai = dry && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
-  const provider = createProvider({ ai });
+  const provider = await createProvider({ ai });
+  const tools = provider.webTools();
 
   if (dry) {
     const body = provider.buildBody({ system, messages: [{ role: 'user', content: question }], tools });
-    console.log('\n只组装不发送(--dry)。会发往 https://api.anthropic.com/v1/messages:\n');
-    console.log('请求头:');
-    console.log('  content-type: application/json');
-    console.log('  anthropic-version: 2023-06-01');
-    console.log(`  x-api-key: ${config.ai.apiKey ? '已配置(不打印)' : '**没配置**'}`);
-    if (config.ai.fallbacks !== false) console.log('  anthropic-beta: server-side-fallback-2026-07-01');
-    console.log('\n请求体:');
+    console.log(`\n只组装不发送(--dry)。供应商 ${provider.name},模型 ${provider.model}。`);
+    console.log(`API key:${config.ai.apiKey ? '已配置(不打印)' : '**没配置**'}\n`);
+    console.log('请求体:');
     console.log(JSON.stringify(body, null, 2));
-    console.log('\n真跑一次:去掉 --dry(会花钱,量级见跑完后的用量行)');
+    console.log('\n真跑一次:去掉 --dry。');
     return;
   }
 
-  console.log(`\n模型 ${config.ai.model} · effort ${config.ai.effort} · 联网工具已挂上`);
+  console.log(`\n供应商 ${provider.name} · 模型 ${provider.model} · 联网工具 ${tools.length} 个`);
   console.log(`题目:《${target.name}》的成就「${achName}」\n`);
 
   const session = createSession(provider, { system, tools });
   const t0 = Date.now();
   const r = await session.ask(question, {
     onEvent(ev) {
-      // 高 effort + 联网,几分钟不出声是常态。把工具调用打出来,不然分不清"在干活"和"卡住了"
-      if (ev.type === 'content_block_start') {
-        const b = ev.content_block ?? {};
-        if (b.type === 'server_tool_use') stdout.write(`\n  → ${b.name} …`);
-        else if (b.type === 'web_search_tool_result' || b.type === 'web_fetch_tool_result') {
-          stdout.write(Array.isArray(b.content) ? ' ok' : ` 失败(${b.content?.error_code ?? '?'})`);
-        } else if (b.type === 'text') stdout.write('\n\n');
-      } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
-        stdout.write(ev.delta.text);
-      }
+      // 联网 + 深度思考,几分钟不出声是常态。把工具活动打出来,不然分不清"在干活"和"卡住了"
+      if (ev.type === 'tool') stdout.write(`\n  → ${ev.name} …`);
+      else if (ev.type === 'tool-result') stdout.write(ev.ok ? ' ok' : ` 失败(${ev.errorCode})`);
+      else if (ev.type === 'search') stdout.write(`\n  🔎 ${ev.query}`);
+      else if (ev.type === 'text') stdout.write(ev.text);
     },
   });
 
@@ -629,12 +636,21 @@ async function cmdAiCheck() {
   const verdict = checkResult(r);
   console.log('\n\n' + '─'.repeat(60));
   console.log(verdict.ok ? '✅ 端到端跑通' : `❌ 这轮不能用:${verdict.reason}`);
-  console.log(`  stop_reason: ${r.stopReason} · 服务端工具调用 ${serverToolCalls(r.content)} 次` +
-    ` · pause_turn 续跑 ${r.continuations} 次 · 耗时 ${secs}s`);
+  console.log(
+    `  stop_reason: ${r.stopReason}${r.rawStopReason && r.rawStopReason !== r.stopReason ? `(原值 ${r.rawStopReason})` : ''}` +
+      ` · 续跑 ${r.continuations} 次 · 耗时 ${secs}s`
+  );
   console.log('  ' + formatUsage(session.usage, provider.model));
-  if (r.toolErrors.length) {
-    for (const e of r.toolErrors) console.log(`  ⚠️  ${e.tool} 报错:${e.errorCode}`);
+
+  // 这一行是这个命令最该看的:**声明了联网工具,模型到底搜没搜**。
+  // 免费层带不带联网是文档上查不准的事,回包比定价页可靠
+  if (r.searchQueries?.length) {
+    console.log(`  🔎 实际发出 ${r.searchQueries.length} 次搜索:${r.searchQueries.slice(0, 5).join(' / ')}`);
+  } else if (tools.length) {
+    console.log('  ⚠️  声明了联网工具,但这一轮一次搜索都没发出去 —— 可能是这个层级/模型不支持,');
+    console.log('      也可能是模型觉得不用查。攻略生成如果一直这样,内容就是它凭记忆编的');
   }
+  for (const e of r.toolErrors ?? []) console.log(`  ⚠️  ${e.tool} 报错:${e.errorCode}`);
 }
 
 /**
@@ -686,7 +702,7 @@ async function cmdGuideGen() {
     if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
   }
 
-  const provider = createProvider(config);
+  const provider = await createProvider(config);
   const p = progressPrinter();
   const started = Date.now();
 
@@ -783,8 +799,9 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
   node tracker.js guide-lint [appid]      校验攻略写法:成就有没有漏、格式对不对(只读)
               guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
-  node tracker.js ai-check [appid]        AI 联网研究链路自检(会花钱,用量和花费会打出来)
+  node tracker.js ai-check [appid]        AI 联网研究链路自检(用量和花费会打出来)
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
+              ai-check --models           问 API 这个 key 能用哪些模型(gemini)
   node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名

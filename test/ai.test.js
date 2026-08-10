@@ -21,17 +21,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  AnthropicProvider,
-  createAccumulator,
   emptyUsage,
   mergeMessageUsage,
   addUsage,
   estimateCost,
-  serverToolErrors,
-  buildWebTools,
   checkResult,
   createSession,
 } from '../lib/ai.js';
+import { AnthropicProvider, createAccumulator, serverToolErrors } from '../lib/ai-anthropic.js';
 
 // ---------------------------------------------------------------------------
 // 假的 fetch:把事件数组变成一条 SSE 流
@@ -71,6 +68,9 @@ function fakeFetch(responses) {
   fn.calls = calls;
   return fn;
 }
+
+/** 联网工具声明现在挂在供应商身上(每家形状不同),测试里包一层省得到处 new */
+const webTools = (ai) => new AnthropicProvider(ai, { fetchImpl: fakeFetch([]) }).webTools();
 
 const AI = {
   apiKey: 'test-key',
@@ -209,7 +209,7 @@ test('web_search 失败时 content 是对象,不能当数组取下标', () => {
 
 test('请求体不带那四个会 400 的参数,而且必须是流式', () => {
   const p = new AnthropicProvider(AI, { fetchImpl: fakeFetch([]) });
-  const body = p.buildBody({ system: '规则', messages: [{ role: 'user', content: '写' }], tools: buildWebTools(AI) });
+  const body = p.buildBody({ system: '规则', messages: [{ role: 'user', content: '写' }], tools: webTools(AI) });
 
   for (const banned of ['temperature', 'top_p', 'top_k']) {
     assert.ok(!(banned in body), `${banned} 在 Opus 5 上是 400,不是被忽略`);
@@ -226,7 +226,7 @@ test('system 最后一块打了 cache_control(回灌重写靠它省钱)', () => 
 });
 
 test('联网工具用 _20260209 版,而且绝不额外声明 code_execution', () => {
-  const tools = buildWebTools(AI);
+  const tools = webTools(AI);
   assert.deepEqual(tools.map((t) => t.type), ['web_search_20260209', 'web_fetch_20260209']);
   assert.ok(!tools.some((t) => String(t.type).startsWith('code_execution')),
     '这版工具内部已经跑代码做动态过滤,再加一个等于两套执行环境');
@@ -234,9 +234,9 @@ test('联网工具用 _20260209 版,而且绝不额外声明 code_execution', ()
 });
 
 test('allowedDomains 为空时不下发(空数组会被当成"什么都不许搜")', () => {
-  const tools = buildWebTools({ ...AI, allowedDomains: [] });
+  const tools = webTools({ ...AI, allowedDomains: [] });
   assert.ok(!('allowed_domains' in tools[0]));
-  const locked = buildWebTools({ ...AI, allowedDomains: ['gamersky.com'] });
+  const locked = webTools({ ...AI, allowedDomains: ['gamersky.com'] });
   assert.deepEqual(locked[0].allowed_domains, ['gamersky.com']);
 });
 
@@ -247,7 +247,7 @@ test('allowedDomains 为空时不下发(空数组会被当成"什么都不许搜
 test('普通一轮:拿到正文和用量,只发一次请求', async () => {
   const fetchImpl = fakeFetch([okResponse(simpleMessage({ text: '按 F 键' }))]);
   const p = new AnthropicProvider(AI, { fetchImpl });
-  const r = await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: buildWebTools(AI) });
+  const r = await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: webTools(AI) });
 
   assert.equal(fetchImpl.calls.length, 1);
   assert.equal(r.text, '按 F 键');
@@ -268,7 +268,7 @@ test('pause_turn 续跑:不补"继续",前一轮的 content 也不丢', async ()
   ];
   const fetchImpl = fakeFetch([okResponse(first), okResponse(simpleMessage({ text: '结论' }))]);
   const p = new AnthropicProvider(AI, { fetchImpl });
-  const r = await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: buildWebTools(AI) });
+  const r = await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], tools: webTools(AI) });
 
   assert.equal(fetchImpl.calls.length, 2);
   assert.equal(r.continuations, 1);
@@ -396,7 +396,7 @@ test('多轮会话:历史留着(回灌重写要用),用量跨轮累加', async (
     okResponse(simpleMessage({ text: '改好了' })),
   ]);
   const p = new AnthropicProvider(AI, { fetchImpl });
-  const s = createSession(p, { system: '规则', tools: buildWebTools(AI) });
+  const s = createSession(p, { system: '规则', tools: webTools(AI) });
 
   await s.ask('写一份');
   await s.ask('这几条没过:...');

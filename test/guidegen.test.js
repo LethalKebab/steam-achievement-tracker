@@ -78,6 +78,8 @@ function fakeProvider(replies) {
   return {
     model: 'claude-opus-5',
     asked: [],
+    // 联网工具由供应商自己声明,编排层只是转发。测试里不需要真的工具
+    webTools: () => [],
     async send({ messages }) {
       this.asked.push(messages.at(-1).content);
       const text = replies[this.asked.length - 1];
@@ -336,6 +338,7 @@ describe('generateGuide', () => {
     const { db, config } = freshEnv();
     const provider = {
       model: 'claude-opus-5',
+      webTools: () => [],
       async send() {
         return {
           content: [{ type: 'text', text: MISSING_B }],
