@@ -301,6 +301,44 @@ describe('错误信息要能照着做', () => {
     });
   });
 
+  test('配额明细从 error.details 里读出来(message 里时有时无)', async () => {
+    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(429, { error: {
+      status: 'RESOURCE_EXHAUSTED',
+      message: 'You exceeded your current quota',
+      details: [
+        { '@type': 'type.googleapis.com/google.rpc.QuotaFailure', violations: [
+          { quotaMetric: 'generate_content_free_tier_requests', quotaId: 'GenerateRequestsPerDay', quotaValue: '0' },
+        ] },
+      ],
+    } })]) });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+      // message 里一个 "limit: 0" 都没有,只有结构化明细里的 quotaValue
+      assert.match(e.message, /GenerateRequestsPerDay/);
+      assert.match(e.message, /不是用完了/, 'quotaValue 为 0 也要认出"这个模型不在这一档"');
+      assert.equal(e.retryable, false);
+      return true;
+    });
+  });
+
+  test('429 只在 Google 说了等多久时才重试 —— 否则每次重试都在烧配额', async () => {
+    // 踩过:自己猜 1/2/4 秒退避,对"每分钟 N 次"的窗口根本不够长,
+    // 结果一次 429 变成 4 个请求全废
+    const noHint = fakeFetch([errResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: 'quota' } })]);
+    const p = new GeminiProvider({ ...AI, maxRetries: 3 }, { fetchImpl: noHint });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), /配额/);
+    assert.equal(noHint.calls.length, 1, '没给 RetryInfo 就只发一次,不要再去撞配额');
+  });
+
+  test('没有配额明细的 429 会给出缩小范围的下一步', async () => {
+    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: 'quota' } })]) });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+      assert.match(e.message, /没有配额明细/);
+      assert.match(e.message, /gemini-2\.5-flash/, '要给一个具体能试的模型');
+      assert.match(e.message, /别名/, '别名可能解析到不在免费层的新模型,这点要说');
+      return true;
+    });
+  });
+
   test('工具相关的 400 指向 geminiTools 这个配置项', async () => {
     const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(400, { error: { message: 'Unknown tool: url_context', status: 'INVALID_ARGUMENT' } })]) });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), /geminiTools/);
