@@ -127,12 +127,20 @@ These override the file, which is useful for one-off runs or if you'd rather not
 | `STEAM_API_KEY` | `steamApiKey` |
 | `STEAM_ID` | `steamId` |
 | `NOTION_TOKEN` | `notion.token` |
+| `AI_PROVIDER` | `ai.provider` |
+| `AI_MODEL` | `ai.model` |
 | `ANTHROPIC_API_KEY` | `ai.apiKey`, when `ai.provider` is `anthropic` |
 | `GEMINI_API_KEY` | `ai.apiKey`, when `ai.provider` is `gemini` |
 | `PORT` | `port` |
 
 ```bash
 STEAM_API_KEY=xxx STEAM_ID=yyy node tracker.js sync
+```
+
+`AI_PROVIDER` is read **before** the key, which is what makes it possible to try a provider without editing `config.json` at all — otherwise the key lookup would still be going after the old provider's variable:
+
+```bash
+AI_PROVIDER=gemini GEMINI_API_KEY=xxx node tracker.js ai-check --models
 ```
 
 **`TRACKER_DATA_DIR`** works differently from the four above: it doesn't override a value inside `config.json`, it changes *where* `config.json`, `data/` and `guidesDir` are read from and written to. Without it, all three sit next to the code, which is what the sections above assume.
