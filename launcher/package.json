@@ -1,0 +1,44 @@
+{
+  "name": "steam-achievement-tracker-launcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Electron launcher shell for steam-achievement-tracker",
+  "type": "module",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder && node postbuild.js"
+  },
+  "build": {
+    "appId": "com.local.steam-achievement-tracker",
+    "productName": "SteamAchievementTracker",
+    "directories": {
+      "output": "../dist"
+    },
+    "files": [
+      "main.js",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../",
+        "to": "tracker",
+        "filter": [
+          "tracker.js",
+          "package.json",
+          "*.html",
+          "lib/**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "zip"
+      ]
+    }
+  },
+  "devDependencies": {
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3"
+  }
+}

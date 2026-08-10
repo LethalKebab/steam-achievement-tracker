@@ -6,3 +6,13 @@ data/
 
 # CSV 导入导出的中间文件
 exports/
+
+# launcher/ 的 Electron 依赖,以及打包产物(仓库根目录的 dist/)——体积大(上百 MB),不该进仓库
+launcher/node_modules/
+dist/
+
+# 本机专属,内容都是本机绝对路径,分发给别人的包永远不该带:
+# - local.config.json:把打包版指回一份已有的 CLI 数据(见 lib/config.js 的 TRACKER_DATA_DIR)
+# - *.lnk:build 时生成的、指向 dist/ 里那个 exe 的快捷方式
+launcher/local.config.json
+*.lnk

@@ -1,0 +1,79 @@
+# Launcher
+
+Electron shell around the existing CLI/server — for people who shouldn't need a terminal or Node installed. This directory is intentionally isolated from the root project: Electron and electron-builder live here as devDependencies so the core tracker stays at zero runtime dependencies.
+
+## Layout
+
+```
+steam-achievement-tracker/
+├── tracker.js, Dashboard.html, Setup.html, lib/   ← the tracker. Edit freely; packaging never needs to change
+├── launcher/                                      ← this directory: the Electron wrap only
+│   ├── main.js            spawn + window lifecycle
+│   ├── postbuild.js       rename output, copy local config, make the root shortcut
+│   └── local.config.json  gitignored, this machine only
+├── dist/                                          ← build output (gitignored)
+│   ├── SteamAchievementTracker/       the app folder
+│   └── SteamAchievementTracker-1.0.0-win.zip   what you send people
+└── SteamAchievementTracker.lnk                    ← gitignored shortcut; double-click this
+```
+
+**The wrap never enumerates core files.** `extraResources` in `package.json` is a single rule with an *allow-list* filter (`tracker.js`, `package.json`, `*.html`, `lib/**/*`), so adding a Dashboard page or a `lib/` module is picked up automatically with no packaging edit. The allow-list is also the safety mechanism: `config.json` and `data/` can never be packaged, because they simply aren't on it — verify with `unzip -l dist/*.zip | grep config` after any change to that filter.
+
+## How it works
+
+`main.js` spawns `../tracker.js serve` as a child process, using Electron's own bundled Node (`ELECTRON_RUN_AS_NODE=1`) as the interpreter — confirmed this bundles a recent-enough Node with a working `node:sqlite`, so no separate Node runtime needs to be vendored. Once the child responds on `127.0.0.1:8777`, a `BrowserWindow` opens pointed at it. That's the entire app — no business logic lives here, only spawn/health-check/window-lifecycle glue.
+
+First run with no `config.json` present: the server itself redirects `/` to `/setup` (see `lib/server.js`), which serves `Setup.html` — a plain form for the Steam API key + SteamID64, plus an optional CSV folder path (the GUI equivalent of `node tracker.js import`, for anyone migrating from a spreadsheet). `completeSetup` in `lib/api.js` validates Steam credentials, runs the import if a path was given, and only then writes anything — a bad import path fails the whole submission rather than saving half-finished state, since ♥/★/family/Manual fields can't be recovered from Steam once a sync has run. On success it patches the running process's in-memory `config`/`steam` state directly, so the same server process is immediately usable — no restart needed. `main.js` just polls `getSetupStatus` while parked on `/setup` and reloads the window once it flips true.
+
+## Dev mode
+
+```
+npm install
+npm start
+```
+
+Runs against the parent project's files directly (`../tracker.js`, `../lib`, etc.) — edit-and-rerun like the CLI itself.
+
+## Building a distributable
+
+```
+npm run build
+```
+
+Output goes to the **repo root** `dist/`, not inside `launcher/` — the built app is what you actually open, so it shouldn't be buried under the wrapper's source. `postbuild.js` then renames electron-builder's `win-unpacked` to the product name and drops a `SteamAchievementTracker.lnk` at the repo root, so launching is one double-click from the top level.
+
+`zip` is the target deliberately, **not** electron-builder's `portable` target — the NSIS `portable` target self-extracts to a temp directory on every launch, which would silently lose `config.json` and the SQLite database between runs. The `zip` target ships a real, stable folder: unzip once anywhere, and `config.json`/`data/` persist right next to the exe, exactly like running the CLI from a normal checkout.
+
+To hand this to someone: send them `dist/SteamAchievementTracker-<version>-win.zip`. They unzip it somewhere permanent (not a temp/Downloads folder they'll clear out) and run the `.exe` inside. First launch shows the setup form; after that it opens straight to the Dashboard. The zip is built *before* `postbuild.js` runs, so it never contains your `local.config.json` — verified, but worth re-checking if you change the build order.
+
+**Filenames are ASCII on purpose.** `productName` is `SteamAchievementTracker`, while the window title and every UI string stay Chinese (`main.js`, `Dashboard.html`, `Setup.html`). Chinese *filenames* get converted through the ANSI codepage by a surprising number of tools: `WScript.Shell` can't create or target them (which is what broke the root shortcut), `taskkill` reports the process as `Steam ?????.exe`, and running the exe by path from a shell needs careful quoting. None of that affects what the user sees. Don't "restore" the Chinese product name without re-testing the shortcut.
+
+## Personal use: pointing the launcher at an existing CLI checkout
+
+If you already have a `data/`/`config.json` from running the CLI directly and don't want the launcher keeping a second, separate copy, create `launcher/local.config.json`:
+
+```json
+{ "dataDir": "D:/GitHub/steam-achievement-tracker" }
+```
+
+It's gitignored, and `npm run build` copies it next to the built exe automatically (`postbuild.js`) — `dist/` is wiped on every rebuild, so the source of truth deliberately lives in `launcher/` where builds can't touch it.
+
+At startup `main.js` looks for `local.config.json` in three places, first hit wins:
+
+1. **next to the exe** — where the build copies it; this is the one that actually gets used
+2. `app.getPath('userData')` (`%APPDATA%\steam-achievement-tracker-launcher\`) — survives deleting and re-extracting the whole app folder
+3. `launcher/` itself — dev mode (`npm start`)
+
+Whichever matches is passed to the child process as `TRACKER_DATA_DIR`. `lib/config.js` honors that env var for `config.json`/`data/`/`guidesDir` **only** — never for code assets (`Dashboard.html`, `Setup.html`, `lib/rpc.js`), which always load from wherever the running code physically is. A `dataDir` pointing at a folder that doesn't exist is ignored rather than used, so copying the app folder to another machine degrades to normal beside-the-exe storage instead of failing to start.
+
+**Why exe-adjacent is first, not `userData`:** `userData` lives under the user profile, which sandboxed or virtualized processes can silently redirect — the same absolute path resolving to different content depending on which process asks. That cost a long debugging session here: a file created by one tool was invisible to the real desktop session while every check insisted it existed. The exe-adjacent copy travels with the app and has exactly one interpretation.
+
+None of this exists on a friend's machine — no file in any of the three locations, so `TRACKER_DATA_DIR` never gets set and data lands beside their exe, same as if the feature weren't there.
+
+## Known scope limitations (deliberate, not oversights)
+
+- **Windows only.** No macOS/Linux build target configured.
+- **No Notion setup UI.** The setup form collects Steam credentials and an optional CSV import path. Notion guide-sync still requires editing `config.json` by hand or `node tracker.js init --notion` — pinned for later, not forgotten.
+- **Port 8777 is hardcoded**, matching the project's default. If that port is already taken on someone's machine, the launcher will fail to start rather than pick another port.
+- **No code signing.** Windows SmartScreen will show an "Unknown Publisher" warning on first run — expected, not a bug. Warn recipients in advance.
+- **No auto-update.** Cutting an actual release is a separate, later step — this only covers building the artifact locally.
