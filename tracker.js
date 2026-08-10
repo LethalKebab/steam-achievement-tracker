@@ -827,9 +827,18 @@ async function cmdGuideGen() {
   console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
     '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
     '"易错过"是不是真的,都要你自己看一遍。');
+  // **能搜 ≠ 搜了。** canSearch 只说供应商有这个能力,searchQueries 才是它真发出去的。
+  // 不报的话,"声明了工具但一次没搜"就变成一个看不出来的质量差别 —— 正是 canSearch
+  // 那套设计要防的东西
   if (!r.researched) {
     console.log('    而且这一份**完全没有经过联网调研**,内容是模型凭已有知识写的,' +
       '可信度比查过资料的低一档。');
+  } else if (!r.searchQueries?.length) {
+    console.log('    ⚠️  而且**这一轮模型一次搜索都没发出去** —— 工具挂上了但它没用,' +
+      '内容实际上等同于凭记忆写的。');
+  } else {
+    console.log(`\n🔎 实际发出 ${r.searchQueries.length} 次搜索,前几条:` +
+      r.searchQueries.slice(0, 4).join(' / '));
   }
 }
 
@@ -937,5 +946,9 @@ try {
 } catch (err) {
   console.error('\n❌ ' + (err.message ?? err));
   if (process.env.DEBUG) console.error(err.stack);
-  process.exit(1);
+  // **不要用 process.exit()。** 强行退出会在 socket / 定时器还在拆除的时候打断 libuv,
+  // Windows 上表现为 "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" ——
+  // 而且是在错误信息打完之后才崩,看起来像两件不相干的事。
+  // 设 exitCode 让 Node 自然退出,退出码一样是 1
+  process.exitCode = 1;
 }

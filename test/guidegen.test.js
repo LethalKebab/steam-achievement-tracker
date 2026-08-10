@@ -400,3 +400,13 @@ test('草稿目录建在 guidesDir 底下,但发现逻辑看不见它', () => {
   assert.equal(found.files, 0);
   assert.equal(allGuides(db).length, 0);
 });
+
+test('只有开围栏没有闭围栏时也要抠干净(模型忘了收尾 / 输出被截断)', () => {
+  // 实测踩过(2026-08-10):成对匹配的正则匹配不上,于是 ```markdown 那一行原样落进了
+  // 攻略文件。**校验器抓不到** —— 那行既不是 checkbox 也不违反任何规则,51/51 照样全绿
+  assert.equal(extractMarkdown('```markdown\n## 主线\n\n- [ ] **A**'), '## 主线\n\n- [ ] **A**');
+  assert.equal(extractMarkdown('```md\n- [ ] **A**\n```'), '- [ ] **A**');
+  // 正常成对的、以及压根没有围栏的,行为不变
+  assert.equal(extractMarkdown('```markdown\n正文\n```'), '正文');
+  assert.equal(extractMarkdown('## 主线'), '## 主线');
+});
