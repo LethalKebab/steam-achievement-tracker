@@ -389,3 +389,29 @@ test('多轮会话:历史原样回传,用量跨轮累加', async () => {
   assert.equal(s.usage.outputTokens, 100);
   assert.equal(s.cost().priced, false, 'Gemini 故意不进价格表:免费层是 0,付费层单价没核实过');
 });
+
+// ---------------------------------------------------------------------------
+// 供应商 / 模型 错配
+// ---------------------------------------------------------------------------
+
+test('模型明确属于另一家时当场拦下,而不是让人去撞供应商那边的 404', async () => {
+  // 实测踩过:config.json 写着 deepseek,PowerShell 会话里 $env:AI_PROVIDER 还留着
+  // gemini,于是拿 gemini 的端点去请求 deepseek-chat。报出来的是 gemini 的
+  // "模型名可能不对",完全指不到"provider 只改了一半"这个真因上
+  const { createProvider, assertModelMatchesProvider } = await import('../lib/ai.js');
+  await assert.rejects(
+    createProvider({ ai: { provider: 'gemini', model: 'deepseek-chat', apiKey: 'k' } }),
+    (e) => {
+      assert.match(e.message, /只改了一半/);
+      assert.match(e.message, /--provider deepseek/, '要给出直接可用的修法');
+      assert.match(e.message, /环境变量会盖掉 config\.json/, '这是最容易看不见的那种来源');
+      return true;
+    }
+  );
+
+  // 对得上的、以及**认不出来的**都要放行 —— 别名和自建端点的模型名可以是任意形状
+  assert.doesNotThrow(() => assertModelMatchesProvider('gemini', 'gemini-flash-latest'));
+  assert.doesNotThrow(() => assertModelMatchesProvider('gemini', 'nano-banana-pro-preview'));
+  assert.doesNotThrow(() => assertModelMatchesProvider('deepseek', 'my-selfhosted-model'));
+  assert.doesNotThrow(() => assertModelMatchesProvider('anthropic', ''));
+});

@@ -89,6 +89,28 @@ function applyAiFlags(config) {
   return config;
 }
 
+/**
+ * 环境变量正在盖掉 config.json 的话,当场说出来。
+ *
+ * 环境变量在 shell 会话里会一直赖着,而 config.json 是肉眼看得见的那份 —— 两者不一致时,
+ * 人看着文件、程序用着变量,谁也不知道差在哪。踩过:config.json 写着 deepseek,
+ * PowerShell 会话里 $env:AI_PROVIDER 还留着 gemini,结果拿 gemini 的端点去请求
+ * deepseek-chat,报出来的是一个完全指错方向的 404。
+ */
+function warnEnvOverrides() {
+  const notes = [];
+  for (const [name, label] of [['AI_PROVIDER', '供应商'], ['AI_MODEL', '模型']]) {
+    if (process.env[name]) notes.push(`${label}来自环境变量 ${name}=${process.env[name]}(盖掉了 config.json)`);
+  }
+  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'DEEPSEEK_API_KEY']) {
+    if (process.env[name]) notes.push(`API key 可能来自环境变量 ${name}(盖掉了 config.json)`);
+  }
+  for (const n of notes) console.log(`  ⚠️  ${n}`);
+  if (notes.length) {
+    console.log('      清掉:Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue');
+  }
+}
+
 /** 供应商实例。`--dry` / `--dry-run` 不发请求,所以没 key 也要能造出来 */
 async function providerFor(config, { needKey = true } = {}) {
   const ai = !needKey && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
@@ -665,6 +687,7 @@ async function cmdAiCheck() {
   }
 
   console.log(`\n供应商 ${provider.name} · 模型 ${provider.model} · 联网工具 ${tools.length} 个`);
+  warnEnvOverrides();
   console.log(`题目:《${target.name}》的成就「${achName}」\n`);
 
   const session = createSession(provider, { system, tools });
@@ -732,6 +755,7 @@ async function cmdGuideGen() {
   // 打供应商解析后的模型名,不是 config 里那个:换 provider 没指定 model 时
   // config 里是空的,真正用的是这一家的默认值
   console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
+  warnEnvOverrides();
   console.log(`  落盘到 ${plan.finalPath}`);
 
   if (probe.canSearch === false && !flags.has('--no-research')) {
