@@ -26,6 +26,25 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "notion": {                 // only needed for guide checkbox sync
     "token": "…",
     "overviewDbId": "…"
+  },
+
+  "ai": {                     // only needed for AI guide generation — costs money
+    "provider": "anthropic",  // the only one wired up so far
+    "apiKey": "…",            // or the ANTHROPIC_API_KEY environment variable
+    "model": "claude-opus-5",
+    "effort": "high",         // low | medium | high | xhigh | max
+    "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
+    "maxAchievements": 100,   // refuse to generate above this — one context has to hold it
+    "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
+    "maxSearches": 8,         // web_search calls per request
+    "maxFetches": 10,         // web_fetch calls per request
+    "maxFetchTokens": 50000,  // how much of one page to pull back
+    "allowedDomains": [],     // non-empty = hard restrict search to these; empty = no limit
+    "maxContinuations": 5,    // server-tool loop resumes before giving up
+    "maxRetries": 3,
+    "requestTimeoutMs": 600000,
+    "fallbacks": true,        // re-run on another model if a safety classifier declines
+    "showThinking": false     // stream a summary of the reasoning; debugging only
   }
 }
 ```
@@ -74,6 +93,18 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 **`notion.overviewDbId`** — the Notion database holding your guide pages. Open that database as a full page; the ID is the 32-character hex string in the URL, *before* the `?v=` (that part is the view ID, not the database). See [guides.md](guides.md).
 
+**`ai.*`** — settings for AI guide generation ([design and status](ai-guide-writing.md)); nothing reads them unless you run `node tracker.js ai-check` or `node tracker.js guide-gen`. It is the one part of this project that spends money, so a few of the defaults are deliberately conservative and `guide-gen` asks for confirmation before it starts.
+
+`maxAchievements` (100) is a refusal threshold, not a truncation: a game with more achievements than one context can comfortably hold gets rejected with an explanation rather than a worse guide. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
+
+`maxTokens` caps thinking **and** prose together, not prose alone — set it too low and a guide gets truncated mid-way, which is worse than a run that fails outright, because nothing downstream can tell the difference. `effort` is the depth knob; there is no temperature or token-budget setting, because the models this targets reject both outright.
+
+`allowedDomains` defaults to empty, meaning no restriction. Filling it in **hard-restricts** search to those domains — the API offers no way to merely prefer one. It's tempting to lock search onto Chinese guide sites (3DM, 游民星空, NGA, B站), but how well those are actually indexed hasn't been measured yet, so the default doesn't trade measured quality for an unmeasured assumption.
+
+`fallbacks` lets Anthropic re-run a request on a different model when a safety classifier declines it. It costs one extra beta header, and if your account doesn't accept that header the whole request fails with a 400 — the error message says to set `"fallbacks": false`, which is the fix.
+
+Cost is reported after every run: model tokens are priced exactly, and the number of web searches is reported as a **count**, never folded into the dollar figure, because how search itself is billed hasn't been measured. A model with no price-table entry reports "no price table" rather than `$0.00`.
+
 ## Environment variables
 
 These override the file, which is useful for one-off runs or if you'd rather not keep credentials on disk:
@@ -83,6 +114,7 @@ These override the file, which is useful for one-off runs or if you'd rather not
 | `STEAM_API_KEY` | `steamApiKey` |
 | `STEAM_ID` | `steamId` |
 | `NOTION_TOKEN` | `notion.token` |
+| `ANTHROPIC_API_KEY` | `ai.apiKey` |
 | `PORT` | `port` |
 
 ```bash
