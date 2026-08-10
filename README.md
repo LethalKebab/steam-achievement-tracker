@@ -2,26 +2,37 @@
 
 Tracks Steam achievement progress across your library. It stores your games, achievement counts and completion percentage in a local SQLite database, and serves a web Dashboard for browsing them.
 
-Everything runs on your own machine: the database is a file in this folder, credentials sit in a config file beside it, and the Dashboard is served by a local HTTP server bound to `127.0.0.1`.
+Everything runs on your own machine: the database is a file next to the program, credentials sit in a config file beside it, and the Dashboard is served by a local HTTP server bound to `127.0.0.1`.
 
 > **Note:** the Dashboard UI is in Chinese (the language this project was built in). Setup and daily use don't require reading Chinese, but the on-screen text is Chinese.
 
 ## Requirements
 
-**Node.js 24 or newer** — check with `node --version`. The project uses Node built-ins only, so there is nothing to install.
+Two ways to run this, with different requirements:
 
-The packaged Windows app bundles its own runtime, so it runs without a separate Node install. Building it is a separate step — see [launcher/README.md](launcher/README.md).
+- **The Windows app** — nothing to install; it bundles its own Node runtime.
+- **From source** — **Node.js 24 or newer**, check with `node --version`. The project uses Node built-ins only, so there are no packages to install.
 
 ## Setup
 
-You'll need two things from Steam, both one-time:
+Either way, you'll need two things from Steam, both one-time:
 
 | | What | Where |
 |---|---|---|
 | ① | **Steam Web API Key** | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
 | ② | **SteamID64** | [steamid.io](https://steamid.io) — paste your profile URL |
 
-Then, in this folder:
+### The Windows app
+
+1. Download the `-win.zip` from [the latest release](https://github.com/LethalKebab/steam-achievement-tracker/releases/latest) (~133 MB)
+2. Unzip somewhere permanent — the database is created inside that folder, so moving or deleting the folder moves or deletes your data
+3. Run `SteamAchievementTracker.exe`
+
+The build is unsigned, so the first launch shows *"Windows protected your PC"*. Click **More info → Run anyway**; it doesn't appear on later launches.
+
+Until credentials are saved, a form is served in place of the Dashboard: the same two fields above, checked against Steam before anything is written. Save it and the Dashboard opens, with the first sync running in the background. Every later launch goes straight to the Dashboard.
+
+### From source
 
 ```bash
 node tracker.js init     # paste ① and ② when asked; checks them against Steam right away
@@ -31,13 +42,11 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 
 `init` writes your credentials to `config.json` (gitignored, readable only by you) and verifies them against Steam immediately, so a typo surfaces before the first sync rather than partway through it.
 
-**In the packaged app, a form replaces those three commands.** It has no terminal, so the first launch serves a setup page instead of the Dashboard: the same two fields, checked against Steam the same way, written to the same `config.json`. Save it and the Dashboard opens, syncing in the background. Afterwards it goes straight to the Dashboard on every launch.
+### Optional, either way
 
-If you already track this in a spreadsheet, import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on that setup form, which also offers blank CSV templates in the right column order. Favorites, spotlights and hand-edited rows cannot be recovered from Steam, so keep the spreadsheet until the import has run; importing is repeatable, so a missed first attempt is not fatal. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
+**Coming from a spreadsheet?** Import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on the setup form, which also offers blank CSV templates in the right column order. Favorites, spotlights and hand-edited rows cannot be recovered from Steam, so keep the spreadsheet until the import has run; importing is repeatable, so a missed first attempt is not fatal. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
 
-The setup form also configures Notion guide sync (step ④), and stays reachable afterwards from the **设置** button on the Dashboard.
-
-**Optional — guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked:
+**Guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked. The setup form covers Notion (step ④) and stays reachable afterwards from the **设置** button on the Dashboard. From source:
 
 ```bash
 node tracker.js init --notion   # only if you use Notion; local markdown needs no setup
@@ -47,6 +56,8 @@ node tracker.js guides          # register your guide pages
 Details, and how matching works: [docs/guides.md](docs/guides.md).
 
 ## Everyday use
+
+This section is the source install. In the app, opening it does what `serve` does and **立即同步** does what `sync` does, which covers everyday use — the rest of the table is available by running the commands in the app's own folder.
 
 All commands are `node tracker.js <command>`. The **Network** column tells you which will be slow and which reach outside your machine.
 
@@ -89,7 +100,8 @@ Refreshing the browser does none of it — that re-reads the local database only
 | [docs/data.md](docs/data.md) | what's in the database, importing/exporting CSV, what Steam can't tell us |
 | [docs/guides.md](docs/guides.md) | guide checkbox sync, Notion setup, how matching works |
 | [CLAUDE.md](CLAUDE.md) | architecture and conventions, for working on the code |
-| [launcher/README.md](launcher/README.md) | packaged Windows app for people without Node.js or a terminal — `cd launcher && npm run build`, then double-click `SteamAchievementTracker.lnk` at the repo root (build-it-yourself for now, no release published yet) |
+| [launcher/README.md](launcher/README.md) | how the Windows app is built and packaged, for working on it |
+| [Releases](https://github.com/LethalKebab/steam-achievement-tracker/releases) | published builds and their notes |
 
 ## License
 
