@@ -7,6 +7,10 @@ data/
 # CSV 导入导出的中间文件
 exports/
 
+# AI 生成但没通过校验的攻略草稿。攻略发现逻辑扫不到这个目录(非递归),
+# 仓库也不该收——没验过的内容不该有任何一条路径流向别人
+guides/.drafts/
+
 # launcher/ 的 Electron 依赖,以及打包产物(仓库根目录的 dist/)——体积大(上百 MB),不该进仓库
 launcher/node_modules/
 dist/
