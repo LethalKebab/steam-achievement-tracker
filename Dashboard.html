@@ -42,6 +42,8 @@
       margin-bottom: 24px;
     }
     .subtitle-row .subtitle { margin-bottom: 0; }
+    /* 「设置」是个 <a>,和「立即同步」这个 <button> 共用这套样式,
+       所以要把链接的默认下划线和 inline 布局压掉 */
     .sync-btn {
       background: var(--panel-alt);
       color: var(--text);
@@ -51,6 +53,10 @@
       font-size: 12px;
       cursor: pointer;
       flex-shrink: 0;
+      display: inline-block;
+      text-decoration: none;
+      line-height: normal;
+      font-family: inherit;
     }
     .sync-btn:hover:not(:disabled) {
       background: var(--accent);
@@ -443,6 +449,9 @@
     <div class="subtitle" id="lastUpdated">加载中...</div>
     <button class="sync-btn" id="syncNowBtn"
             title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。">立即同步</button>
+    <!-- 打包版没有地址栏,不给入口的话设置页在首次设置之后就再也打不开了 -->
+    <a class="sync-btn" href="/setup" id="settingsLink"
+       title="改 Steam 凭据、配置 Notion 攻略同步、从表格导入">设置</a>
     <span class="sync-msg" id="syncMsg"></span>
   </div>
 

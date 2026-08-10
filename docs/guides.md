@@ -15,6 +15,8 @@ A guide is any page whose body starts with a line like `appid: 3117820`. That's 
 3. Run `node tracker.js init --notion`. It prompts for both (the token isn't echoed), verifies the token and the database access separately, and only saves once the token works.
 4. In Notion, open the guide pages' shared parent → `•••` → **Connections** → add your integration. Child pages inherit it. Without this the API returns 404s.
 
+In the packaged app, step 3 is the **④ Notion 攻略同步** section of the setup page instead — reachable on first run, and afterwards from the **设置** button on the Dashboard. It performs the same two checks and reports them separately, because the fixes differ: a rejected token means re-copying it from `my-integrations`, while a token that works but a database it cannot read means step 4 above was skipped. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
+
 Then:
 
 ```bash

@@ -33,7 +33,9 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 
 **In the packaged app, a form replaces those three commands.** It has no terminal, so the first launch serves a setup page instead of the Dashboard: the same two fields, checked against Steam the same way, written to the same `config.json`. Save it and the Dashboard opens, syncing in the background. Afterwards it goes straight to the Dashboard on every launch.
 
-If you already track this in a spreadsheet, import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on that setup form. Favorites, spotlights and hand-edited rows cannot be recovered from Steam afterwards, and the form is the only place the app offers the import, so skipping it there means falling back to the command line later. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
+If you already track this in a spreadsheet, import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on that setup form, which also offers blank CSV templates in the right column order. Favorites, spotlights and hand-edited rows cannot be recovered from Steam, so keep the spreadsheet until the import has run; importing is repeatable, so a missed first attempt is not fatal. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
+
+The setup form also configures Notion guide sync (step ④), and stays reachable afterwards from the **设置** button on the Dashboard.
 
 **Optional — guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked:
 

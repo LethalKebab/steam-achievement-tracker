@@ -97,7 +97,7 @@ None of this exists on a friend's machine — no file in any of the three locati
 ## Known scope limitations (deliberate, not oversights)
 
 - **Windows only.** No macOS/Linux build target configured.
-- **No Notion setup UI.** The setup form collects Steam credentials and an optional CSV import path. Notion guide-sync still requires editing `config.json` by hand or `node tracker.js init --notion` — pinned for later, not forgotten.
+- **Turning Notion sync back off** needs `config.json` — the settings page treats an empty Integration Secret as "keep the current one", the same rule the Steam API Key follows, so that changing a SteamID can't silently wipe a token. Everything else about Notion is configurable in the app.
 - **Port 8777 is hardcoded**, matching the project's default. If that port is already taken on someone's machine, the launcher will fail to start rather than pick another port.
 - **No code signing.** Windows SmartScreen will show an "Unknown Publisher" warning on first run — expected, not a bug. Warn recipients in advance.
 - **No auto-update.** Cutting an actual release is a separate, later step — this only covers building the artifact locally.

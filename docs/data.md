@@ -62,7 +62,9 @@ If you already track this in a spreadsheet, import it **before your first sync**
 2. Put them all in one folder.
 3. `node tracker.js import ~/Downloads/steam-csvs`
 
-The packaged app ([launcher/README.md](../launcher/README.md)) exposes the same step as an optional folder-path field on its first-run form, since it has no terminal to run the command from. It runs this identical import, and it validates before saving anything: a folder it can't read fails the whole form rather than saving credentials and leaving you past the point where importing still helps.
+The packaged app ([launcher/README.md](../launcher/README.md)) exposes the same step as an optional folder-path field under **③ 从表格导入** on the setup page, since it has no terminal to run the command from. It runs this identical import, offers blank templates for the three files, and fails the whole form if the folder can't be read rather than saving credentials and reporting success. The setup page stays reachable from the **设置** button on the Dashboard, so a skipped import can be done later.
+
+**"Before your first sync" is a recommendation, not a deadline.** Import overwrites `status`, `sync_locked`, `family`, `favorite`, `priority`, `name` and the counts on every run — it is written to be re-runnable, so importing after a sync still restores those columns. Going in the recommended order just avoids a sync's fresh Steam numbers being replaced by older spreadsheet ones. What is genuinely unrecoverable is the spreadsheet itself: Steam's API cannot supply ♥/★/family/`Manual`, so keep the CSVs until you have confirmed the import landed.
 
 Columns are read **by position**, not by header text, so translated or renamed headers are fine:
 

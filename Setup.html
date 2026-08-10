@@ -68,23 +68,72 @@
   .msg { font-size: 12px; margin-top: 14px; min-height: 16px; line-height: 1.5; }
   .msg.error { color: var(--low); }
   .msg.ok { color: var(--good); }
+
+  /* 可选步骤:默认折叠。展开后才显示操作说明,不然首次打开一屏全是字 */
+  details {
+    margin-top: 18px;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+  summary {
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text);
+    list-style: none;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: '▸ '; color: var(--text-dim); }
+  details[open] summary::before { content: '▾ '; }
+  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  details .hint { margin: 12px 0 0; }
+  details ol { margin: 10px 0 0; padding-left: 20px; font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+  details ol code {
+    background: var(--panel-alt);
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+  }
+  .configured { font-size: 11px; color: var(--good); margin-left: 6px; }
 </style>
 </head>
 <body>
   <form class="card" id="setup-form">
-    <h1>初始设置</h1>
-    <div class="subtitle">只需要填一次,凭据存在本机的 config.json 里</div>
+    <h1 id="page-title">初始设置</h1>
+    <div class="subtitle" id="page-subtitle">只需要填一次,凭据存在本机的 config.json 里</div>
     <div class="hint">
       ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
       ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>(把你的个人资料链接粘进去查)
     </div>
-    <label for="key">① Steam Web API Key</label>
+    <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空则不改</span></label>
     <input id="key" name="key" type="text" autocomplete="off" required>
     <label for="id">② SteamID64</label>
     <input id="id" name="id" type="text" autocomplete="off" required placeholder="17 位数字">
 
-    <label for="csv">③ 从 CSV 导入(可选)</label>
-    <input id="csv" name="csv" type="text" autocomplete="off" placeholder="CSV 所在文件夹路径">
+    <details id="csv-step">
+      <summary>③ 从表格导入(可选)</summary>
+      <input id="csv" name="csv" type="text" autocomplete="off" placeholder="CSV 所在文件夹路径" style="margin-top:10px">
+      <div class="hint">
+        文件名里要含 <code>RAW DATA</code> / <code>ACHIEVEMENTS</code> / <code>GUIDES</code> 其中之一。
+        列按位置读,表头叫什么都行。<br>
+        空模板:
+        <a href="/template/RAW DATA.csv">RAW DATA</a> ·
+        <a href="/template/ACHIEVEMENTS.csv">ACHIEVEMENTS</a> ·
+        <a href="/template/GUIDES.csv">GUIDES</a>
+      </div>
+    </details>
+
+    <details id="notion-step">
+      <summary>④ Notion 攻略同步(可选)<span class="configured" id="notion-set" hidden>已配置</span></summary>
+      <ol>
+        <li>打开 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a>,新建一个 Internal Integration,复制它的 secret</li>
+        <li>回到 Notion,打开放攻略的数据库(或它们的父页面)→ 右上角 <code>•••</code> → <code>Connections</code> → 加上刚建的 integration。<strong>不做这一步会读不到页面。</strong></li>
+        <li>把那个数据库当整页打开,地址栏里 <code>?v=</code> 之前的 32 位十六进制就是数据库 ID</li>
+      </ol>
+      <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空则不改</span></label>
+      <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="secret_...">
+      <label for="notion-db">攻略数据库 ID</label>
+      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
+    </details>
 
     <button type="submit" id="submit-btn">保存并验证</button>
     <div class="msg" id="msg" role="status"></div>
@@ -93,46 +142,102 @@
     const form = document.getElementById('setup-form');
     const btn = document.getElementById('submit-btn');
     const msg = document.getElementById('msg');
+    const $ = (id) => document.getElementById(id);
+
+    const call = async (method, args) => {
+      const res = await fetch('/api/' + method, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ args }),
+      });
+      const body = await res.json();
+      return body.ok ? body.result : { error: body.error || '请求失败' };
+    };
+
+    // 这个页面有两种身份:首次设置(还没凭据,是进 Dashboard 前的关卡),
+    // 以及之后从 Dashboard 点进来改设置。区别只在文案和"密钥留空表示不改",
+    // 所以共用一份表单,靠 getSettings 的结果切换,不做两个页面。
+    let isEditMode = false;
+    let loadedNotionDb = '';
+
+    (async function load() {
+      const s = await call('getSettings', []);
+      if (s.error) return;
+      isEditMode = s.hasSteamKey && Boolean(s.steamId);
+
+      $('id').value = s.steamId || '';
+      $('notion-db').value = s.notionDbId || '';
+      loadedNotionDb = s.notionDbId || '';
+
+      if (s.hasSteamKey) {
+        $('key').required = false;
+        $('key').placeholder = '留空则沿用现在的';
+        $('key-set').hidden = false;
+      }
+      if (s.hasNotionToken) {
+        $('token-set').hidden = false;
+        $('notion-set').hidden = false;
+        $('notion-token').placeholder = '留空则沿用现在的';
+      }
+      if (isEditMode) {
+        $('page-title').textContent = '设置';
+        $('page-subtitle').textContent = '改完点保存;没动的项目留空即可';
+        document.title = '设置 · Steam 成就追踪器';
+      }
+    })();
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const key = document.getElementById('key').value.trim();
-      const id = document.getElementById('id').value.trim();
-      const csv = document.getElementById('csv').value.trim();
-      if (!key || !id) return;
+      const key = $('key').value.trim();
+      const id = $('id').value.trim();
+      const csv = $('csv').value.trim();
+      const notionToken = $('notion-token').value.trim();
+      const notionDb = $('notion-db').value.trim();
+
+      // 编辑模式下 key 可以留空(表示沿用),首次设置则必填
+      if ((!key && !isEditMode) || !id) return;
 
       btn.disabled = true;
       msg.className = 'msg';
-      msg.textContent = csv ? '正在验证凭据、导入表格数据…' : '正在验证凭据…';
+      msg.textContent = csv ? '正在验证凭据、导入表格数据…' : '正在验证…';
 
+      const done = [];
       try {
-        const res = await fetch('/api/completeSetup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ args: [key, id, csv] }),
-        });
-        const body = await res.json();
-        const result = body.ok ? body.result : { error: body.error || '请求失败' };
-
-        if (result.error) {
-          msg.className = 'msg error';
-          msg.textContent = result.error;
-          btn.disabled = false;
-          return;
+        // Steam 那部分:编辑模式下没填新 key 就不动它,免得为了改 Notion 还得
+        // 把 API Key 翻出来重打一遍
+        if (key || !isEditMode) {
+          const r = await call('completeSetup', [key, id, csv]);
+          if (r.error) throw new Error(r.error);
+          done.push(`Steam 凭据可用(${r.gameCount} 款游戏)`);
+          if (r.imported) done.push(`导入了 ${r.imported.games?.imported ?? 0} 款游戏的表格数据`);
         }
 
-        const importedNote = result.imported
-          ? `,导入了 ${result.imported.games?.imported ?? 0} 款游戏的表格数据`
-          : '';
+        // Notion 是独立的一步:它失败不该把已经存好的 Steam 配置也说成失败。
+        // **只在真的动过 Notion 时才调**——数据库 ID 是回填的,不比对一下的话,
+        // 进来只想改 SteamID 的人也会顺带触发一次 Notion 验证(白等几秒,
+        // 而且 Notion 那边一旦出问题就会把一次成功的保存报成失败)。
+        const notionChanged = Boolean(notionToken) || notionDb !== loadedNotionDb;
+        if (notionChanged) {
+          const r = await call('saveNotionConfig', [notionToken, notionDb]);
+          if (r.error) throw new Error(r.error);
+          done.push(
+            r.pageCount === null || r.pageCount === undefined
+              ? 'Notion token 可用'
+              : `Notion 可用(数据库里 ${r.pageCount} 个页面)`
+          );
+        }
+
         msg.className = 'msg ok';
-        msg.textContent = `✅ 凭据可用(Steam 返回了 ${result.gameCount} 款游戏${importedNote}),正在打开 Dashboard…`;
-        // 正常情况下 Electron 主进程轮询 getSetupStatus 发现配置好了,直接把窗口跳回 Dashboard——
-        // completeSetup 已经把 config/steam 就地改过了,不需要重启子进程。
-        // 这条延时跳转只是没有 Electron 在旁边看着时(比如直接跑 `node tracker.js serve`)的兜底。
-        setTimeout(() => { window.location.href = '/'; }, 4000);
+        msg.textContent = '✅ ' + done.join(';') + ',正在打开 Dashboard…';
+        // 有 Electron 在的话,它轮询 getSetupStatus 发现配置好了就会把窗口跳回去——
+        // completeSetup 已经就地改过 config/steam,不需要重启子进程。
+        // 这条延时跳转是没有 Electron 时(比如直接 `node tracker.js serve`)的兜底,
+        // 编辑模式下则是"改完就回 Dashboard"的正常出口。
+        setTimeout(() => { window.location.href = '/'; }, isEditMode ? 1200 : 4000);
       } catch (err) {
         msg.className = 'msg error';
-        msg.textContent = '请求失败:' + err.message;
+        // 已经成功的步骤照实说出来,不然改 Notion 失败会让人以为 Steam 那步也白做了
+        msg.textContent = (done.length ? '已完成:' + done.join(';') + '。' : '') + err.message;
         btn.disabled = false;
       }
     });
