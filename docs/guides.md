@@ -37,6 +37,16 @@ Checkboxes are ordinary markdown — `- [ ]` becomes `- [x]`, in place, with the
 
 If a game already has a Notion guide registered, a same-appid local `.md` is left alone unless you pass `--force`. One appid, one backend.
 
+### Having one written for you
+
+`node tracker.js guide-gen <appid>` has an AI research the game online and write the file, then validates the result against your actual achievement data and registers it. It needs an API key ([configuration](configuration.md#notes-on-individual-options)) and it costs money, so it asks before starting — `--dry-run` shows you the prompt and where the file would land without sending anything.
+
+The checkboxes are **not** written by the model. It only ever emits `- [ ]`; the ticks are applied afterwards from your real unlock data, which makes "checked state equals real unlock state" impossible to get wrong rather than merely checkable. The `# 游戏名` and `appid:` header lines are written by the program too — a mis-transcribed appid would file the guide under a different game.
+
+What the machine checks is **format and data**: every achievement has its own checkbox row, no merged rows, names match Steam exactly, descriptions are quoted verbatim, ticks match reality. If that fails it feeds the specific errors back and asks for a rewrite, up to three times; still failing, the attempt is kept under `guides/.drafts/`, which guide discovery cannot see — so a draft that didn't pass can never end up ticking your notes.
+
+**What it cannot check is whether the guide is right.** Whether the steps work, whether a difficulty rating is fair, whether "easy to miss" is actually true — that's the whole value of a guide and no machine verifies it. Read what it wrote.
+
 ## Running the sync
 
 ```bash

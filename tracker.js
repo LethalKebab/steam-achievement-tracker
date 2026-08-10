@@ -15,6 +15,8 @@
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
  *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
+ *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
+ *   node tracker.js guide-gen <appid>  让 AI 写一份本地攻略(--dry-run 只打印提示词)
  *   node tracker.js log [n]         看最近的同步日志
  */
 import { createInterface } from 'node:readline/promises';
@@ -24,13 +26,21 @@ import { stdin, stdout } from 'node:process';
 import { Writable } from 'node:stream';
 
 import { loadConfig, saveConfig, ROOT, CONFIG_PATH } from './lib/config.js';
-import { openDb, allGames, allGuides, countGames, getMeta, recentSyncLog } from './lib/db.js';
+import {
+  openDb, allGames, allGuides, countGames, getMeta, recentSyncLog,
+  getGame, achievementsFor, appIdsWithAchievements,
+} from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
 import { serve } from './lib/server.js';
 import { NotionClient } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
+import {
+  createProvider, createSession, buildWebTools, checkResult,
+  formatUsage, serverToolCalls,
+} from './lib/ai.js';
+import { generateGuide, planGuide, buildSystemPrompt } from './lib/guidegen.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -534,6 +544,190 @@ async function cmdGuideLint() {
   else console.log(`\n合计 ${totals.errors} 个 error、${totals.warnings} 个 warn。改的是攻略内容,不是代码。`);
 }
 
+/** 挑一个有成就详情的游戏来做冒烟测试。没指定 appid 就拿库里第一个能用的 */
+function pickSmokeTarget(db, appid) {
+  if (appid) {
+    const defs = achievementsFor(db, appid);
+    if (!defs.length) {
+      throw new Error(`appid ${appid} 还没有成就详情。先跑 \`node tracker.js sync --schema\``);
+    }
+    return { appid: String(appid), name: getGame(db, appid)?.name || defs[0].game_name || String(appid), defs };
+  }
+  const withAch = appIdsWithAchievements(db);
+  for (const g of allGames(db)) {
+    if (!withAch.has(String(g.appid))) continue;
+    const defs = achievementsFor(db, g.appid);
+    if (defs.length) return { appid: String(g.appid), name: g.name || String(g.appid), defs };
+  }
+  throw new Error('数据库里一条成就详情都没有。先跑 `node tracker.js sync --schema`');
+}
+
+/**
+ * `ai-check`:把 lib/ai.js 整条链路真跑一遍——组装请求 → 服务端搜索 → 抓页 →
+ * pause_turn 续跑 → 用量和花费。
+ *
+ * 这是「动手顺序」第 3 步的验收命令,不是攻略生成本身:它只问一个成就,拿三句话回来。
+ * 攻略怎么写是 guidegen(下一步)的事。**要花钱**,所以 `--dry` 只组装不发送,
+ * 先看清楚会发出去什么、用哪个模型、带哪些工具。
+ */
+async function cmdAiCheck() {
+  const dry = flags.has('--dry');
+  // --dry 不需要 key:它的用处正是"还没配 key 时先看清楚会发什么"
+  const config = loadConfig({ required: dry ? [] : ['ai'] });
+  const db = openDb(config.dbPath);
+  const target = pickSmokeTarget(db, positional[0] ?? null);
+  const def = target.defs.find((d) => d.description) ?? target.defs[0];
+  const achName = def.name_cn || def.name_en || def.api_name;
+
+  const system =
+    '你在帮一个 Steam 成就攻略作者做资料调研。回答用中文,只讲怎么达成,不要寒暄和总结段。';
+  const question =
+    `游戏《${target.name}》(appid ${target.appid})的成就「${achName}」` +
+    (def.description ? `,官方描述是「${def.description}」` : '') +
+    '。先用 web_search 找攻略,再用 web_fetch 抓其中一页的正文读一读,然后用三句话讲清楚怎么拿到它。';
+
+  const tools = buildWebTools(config.ai);
+  // --dry 不发请求,所以没配 key 也要能走完组装。真跑那条路上 loadConfig 已经拦过了
+  const ai = dry && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
+  const provider = createProvider({ ai });
+
+  if (dry) {
+    const body = provider.buildBody({ system, messages: [{ role: 'user', content: question }], tools });
+    console.log('\n只组装不发送(--dry)。会发往 https://api.anthropic.com/v1/messages:\n');
+    console.log('请求头:');
+    console.log('  content-type: application/json');
+    console.log('  anthropic-version: 2023-06-01');
+    console.log(`  x-api-key: ${config.ai.apiKey ? '已配置(不打印)' : '**没配置**'}`);
+    if (config.ai.fallbacks !== false) console.log('  anthropic-beta: server-side-fallback-2026-07-01');
+    console.log('\n请求体:');
+    console.log(JSON.stringify(body, null, 2));
+    console.log('\n真跑一次:去掉 --dry(会花钱,量级见跑完后的用量行)');
+    return;
+  }
+
+  console.log(`\n模型 ${config.ai.model} · effort ${config.ai.effort} · 联网工具已挂上`);
+  console.log(`题目:《${target.name}》的成就「${achName}」\n`);
+
+  const session = createSession(provider, { system, tools });
+  const t0 = Date.now();
+  const r = await session.ask(question, {
+    onEvent(ev) {
+      // 高 effort + 联网,几分钟不出声是常态。把工具调用打出来,不然分不清"在干活"和"卡住了"
+      if (ev.type === 'content_block_start') {
+        const b = ev.content_block ?? {};
+        if (b.type === 'server_tool_use') stdout.write(`\n  → ${b.name} …`);
+        else if (b.type === 'web_search_tool_result' || b.type === 'web_fetch_tool_result') {
+          stdout.write(Array.isArray(b.content) ? ' ok' : ` 失败(${b.content?.error_code ?? '?'})`);
+        } else if (b.type === 'text') stdout.write('\n\n');
+      } else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') {
+        stdout.write(ev.delta.text);
+      }
+    },
+  });
+
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  const verdict = checkResult(r);
+  console.log('\n\n' + '─'.repeat(60));
+  console.log(verdict.ok ? '✅ 端到端跑通' : `❌ 这轮不能用:${verdict.reason}`);
+  console.log(`  stop_reason: ${r.stopReason} · 服务端工具调用 ${serverToolCalls(r.content)} 次` +
+    ` · pause_turn 续跑 ${r.continuations} 次 · 耗时 ${secs}s`);
+  console.log('  ' + formatUsage(session.usage, provider.model));
+  if (r.toolErrors.length) {
+    for (const e of r.toolErrors) console.log(`  ⚠️  ${e.tool} 报错:${e.errorCode}`);
+  }
+}
+
+/**
+ * `guide-gen <appid>`:让 AI 写一份本地 markdown 攻略。
+ *
+ * **会花钱**,所以默认要人工确认一次(`--yes` 跳过),`--dry-run` 则只打印会发出去的
+ * 提示词和落盘计划、一个请求都不发。硬上限和实时花费是「动手顺序」第 5 步,还没做——
+ * 现在只有跑完之后的事后账。
+ */
+async function cmdGuideGen() {
+  // `--rounds 2` 的 "2" 也会落进全局 positional,于是 `guide-gen --rounds 2 1937500`
+  // 会把 2 当成 appid。按"前一个参数是不是取值 flag"排掉,只在这个命令里做,
+  // 不动别的命令的解析
+  const VALUE_FLAGS = new Set(['--rounds', '--file']);
+  const args = argv.slice(1);
+  const appid = args.find((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(args[i - 1]));
+  if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes]');
+  const dryRun = flags.has('--dry-run');
+
+  const config = loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] });
+  const db = openDb(config.dbPath);
+  const steam = new SteamClient(config, { log: () => {} });
+  const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
+  const fileName = flagValue('file') ?? null;
+
+  const plan = await planGuide(db, { config, steam, appid, fileName });
+
+  console.log(`\n《${plan.game}》(appid ${appid})`);
+  console.log(`  成就 ${plan.defs.length} 个,其中已解锁 ${plan.unlocked.size} 个(用来机械打勾,不会喂给模型)`);
+  if (plan.unnameable.size) {
+    console.log(`  ${plan.unnameable.size} 个成就名字在本作里撞车,机械打勾够不着——它们的框会留空,这是已知的`);
+  }
+  console.log(`  模型 ${config.ai.model} · effort ${config.ai.effort} · 最多改 ${rounds} 轮`);
+  console.log(`  落盘到 ${plan.finalPath}`);
+
+  if (dryRun) {
+    console.log('\n--dry-run:不发任何请求。会发过去的 system 提示词:\n');
+    console.log('─'.repeat(70));
+    console.log(buildSystemPrompt(plan.game, String(appid), plan.defs));
+    console.log('─'.repeat(70));
+    return;
+  }
+
+  if (!flags.has('--yes')) {
+    // 花钱的操作默认问一句。硬上限 + 实时花费是第 5 步,这里只是最低限度的闸门
+    const io = makeSecretReader();
+    const answer = await io.ask('\n这一步会调用 AI 并产生费用。继续?(y/N)');
+    io.close();
+    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+  }
+
+  const provider = createProvider(config);
+  const p = progressPrinter();
+  const started = Date.now();
+
+  const r = await generateGuide(db, {
+    config, provider, steam, appid, rounds, fileName,
+    onProgress(ev) {
+      if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮:联网研究 + 撰写…`);
+      else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
+      else if (ev.phase === 'check') p.update(`  第 ${ev.round} 轮:机械打勾 + 校验…`);
+      else if (ev.phase === 'lint') {
+        p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
+      }
+    },
+  });
+  p.done();
+
+  const secs = ((Date.now() - started) / 1000).toFixed(0);
+  console.log('\n' + '─'.repeat(70));
+  if (r.ok) {
+    console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.path}`);
+    if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action}),Dashboard 上就能看到链接了`);
+    else console.log('  ⚠️  没被 guides 发现逻辑收进去,手动跑一次 `node tracker.js guides --local` 看看为什么');
+  } else {
+    console.log(`❌ ${r.rounds} 轮之后仍有 ${r.blocking.length} 条没过,草稿留在 ${r.draftPath}`);
+    console.log('  (草稿目录不会被攻略发现逻辑扫到,不会被同步拿去勾框)');
+    for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
+    if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
+  }
+  if (r.expected.length) {
+    console.log(`  ${r.expected.length} 条"已解锁但没勾"是预期内的:这些成就名在本作里撞车,机械打勾够不着`);
+  }
+  if (r.lint?.stats) {
+    console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
+      `${r.lint.stats.warnings} 条 warn`);
+  }
+  console.log('  ' + formatUsage(r.usage, r.model));
+  console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
+    '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
+    '"易错过"是不是真的,都要你自己看一遍。');
+}
+
 function cmdImport() {
   const dir = positional[0];
   if (!dir) throw new Error('用法:node tracker.js import <放 CSV 的目录>');
@@ -589,6 +783,11 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
   node tracker.js guide-lint [appid]      校验攻略写法:成就有没有漏、格式对不对(只读)
               guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
+  node tracker.js ai-check [appid]        AI 联网研究链路自检(会花钱,用量和花费会打出来)
+              ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
+  node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
+              guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
+              guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
   node tracker.js log [n]                 最近 n 条同步日志
 
 配置:${CONFIG_PATH}(gitignore 里,别提交)
@@ -607,6 +806,8 @@ const COMMANDS = {
   'checkbox-sync': cmdCheckboxSync,
   'guide-status': cmdGuideStatus,
   'guide-lint': cmdGuideLint,
+  'ai-check': cmdAiCheck,
+  'guide-gen': cmdGuideGen,
   audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,
