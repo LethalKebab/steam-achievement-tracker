@@ -44,6 +44,22 @@ describe('extractTitleCandidates', () => {
     assert.ok(extractTitleCandidates('体验(taste) — 描述').includes('体验(taste)'));
   });
 
+  test('破折号前面没有空格也要能拆(`成就名- 描述`)', () => {
+    // 2026-08-10 guidelint 跑全量攻略时发现的:文明 6 这类攻略写成 `胜利！- 使用...`,
+    // 破折号前不留空格。以前只按 ' - ' 拆,整行成了唯一候选,成就名提取不出来,
+    // 于是这些框永远勾不上——而且不报错:audit 靠描述反查蒙混过去,
+    // checkbox-sync 则表现为"没有要勾的",和"已经勾完了"分不出来。
+    assert.ok(extractTitleCandidates('胜利！- 使用北条时宗获得一场常规赛胜利').includes('胜利！'));
+    assert.ok(extractTitleCandidates('《物种起源》- 在加拉帕戈斯群岛附近激活达尔文').includes('《物种起源》'));
+  });
+
+  test('名字自带连字符、后面没空格的不拆(Half-Life 不能变成 Half-)', () => {
+    // 拆的条件是破折号**后面跟空白**,所以复合词不会被腰斩
+    const c = extractTitleCandidates('half-life 描述');
+    assert.equal(c.includes('half'), false);
+    assert.equal(c.includes('half-'), false);
+  });
+
   test('"中文名(English)" 的中英文各自都算候选', () => {
     const c = extractTitleCandidates('体验(taste) — "游戏才刚刚开始……"');
     assert.ok(c.includes('体验'), '中文名应该是候选');

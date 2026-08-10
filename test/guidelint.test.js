@@ -1,0 +1,294 @@
+/**
+ * 攻略校验器的回归测试
+ * ------------------------------------------------
+ * 跑法:node --test
+ *
+ * 这个文件守的失败类是**误报**。校验器将来要给 AI 生成的攻略当闸门,过不了就不落盘;
+ * 一条会误报的规则,轻则把好攻略拦在外面,重则让人开始无视校验结果——那时它就等于不存在。
+ * 所以这里除了"该报的报得出来",更要紧的是那几条"看起来该报、其实不该报"的:
+ * 同名成就的框是存在的(只是名字认不出)、子步骤不是成就、描述空的成就无解但不是攻略的错。
+ */
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+
+import { lintGuide, computeCheckedKeys } from '../lib/guidelint.js';
+
+/** 造一个成就定义,字段名和 achievements 表一致 */
+const def = (apiName, nameCn, description = '', nameEn = '') => ({
+  api_name: apiName,
+  name_cn: nameCn,
+  name_en: nameEn,
+  description,
+});
+const todo = (key, text, checked = false, parent = null) => ({ key, text, checked, parent });
+
+const codesOf = (r) => r.findings.map((f) => f.code);
+
+describe('缺 checkbox', () => {
+  test('成就没有对应的框 → error', () => {
+    const r = lintGuide({
+      defs: [def('A', '第一步'), def('B', '第二步')],
+      todos: [todo(1, '**第一步**')],
+    });
+    assert.equal(r.ok, false);
+    assert.deepEqual(codesOf(r), ['missing-checkbox']);
+    assert.equal(r.findings[0].name, '第二步');
+  });
+
+  test('全都有框 → 通过', () => {
+    const r = lintGuide({
+      defs: [def('A', '第一步'), def('B', '第二步')],
+      todos: [todo(1, '**第一步**'), todo(2, '**第二步**')],
+    });
+    assert.equal(r.ok, true);
+    assert.equal(r.stats.covered, 2);
+  });
+
+  test('英文名也算数(游戏没中文时成就名保留英文)', () => {
+    const r = lintGuide({
+      defs: [def('A', '', '', 'First Blood')],
+      todos: [todo(1, '**First Blood**<br>拿到第一滴血')],
+    });
+    assert.equal(r.ok, true);
+  });
+
+  test('名字后面跟着描述和心得照样能对上(SKILL.md 规则 3.1 的三段式)', () => {
+    const r = lintGuide({
+      defs: [def('A', '妙手空空', '偷窃十次')],
+      todos: [todo(1, '**妙手空空**<br>偷窃十次<br>开局就能做,别等')],
+    });
+    assert.equal(r.ok, true);
+  });
+});
+
+describe('合并行', () => {
+  test('一行里两个 checkbox → error', () => {
+    const r = lintGuide({
+      defs: [def('A', 'A成就'), def('B', 'B成就')],
+      todos: [todo(1, '**A成就** / [x] **B成就**')],
+    });
+    assert.ok(codesOf(r).includes('merged-line'));
+  });
+
+  test('正文里出现方括号但不是 checkbox → 不报', () => {
+    const r = lintGuide({
+      defs: [def('A', 'A成就')],
+      todos: [todo(1, '**A成就**<br>参考 [攻略链接](http://x) 里的做法')],
+    });
+    assert.equal(codesOf(r).includes('merged-line'), false);
+  });
+});
+
+describe('同名成就', () => {
+  const twins = [
+    def('A1', '妙手空空', '成功偷窃了其他修仙者的物品10次,并且尚未被察觉。'),
+    def('A2', '妙手空空', '通关且成功偷窃其他修仙者100次'),
+  ];
+
+  test('抄了描述原文 → 通过,且不误报缺 checkbox', () => {
+    const r = lintGuide({
+      defs: twins,
+      todos: [
+        todo(1, '**妙手空空**<br>成功偷窃了其他修仙者的物品10次,并且尚未被察觉。'),
+        todo(2, '**妙手空空**<br>通关且成功偷窃其他修仙者100次'),
+      ],
+    });
+    assert.equal(r.ok, true, JSON.stringify(r.findings));
+  });
+
+  test('没抄描述 → 报同名歧义,但**不**报缺 checkbox(框是存在的)', () => {
+    const r = lintGuide({
+      defs: twins,
+      todos: [todo(1, '**妙手空空**'), todo(2, '**妙手空空**')],
+    });
+    assert.equal(codesOf(r).includes('missing-checkbox'), false, '框存在,不该报缺失');
+    assert.equal(r.findings.filter((f) => f.code === 'ambiguous-no-description').length, 2);
+    assert.equal(r.findings[0].fixable, true);
+  });
+
+  test('Steam 上描述本身是空的 → 报出来但标成 fixable:false(不是攻略能修的)', () => {
+    const r = lintGuide({
+      defs: [def('P1', 'Pilgrimage', ''), def('P2', 'Pilgrimage', '')],
+      todos: [todo(1, '**Pilgrimage**'), todo(2, '**Pilgrimage**')],
+    });
+    const amb = r.findings.filter((f) => f.code === 'ambiguous-no-description');
+    assert.equal(amb.length, 2);
+    assert.equal(amb[0].fixable, false);
+  });
+
+  test('只有中文名撞名、英文名不同 → 英文名那侧照常能覆盖', () => {
+    const r = lintGuide({
+      defs: [
+        def('N1', '大师', '甲的描述', 'Nano-Virus Master'),
+        def('N2', '大师', '乙的描述', 'Bioweapon Master'),
+      ],
+      todos: [
+        todo(1, '**Nano-Virus Master**<br>甲的描述'),
+        todo(2, '**Bioweapon Master**<br>乙的描述'),
+      ],
+    });
+    assert.equal(r.ok, true, JSON.stringify(r.findings));
+  });
+});
+
+describe('描述原文', () => {
+  test('改写过的描述 → warn,不是 error(还能靠名字勾上,只是 audit 反查不了)', () => {
+    const r = lintGuide({
+      defs: [def('A', '妙手空空', '成功偷窃了其他修仙者的物品10次,并且尚未被察觉。')],
+      todos: [todo(1, '**妙手空空**<br>隐秘偷窃10次')],
+    });
+    assert.deepEqual(codesOf(r), ['paraphrased-description']);
+    assert.equal(r.ok, true, 'warn 不该让整份攻略不通过');
+  });
+
+  test('空白差异不算改写(和 resolveTodoToAchievement 的判据一致)', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X', '偷窃 十次')],
+      todos: [todo(1, '**X**<br>偷窃十次')],
+    });
+    assert.equal(codesOf(r).includes('paraphrased-description'), false);
+  });
+
+  test('缺 checkbox 的成就不重复报描述问题', () => {
+    const r = lintGuide({
+      defs: [def('A', '没写进攻略的成就', '某个描述')],
+      todos: [],
+    });
+    assert.deepEqual(codesOf(r), ['missing-checkbox']);
+  });
+});
+
+describe('勾选状态', () => {
+  test('已解锁但没勾 → error', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**', false)],
+      unlockedApiNames: new Set(['A']),
+    });
+    assert.ok(codesOf(r).includes('checked-mismatch'));
+  });
+
+  test('没解锁却勾上了 → error', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**', true)],
+      unlockedApiNames: new Set(),
+    });
+    assert.ok(codesOf(r).includes('checked-mismatch'));
+  });
+
+  test('不给解锁数据就整条跳过,不猜', () => {
+    const r = lintGuide({ defs: [def('A', 'X')], todos: [todo(1, '**X**', true)] });
+    assert.equal(codesOf(r).includes('checked-mismatch'), false);
+  });
+});
+
+describe('只有本地 markdown 能验的几条', () => {
+  test('本地攻略缺 `# 游戏名` → error', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**')],
+      text: 'appid: 123\n\n## 一、店铺日常\n\n- [ ] **X**',
+      kind: 'local',
+    });
+    assert.ok(codesOf(r).includes('missing-title'));
+  });
+
+  test('有 `# 游戏名` → 通过', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**')],
+      text: '# 苏丹的游戏\n\nappid: 123\n\n- [ ] **X**',
+      kind: 'local',
+    });
+    assert.equal(r.ok, true);
+  });
+
+  test('Notion 攻略不要求 `# 标题`(名字来自 title 属性)', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**')],
+      text: 'appid: 123\n\n- [ ] **X**',
+      kind: 'notion',
+    });
+    assert.equal(codesOf(r).includes('missing-title'), false);
+  });
+
+  test('节标题里的统计数字 → warn', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**')],
+      text: '# 游戏\n\n## 收集类(共 39 个)\n\n- [ ] **X**',
+      kind: 'local',
+    });
+    assert.ok(codesOf(r).includes('stats-in-heading'));
+  });
+
+  test('数据来源说明 → warn', () => {
+    const r = lintGuide({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**')],
+      text: '# 游戏\n\n勾选状态来自 Steam 真实解锁数据。\n\n- [ ] **X**',
+      kind: 'local',
+    });
+    assert.ok(codesOf(r).includes('data-source-note'));
+  });
+
+  test('不给全文就跳过这几条,而不是当成缺失来报', () => {
+    const r = lintGuide({ defs: [def('A', 'X')], todos: [todo(1, '**X**')], kind: 'local' });
+    assert.equal(codesOf(r).includes('missing-title'), false);
+  });
+});
+
+describe('子步骤', () => {
+  test('嵌套的子步骤不是成就,不该被当成多余内容报错', () => {
+    const r = lintGuide({
+      defs: [def('A', '水火不容', '完成所有差事')],
+      todos: [
+        todo(1, '**水火不容**<br>完成所有差事'),
+        todo(2, '1.【二手灵魂】:第一次水位下降后', false, 1),
+        todo(3, '2.【法夫纳的宝藏】:离开精灵国时', false, 1),
+      ],
+    });
+    assert.equal(r.ok, true, JSON.stringify(r.findings));
+    assert.equal(r.findings.length, 0);
+  });
+});
+
+describe('computeCheckedKeys(机械打勾)', () => {
+  test('已解锁的成就 → 该勾', () => {
+    const keys = computeCheckedKeys({
+      defs: [def('A', 'X'), def('B', 'Y')],
+      todos: [todo(1, '**X**'), todo(2, '**Y**')],
+      unlockedApiNames: new Set(['A']),
+    });
+    assert.deepEqual(keys, [1]);
+  });
+
+  test('已经勾上的不重复返回(同步只勾不取消)', () => {
+    const keys = computeCheckedKeys({
+      defs: [def('A', 'X')],
+      todos: [todo(1, '**X**', true)],
+      unlockedApiNames: new Set(['A']),
+    });
+    assert.deepEqual(keys, []);
+  });
+
+  test('同名成就一律不打勾——分不清是哪一个,宁可漏勾也不能勾错', () => {
+    const keys = computeCheckedKeys({
+      defs: [def('A1', '妙手空空', '甲'), def('A2', '妙手空空', '乙')],
+      todos: [todo(1, '**妙手空空**<br>甲'), todo(2, '**妙手空空**<br>乙')],
+      unlockedApiNames: new Set(['A1']),
+    });
+    assert.deepEqual(keys, []);
+  });
+
+  test('子步骤不会被误勾(名字对不上任何成就)', () => {
+    const keys = computeCheckedKeys({
+      defs: [def('A', '水火不容')],
+      todos: [todo(1, '**水火不容**'), todo(2, '1.【二手灵魂】', false, 1)],
+      unlockedApiNames: new Set(['A']),
+    });
+    assert.deepEqual(keys, [1]);
+  });
+});
