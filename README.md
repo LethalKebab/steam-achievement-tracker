@@ -10,7 +10,7 @@ Everything runs on your own machine: the database is a file in this folder, cred
 
 **Node.js 24 or newer** — check with `node --version`. The project uses Node built-ins only, so there is nothing to install.
 
-There is also a packaged Windows app that bundles its own runtime, for machines without Node or for anyone who'd rather not use a terminal. It runs this same code and has a first-run form in place of the setup commands below. Building it is a separate step — see [launcher/README.md](launcher/README.md).
+The packaged Windows app bundles its own runtime and needs none of that. Building it is a separate step — see [launcher/README.md](launcher/README.md).
 
 ## Setup
 
@@ -31,7 +31,9 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 
 `init` writes your credentials to `config.json` (gitignored, readable only by you) and verifies them against Steam immediately, so a typo surfaces before the first sync rather than partway through it.
 
-If you already track this in a spreadsheet, run `node tracker.js import <folder-of-csvs>` **before** your first sync. Favorites, spotlights and hand-edited rows cannot be recovered from Steam afterwards — see [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
+**In the packaged app, a form replaces those three commands.** It has no terminal, so the first launch serves a setup page instead of the Dashboard: the same two fields, checked against Steam the same way, written to the same `config.json`. Save it and the Dashboard opens, syncing in the background. Afterwards it goes straight to the Dashboard on every launch.
+
+If you already track this in a spreadsheet, import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on that setup form. Favorites, spotlights and hand-edited rows cannot be recovered from Steam afterwards, and the form is the only place the app offers the import, so skipping it there means falling back to the command line later. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
 
 **Optional — guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked:
 
@@ -63,6 +65,8 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 ## What runs when
 
 **There is no scheduler, and nothing runs on a timer.** Everything is triggered by one of three things: starting `serve`, pressing **立即同步**, or running a command yourself. Nothing happens while your machine is asleep, and nothing happens while `serve` merely sits running — the Dashboard polls every 3 seconds, but only to redraw the progress bar, never to fetch anything.
+
+Opening the packaged app counts as starting `serve`: it runs the same server as a background process and stops it when you close the window. Everything below applies unchanged.
 
 | | Starting `serve` | 立即同步 | Command line |
 |---|---|---|---|
