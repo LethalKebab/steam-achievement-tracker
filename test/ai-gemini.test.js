@@ -268,6 +268,19 @@ describe('请求组装', () => {
 // ---------------------------------------------------------------------------
 
 describe('错误信息要能照着做', () => {
+  test('"对新用户停止提供" 是停售,不是名字写错', async () => {
+    // 实测(2026-08-10):2.5 系列对新申请的 key 返回这个,但它照样出现在 --models 里。
+    // 报成"名字可能不对"会让人对着列表反复试同一类已停售的模型
+    const msg = 'This model models/gemini-2.5-flash is no longer available to new users.';
+    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(404, { error: { code: 404, message: msg, status: 'NOT_FOUND' } })]) });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+      assert.match(e.message, /已经停止提供/);
+      assert.match(e.message, /不一定能用/, '得说清楚 --models 列出来不等于能用');
+      assert.doesNotMatch(e.message, /可能不对/, '别把停售报成名字写错');
+      return true;
+    });
+  });
+
   test('404 指向 --models,而不是让人去猜模型名', async () => {
     const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(404, { error: { code: 404, message: 'models/x is not found', status: 'NOT_FOUND' } })]) });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {

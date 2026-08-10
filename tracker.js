@@ -610,12 +610,20 @@ async function cmdAiCheck() {
       throw new Error(`${provider.name} 没有列模型的接口(目前只有 gemini 有)`);
     }
     const models = await provider.listModels();
-    console.log(`\n${provider.name} 上这个 key 能用的模型(${models.length} 个):\n`);
+    console.log(`\n${provider.name} 列出来的模型(${models.length} 个):\n`);
     for (const m of models) {
       const limits = m.inputLimit ? `  输入上限 ${m.inputLimit} / 输出上限 ${m.outputLimit}` : '';
       console.log(`  ${m.name.padEnd(34)}${m.display}${limits}`);
     }
-    console.log(`\n当前用的是 ${provider.model}。换的话改 config.json 的 ai.model。`);
+    // 实测:2.5 系列对新 key 已停售,但照样出现在这个列表里。这个接口只说"存在",
+    // 不说"你能不能用"——不写清楚会让人对着列表反复试
+    console.log(
+      `\n⚠️  列出来 ≠ 能用。这个接口只说模型存在,不反映你的 key 有没有权限或额度:\n` +
+        '    · 老版本可能已经"对新用户停止提供"(实测 2.5 系列)\n' +
+        '    · 有的在你这一档额度是 0(实测 Pro 系列在免费层)\n' +
+        '    真跑一次 `ai-check` 才知道。'
+    );
+    console.log(`\n当前用的是 ${provider.model}。临时换:--model <名字>;固定换:改 config.json 的 ai.model。`);
     return;
   }
 
