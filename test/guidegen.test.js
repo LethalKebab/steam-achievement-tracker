@@ -35,6 +35,8 @@ import {
   buildHeader,
   guideFileName,
   buildAchievementList,
+  buildSystemPrompt,
+  SKILL_RULE_DISPOSITION,
   DRAFTS_DIR,
 } from '../lib/guidegen.js';
 
@@ -409,4 +411,57 @@ test('只有开围栏没有闭围栏时也要抠干净(模型忘了收尾 / 输�
   // 正常成对的、以及压根没有围栏的,行为不变
   assert.equal(extractMarkdown('```markdown\n正文\n```'), '正文');
   assert.equal(extractMarkdown('## 主线'), '## 主线');
+});
+
+// ---------------------------------------------------------------------------
+// 提示词 ↔ SKILL.md 的漂移
+// ---------------------------------------------------------------------------
+
+describe('提示词和 SKILL.md 不能悄悄脱节', () => {
+  const skillPath = new URL('../.claude/skills/achievement-guide-writing/SKILL.md', import.meta.url);
+
+  /** SKILL.md 里的规则标题:`## 规则一:…` 取「规则一」,`### 3.1 …` 取「3.1」 */
+  function skillRuleKeys() {
+    const text = readFileSync(skillPath, 'utf8');
+    const keys = new Set();
+    for (const line of text.split('\n')) {
+      let m = line.match(/^##\s+(规则[一二三四五六七八九十]+)/);
+      if (m) { keys.add(m[1]); continue; }
+      m = line.match(/^###\s+(\d+\.\d+)/);
+      if (m) keys.add(m[1]);
+    }
+    return keys;
+  }
+
+  test('SKILL.md 的每条规则都要在处置表里有交代', () => {
+    // RULES 是 SKILL.md 的手抄摘要(约 1/4 体量),全文不能直接发 —— 里面整节讲往 Notion
+    // 写、讲截图、讲委托子 agent,8.0 还明写"默认建在 Notion",发过去会主动误导模型。
+    // 但手抄就会漂移,而这个项目已经被"文档和代码各说各话"咬过一次。
+    // 这条测试把漂移变成一次失败:改了 SKILL.md 就必须表态。
+    const missing = [...skillRuleKeys()].filter((k) => !(k in SKILL_RULE_DISPOSITION));
+    assert.deepEqual(
+      missing,
+      [],
+      `SKILL.md 里这几条在 lib/guidegen.js 的 SKILL_RULE_DISPOSITION 里没有交代:${missing.join('、')}\n` +
+        '要么把它加进 RULES 提示词,要么在处置表里写明为什么不加。'
+    );
+  });
+
+  test('处置表里不能有 SKILL.md 已经删掉的条目', () => {
+    const keys = skillRuleKeys();
+    const stale = Object.keys(SKILL_RULE_DISPOSITION).filter((k) => !keys.has(k));
+    assert.deepEqual(stale, [], `处置表里这几条 SKILL.md 已经没有了:${stale.join('、')}`);
+  });
+
+  test('几条对生成结果有实际约束的规则,确实在提示词里', () => {
+    const defs = [def('A', '第一步', '完成第一关。')];
+    const p = buildSystemPrompt('测试游戏', '1', defs);
+    // 每一条都对应一个踩过或差点踩的坑,不是凑数
+    assert.match(p, /易错过/, '永久错过的标注');
+    assert.match(p, /不要标/, '季节性的**不能**标易错过 —— 假警报会让这个记号失效');
+    assert.match(p, /※除去追加内容/, 'DLC 排除标注的固定写法');
+    assert.match(p, /位置 XXX/, '位置标注的固定写法');
+    assert.match(p, /待确认/, '不写"推测/待确认"这类文档化备注');
+    assert.match(p, /机制速查/, '成就列表前的机制速查');
+  });
 });
