@@ -54,6 +54,36 @@ function flagValue(name) {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
+/** 取值型 flag —— 它们后面那个参数是值,不是位置参数(见 positionalArgs) */
+const VALUE_FLAGS = new Set(['--rounds', '--file', '--model', '--provider', '--port']);
+
+/**
+ * 位置参数,排掉取值型 flag 的值。
+ *
+ * 不这么做的话 `guide-gen --rounds 2 1937500` 会把 2 当成 appid。
+ * 全局那个 `positional` 是简单切分的,只有需要的命令用这个。
+ */
+function positionalArgs() {
+  const args = argv.slice(1);
+  return args.filter((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(args[i - 1]));
+}
+
+/**
+ * `--provider` / `--model` 覆盖配置。
+ *
+ * 有环境变量(AI_PROVIDER / AI_MODEL)还加 flag,是因为**环境变量的写法各 shell 不一样**:
+ * `AI_MODEL=x node ...` 在 PowerShell 里直接报 CommandNotFound,得写成
+ * `$env:AI_MODEL = "x"; node ...`,而且那样设了之后会在整个会话里赖着不走、
+ * 悄悄盖掉 config.json。flag 没有这两个问题,哪个 shell 都一样。
+ */
+function applyAiFlags(config) {
+  const provider = flagValue('provider');
+  const model = flagValue('model');
+  if (provider) config.ai.provider = provider;
+  if (model) config.ai.model = model;
+  return config;
+}
+
 /** 同一行原地刷新的进度输出(不是 TTY 就退化成什么都不打,避免刷屏日志) */
 function progressPrinter() {
   const isTty = stdout.isTTY;
@@ -570,7 +600,7 @@ function pickSmokeTarget(db, appid) {
 async function cmdAiCheck() {
   const dry = flags.has('--dry');
   // --dry 不需要 key:它的用处正是"还没配 key 时先看清楚会发什么"
-  const config = loadConfig({ required: dry ? [] : ['ai'] });
+  const config = applyAiFlags(loadConfig({ required: dry ? [] : ['ai'] }));
 
   // --models:直接问 API 有哪些模型可用。写 Gemini 那家的时候文档拿不到,模型名只能靠
   // 记忆猜,所以留了这条路——猜错了不用改代码,问一句就知道
@@ -590,7 +620,7 @@ async function cmdAiCheck() {
   }
 
   const db = openDb(config.dbPath);
-  const target = pickSmokeTarget(db, positional[0] ?? null);
+  const target = pickSmokeTarget(db, positionalArgs()[0] ?? null);
   const def = target.defs.find((d) => d.description) ?? target.defs[0];
   const achName = def.name_cn || def.name_en || def.api_name;
 
@@ -661,16 +691,11 @@ async function cmdAiCheck() {
  * 现在只有跑完之后的事后账。
  */
 async function cmdGuideGen() {
-  // `--rounds 2` 的 "2" 也会落进全局 positional,于是 `guide-gen --rounds 2 1937500`
-  // 会把 2 当成 appid。按"前一个参数是不是取值 flag"排掉,只在这个命令里做,
-  // 不动别的命令的解析
-  const VALUE_FLAGS = new Set(['--rounds', '--file']);
-  const args = argv.slice(1);
-  const appid = args.find((a, i) => !a.startsWith('--') && !VALUE_FLAGS.has(args[i - 1]));
+  const appid = positionalArgs()[0];
   if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes]');
   const dryRun = flags.has('--dry-run');
 
-  const config = loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] });
+  const config = applyAiFlags(loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] }));
   const db = openDb(config.dbPath);
   const steam = new SteamClient(config, { log: () => {} });
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
@@ -802,6 +827,8 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js ai-check [appid]        AI 联网研究链路自检(用量和花费会打出来)
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
+              --provider X --model Y      临时换供应商/模型,不改 config.json
+                                          (ai-check 和 guide-gen 都支持)
   node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
