@@ -79,9 +79,20 @@ function positionalArgs() {
 function applyAiFlags(config) {
   const provider = flagValue('provider');
   const model = flagValue('model');
-  if (provider) config.ai.provider = provider;
+  if (provider) {
+    config.ai.provider = provider;
+    // 换了供应商却没指定模型:config.json 里那个是给上一家的(claude-* vs gemini-* vs
+    // deepseek-*),带过去必然报错。清掉,让新供应商用自己的默认值
+    if (!model) config.ai.model = '';
+  }
   if (model) config.ai.model = model;
   return config;
+}
+
+/** 供应商实例。`--dry` / `--dry-run` 不发请求,所以没 key 也要能造出来 */
+async function providerFor(config, { needKey = true } = {}) {
+  const ai = !needKey && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
+  return createProvider({ ai });
 }
 
 /** 同一行原地刷新的进度输出(不是 TTY 就退化成什么都不打,避免刷屏日志) */
@@ -640,9 +651,7 @@ async function cmdAiCheck() {
     // 不点名具体工具:两家的工具叫法不一样,写死一家的名字会让另一家看不懂
     '。请先上网搜一下这个成就的攻略,能抓到正文的话读一读,然后用三句话讲清楚怎么拿到它。';
 
-  // --dry 不发请求,所以没配 key 也要能走完组装。真跑那条路上 loadConfig 已经拦过了
-  const ai = dry && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
-  const provider = await createProvider({ ai });
+  const provider = await providerFor(config, { needKey: !dry });
   const tools = provider.webTools();
 
   if (dry) {
@@ -716,13 +725,32 @@ async function cmdGuideGen() {
   if (plan.unnameable.size) {
     console.log(`  ${plan.unnameable.size} 个成就名字在本作里撞车,机械打勾够不着——它们的框会留空,这是已知的`);
   }
-  console.log(`  模型 ${config.ai.model} · effort ${config.ai.effort} · 最多改 ${rounds} 轮`);
+  // 「有服务端搜索」是设计文档定的硬性准入,理由是"混进一家没有搜索的,会让质量取决于
+  // 用户选了谁,而用户看不出这个差别"。所以不能默认放行,得让人**明确知道自己在要什么**
+  const probe = await providerFor(config, { needKey: !dryRun });
+
+  // 打供应商解析后的模型名,不是 config 里那个:换 provider 没指定 model 时
+  // config 里是空的,真正用的是这一家的默认值
+  console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
   console.log(`  落盘到 ${plan.finalPath}`);
+
+  if (probe.canSearch === false && !flags.has('--no-research')) {
+    throw new Error(
+      `${probe.name} 没有服务端联网搜索,生成出来的攻略是模型**凭已有知识写的**,不是查来的。\n` +
+        '  这类攻略的步骤、数值、地点都无法核实,而格式校验一个字都验不出来。\n\n' +
+        '  真要这么跑(比如只是想验证流水线本身),加 --no-research 明说:\n' +
+        `    node tracker.js guide-gen ${appid} --no-research\n\n` +
+        '  想要经过调研的攻略,换一家有联网的:--provider anthropic 或 --provider gemini。'
+    );
+  }
+  if (probe.canSearch === false) {
+    console.log('  ⚠️  --no-research:这一份不会经过任何联网调研,内容全靠模型的已有知识');
+  }
 
   if (dryRun) {
     console.log('\n--dry-run:不发任何请求。会发过去的 system 提示词:\n');
     console.log('─'.repeat(70));
-    console.log(buildSystemPrompt(plan.game, String(appid), plan.defs));
+    console.log(buildSystemPrompt(plan.game, String(appid), plan.defs, { canSearch: probe.canSearch !== false }));
     console.log('─'.repeat(70));
     return;
   }
@@ -735,7 +763,7 @@ async function cmdGuideGen() {
     if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
   }
 
-  const provider = await createProvider(config);
+  const provider = probe;
   const p = progressPrinter();
   const started = Date.now();
 
@@ -775,6 +803,10 @@ async function cmdGuideGen() {
   console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
     '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
     '"易错过"是不是真的,都要你自己看一遍。');
+  if (!r.researched) {
+    console.log('    而且这一份**完全没有经过联网调研**,内容是模型凭已有知识写的,' +
+      '可信度比查过资料的低一档。');
+  }
 }
 
 function cmdImport() {
