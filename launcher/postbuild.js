@@ -29,15 +29,20 @@ const exePath = join(appDir, `${PRODUCT}.exe`);
 
 // --- 1. win-unpacked → 产品名 ---
 if (existsSync(unpacked)) {
-  // 上一次 build 留下的同名目录先清掉,不然 rename 会失败
-  if (existsSync(appDir)) rmSync(appDir, { recursive: true, force: true });
+  // **删和改名要在同一个 try 里。** 程序开着的时候目录被占用,这两步会因为
+  // 完全相同的原因失败,而先执行的是删 —— 以前只有改名有保护,于是真出问题时
+  // 抛的是一句裸 EPERM 栈,而那句写好的提示("先关掉正在运行的…")永远轮不到。
+  // 更糟的是 build 看起来"跑完了":dist/ 里躺着上一次的产物,时间戳都还挺新
   try {
+    // 上一次 build 留下的同名目录先清掉,不然 rename 会失败
+    if (existsSync(appDir)) rmSync(appDir, { recursive: true, force: true });
     renameSync(unpacked, appDir);
     console.log(`[postbuild] ${unpacked} → ${appDir}`);
   } catch (err) {
-    // 程序还开着的时候目录被占用,重命名会失败。这时候说清楚原因,
-    // 别让人对着一句 EBUSY 猜
-    console.error(`[postbuild] 重命名失败(${err.code}):先关掉正在运行的「${PRODUCT}」再 build。`);
+    console.error(
+      `[postbuild] 收尾失败(${err.code}):先关掉正在运行的「${PRODUCT}」再 build。\n` +
+        `           dist/ 里现在是**上一次**的产物,没有被这次 build 更新。`
+    );
     process.exit(1);
   }
 } else if (!existsSync(appDir)) {
