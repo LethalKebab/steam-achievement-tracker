@@ -5,7 +5,7 @@
  * 零依赖:只用 Node 内置模块(node:sqlite 存数据,内置 fetch 调 Steam API,
  * node:http 起 Dashboard),不需要 npm install,不需要任何外部账号或部署。
  *
- *   node tracker.js init            填 Steam 凭据(只需要跑一次;--notion 填 Notion token)
+ *   node tracker.js init            填 Steam 凭据(只跑一次;--notion 填 Notion token,--ai 填 AI 供应商)
  *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情;--fast 只查该查的)
  *   node tracker.js serve           起本地 Dashboard,数据太旧会自动后台同步
  *   node tracker.js status          看一眼当前数据和 AGCR
@@ -249,8 +249,80 @@ async function cmdInitNotion() {
   }
 }
 
+/** 供应商选项。顺序就是推荐顺序,第一个是默认 */
+const AI_PROVIDERS = [
+  {
+    key: 'deepseek',
+    label: 'DeepSeek',
+    note: '有联网搜索,便宜。key 在 https://platform.deepseek.com/api_keys',
+    env: 'DEEPSEEK_API_KEY',
+  },
+  {
+    key: 'anthropic',
+    label: 'Anthropic (Claude)',
+    note: '有联网搜索,质量最好也最贵。key 在 https://platform.claude.com/settings/keys',
+    env: 'ANTHROPIC_API_KEY',
+  },
+  {
+    key: 'gemini',
+    label: 'Google Gemini',
+    note: '有免费额度,但实测免费层常常拿不到能用的模型。https://aistudio.google.com/apikey',
+    env: 'GEMINI_API_KEY',
+  },
+];
+
+/**
+ * `init --ai`:配置攻略生成用的 AI 供应商。
+ *
+ * **当场用真请求验证**,而不是写完就完 —— 这个功能的失败模式(key 无效、模型名不对、
+ * 这一档没额度、端点不认某个工具)全都长得不一样,而且全都要发一次请求才知道。
+ * 让人在 `init` 的时候花几分钱撞上,好过在生成一份攻略跑到一半的时候撞上。
+ */
+async function cmdInitAi() {
+  const io = makeSecretReader();
+  try {
+    console.log('\n配置 AI 攻略生成\n');
+    console.log('这个功能会调用 AI 联网查资料并写攻略,**要花钱**(免费额度的除外)。');
+    console.log('不用这个功能的话,整个项目的其他部分都不需要它。\n');
+
+    AI_PROVIDERS.forEach((p, i) => {
+      console.log(`  ${i + 1}) ${p.label.padEnd(20)} ${p.note}`);
+    });
+    const pick = (await io.ask(`\n选一个(1-${AI_PROVIDERS.length},回车用 1): `)) || '1';
+    const chosen = AI_PROVIDERS[Number(pick) - 1];
+    if (!chosen) throw new Error(`没有第 ${pick} 个选项`);
+
+    const key = await io.askSecret(`${chosen.label} API Key(输入不会显示): `);
+    if (!key) throw new Error('没输入 key');
+
+    const model = await io.ask('模型名(回车用这一家的默认值): ');
+
+    const ai = { provider: chosen.key, apiKey: key.trim(), model: model.trim() };
+    const provider = await createProvider({ ai: { ...loadConfig().ai, ...ai } });
+
+    // 真发一次请求。问题最小化:不挂联网工具、只要一个字
+    stdout.write(`\n正在验证(模型 ${provider.model})…`);
+    const r = await provider.send({ messages: [{ role: 'user', content: '回复一个字:好' }] });
+    const verdict = checkResult(r);
+    if (!verdict.ok) throw new Error(`验证没通过:${verdict.reason}`);
+    console.log(`\r✅ 可用:${provider.name} / ${provider.model},回了「${r.text.trim().slice(0, 10)}」      `);
+    console.log(`   ${formatUsage(r.usage, provider.model)}`);
+
+    // model 留空就不写进 config,让代码里的默认值继续生效(那个会跟着版本更新)
+    saveConfig({ ai: model.trim() ? ai : { provider: ai.provider, apiKey: ai.apiKey } });
+    console.log(`\n✅ 已写入 ${CONFIG_PATH}(已 gitignore,不会被提交)`);
+    console.log('\n接下来:');
+    console.log('  node tracker.js ai-check              ← 验证联网搜索真的能用(重点看有没有发出搜索)');
+    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(会先问你一句才开始花钱)');
+    console.log(`\n(不想把 key 写进文件的话,也可以用环境变量 ${chosen.env}=… 临时覆盖)`);
+  } finally {
+    io.close();
+  }
+}
+
 async function cmdInit() {
   if (flags.has('--notion')) return cmdInitNotion();
+  if (flags.has('--ai')) return cmdInitAi();
   const rl = createInterface({ input: stdin, output: stdout });
   try {
     const current = loadConfig();
@@ -878,6 +950,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
 
   node tracker.js init                    填 Steam API Key 和 SteamID64(跑一次)
               init --notion               填 Notion token(只有要用攻略同步才需要)
+              init --ai                   填 AI 供应商和 key(只有要用攻略生成才需要)
   node tracker.js sync                    全量同步:库 + 成就完成数 + 成就详情
               sync --fast                 只查玩过的 + 轮换复查一批(和 Dashboard 一样)
               sync --library              只检查新游戏
