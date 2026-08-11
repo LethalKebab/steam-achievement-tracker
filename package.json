@@ -1,7 +1,7 @@
 {
   "name": "steam-achievement-tracker",
-  "version": "2.0.0",
-  "description": "Track your Steam achievement progress locally — no Google account, no deployment, zero dependencies",
+  "version": "2.1.0",
+  "description": "Tracks Steam achievement progress in a local SQLite database, with a Dashboard served on 127.0.0.1",
   "type": "module",
   "license": "MIT",
   "engines": {
