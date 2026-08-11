@@ -30,6 +30,8 @@ Either way, you'll need two things from Steam, both one-time:
 
 The build is unsigned, so the first launch shows *"Windows protected your PC"*. Click **More info → Run anyway**; it doesn't appear on later launches.
 
+**Updating:** close the app, then unzip the new release into the same folder and replace files when asked. The zip contains program files only — your `config.json` and `data/` are not in it and are left alone. To keep a copy first, those two are the whole of your data.
+
 Until credentials are saved, a form is served in place of the Dashboard: the same two fields above, checked against Steam before anything is written. Save it and the Dashboard opens, with the first sync running in the background. Every later launch goes straight to the Dashboard.
 
 ### From source
