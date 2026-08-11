@@ -70,7 +70,7 @@ That asks which provider, takes your key without echoing it, and **verifies it w
 
 ```bash
 node tracker.js ai-check              # confirms search actually works
-node tracker.js guide-gen <appid>     # asks before it starts spending
+node tracker.js guide-gen <appid>     # asks once before it starts
 ```
 
 If a guide is already registered for that appid, `guide-gen` refuses — regenerating over
@@ -82,7 +82,7 @@ node tracker.js guide-gen <appid> --overwrite
 
 That backs the old guide up first (a local `.md` is copied, a Notion page is dumped as raw
 block JSON, both into `guides/.backups/`) and shows you what you are about to replace
-**before** it spends anything: how big the current guide is, how many achievements it
+**before** it writes anything: how big the current guide is, how many achievements it
 covers, and which boxes you ticked by hand will not survive. Achievement checkboxes are
 re-ticked from your Steam data automatically, so their state comes back exactly; boxes for
 sub-steps match no achievement, so those come back unticked. If the backup fails, nothing

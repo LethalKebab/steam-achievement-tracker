@@ -554,6 +554,21 @@ describe('Dashboard 上的「生成」按钮', () => {
     assert.match(html, /id="askModal"/, '页面里得真有那个框,不能只有函数');
   });
 
+  // 这是**第二次**把花钱措辞从界面上拿掉了(第一次是设置页,commit 4d66ce9)。
+  // 提示语该说的是"接下来会发生什么",不是替用户评估值不值:key 是他自己配的,
+  // 单价他自己知道,而我们连服务端搜索怎么计费都没测过(见 CLAUDE.md「没有 spend caps」)。
+  // 拿一个我们说不清的数去吓人,比不说更糟。代码注释里说明"为什么有这道确认"是可以的,
+  // 用户读不到注释。
+  test('面向用户的文案里不提花钱 —— 已经被拿掉两次了', () => {
+    const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*(\*|\/\/).*$/gm, '');
+    const MONEY = /花钱|产生费用|要花多少|收费/;
+
+    assert.doesNotMatch(strip(html), MONEY, 'Dashboard 的确认框和状态条里不提钱');
+
+    const cli = strip(readFileSync(new URL('../tracker.js', import.meta.url), 'utf8'));
+    assert.doesNotMatch(cli, MONEY, 'CLI 的提示语和帮助里也不提钱(注释里说明理由没问题)');
+  });
+
   test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
     // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
     // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默

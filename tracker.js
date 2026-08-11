@@ -287,7 +287,7 @@ async function cmdInitAi() {
   const io = makeSecretReader();
   try {
     console.log('\n配置 AI 攻略生成\n');
-    console.log('这个功能会调用 AI 联网查资料并写攻略,**要花钱**(免费额度的除外)。');
+    console.log('这个功能会调用 AI 联网查资料并写攻略。');
     console.log('不用这个功能的话,整个项目的其他部分都不需要它。\n');
 
     AI_PROVIDERS.forEach((p, i) => {
@@ -318,7 +318,7 @@ async function cmdInitAi() {
     console.log(`\n✅ 已写入 ${CONFIG_PATH}(已 gitignore,不会被提交)`);
     console.log('\n接下来:');
     console.log('  node tracker.js ai-check              ← 验证联网搜索真的能用(重点看有没有发出搜索)');
-    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(会先问你一句才开始花钱)');
+    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(开始之前会先问你一句)');
     console.log(`\n(不想把 key 写进文件的话,也可以用环境变量 ${chosen.env}=… 临时覆盖)`);
   } finally {
     io.close();
@@ -882,13 +882,17 @@ async function cmdGuideGen() {
   }
 
   if (!flags.has('--yes')) {
-    // 花钱的操作默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)。
-    // 覆盖的时候这句话还要多担一件事:它同时是那次不可逆写入的人工确认
+    // 默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)。
+    // 覆盖的时候这句话还要多担一件事:它同时是那次不可逆写入的人工确认。
+    //
+    // **措辞里不提钱。** 提示语该说的是"接下来会发生什么",不是替用户评估值不值 ——
+    // 他自己配的 key,自己知道单价,而我们连服务端搜索怎么计费都没测过(见 CLAUDE.md
+    // 那条"没有 spend caps")。用一个我们说不清的数去吓人,比不说更糟
     const io = makeSecretReader();
     const answer = await io.ask(
       plan.existing
-        ? `\n这一步会调用 AI 并产生费用,而且会**覆盖《${plan.game}》现在那份攻略**。继续?(y/N)`
-        : '\n这一步会调用 AI 并产生费用。继续?(y/N)'
+        ? `\n这一步会联网研究并重写,而且会**覆盖《${plan.game}》现在那份攻略**。继续?(y/N)`
+        : '\n这一步会联网研究并撰写,通常两到四分钟。继续?(y/N)'
     );
     io.close();
     if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
@@ -1136,7 +1140,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
               --provider X --model Y      临时换供应商/模型,不改 config.json
                                           (ai-check 和 guide-gen 都支持)
-  node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
+  node tracker.js guide-gen <appid>       让 AI 写一份攻略(默认先问一句才开始)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       重写已有的那份攻略(先备份原文,再告诉你会失去什么)
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
