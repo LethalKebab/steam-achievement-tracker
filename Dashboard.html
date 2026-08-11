@@ -413,6 +413,15 @@
       pointer-events: none;
     }
     /* 配了 AI 之后,没攻略的行变成"可以生成一份" */
+    .guide-btn.to-notion {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .guide-btn.to-notion:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+    .guide-btn.to-notion:disabled { opacity: 0.4; cursor: default; }
     .guide-btn.can-gen {
       opacity: 1;
       cursor: pointer;
@@ -785,6 +794,11 @@
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
           + guideBtn
+          + (g.guideKind === 'local' && notionReady
+              ? '<button class="guide-btn to-notion" data-migrate="' + g.appid + '" data-name="'
+                + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
+                + ' onclick="event.stopPropagation();window.migrateGuide(this)">⬆ Notion</button>'
+              : '')
           + '<button class="delete-btn" data-delete-appid="' + g.appid + '" title="删除这一行">🗑</button>'
           + '</div>';
 
@@ -1200,14 +1214,76 @@
     // "会发生什么、机器验不了什么"说清楚 —— 用户看不到 CLI 那些提示。
     const genBar = document.getElementById('gen-bar');
     let aiReady = false;
+    let notionReady = false;
 
     (async function loadAiState() {
       const s = await new Promise((resolve) => {
         rpc.withSuccessHandler(resolve).withFailureHandler(() => resolve({})).getSettings();
       });
       aiReady = Boolean(s && s.hasAiKey);
-      if (aiReady) loadDashboard();  // 重画一次,把「✨ 生成」按钮放出来
+      // 搬去 Notion 要两样都有:token(能写)和数据库 ID(知道写去哪)
+      notionReady = Boolean(s && s.hasNotionToken && s.notionDbId);
+      if (aiReady || notionReady) loadDashboard();  // 重画一次,把那两个按钮放出来
     })();
+
+    /**
+     * 本地攻略 → Notion。**先预览再问**:转换可能把表格、折叠块降级成普通段落,
+     * 不把这件事摆在确认框里,用户就是在不知道会损失什么的情况下点的"确定"。
+     */
+    window.migrateGuide = function (btn) {
+      const appid = btn.getAttribute('data-migrate');
+      const name = btn.getAttribute('data-name') || appid;
+      btn.disabled = true;
+      showGen('⏳ 正在检查《' + name + '》的攻略…');
+      rpc
+        .withSuccessHandler(function (p) {
+          if (!p || p.error) {
+            btn.disabled = false;
+            return showGen('⚠️ ' + ((p && p.error) || '预览失败'), true);
+          }
+          const lines = [
+            '把《' + p.game + '》的本地攻略搬到 Notion?',
+            '',
+            '· ' + p.todos + ' 个 checkbox,其中 ' + p.checked + ' 个已勾选(勾选状态会原样带过去)',
+            p.existingPage ? '· 写进 Notion 上已有的那个空页面' : '· 在 Notion 攻略库里新建一页',
+            '· 搬完逐条核对,对不上就不动本地文件',
+            '· 核对通过后本地文件挪进 guides/.migrated/,不会删',
+          ];
+          if (p.unconverted && p.unconverted.length) {
+            lines.push('', '⚠️ 有 ' + p.unconverted.length + ' 行 Notion 放不下原来的排版,会变成普通段落(文字不丢):');
+            p.unconverted.slice(0, 5).forEach(function (l) { lines.push('    ' + l); });
+          }
+          if (!window.confirm(lines.join('\n'))) {
+            btn.disabled = false;
+            genBar.style.display = 'none';
+            return;
+          }
+          showGen('⏳ 正在搬《' + p.game + '》…');
+          rpc
+            .withSuccessHandler(function (r) {
+              if (!r || r.error) {
+                btn.disabled = false;
+                return showGen('⚠️ ' + ((r && r.error) || '搬运失败'), true);
+              }
+              showGen(
+                '✅ 《' + r.game + '》已搬到 Notion,' + r.count + ' 个 checkbox 逐条核对一致。' +
+                  '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开页面</a>' +
+                  (r.archivedTo ? '<br><span class="warn">本地文件已挪进 guides/.migrated/,没有删除。</span>' : '')
+              );
+              loadDashboard();
+            })
+            .withFailureHandler(function (err) {
+              btn.disabled = false;
+              showGen('⚠️ ' + err, true);
+            })
+            .migrateGuideToNotion(appid);
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          showGen('⚠️ ' + err, true);
+        })
+        .previewGuideToNotion(appid);
+    };
 
     // **按钮直接调这个,不走事件委托。** 按钮上带着 event.stopPropagation()
     // (行本身也可点,不拦住就会同时展开成就详情),而 stopPropagation 会让挂在

@@ -21,7 +21,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { openDb, insertGame, replaceAchievements, getGuide } from '../lib/db.js';
-import { planNotionTarget, landToNotion, NOTION_NEW_STATUS, DRAFTS_DIR } from '../lib/guidegen.js';
+import { landToNotion, DRAFTS_DIR } from '../lib/guidegen.js';
+// planNotionTarget 住在 notion.js 而不是 guidegen.js —— 它是"写 Notion 前该问什么",
+// 跟 AI 没有关系,搬家那条路(guidemigrate.js)也要用它
+import { planNotionTarget, NOTION_NEW_STATUS } from '../lib/notion.js';
 
 // ---------------------------------------------------------------------------
 // 脚手架

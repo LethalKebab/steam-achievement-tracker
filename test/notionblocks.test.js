@@ -97,3 +97,54 @@ test('chunkBlocks 按 100 切', () => {
     [100, 100, 50]
   );
 });
+
+// ---------------------------------------------------------------------------
+// 下面两组是为「本地攻略搬去 Notion」加的:手写攻略里真实出现的两种块。
+// 生成的攻略不会用到它们,但用户自己写的会 —— 而把这些降级成段落,
+// 丢的是他自己记下来的东西
+// ---------------------------------------------------------------------------
+
+test('普通项目符号变成 bulleted_list_item,不是段落', () => {
+  const { blocks } = markdownToBlocks('- **模式**:用标准模式开新档\n- 第二条');
+  assert.deepEqual(
+    blocks.map((b) => b.type),
+    ['bulleted_list_item', 'bulleted_list_item']
+  );
+  assert.equal(blocks[0].bulleted_list_item.rich_text[0].annotations.bold, true);
+});
+
+test('`- [ ]` 不会被当成普通项目符号 —— checkbox 优先', () => {
+  const { blocks } = markdownToBlocks('- [ ] **成就**<br>描述');
+  assert.equal(blocks[0].type, 'to_do');
+});
+
+test('markdown 表格变成 table 块,分隔行不算数据行', () => {
+  const md = [
+    '| 章节 | 犯罪手法 | 嫌疑人 |',
+    '| --- | --- | --- |',
+    '| 序章 | 41627 | 两个都是 |',
+    '| 第一章 | 35624 | 肖恩 |',
+  ].join('\n');
+  const { blocks } = markdownToBlocks(md);
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].type, 'table');
+  assert.equal(blocks[0].table.table_width, 3);
+  assert.equal(blocks[0].table.has_column_header, true);
+  assert.equal(blocks[0].table.children.length, 3, '分隔行不该变成一行数据');
+  assert.equal(plain(blocks[0].table.children[1].table_row.cells[1]), '41627');
+});
+
+test('行与行列数不齐的表格补齐到同一宽度 —— Notion 会拒收不齐的', () => {
+  const { blocks } = markdownToBlocks('| a | b | c |\n| --- | --- | --- |\n| 只有一格 |');
+  const rows = blocks[0].table.children;
+  assert.ok(rows.every((r) => r.table_row.cells.length === 3));
+  assert.equal(plain(rows[1].table_row.cells[2]), '');
+});
+
+test('表格结束后普通行照常解析,表格在文件末尾也不会漏', () => {
+  const { blocks } = markdownToBlocks('| a |\n| --- |\n| b |\n\n## 后面还有\n\n| c |\n| --- |');
+  assert.deepEqual(
+    blocks.map((b) => b.type),
+    ['table', 'heading_2', 'table']
+  );
+});

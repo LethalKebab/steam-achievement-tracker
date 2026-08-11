@@ -37,6 +37,25 @@ Checkboxes are ordinary markdown — `- [ ]` becomes `- [x]`, in place, with the
 
 If a game already has a Notion guide registered, a same-appid local `.md` is left alone unless you pass `--force`. One appid, one backend.
 
+### Moving a local guide into Notion
+
+Either the **⬆ Notion** button on that game's row in the Dashboard, or:
+
+```bash
+node tracker.js guide-to-notion <appid> --dry-run   # shows exactly what would happen, writes nothing
+node tracker.js guide-to-notion <appid>
+```
+
+Headings, checkboxes (including nested sub-steps and their ticked state), plain bullets and markdown tables all carry over as real Notion blocks. Anything Notion can't represent — `<details>`, third-level headings — becomes a plain paragraph, and the dry run lists those lines before you commit to it.
+
+**Your ticks come across untouched.** Migration never re-derives checked state from Steam; that's `checkbox-sync`'s job, and quietly doing it here would mean a move could change your data.
+
+Afterwards the page is **read back and compared line by line** against the file — same count, same text, same ticks. Only if that matches does the local file move to `guides/.migrated/`. If anything is off, the migration fails, says which line, and **your file stays exactly where it was**. Nothing is ever deleted.
+
+Two refusals, same as for generated guides: a page with that game's title that already has content, and two pages sharing the title.
+
+This is not a quality check. Your guide is your guide — it is moved as written, not graded on the way through.
+
 ### Having one written for you
 
 `node tracker.js guide-gen <appid>` has an AI research the game online and write the guide, then validates the result against your actual achievement data and registers it. Set it up once:
