@@ -34,7 +34,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "model": "",              // blank = that provider's own default; names aren't portable
     "effort": "high",         // low | medium | high | xhigh | max
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
-    "maxAchievements": 100,   // refuse to generate above this — one context has to hold it
+    "maxAchievements": 500,   // refuse to generate above this
+    "chunkSize": 50,          // achievements per writing pass; more than this is written in several
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
 
     "maxSearches": 8,         // web_search calls per request
@@ -99,7 +100,7 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 **`ai.*`** — settings for AI guide generation ([design and status](ai-guide-writing.md)); nothing reads them unless you run `node tracker.js ai-check` or `node tracker.js guide-gen`. It is the one part of this project that spends money, so a few of the defaults are deliberately conservative and `guide-gen` asks for confirmation before it starts.
 
-`maxAchievements` (100) is a refusal threshold, not a truncation: a game with more achievements than one context can comfortably hold gets rejected with an explanation rather than a worse guide. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
+`maxAchievements` (500) is a refusal threshold, not a truncation: a game above it is rejected with an explanation rather than given a worse guide. A game with more achievements than `chunkSize` (50) is written in several passes rather than refused — the passes share one conversation, so the model can see what it already wrote and won't repeat a section or an achievement, and validation always runs over the assembled guide. What the limit protects now is your time and spend, not feasibility: a 400-achievement game is nine passes. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
 
 `maxTokens` caps thinking **and** prose together, not prose alone — set it too low and a guide gets truncated mid-way, which is worse than a run that fails outright, because nothing downstream can tell the difference. `effort` is the depth knob; there is no temperature or token-budget setting, because the models this targets reject both outright.
 

@@ -58,12 +58,15 @@ test('小节标题会切断父子关系,标题后面的缩进项不会挂到上�
 });
 
 test('认不出来的行降级成段落,内容留住并且报出来', () => {
-  const md = '<details><summary>展开</summary>\n### 三级标题\n';
+  // `### 三级标题` **不再**属于这一类 —— 它现在真的转成 heading_3(见下面那组测试)。
+  // 留在这里的是真认不出来的:HTML 折叠块 Notion 没有对应的块类型
+  const md = '<details><summary>展开</summary>\n普通一行\n';
   const { blocks, unconverted } = markdownToBlocks(md);
   assert.equal(blocks.length, 2);
   assert.ok(blocks.every((b) => b.type === 'paragraph'));
   assert.match(plain(blocks[0].paragraph.rich_text), /details/);
-  assert.equal(unconverted.length, 2, '排版丢了要告诉用户是哪几行');
+  assert.equal(unconverted.length, 1, '排版丢了要告诉用户是哪几行');
+  assert.match(unconverted[0], /details/);
 });
 
 test('CRLF 和行尾空格不影响解析', () => {
@@ -197,4 +200,38 @@ test('没有标注时 underline 一律 false,不留下 undefined', () => {
   for (const r of toRichText('**名字**<br>普通描述')) {
     assert.equal(r.annotations.underline, false);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 标题的每一级
+// ---------------------------------------------------------------------------
+// 踩过(2026-08-11,《中国式家长》):转换器只认 `##`,模型整篇写的是 `###`,
+// 于是七个小节标题全掉进普通段落分支,页面上是七行字面的 `### 机制速查`,
+// 一个真标题都没有。`unconverted` 报的是"排版降级",听着像小事。
+
+test('### 变成 heading_3,不是字面文字', () => {
+  const { blocks, unconverted } = markdownToBlocks('### 机制速查\n正文\n');
+  assert.equal(blocks[0].type, 'heading_3');
+  assert.equal(plain(blocks[0].heading_3.rich_text), '机制速查');
+  assert.deepEqual(unconverted, [], '转好了就不该再报"排版降级"');
+});
+
+test('#### 及更深的归到 heading_3 —— Notion 只有三级', () => {
+  const { blocks } = markdownToBlocks('#### 更深一层\n##### 再深\n');
+  assert.deepEqual(blocks.map((b) => b.type), ['heading_3', 'heading_3']);
+});
+
+test('## 仍然是 heading_2,# 仍然被丢掉', () => {
+  const { blocks } = markdownToBlocks('# 游戏名\n## 主线\n### 支线\n');
+  assert.deepEqual(blocks.map((b) => b.type), ['heading_2', 'heading_3']);
+});
+
+test('标题里的粗体和下划线照常生效', () => {
+  const { blocks } = markdownToBlocks('### **重点**小节\n');
+  assert.equal(blocks[0].heading_3.rich_text.filter((r) => r.annotations.bold).length, 1);
+});
+
+test('井号后面没有空格的不算标题(#1 号这种)', () => {
+  const { blocks } = markdownToBlocks('#1 号目标\n');
+  assert.equal(blocks[0].type, 'paragraph', '"#1 号" 是正文,不是标题');
 });

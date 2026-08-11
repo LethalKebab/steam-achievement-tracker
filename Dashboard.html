@@ -422,6 +422,17 @@
     }
     .guide-btn.to-notion:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
     .guide-btn.to-notion:disabled { opacity: 0.4; cursor: default; }
+    /* 重写会覆盖已有攻略,是这一行上唯一不可逆的动作 —— 平时低调,
+       悬停时才显出警示色,免得一排 ♻ 把表格弄得像满屏警告 */
+    .guide-btn.rewrite {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .guide-btn.rewrite:hover:not(:disabled) { color: #e0a030; border-color: #e0a030; }
+    .guide-btn.rewrite:disabled { opacity: 0.4; cursor: default; }
     .guide-btn.can-gen {
       opacity: 1;
       cursor: pointer;
@@ -430,17 +441,52 @@
       border-color: var(--good);
     }
     .guide-btn.can-gen:disabled { opacity: 0.4; cursor: default; }
+    /*
+      悬浮,不跟着页面滚走。一次生成要两到四分钟,而这段时间里人多半在往下翻表格 ——
+      进度条钉在文档流最上面等于"想看就得先滚回去"。
+
+      **靠左下角,因为右下角被 lib/rpc.js 的同步状态条占了**(那边写死
+      right:16px / bottom:16px / z-index:9999)。两个浮层各占一角,谁也不压谁;
+      z-index 比它低一档,万一真挤到一起也是同步状态条在上面。
+    */
     #gen-bar {
       display: none;
-      margin: 0 0 10px;
-      padding: 8px 12px;
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      z-index: 9990;
+      max-width: min(420px, calc(100vw - 32px));
+      max-height: 60vh;
+      overflow-y: auto;
+      /* 右边留出关闭按钮的位置 */
+      padding: 10px 30px 10px 12px;
       border: 1px solid var(--good);
-      border-radius: 4px;
+      border-radius: 6px;
+      /* 浮起来就必须有不透明背景,否则和下面的表格文字叠在一起没法读 */
+      background: var(--panel);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
       font-size: 12px;
       line-height: 1.6;
       color: var(--text);
     }
     #gen-bar .warn { color: var(--text-dim); }
+    #gen-bar .gen-close {
+      position: absolute;
+      top: 3px;
+      right: 6px;
+      background: none;
+      border: none;
+      padding: 2px 4px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1;
+    }
+    #gen-bar .gen-close:hover { color: var(--text); }
+    /* 窄屏上两个角会挤到一起,改成横跨一行并让开下面的同步状态条 */
+    @media (max-width: 720px) {
+      #gen-bar { left: 12px; right: 12px; bottom: 76px; max-width: none; }
+    }
     .ach-guide-link {
       font-size: 11px;
       color: var(--accent);
@@ -484,7 +530,10 @@
     <span class="sync-msg" id="syncMsg"></span>
   </div>
 
-  <div id="gen-bar" role="status"></div>
+  <div id="gen-bar" role="status">
+    <button type="button" class="gen-close" id="genClose" title="收起">×</button>
+    <span id="gen-msg"></span>
+  </div>
 
   <div class="cards">
     <div class="card">
@@ -811,6 +860,13 @@
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
           + guideBtn
+          // 已经有攻略的行原来只有「📖 攻略」,没有任何入口能重写它 —— 覆盖只能敲命令行。
+          // 闸门不在这个按钮上,在它弹出的确认框里(会先算清楚要失去什么),所以露出来是安全的
+          + (g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0
+              ? '<button class="guide-btn rewrite" data-rewrite="' + g.appid + '" data-name="'
+                + escapeHtml(g.name) + '" title="让 AI 重新写一份,覆盖现在这份(会先备份原文)"'
+                + ' onclick="event.stopPropagation();window.rewriteGuide(this)">♻ 重写</button>'
+              : '')
           + (g.guideKind === 'local' && notionReady
               ? '<button class="guide-btn to-notion" data-migrate="' + g.appid + '" data-name="'
                 + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
@@ -931,7 +987,7 @@
           if (!game) return;
           const ok = await askConfirm({
             title: '删除《' + game.name + '》?',
-            body: '这会从本地数据库里彻底删掉这一行,无法撤销。',
+            body: '从本地数据库删掉这一行,无法撤销。',
             okText: '删除',
             danger: true,
           });
@@ -1172,7 +1228,10 @@
         const okBtn = document.getElementById('askOkBtn');
         const cancelBtn = document.getElementById('askCancelBtn');
         document.getElementById('askTitle').textContent = o.title;
-        document.getElementById('askBody').textContent = o.body || '';
+        const bodyEl = document.getElementById('askBody');
+        bodyEl.textContent = o.body || '';
+        // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的
+        bodyEl.style.display = o.body ? '' : 'none';
         okBtn.textContent = o.okText || '确认';
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
@@ -1286,6 +1345,16 @@
     // 这是页面上**唯一一个会花钱的按钮**,所以点下去之前必须先问一次,而且要把
     // "会发生什么、机器验不了什么"说清楚 —— 用户看不到 CLI 那些提示。
     const genBar = document.getElementById('gen-bar');
+    const genMsg = document.getElementById('gen-msg');
+    // 关掉 = "这一轮不想看了"。轮询每 3 秒还会再调一次 showGen,不把这个意图记下来的话,
+    // 关掉三秒之后它自己又回来了。下一次**主动**发起生成/搬运时才重新打开 ——
+    // 那时候是用户自己要看进度的
+    let genDismissed = false;
+    document.getElementById('genClose').addEventListener('click', function () {
+      genDismissed = true;
+      genBar.style.display = 'none';
+    });
+
     let aiReady = false;
     let notionReady = false;
 
@@ -1303,30 +1372,88 @@
      * 本地攻略 → Notion。**先预览再问**:转换可能把表格、折叠块降级成普通段落,
      * 不把这件事摆在确认框里,用户就是在不知道会损失什么的情况下点的"确定"。
      */
+    /**
+     * 重写已有攻略。**先预检再问**,和 `guide-to-notion` 的流程一样,理由也一样:
+     * 不知道会失去什么的"确认"不算确认。
+     *
+     * 覆盖唯一真正丢掉的东西是**手动勾上的子步骤框** —— 成就框会被机械打勾按数据库
+     * 勾回原样,子步骤框匹配不到任何成就。这句话由服务端的 formatPreflight 生成,
+     * 和 CLI 那边是同一份措辞。
+     */
+    window.rewriteGuide = async function (btn) {
+      const appid = btn.getAttribute('data-rewrite');
+      const name = btn.getAttribute('data-name') || appid;
+      genDismissed = false;
+      btn.disabled = true;
+      showGen('⏳ 检查《' + name + '》…');
+
+      const p = await new Promise((resolve) => {
+        rpc.withSuccessHandler(resolve)
+          .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
+          .previewGuideRewrite(appid);
+      });
+      if (!p || p.error) {
+        btn.disabled = false;
+        return showGen('⚠️ ' + ((p && p.error) || '预检失败'), true);
+      }
+
+      // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
+      // 都是他点下去之后自然会看到的,不必在这里先讲一遍
+      const ok = await askConfirm({
+        title: '重写《' + name + '》的攻略?',
+        body: [
+          '现有 ' + p.boxes + ' 个 checkbox 会被整份替换,原文先备份。',
+          p.atRisk ? p.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
+          '约 2–4 分钟。',
+        ].filter(Boolean).join('\n'),
+        okText: '重写',
+        danger: true,
+      });
+      if (!ok) {
+        btn.disabled = false;
+        genBar.style.display = 'none';
+        return;
+      }
+
+      rpc
+        .withSuccessHandler(function (r) {
+          if (r && r.error) {
+            btn.disabled = false;
+            return showGen('⚠️ ' + r.error, true);
+          }
+          showGen('⏳ 重写《' + name + '》…');
+          pollGen();
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          showGen('⚠️ ' + err, true);
+        })
+        .startGuideGen(appid, true);
+    };
+
     window.migrateGuide = function (btn) {
       const appid = btn.getAttribute('data-migrate');
       const name = btn.getAttribute('data-name') || appid;
+      genDismissed = false; // 自己点的搬运,进度条要露出来
       btn.disabled = true;
-      showGen('⏳ 正在检查《' + name + '》的攻略…');
+      showGen('⏳ 检查《' + name + '》…');
       rpc
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             btn.disabled = false;
             return showGen('⚠️ ' + ((p && p.error) || '预览失败'), true);
           }
+          // 逐条核对、对不上就不动本地文件、页面带图标 —— 都是"我们怎么保证不出事",
+          // 不是他要决定的事。真正要他知道的只有两件:搬什么、原文去哪
           const lines = [
-            '· ' + p.todos + ' 个 checkbox,其中 ' + p.checked + ' 个已勾选(勾选状态会原样带过去)',
-            p.existingPage ? '· 写进 Notion 上已有的那个空页面' : '· 在 Notion 攻略库里新建一页',
-            '· 页面会带上这个游戏的 Steam 图标',
-            '· 搬完逐条核对,对不上就不动本地文件',
-            '· 核对通过后本地文件挪进 guides/.migrated/,不会删',
+            p.todos + ' 个 checkbox 原样搬过去(含勾选状态)。',
+            '本地文件挪进 guides/.migrated/,不会删。',
           ];
           if (p.unconverted && p.unconverted.length) {
-            lines.push('', '⚠️ 有 ' + p.unconverted.length + ' 行 Notion 放不下原来的排版,会变成普通段落(文字不丢):');
-            p.unconverted.slice(0, 5).forEach(function (l) { lines.push('    ' + l); });
+            lines.push('⚠️ ' + p.unconverted.length + ' 行排版会降级成普通段落,文字不丢。');
           }
           const goMigrate = await askConfirm({
-            title: '把《' + p.game + '》的本地攻略搬到 Notion?',
+            title: '把《' + p.game + '》的攻略搬到 Notion?',
             body: lines.join('\n'),
             okText: '搬过去',
           });
@@ -1335,7 +1462,7 @@
             genBar.style.display = 'none';
             return;
           }
-          showGen('⏳ 正在搬《' + p.game + '》…');
+          showGen('⏳ 搬运《' + p.game + '》…');
           rpc
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
@@ -1343,9 +1470,9 @@
                 return showGen('⚠️ ' + ((r && r.error) || '搬运失败'), true);
               }
               showGen(
-                '✅ 《' + r.game + '》已搬到 Notion,' + r.count + ' 个 checkbox 逐条核对一致。' +
-                  '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开页面</a>' +
-                  (r.archivedTo ? '<br><span class="warn">本地文件已挪进 guides/.migrated/,没有删除。</span>' : '')
+                '✅ 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
+                  '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开 Notion 页面</a>' +
+                  (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : '')
               );
               loadDashboard();
             })
@@ -1369,17 +1496,13 @@
     window.genGuide = async function (btn) {
       const appid = btn.getAttribute('data-gen');
       const name = btn.getAttribute('data-name') || appid;
-      const ok = await askConfirm({
-        title: '要为《' + name + '》生成一份攻略吗?',
-        body: [
-          '· 会调用 AI 联网查资料并撰写,这一步会花钱',
-          '· 通常要两到四分钟,期间可以继续用这个页面',
-          '· 机器只保证格式和数据:每个成就一行、名字对得上、勾选等于你的真实解锁状态',
-          '· 攻略内容对不对没有任何东西能验,生成完请自己读一遍',
-        ].join('\n'),
-        okText: '开始生成',
-      });
+      // **只问,不解释。** 生成是可逆的(不满意删掉页面就行),没有"信错了会损失什么"
+      // 要提醒 —— 时长看进度条就知道,而"内容未经验证"这条本来就该在攻略真的写出来、
+      // 他要去读的时候说,所以留在结果那一行,不放在这里。
+      // 带损失的那几个框(重写、删除)不适用这条,它们的正文是必须的
+      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成' });
       if (!ok) return;
+      genDismissed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;
       rpc
         .withSuccessHandler(function (r) {
@@ -1388,7 +1511,7 @@
             showGen('⚠️ ' + r.error, true);
             return;
           }
-          showGen('⏳ 已开始生成《' + name + '》…');
+          showGen('⏳ 生成《' + name + '》…');
           pollGen();
         })
         .withFailureHandler(function (err) {
@@ -1399,8 +1522,11 @@
     };
 
     function showGen(html, dim) {
+      if (genDismissed) return;
       genBar.style.display = 'block';
-      genBar.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
+      // 写进内层 span,不要覆盖 genBar 本身 —— 关闭按钮是它的兄弟节点,
+      // 覆盖 innerHTML 会把按钮一起冲掉
+      genMsg.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
     }
 
     // 只在有任务在跑的时候轮询 —— 平时不给这个本地服务加一份常驻请求。
@@ -1417,8 +1543,10 @@
         .withSuccessHandler(function (s) {
           if (!s) return;
           if (s.running) {
-            const round = s.rounds ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
-            showGen('⏳ 正在生成《' + s.game + '》' + round + (s.note ? ' —— ' + s.note : ''));
+            // 只有真在重写(第 2 轮起)才显示轮数 —— 一次过的时候写"第 1/3 轮"
+            // 反而像出了什么事要重来三次
+            const round = s.rounds && s.round > 1 ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
+            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : ''));
             return;
           }
           clearInterval(genTimer);
@@ -1429,30 +1557,36 @@
 
           if (!r.ok) {
             showGen(
-              '⚠️ 《' + s.game + '》没通过校验,草稿已留下,没有写进攻略目录。' +
+              '⚠️ 《' + s.game + '》校验没过,已存草稿,没写进攻略。' +
                 (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
               true
             );
             return;
           }
-          // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 必须明写
-          const research = !r.researched
-            ? '<br><span class="warn">⚠️ 这一份没有经过联网调研,内容是模型凭已有知识写的。</span>'
-            : r.searchQueries && r.searchQueries.length
-              ? '<br><span class="warn">🔎 实际发出 ' + r.searchQueries.length + ' 次搜索。</span>'
-              : '<br><span class="warn">⚠️ 挂了联网工具但模型一次都没搜,内容等同于凭记忆写的。</span>';
+          // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 搜过就并进事实那一行,
+          // 没搜才单独警告(那是真会影响内容质量的一件事)
+          const searches = r.searchQueries ? r.searchQueries.length : 0;
+          const noResearch = !r.researched
+            ? '<br><span class="warn">⚠️ 没联网,内容是模型凭已有知识写的。</span>'
+            : searches === 0
+              ? '<br><span class="warn">⚠️ 一次都没搜,内容等同于凭记忆写的。</span>'
+              : '';
           // 只报 token,不报钱 —— 单价我们核实不过来,一个不知道错多少的金额
           // 比不给金额更糟。token 是 API 回的硬数字
-          const spend = (r.tokens || 0) + ' token';
+          const facts = [
+            r.covered + '/' + r.total + ' 个成就',
+            searches ? searches + ' 次搜索' : null,
+            Math.round((r.tokens || 0) / 100) / 10 + 'k token',
+          ].filter(Boolean).join(' · ');
           // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
           const where = r.target === 'notion'
-            ? '已写进 Notion:<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开页面</a>'
-            : '已写到本地:' + escapeHtml(r.path || '');
+            ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开 Notion 页面</a>'
+            : escapeHtml(r.path || '');
           showGen(
-            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就,' + spend + ')' +
+            '✅ 《' + s.game + '》 ' + facts +
               '<br>' + where +
-              research +
-              '<br><span class="warn">机器只验了格式和数据,<strong>内容对不对请自己读一遍</strong>。</span>'
+              noResearch +
+              '<br><span class="warn">内容需要你自己过一遍。</span>'
           );
           loadDashboard();  // 攻略已登记,刷新一下让「📖 攻略」链接出来
         })

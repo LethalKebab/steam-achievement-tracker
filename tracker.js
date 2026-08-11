@@ -287,7 +287,7 @@ async function cmdInitAi() {
   const io = makeSecretReader();
   try {
     console.log('\n配置 AI 攻略生成\n');
-    console.log('这个功能会调用 AI 联网查资料并写攻略,**要花钱**(免费额度的除外)。');
+    console.log('这个功能会调用 AI 联网查资料并写攻略。');
     console.log('不用这个功能的话,整个项目的其他部分都不需要它。\n');
 
     AI_PROVIDERS.forEach((p, i) => {
@@ -318,7 +318,7 @@ async function cmdInitAi() {
     console.log(`\n✅ 已写入 ${CONFIG_PATH}(已 gitignore,不会被提交)`);
     console.log('\n接下来:');
     console.log('  node tracker.js ai-check              ← 验证联网搜索真的能用(重点看有没有发出搜索)');
-    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(会先问你一句才开始花钱)');
+    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(开始之前会先问你一句)');
     console.log(`\n(不想把 key 写进文件的话,也可以用环境变量 ${chosen.env}=… 临时覆盖)`);
   } finally {
     io.close();
@@ -829,9 +829,10 @@ async function cmdGuideGen() {
   const plan = await planGuide(db, { config, steam, appid, fileName, notion, local, overwrite });
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
-  console.log(`  成就 ${plan.defs.length} 个,其中已解锁 ${plan.unlocked.size} 个(用来机械打勾,不会喂给模型)`);
+  // 解锁状态是拿来机械打勾的,不会喂给模型 —— 那是设计,不是他这一刻要读的东西
+  console.log(`  成就 ${plan.defs.length} 个,已解锁 ${plan.unlocked.size} 个`);
   if (plan.unnameable.size) {
-    console.log(`  ${plan.unnameable.size} 个成就名字在本作里撞车,机械打勾够不着——它们的框会留空,这是已知的`);
+    console.log(`  ${plan.unnameable.size} 个成就名在本作里撞车,它们的框会留空(已知)`);
   }
   // 「有服务端搜索」是设计文档定的硬性准入,理由是"混进一家没有搜索的,会让质量取决于
   // 用户选了谁,而用户看不出这个差别"。所以不能默认放行,得让人**明确知道自己在要什么**
@@ -846,10 +847,9 @@ async function cmdGuideGen() {
     const where = plan.existing.kind === 'notion' ? 'Notion 页面' : '本地文件';
     console.log(`\n  ⚠️  覆盖已有攻略(${where}:${plan.existing.url})`);
     console.log(formatPreflight(overwritePreflight(plan), { defsCount: plan.defs.length }));
-    console.log(`  原文会先备份进 ${join(config.guidesDir, BACKUPS_DIR)}/,备份失败就不会动它`);
-    if (plan.existing.kind === 'notion') {
-      console.log('  Notion 删块是归档,30 天内还能在 Notion 回收站里找回来');
-    }
+    // 备份失败就不写、Notion 删块其实是归档(30 天内可从回收站找回)—— 都是我们这边的
+    // 保底措施,不是他要决定的事,所以不印出来
+    console.log(`  原文备份到 ${join(config.guidesDir, BACKUPS_DIR)}`);
   } else if (plan.target === 'notion') {
     console.log(
       plan.notion.existingPage
@@ -882,13 +882,17 @@ async function cmdGuideGen() {
   }
 
   if (!flags.has('--yes')) {
-    // 花钱的操作默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)。
-    // 覆盖的时候这句话还要多担一件事:它同时是那次不可逆写入的人工确认
+    // 默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)。
+    // 覆盖的时候这句话还要多担一件事:它同时是那次不可逆写入的人工确认。
+    //
+    // **措辞里不提钱。** 提示语该说的是"接下来会发生什么",不是替用户评估值不值 ——
+    // 他自己配的 key,自己知道单价,而我们连服务端搜索怎么计费都没测过(见 CLAUDE.md
+    // 那条"没有 spend caps")。用一个我们说不清的数去吓人,比不说更糟
     const io = makeSecretReader();
     const answer = await io.ask(
       plan.existing
-        ? `\n这一步会调用 AI 并产生费用,而且会**覆盖《${plan.game}》现在那份攻略**。继续?(y/N)`
-        : '\n这一步会调用 AI 并产生费用。继续?(y/N)'
+        ? `\n这一步会联网研究并重写,而且会**覆盖《${plan.game}》现在那份攻略**。继续?(y/N)`
+        : '\n这一步会联网研究并撰写,通常两到四分钟。继续?(y/N)'
     );
     io.close();
     if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
@@ -901,8 +905,14 @@ async function cmdGuideGen() {
   const r = await generateGuide(db, {
     config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan,
     onProgress(ev) {
-      if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮:联网研究 + 撰写…`);
-      else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
+      // 分段写时把段号带上 —— 九段的活只显示"第 1/3 轮"的话,进度十几分钟不动
+      const seg = ev.chunks > 1 ? ` 第 ${ev.chunk}/${ev.chunks} 段` : '';
+      if (ev.phase === 'plan' && ev.chunks > 1) {
+        p.done(`  ${ev.achievements} 个成就,一次写不完,分 ${ev.chunks} 段写`);
+      } else if (ev.phase === 'rewrite') {
+        p.done(`  校验没过,第 ${ev.round} 轮只重写其中 ${ev.chunks}/${ev.of} 段`);
+      } else if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮${seg}:联网研究 + 撰写…`);
+      else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮${ev.label ? ` ${ev.label}` : ''}:${ev.name}…`);
       else if (ev.phase === 'check') p.update(`  第 ${ev.round} 轮:机械打勾 + 校验…`);
       else if (ev.phase === 'lint') {
         p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
@@ -932,42 +942,39 @@ async function cmdGuideGen() {
       })));
       if (r.backup) console.log(`  原文备份:${r.backup.path}`);
     }
-    if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action ?? '新增'}),Dashboard 上就能看到链接了`);
-    else console.log('  ⚠️  没被 guides 发现逻辑收进去,手动跑一次 `node tracker.js guides --local` 看看为什么');
+    if (r.registered) console.log(`  已登记(${r.registered.action ?? '新增'}),Dashboard 上能看到链接了`);
+    else console.log('  ⚠️  没登记上。跑一次 `node tracker.js guides` 看为什么');
     // 转换器认不出来的行没丢,但排版降级成了普通段落。用户有权知道是哪几行
     if (r.unconverted.length) {
-      console.log(`  ⚠️  ${r.unconverted.length} 行 Notion 放不下原来的排版,已经降级成普通段落(内容没丢):`);
+      console.log(`  ⚠️  ${r.unconverted.length} 行排版降级成普通段落,文字没丢:`);
       for (const line of r.unconverted.slice(0, 5)) console.log(`       ${line}`);
     }
   } else {
     console.log(`❌ ${r.rounds} 轮之后仍有 ${r.blocking.length} 条没过,草稿留在 ${r.draftPath}`);
-    console.log('  (草稿目录不会被攻略发现逻辑扫到,不会被同步拿去勾框)');
+    console.log('  (草稿不会被发现逻辑扫到,不会拿去勾框)');
     for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
     if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
   }
   if (r.expected.length) {
-    console.log(`  ${r.expected.length} 条"已解锁但没勾"是预期内的:这些成就名在本作里撞车,机械打勾够不着`);
+    console.log(`  ${r.expected.length} 条"已解锁但没勾"是预期内的:成就名在本作里撞车,勾不上`);
   }
   if (r.lint?.stats) {
     console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
       `${r.lint.stats.warnings} 条 warn`);
   }
   console.log('  ' + formatUsage(r.usage));
-  console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
-    '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
-    '"易错过"是不是真的,都要你自己看一遍。');
+  // 机器验的是格式和数据(一个成就一行、名字对得上、描述原文、勾选等于真实解锁),
+  // 内容对不对一条都验不了。**这句提醒必须留着**,但它是一句话的事,不是一段
+  console.log('\n⚠️  只验了格式和数据,内容需要你自己读一遍。');
   // **能搜 ≠ 搜了。** canSearch 只说供应商有这个能力,searchQueries 才是它真发出去的。
   // 不报的话,"声明了工具但一次没搜"就变成一个看不出来的质量差别 —— 正是 canSearch
   // 那套设计要防的东西
   if (!r.researched) {
-    console.log('    而且这一份**完全没有经过联网调研**,内容是模型凭已有知识写的,' +
-      '可信度比查过资料的低一档。');
+    console.log('    这一份没联网,内容是模型凭已有知识写的。');
   } else if (!r.searchQueries?.length) {
-    console.log('    ⚠️  而且**这一轮模型一次搜索都没发出去** —— 工具挂上了但它没用,' +
-      '内容实际上等同于凭记忆写的。');
+    console.log('    ⚠️  一次搜索都没发出去,内容等同于凭记忆写的。');
   } else {
-    console.log(`\n🔎 实际发出 ${r.searchQueries.length} 次搜索,前几条:` +
-      r.searchQueries.slice(0, 4).join(' / '));
+    console.log(`\n🔎 搜了 ${r.searchQueries.length} 次:` + r.searchQueries.slice(0, 4).join(' / '));
   }
 }
 
@@ -1136,7 +1143,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
               --provider X --model Y      临时换供应商/模型,不改 config.json
                                           (ai-check 和 guide-gen 都支持)
-  node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
+  node tracker.js guide-gen <appid>       让 AI 写一份攻略(默认先问一句才开始)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       重写已有的那份攻略(先备份原文,再告诉你会失去什么)
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名

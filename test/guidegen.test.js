@@ -38,6 +38,10 @@ import {
   guideFileName,
   buildAchievementList,
   buildSystemPrompt,
+  chunkDefs,
+  buildChunkMessage,
+  buildChunkFeedback,
+  chunksNeedingRewrite,
   SKILL_RULE_DISPOSITION,
   DRAFTS_DIR,
 } from '../lib/guidegen.js';
@@ -554,6 +558,68 @@ describe('Dashboard 上的「生成」按钮', () => {
     assert.match(html, /id="askModal"/, '页面里得真有那个框,不能只有函数');
   });
 
+  // 这是**第二次**把花钱措辞从界面上拿掉了(第一次是设置页,commit 4d66ce9)。
+  // 提示语该说的是"接下来会发生什么",不是替用户评估值不值:key 是他自己配的,
+  // 单价他自己知道,而我们连服务端搜索怎么计费都没测过(见 CLAUDE.md「没有 spend caps」)。
+  // 拿一个我们说不清的数去吓人,比不说更糟。代码注释里说明"为什么有这道确认"是可以的,
+  // 用户读不到注释。
+  test('面向用户的文案里不提花钱 —— 已经被拿掉两次了', () => {
+    const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*(\*|\/\/).*$/gm, '');
+    const MONEY = /花钱|产生费用|要花多少|收费/;
+
+    assert.doesNotMatch(strip(html), MONEY, 'Dashboard 的确认框和状态条里不提钱');
+
+    const cli = strip(readFileSync(new URL('../tracker.js', import.meta.url), 'utf8'));
+    assert.doesNotMatch(cli, MONEY, 'CLI 的提示语和帮助里也不提钱(注释里说明理由没问题)');
+  });
+
+  // 重写(覆盖已有攻略)以前只有命令行能调 —— Dashboard 上有攻略的行只显示「📖 攻略」,
+  // 连按钮都没有。GUI 上点一下比敲一行命令容易得多,所以闸门**不能比 CLI 松**:
+  // 必须先预检、把"会失去什么"摆出来,再问。
+  test('Dashboard 能重写已有攻略,而且闸门和 CLI 一样严', () => {
+    assert.match(html, /data-rewrite=/, '有攻略的行要有重写入口');
+    assert.match(html, /window\.rewriteGuide = async function/);
+    // 先预检再问 —— 顺序反了就成了"不知道会失去什么的确认"
+    // 按**函数定义**切,不是按名字第一次出现切 —— 名字最早出现在按钮的 onclick 属性里,
+    // 那样切出来的是两个 onclick 之间的一小段,什么都匹配不到
+    const fn = html.slice(
+      html.indexOf('window.rewriteGuide = async function'),
+      html.indexOf('window.migrateGuide = function')
+    );
+    assert.ok(
+      fn.indexOf('previewGuideRewrite') < fn.indexOf('askConfirm'),
+      '必须先拿到预检结果再弹确认框'
+    );
+    assert.match(fn, /danger: true/, '覆盖不可逆,确认按钮要标红');
+    assert.match(fn, /startGuideGen\(appid, true\)/, '不把 overwrite 传下去,服务端会照常拒绝');
+  });
+
+  test('生成和重写不会同时出现在一行 —— 一个针对没攻略的,一个针对有攻略的', () => {
+    assert.match(html, /const canGen = !g\.guideUrl/, '生成只给没攻略的行');
+    assert.match(html, /g\.guideUrl && aiReady/, '重写只给有攻略的行');
+  });
+
+  // 用户反复说过三次:界面上的字太长、解释太多。确认框只该回答"会发生什么、要多久",
+  // 机制和保证属于说明,搬到代码注释里用户一个字都不用读。这条测试是防它长回去的 ——
+  // 每次想往框里加一句"顺便解释一下"的时候,它会先失败
+  test('确认框要短 —— 不摆项目符号清单,不写解释', () => {
+    const bodies = [...html.matchAll(/askConfirm\(\{[\s\S]{0,120}?body:\s*'([^']*)'/g)].map((m) => m[1]);
+    assert.ok(bodies.length >= 1, '至少该抓到一个字符串型 body(删除框)');
+    for (const b of bodies) {
+      const lines = b.split('\\n').filter((l) => l.trim());
+      assert.ok(lines.length <= 3, `确认框最多三行,这个有 ${lines.length} 行:${b.slice(0, 60)}`);
+      assert.ok(!b.includes('· '), `别在确认框里摆项目符号清单:${b.slice(0, 60)}`);
+    }
+  });
+
+  test('生成框只有一句问话,没有正文 —— 生成是可逆的,没什么要先交代', () => {
+    const call = html.slice(html.indexOf("askConfirm({ title: '为《'"), html.indexOf("okText: '生成'") + 20);
+    assert.ok(call.includes("title: '为《'"), '生成框还在');
+    assert.ok(!/\bbody:/.test(call), '生成框不该再有正文');
+    // 但"内容没验过"这句话不能整个消失,它挪到结果那一行去了
+    assert.match(html, /内容需要你自己过一遍/, '攻略写完之后仍要如实说内容未经验证');
+  });
+
   test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
     // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
     // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默
@@ -564,5 +630,106 @@ describe('Dashboard 上的「生成」按钮', () => {
         `askConfirm 的返回值没有被 await(位置 ${m.index}) —— 除非是 notifyOnly 的纯提示`
       );
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 分段撰写(几百个成就的游戏)
+// ---------------------------------------------------------------------------
+// 上限从 100 提到 500,靠的不是"调大一个数字"——一次输出装不下几百条正文,
+// 而**装不下不会报错**:模型写到一半停,校验器只说"后半段的成就都缺 checkbox"。
+// 所以超过一段就分几轮写,同一个 session(模型看得见自己前面写了什么),
+// 最后拼起来对**完整的一份**打勾和校验。
+
+describe('分段撰写', () => {
+  const BIG = ['A', 'B', 'C', 'D', 'E'].map((k, i) => def(k, `成就${i + 1}`, `完成第${i + 1}关。`));
+  const bigSteam = () => ({
+    async fetchPlayerAchievements() {
+      return { achievements: BIG.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+    },
+    async fetchGlobalAchievementPercentages() { return null; },
+  });
+  /** 某一段该有的 markdown */
+  const seg = (items) =>
+    '```markdown\n## 主线\n\n' +
+    items.map((d) => `- [ ] **${d.name_cn}**<br>${d.description}<br>心得`).join('\n') +
+    '\n```';
+
+  const envFor = (chunkSize) => {
+    const e = freshEnv({ defs: BIG });
+    e.config.ai = { maxAchievements: 500, chunkSize };
+    return e;
+  };
+
+  test('chunkDefs 切得对,余数单独成段', () => {
+    assert.deepEqual(chunkDefs([1, 2, 3, 4, 5], 2).map((c) => c.length), [2, 2, 1]);
+    assert.deepEqual(chunkDefs([1, 2, 3], 10).map((c) => c.length), [3], '装得下就只有一段');
+    assert.equal(chunkDefs([1, 2, 3], 0).length, 3, 'size 传 0 不能死循环');
+  });
+
+  test('只有一段时,发过去的话和以前一字不差 —— 小攻略的行为不能被这次改动碰到', () => {
+    assert.equal(buildChunkMessage([BIG], 0), '开始写吧。先联网查资料,再按规则写完整份攻略。');
+  });
+
+  test('分段时告诉模型这一段是哪几个,以及别重复前面写过的', () => {
+    const chunks = chunkDefs(BIG, 2);
+    const m = buildChunkMessage(chunks, 1);
+    assert.match(m, /第 3–4 个成就/);
+    assert.match(m, /成就3[\s\S]*成就4/);
+    assert.match(m, /不要重复前面已经写过的小节和成就/);
+    assert.match(m, /后面还有/, '中间段不该收尾');
+    assert.match(buildChunkMessage(chunks, 2), /最后一段,写完就停/);
+  });
+
+  test('chunksNeedingRewrite 按 apiName 把问题定位到具体那一段', () => {
+    const chunks = chunkDefs(BIG, 2);
+    const blocking = [{ code: 'missing-checkbox', apiName: 'E', message: 'x' }];
+    assert.deepEqual(chunksNeedingRewrite(blocking, chunks), [2]);
+    // 定位不到的(没带 apiName)不该乱指一段 —— 调用方会退回全部重写
+    assert.deepEqual(chunksNeedingRewrite([{ code: 'merged-line', message: 'x' }], chunks), []);
+  });
+
+  test('五个成就分三段写完,拼起来五个 checkbox 一个不少', async () => {
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const provider = fakeProvider(chunks.map(seg));
+    const r = await generateGuide(db, { config, provider, steam: bigSteam(), appid: '1' });
+
+    assert.equal(r.ok, true);
+    assert.equal(provider.asked.length, 3, '三段就该问三次');
+    const text = readFileSync(r.path, 'utf8');
+    // 直接比字符串,不拼正则 —— `- [ ] **名字**` 里每个字符都要转义,拼错了
+    // 报的是"正则无效",而不是"攻略少了一条",排查方向整个偏掉
+    for (const d of BIG) {
+      assert.ok(text.includes(`- [ ] **${d.name_cn}**`), `${d.name_cn} 在拼起来的攻略里丢了`);
+    }
+    assert.equal((text.match(/^# /gm) || []).length, 1, '标题只能有一个,不能每段各写一个');
+  });
+
+  test('只有一段出问题时,第二轮只重问那一段', async () => {
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    // 第 2 段(成就3/成就4)漏了成就4
+    const bad = seg([chunks[1][0]]);
+    const provider = fakeProvider([seg(chunks[0]), bad, seg(chunks[2]), seg(chunks[1])]);
+    const r = await generateGuide(db, { config, provider, steam: bigSteam(), appid: '1' });
+
+    assert.equal(r.ok, true);
+    assert.equal(r.rounds, 2);
+    assert.equal(provider.asked.length, 4, '第一轮 3 次 + 第二轮只补 1 次');
+    assert.match(provider.asked[3], /第 2\/3 段/, '重问的必须是出问题的那一段');
+    assert.match(provider.asked[3], /只重新输出这一段/);
+    assert.match(readFileSync(r.path, 'utf8'), /- \[ \] \*\*成就4\*\*/);
+  });
+
+  test('打回清单只列这一段自己的问题,别把别段的错也塞进来', () => {
+    const chunks = chunkDefs(BIG, 2);
+    const findings = [
+      { level: 'error', code: 'missing-checkbox', apiName: 'B', message: '成就2 没有 checkbox' },
+      { level: 'error', code: 'missing-checkbox', apiName: 'E', message: '成就5 没有 checkbox' },
+    ];
+    const m = buildChunkFeedback(findings, chunks, 0, new Set());
+    assert.match(m, /成就2/);
+    assert.doesNotMatch(m, /成就5/, '第 3 段的问题不该出现在第 1 段的打回清单里');
   });
 });
