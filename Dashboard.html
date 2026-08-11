@@ -1228,7 +1228,10 @@
         const okBtn = document.getElementById('askOkBtn');
         const cancelBtn = document.getElementById('askCancelBtn');
         document.getElementById('askTitle').textContent = o.title;
-        document.getElementById('askBody').textContent = o.body || '';
+        const bodyEl = document.getElementById('askBody');
+        bodyEl.textContent = o.body || '';
+        // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的
+        bodyEl.style.display = o.body ? '' : 'none';
         okBtn.textContent = o.okText || '确认';
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
@@ -1493,15 +1496,11 @@
     window.genGuide = async function (btn) {
       const appid = btn.getAttribute('data-gen');
       const name = btn.getAttribute('data-name') || appid;
-      // 确认框只回答一个问题:会发生什么、要多久。**机器验了什么、没验什么属于说明,
-      // 不属于这一刻的决策依据** —— 那几句搬到这里当注释,用户一个字都不用读:
-      // 程序保证的是格式和数据(一个成就一行、名字对得上、勾选等于真实解锁状态),
-      // 内容本身谁都验不了,所以下面那句"内容要自己过一遍"必须留着
-      const ok = await askConfirm({
-        title: '为《' + name + '》生成攻略?',
-        body: '联网查资料并撰写,约 2–4 分钟,期间可以继续用这个页面。\n生成的内容需要你自己过一遍。',
-        okText: '生成',
-      });
+      // **只问,不解释。** 生成是可逆的(不满意删掉页面就行),没有"信错了会损失什么"
+      // 要提醒 —— 时长看进度条就知道,而"内容未经验证"这条本来就该在攻略真的写出来、
+      // 他要去读的时候说,所以留在结果那一行,不放在这里。
+      // 带损失的那几个框(重写、删除)不适用这条,它们的正文是必须的
+      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成' });
       if (!ok) return;
       genDismissed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;

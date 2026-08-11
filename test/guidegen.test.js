@@ -604,12 +604,20 @@ describe('Dashboard 上的「生成」按钮', () => {
   // 每次想往框里加一句"顺便解释一下"的时候,它会先失败
   test('确认框要短 —— 不摆项目符号清单,不写解释', () => {
     const bodies = [...html.matchAll(/askConfirm\(\{[\s\S]{0,120}?body:\s*'([^']*)'/g)].map((m) => m[1]);
-    assert.ok(bodies.length >= 2, '至少该抓到生成和删除两个框');
+    assert.ok(bodies.length >= 1, '至少该抓到一个字符串型 body(删除框)');
     for (const b of bodies) {
       const lines = b.split('\\n').filter((l) => l.trim());
       assert.ok(lines.length <= 3, `确认框最多三行,这个有 ${lines.length} 行:${b.slice(0, 60)}`);
       assert.ok(!b.includes('· '), `别在确认框里摆项目符号清单:${b.slice(0, 60)}`);
     }
+  });
+
+  test('生成框只有一句问话,没有正文 —— 生成是可逆的,没什么要先交代', () => {
+    const call = html.slice(html.indexOf("askConfirm({ title: '为《'"), html.indexOf("okText: '生成'") + 20);
+    assert.ok(call.includes("title: '为《'"), '生成框还在');
+    assert.ok(!/\bbody:/.test(call), '生成框不该再有正文');
+    // 但"内容没验过"这句话不能整个消失,它挪到结果那一行去了
+    assert.match(html, /内容需要你自己过一遍/, '攻略写完之后仍要如实说内容未经验证');
   });
 
   test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
