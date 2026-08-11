@@ -573,6 +573,32 @@ describe('Dashboard 上的「生成」按钮', () => {
     assert.doesNotMatch(cli, MONEY, 'CLI 的提示语和帮助里也不提钱(注释里说明理由没问题)');
   });
 
+  // 重写(覆盖已有攻略)以前只有命令行能调 —— Dashboard 上有攻略的行只显示「📖 攻略」,
+  // 连按钮都没有。GUI 上点一下比敲一行命令容易得多,所以闸门**不能比 CLI 松**:
+  // 必须先预检、把"会失去什么"摆出来,再问。
+  test('Dashboard 能重写已有攻略,而且闸门和 CLI 一样严', () => {
+    assert.match(html, /data-rewrite=/, '有攻略的行要有重写入口');
+    assert.match(html, /window\.rewriteGuide = async function/);
+    // 先预检再问 —— 顺序反了就成了"不知道会失去什么的确认"
+    // 按**函数定义**切,不是按名字第一次出现切 —— 名字最早出现在按钮的 onclick 属性里,
+    // 那样切出来的是两个 onclick 之间的一小段,什么都匹配不到
+    const fn = html.slice(
+      html.indexOf('window.rewriteGuide = async function'),
+      html.indexOf('window.migrateGuide = function')
+    );
+    assert.ok(
+      fn.indexOf('previewGuideRewrite') < fn.indexOf('askConfirm'),
+      '必须先拿到预检结果再弹确认框'
+    );
+    assert.match(fn, /danger: true/, '覆盖不可逆,确认按钮要标红');
+    assert.match(fn, /startGuideGen\(appid, true\)/, '不把 overwrite 传下去,服务端会照常拒绝');
+  });
+
+  test('生成和重写不会同时出现在一行 —— 一个针对没攻略的,一个针对有攻略的', () => {
+    assert.match(html, /const canGen = !g\.guideUrl/, '生成只给没攻略的行');
+    assert.match(html, /g\.guideUrl && aiReady/, '重写只给有攻略的行');
+  });
+
   test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
     // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
     // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默

@@ -88,6 +88,10 @@ re-ticked from your Steam data automatically, so their state comes back exactly;
 sub-steps match no achievement, so those come back unticked. If the backup fails, nothing
 is written. Add `--dry-run` to see all of that and stop there.
 
+The Dashboard offers the same thing: a game that already has a guide shows a **♻ 重写** button
+next to its 📖 攻略 link. It asks the same question with the same information — what you are
+replacing, and which hand-ticked boxes will not survive — before anything is written.
+
 A guide that fails validation three times is left in `guides/.drafts/` rather than thrown away —
 you paid for it, and *which* checks failed is itself information. Nothing scans that directory, so
 leftovers are harmless, but they do accumulate. To see and clear them:

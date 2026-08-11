@@ -422,6 +422,17 @@
     }
     .guide-btn.to-notion:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
     .guide-btn.to-notion:disabled { opacity: 0.4; cursor: default; }
+    /* 重写会覆盖已有攻略,是这一行上唯一不可逆的动作 —— 平时低调,
+       悬停时才显出警示色,免得一排 ♻ 把表格弄得像满屏警告 */
+    .guide-btn.rewrite {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .guide-btn.rewrite:hover:not(:disabled) { color: #e0a030; border-color: #e0a030; }
+    .guide-btn.rewrite:disabled { opacity: 0.4; cursor: default; }
     .guide-btn.can-gen {
       opacity: 1;
       cursor: pointer;
@@ -849,6 +860,13 @@
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
           + guideBtn
+          // 已经有攻略的行原来只有「📖 攻略」,没有任何入口能重写它 —— 覆盖只能敲命令行。
+          // 闸门不在这个按钮上,在它弹出的确认框里(会先算清楚要失去什么),所以露出来是安全的
+          + (g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0
+              ? '<button class="guide-btn rewrite" data-rewrite="' + g.appid + '" data-name="'
+                + escapeHtml(g.name) + '" title="让 AI 重新写一份,覆盖现在这份(会先备份原文)"'
+                + ' onclick="event.stopPropagation();window.rewriteGuide(this)">♻ 重写</button>'
+              : '')
           + (g.guideKind === 'local' && notionReady
               ? '<button class="guide-btn to-notion" data-migrate="' + g.appid + '" data-name="'
                 + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
@@ -1351,6 +1369,65 @@
      * 本地攻略 → Notion。**先预览再问**:转换可能把表格、折叠块降级成普通段落,
      * 不把这件事摆在确认框里,用户就是在不知道会损失什么的情况下点的"确定"。
      */
+    /**
+     * 重写已有攻略。**先预检再问**,和 `guide-to-notion` 的流程一样,理由也一样:
+     * 不知道会失去什么的"确认"不算确认。
+     *
+     * 覆盖唯一真正丢掉的东西是**手动勾上的子步骤框** —— 成就框会被机械打勾按数据库
+     * 勾回原样,子步骤框匹配不到任何成就。这句话由服务端的 formatPreflight 生成,
+     * 和 CLI 那边是同一份措辞。
+     */
+    window.rewriteGuide = async function (btn) {
+      const appid = btn.getAttribute('data-rewrite');
+      const name = btn.getAttribute('data-name') || appid;
+      genDismissed = false;
+      btn.disabled = true;
+      showGen('⏳ 正在检查《' + name + '》现在那份攻略…');
+
+      const p = await new Promise((resolve) => {
+        rpc.withSuccessHandler(resolve)
+          .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
+          .previewGuideRewrite(appid);
+      });
+      if (!p || p.error) {
+        btn.disabled = false;
+        return showGen('⚠️ ' + ((p && p.error) || '预检失败'), true);
+      }
+
+      const ok = await askConfirm({
+        title: '重写《' + name + '》的攻略?',
+        body: [
+          (p.summary || '').replace(/^ {2}/gm, ''),
+          '',
+          '· 原文会先备份到 ' + (p.backupDir || 'guides/.backups/') + ',备份失败就不会动它',
+          '· 会调用 AI 联网重新查资料并撰写,通常两到四分钟',
+          '· 写完会给一份覆盖前后的对照',
+        ].join('\n'),
+        okText: '重写',
+        danger: true,
+      });
+      if (!ok) {
+        btn.disabled = false;
+        genBar.style.display = 'none';
+        return;
+      }
+
+      rpc
+        .withSuccessHandler(function (r) {
+          if (r && r.error) {
+            btn.disabled = false;
+            return showGen('⚠️ ' + r.error, true);
+          }
+          showGen('⏳ 已开始重写《' + name + '》…');
+          pollGen();
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          showGen('⚠️ ' + err, true);
+        })
+        .startGuideGen(appid, true);
+    };
+
     window.migrateGuide = function (btn) {
       const appid = btn.getAttribute('data-migrate');
       const name = btn.getAttribute('data-name') || appid;
