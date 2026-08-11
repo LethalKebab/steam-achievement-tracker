@@ -599,6 +599,19 @@ describe('Dashboard 上的「生成」按钮', () => {
     assert.match(html, /g\.guideUrl && aiReady/, '重写只给有攻略的行');
   });
 
+  // 用户反复说过三次:界面上的字太长、解释太多。确认框只该回答"会发生什么、要多久",
+  // 机制和保证属于说明,搬到代码注释里用户一个字都不用读。这条测试是防它长回去的 ——
+  // 每次想往框里加一句"顺便解释一下"的时候,它会先失败
+  test('确认框要短 —— 不摆项目符号清单,不写解释', () => {
+    const bodies = [...html.matchAll(/askConfirm\(\{[\s\S]{0,120}?body:\s*'([^']*)'/g)].map((m) => m[1]);
+    assert.ok(bodies.length >= 2, '至少该抓到生成和删除两个框');
+    for (const b of bodies) {
+      const lines = b.split('\\n').filter((l) => l.trim());
+      assert.ok(lines.length <= 3, `确认框最多三行,这个有 ${lines.length} 行:${b.slice(0, 60)}`);
+      assert.ok(!b.includes('· '), `别在确认框里摆项目符号清单:${b.slice(0, 60)}`);
+    }
+  });
+
   test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
     // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
     // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默

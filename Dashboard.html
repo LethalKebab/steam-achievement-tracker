@@ -987,7 +987,7 @@
           if (!game) return;
           const ok = await askConfirm({
             title: '删除《' + game.name + '》?',
-            body: '这会从本地数据库里彻底删掉这一行,无法撤销。',
+            body: '从本地数据库删掉这一行,无法撤销。',
             okText: '删除',
             danger: true,
           });
@@ -1382,7 +1382,7 @@
       const name = btn.getAttribute('data-name') || appid;
       genDismissed = false;
       btn.disabled = true;
-      showGen('⏳ 正在检查《' + name + '》现在那份攻略…');
+      showGen('⏳ 检查《' + name + '》…');
 
       const p = await new Promise((resolve) => {
         rpc.withSuccessHandler(resolve)
@@ -1394,15 +1394,15 @@
         return showGen('⚠️ ' + ((p && p.error) || '预检失败'), true);
       }
 
+      // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
+      // 都是他点下去之后自然会看到的,不必在这里先讲一遍
       const ok = await askConfirm({
         title: '重写《' + name + '》的攻略?',
         body: [
-          (p.summary || '').replace(/^ {2}/gm, ''),
-          '',
-          '· 原文会先备份到 ' + (p.backupDir || 'guides/.backups/') + ',备份失败就不会动它',
-          '· 会调用 AI 联网重新查资料并撰写,通常两到四分钟',
-          '· 写完会给一份覆盖前后的对照',
-        ].join('\n'),
+          '现有 ' + p.boxes + ' 个 checkbox 会被整份替换,原文先备份。',
+          p.atRisk ? p.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
+          '约 2–4 分钟。',
+        ].filter(Boolean).join('\n'),
         okText: '重写',
         danger: true,
       });
@@ -1418,7 +1418,7 @@
             btn.disabled = false;
             return showGen('⚠️ ' + r.error, true);
           }
-          showGen('⏳ 已开始重写《' + name + '》…');
+          showGen('⏳ 重写《' + name + '》…');
           pollGen();
         })
         .withFailureHandler(function (err) {
@@ -1433,26 +1433,24 @@
       const name = btn.getAttribute('data-name') || appid;
       genDismissed = false; // 自己点的搬运,进度条要露出来
       btn.disabled = true;
-      showGen('⏳ 正在检查《' + name + '》的攻略…');
+      showGen('⏳ 检查《' + name + '》…');
       rpc
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             btn.disabled = false;
             return showGen('⚠️ ' + ((p && p.error) || '预览失败'), true);
           }
+          // 逐条核对、对不上就不动本地文件、页面带图标 —— 都是"我们怎么保证不出事",
+          // 不是他要决定的事。真正要他知道的只有两件:搬什么、原文去哪
           const lines = [
-            '· ' + p.todos + ' 个 checkbox,其中 ' + p.checked + ' 个已勾选(勾选状态会原样带过去)',
-            p.existingPage ? '· 写进 Notion 上已有的那个空页面' : '· 在 Notion 攻略库里新建一页',
-            '· 页面会带上这个游戏的 Steam 图标',
-            '· 搬完逐条核对,对不上就不动本地文件',
-            '· 核对通过后本地文件挪进 guides/.migrated/,不会删',
+            p.todos + ' 个 checkbox 原样搬过去(含勾选状态)。',
+            '本地文件挪进 guides/.migrated/,不会删。',
           ];
           if (p.unconverted && p.unconverted.length) {
-            lines.push('', '⚠️ 有 ' + p.unconverted.length + ' 行 Notion 放不下原来的排版,会变成普通段落(文字不丢):');
-            p.unconverted.slice(0, 5).forEach(function (l) { lines.push('    ' + l); });
+            lines.push('⚠️ ' + p.unconverted.length + ' 行排版会降级成普通段落,文字不丢。');
           }
           const goMigrate = await askConfirm({
-            title: '把《' + p.game + '》的本地攻略搬到 Notion?',
+            title: '把《' + p.game + '》的攻略搬到 Notion?',
             body: lines.join('\n'),
             okText: '搬过去',
           });
@@ -1461,7 +1459,7 @@
             genBar.style.display = 'none';
             return;
           }
-          showGen('⏳ 正在搬《' + p.game + '》…');
+          showGen('⏳ 搬运《' + p.game + '》…');
           rpc
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
@@ -1469,9 +1467,9 @@
                 return showGen('⚠️ ' + ((r && r.error) || '搬运失败'), true);
               }
               showGen(
-                '✅ 《' + r.game + '》已搬到 Notion,' + r.count + ' 个 checkbox 逐条核对一致。' +
-                  '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开页面</a>' +
-                  (r.archivedTo ? '<br><span class="warn">本地文件已挪进 guides/.migrated/,没有删除。</span>' : '')
+                '✅ 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
+                  '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开 Notion 页面</a>' +
+                  (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : '')
               );
               loadDashboard();
             })
@@ -1495,15 +1493,14 @@
     window.genGuide = async function (btn) {
       const appid = btn.getAttribute('data-gen');
       const name = btn.getAttribute('data-name') || appid;
+      // 确认框只回答一个问题:会发生什么、要多久。**机器验了什么、没验什么属于说明,
+      // 不属于这一刻的决策依据** —— 那几句搬到这里当注释,用户一个字都不用读:
+      // 程序保证的是格式和数据(一个成就一行、名字对得上、勾选等于真实解锁状态),
+      // 内容本身谁都验不了,所以下面那句"内容要自己过一遍"必须留着
       const ok = await askConfirm({
-        title: '要为《' + name + '》生成一份攻略吗?',
-        body: [
-          '· 会调用 AI 联网查资料并撰写',
-          '· 通常要两到四分钟,期间可以继续用这个页面',
-          '· 机器只保证格式和数据:每个成就一行、名字对得上、勾选等于你的真实解锁状态',
-          '· 攻略内容对不对没有任何东西能验,生成完请自己读一遍',
-        ].join('\n'),
-        okText: '开始生成',
+        title: '为《' + name + '》生成攻略?',
+        body: '联网查资料并撰写,约 2–4 分钟,期间可以继续用这个页面。\n生成的内容需要你自己过一遍。',
+        okText: '生成',
       });
       if (!ok) return;
       genDismissed = false; // 自己点的生成,进度条要露出来
@@ -1515,7 +1512,7 @@
             showGen('⚠️ ' + r.error, true);
             return;
           }
-          showGen('⏳ 已开始生成《' + name + '》…');
+          showGen('⏳ 生成《' + name + '》…');
           pollGen();
         })
         .withFailureHandler(function (err) {
@@ -1547,8 +1544,10 @@
         .withSuccessHandler(function (s) {
           if (!s) return;
           if (s.running) {
-            const round = s.rounds ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
-            showGen('⏳ 正在生成《' + s.game + '》' + round + (s.note ? ' —— ' + s.note : ''));
+            // 只有真在重写(第 2 轮起)才显示轮数 —— 一次过的时候写"第 1/3 轮"
+            // 反而像出了什么事要重来三次
+            const round = s.rounds && s.round > 1 ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
+            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : ''));
             return;
           }
           clearInterval(genTimer);
@@ -1559,30 +1558,36 @@
 
           if (!r.ok) {
             showGen(
-              '⚠️ 《' + s.game + '》没通过校验,草稿已留下,没有写进攻略目录。' +
+              '⚠️ 《' + s.game + '》校验没过,已存草稿,没写进攻略。' +
                 (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
               true
             );
             return;
           }
-          // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 必须明写
-          const research = !r.researched
-            ? '<br><span class="warn">⚠️ 这一份没有经过联网调研,内容是模型凭已有知识写的。</span>'
-            : r.searchQueries && r.searchQueries.length
-              ? '<br><span class="warn">🔎 实际发出 ' + r.searchQueries.length + ' 次搜索。</span>'
-              : '<br><span class="warn">⚠️ 挂了联网工具但模型一次都没搜,内容等同于凭记忆写的。</span>';
+          // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 搜过就并进事实那一行,
+          // 没搜才单独警告(那是真会影响内容质量的一件事)
+          const searches = r.searchQueries ? r.searchQueries.length : 0;
+          const noResearch = !r.researched
+            ? '<br><span class="warn">⚠️ 没联网,内容是模型凭已有知识写的。</span>'
+            : searches === 0
+              ? '<br><span class="warn">⚠️ 一次都没搜,内容等同于凭记忆写的。</span>'
+              : '';
           // 只报 token,不报钱 —— 单价我们核实不过来,一个不知道错多少的金额
           // 比不给金额更糟。token 是 API 回的硬数字
-          const spend = (r.tokens || 0) + ' token';
+          const facts = [
+            r.covered + '/' + r.total + ' 个成就',
+            searches ? searches + ' 次搜索' : null,
+            Math.round((r.tokens || 0) / 100) / 10 + 'k token',
+          ].filter(Boolean).join(' · ');
           // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
           const where = r.target === 'notion'
-            ? '已写进 Notion:<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开页面</a>'
-            : '已写到本地:' + escapeHtml(r.path || '');
+            ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开 Notion 页面</a>'
+            : escapeHtml(r.path || '');
           showGen(
-            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就,' + spend + ')' +
+            '✅ 《' + s.game + '》 ' + facts +
               '<br>' + where +
-              research +
-              '<br><span class="warn">机器只验了格式和数据,<strong>内容对不对请自己读一遍</strong>。</span>'
+              noResearch +
+              '<br><span class="warn">内容需要你自己过一遍。</span>'
           );
           loadDashboard();  // 攻略已登记,刷新一下让「📖 攻略」链接出来
         })
