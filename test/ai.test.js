@@ -17,7 +17,7 @@
  *
  * 全部离线:fetch 是注入的,一个字节都不发出去。
  */
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
@@ -487,4 +487,61 @@ test('401 报的是真实供应商和对应的环境变量,不是写死的 Anthr
     assert.doesNotMatch(e.message, /ANTHROPIC_API_KEY/);
     return true;
   });
+});
+
+// ---------------------------------------------------------------------------
+// 花费上限
+// ---------------------------------------------------------------------------
+
+describe('checkBudget', () => {
+  const heavy = { ...emptyUsage(), inputTokens: 60000, outputTokens: 40000, requests: 3 };
+
+  test('token 上限对**每一家**都生效', async () => {
+    const { checkBudget } = await import('../lib/ai.js');
+    // 这条是兜底:DeepSeek / Gemini 没有内置价格表,美元上限对它们形同虚设
+    const r = checkBudget(heavy, { model: 'deepseek-v4-flash', maxTokens: 50000 });
+    assert.equal(r.over, true);
+    assert.match(r.reason, /100000 个 token/);
+  });
+
+  test('没有价格表时,美元上限**明说自己没在起作用**,而不是假装拦住了', async () => {
+    const { checkBudget } = await import('../lib/ai.js');
+    const r = checkBudget(heavy, { model: 'deepseek-v4-flash', maxUsd: 0.01 });
+    assert.equal(r.over, false, '算不出金额就不能声称超了');
+    assert.match(r.note, /不起作用/, '一个设了却永远不触发的上限,必须说出来');
+    assert.match(r.note, /ai\.pricing/, '要给出让它生效的办法');
+  });
+
+  test('用户填了单价,美元上限就对没有内置价格的供应商生效', async () => {
+    const { checkBudget } = await import('../lib/ai.js');
+    // 我们不猜 DeepSeek 的单价,但用户看得到自己的账单 —— 他填进来就能用
+    const r = checkBudget(heavy, {
+      model: 'deepseek-v4-flash',
+      pricing: { input: 0.28, output: 0.42 },
+      maxUsd: 0.01,
+    });
+    assert.equal(r.over, true);
+    assert.match(r.reason, /\$0\.0/);
+  });
+
+  test('有内置价格表的直接按它算', async () => {
+    const { checkBudget } = await import('../lib/ai.js');
+    assert.equal(checkBudget(heavy, { model: 'claude-opus-5', maxUsd: 0.5 }).over, true);
+    assert.equal(checkBudget(heavy, { model: 'claude-opus-5', maxUsd: 99 }).over, false);
+  });
+
+  test('没设上限就什么都不拦', async () => {
+    const { checkBudget } = await import('../lib/ai.js');
+    const r = checkBudget(heavy, { model: 'claude-opus-5' });
+    assert.equal(r.over, false);
+    assert.equal(r.note, null);
+  });
+});
+
+test('estimateCost:用户填的单价优先于内置价格表', () => {
+  const u = { ...emptyUsage(), inputTokens: 1_000_000, outputTokens: 1_000_000 };
+  const builtin = estimateCost(u, 'claude-opus-5');
+  const custom = estimateCost(u, 'claude-opus-5', { input: 1, output: 1 });
+  assert.equal(Number(builtin.usd.toFixed(2)), 30);
+  assert.equal(Number(custom.usd.toFixed(2)), 2, '填了单价就按填的算 —— 折扣/企业价都可能不一样');
 });

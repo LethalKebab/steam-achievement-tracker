@@ -22,7 +22,10 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openDb, insertGame, replaceAchievements, upsertGuide, allGuides } from '../lib/db.js';
+import {
+  openDb, insertGame, replaceAchievements, upsertGuide, allGuides,
+  recordAiUsage, aiUsageSince,
+} from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
@@ -37,6 +40,7 @@ import {
   buildAchievementList,
   buildSystemPrompt,
   SKILL_RULE_DISPOSITION,
+  checkDailyBudget,
   DRAFTS_DIR,
 } from '../lib/guidegen.js';
 
@@ -498,5 +502,49 @@ describe('全球解锁率', () => {
       config, provider: fakeProvider([GOOD]), steam: fakeSteam(['A'], null), appid: '1',
     });
     assert.equal(r.ok, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 累计上限
+// ---------------------------------------------------------------------------
+
+describe('checkDailyBudget', () => {
+  const seed = (db, usage, usd) =>
+    recordAiUsage(db, { kind: 'guide-gen', provider: 'p', model: 'm', usage, usd });
+
+  test('拦的是"点了二十次",不是"这一次跑飞了"', () => {
+    // per-run 上限拦不住这个:每次都乖乖收在预算内,点一天照样花光
+    const db = openDb(':memory:');
+    for (let i = 0; i < 5; i++) {
+      seed(db, { requests: 1, inputTokens: 20000, outputTokens: 10000, webSearches: 0 }, null);
+    }
+    const r = checkDailyBudget(db, { ai: { maxTokensPerDay: 100000 } }, { aiUsageSince });
+    assert.equal(r.over, true);
+    assert.match(r.reason, /150000 个 token/);
+  });
+
+  test('只有算不出金额的调用时,美元上限要明说自己没在拦', () => {
+    // 账面上会显示 "$0.00 / 上限 $5",看起来一切正常 —— 而实际一次都没拦
+    const db = openDb(':memory:');
+    seed(db, { requests: 3, inputTokens: 500000, outputTokens: 200000, webSearches: 0 }, null);
+    const r = checkDailyBudget(db, { ai: { maxSpendPerDayUsd: 5 } }, { aiUsageSince });
+    assert.equal(r.over, false);
+    assert.match(r.note, /算不出金额/);
+    assert.match(r.note, /不起作用/);
+  });
+
+  test('算得出金额时正常拦', () => {
+    const db = openDb(':memory:');
+    seed(db, { requests: 1, inputTokens: 100, outputTokens: 100, webSearches: 0 }, 6.5);
+    const r = checkDailyBudget(db, { ai: { maxSpendPerDayUsd: 5 } }, { aiUsageSince });
+    assert.equal(r.over, true);
+    assert.match(r.reason, /\$6\.5/);
+  });
+
+  test('没设上限就不拦', () => {
+    const db = openDb(':memory:');
+    seed(db, { requests: 99, inputTokens: 9e6, outputTokens: 9e6, webSearches: 0 }, 999);
+    assert.equal(checkDailyBudget(db, { ai: {} }, { aiUsageSince }).over, false);
   });
 });

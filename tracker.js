@@ -29,6 +29,7 @@ import { loadConfig, saveConfig, ROOT, CONFIG_PATH } from './lib/config.js';
 import {
   openDb, allGames, allGuides, countGames, getMeta, recentSyncLog,
   getGame, achievementsFor, appIdsWithAchievements,
+  recordAiUsage, aiUsageSince, recentAiUsage,
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
@@ -36,8 +37,8 @@ import { serve } from './lib/server.js';
 import { NotionClient } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
-import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
-import { generateGuide, planGuide, buildSystemPrompt } from './lib/guidegen.js';
+import { createProvider, createSession, checkResult, formatUsage, estimateCost } from './lib/ai.js';
+import { generateGuide, planGuide, buildSystemPrompt, checkDailyBudget } from './lib/guidegen.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -782,7 +783,11 @@ async function cmdAiCheck() {
     `  stop_reason: ${r.stopReason}${r.rawStopReason && r.rawStopReason !== r.stopReason ? `(原值 ${r.rawStopReason})` : ''}` +
       ` · 续跑 ${r.continuations} 次 · 耗时 ${secs}s`
   );
-  console.log('  ' + formatUsage(session.usage, provider.model));
+  recordAiUsage(db, {
+    kind: 'ai-check', appid: target.appid, provider: provider.name, model: provider.model,
+    usage: session.usage, usd: estimateCost(session.usage, provider.model, config.ai.pricing).usd,
+  });
+  console.log('  ' + formatUsage(session.usage, provider.model, config.ai.pricing));
 
   // 这一行是这个命令最该看的:**声明了联网工具,模型到底搜没搜**。
   // 免费层带不带联网是文档上查不准的事,回包比定价页可靠
@@ -829,6 +834,11 @@ async function cmdGuideGen() {
   console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
   warnEnvOverrides();
   console.log(`  落盘到 ${plan.finalPath}`);
+
+  // 累计上限:拦的是"点了二十次",和 per-run 上限拦的"这一次跑飞了"是两件事
+  const daily = checkDailyBudget(db, config, { aiUsageSince });
+  if (daily.note) console.log(`  ⚠️  ${daily.note}`);
+  if (daily.over) throw new Error(`${daily.reason}。明天再跑,或者把上限调高。`);
 
   if (probe.canSearch === false && !flags.has('--no-research')) {
     throw new Error(
@@ -895,7 +905,11 @@ async function cmdGuideGen() {
     console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
       `${r.lint.stats.warnings} 条 warn`);
   }
-  console.log('  ' + formatUsage(r.usage, r.model));
+  recordAiUsage(db, {
+    kind: 'guide-gen', appid, provider: provider.name, model: r.model,
+    usage: r.usage, usd: r.cost?.usd ?? null,
+  });
+  console.log('  ' + formatUsage(r.usage, r.model, config.ai.pricing));
   console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
     '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
     '"易错过"是不是真的,都要你自己看一遍。');
@@ -911,6 +925,60 @@ async function cmdGuideGen() {
   } else {
     console.log(`\n🔎 实际发出 ${r.searchQueries.length} 次搜索,前几条:` +
       r.searchQueries.slice(0, 4).join(' / '));
+  }
+}
+
+/**
+ * `ai-cost`:AI 到底花了多少。
+ *
+ * **账本存的是 token,不是钱** —— 钱是按记账当时能拿到的价格算出来的一个视图,
+ * 算不出来就存 NULL。所以这里必须把"算不出金额的那部分"单独报出来:
+ * 只报一个 "$0.00" 会被读成"没花钱",而实际可能是跑了二十次没有价格表的模型。
+ */
+function cmdAiCost() {
+  const config = loadConfig();
+  const db = openDb(config.dbPath);
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+
+  const show = (label, s, capUsd, capTokens) => {
+    const tokens = s.input + s.output;
+    const money = s.usd > 0 ? `$${s.usd.toFixed(4)}` : '$0';
+    const caps = [];
+    if (capTokens > 0) caps.push(`token 上限 ${capTokens}`);
+    if (capUsd > 0) caps.push(`美元上限 $${capUsd}`);
+    console.log(
+      `  ${label.padEnd(6)} ${String(s.calls).padStart(3)} 次调用 · ` +
+        `${String(s.requests).padStart(4)} 个请求 · ${String(tokens).padStart(8)} token · ${money}` +
+        (caps.length ? `   (${caps.join(',')})` : '')
+    );
+    if (s.unpricedRequests > 0) {
+      console.log(`         其中 ${s.unpricedRequests} 个请求算不出金额(模型没有价格表),没有计入上面那个数`);
+    }
+  };
+
+  console.log('\nAI 花费');
+  show('今天', aiUsageSince(db, dayStart), config.ai.maxSpendPerDayUsd, config.ai.maxTokensPerDay);
+  show('本月', aiUsageSince(db, monthStart), 0, 0);
+  show('全部', aiUsageSince(db, '1970-01-01'), 0, 0);
+
+  const rows = recentAiUsage(db, Number(positional[0] ?? 10));
+  if (!rows.length) {
+    console.log('\n还没有任何 AI 调用记录。');
+    return;
+  }
+  console.log('\n最近几次:');
+  for (const r of rows) {
+    const t = new Date(r.ts).toLocaleString('zh-CN');
+    const money = typeof r.usd === 'number' ? `$${r.usd.toFixed(4)}` : '(无价格表)';
+    console.log(
+      `  ${t}  ${String(r.kind).padEnd(9)} ${String(r.model).padEnd(20)} ` +
+        `${String(r.input + r.output).padStart(7)} token  ${r.searches} 搜  ${money}`
+    );
+  }
+  if (!config.ai.maxTokensPerDay && !config.ai.maxSpendPerDayUsd) {
+    console.log('\n⚠️  没设每日上限。config.json 里 ai.maxTokensPerDay / ai.maxSpendPerDayUsd 任填一个。');
   }
 }
 
@@ -978,6 +1046,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
+  node tracker.js ai-cost [n]             AI 花了多少(今天/本月/全部 + 最近 n 条明细)
   node tracker.js log [n]                 最近 n 条同步日志
 
 配置:${CONFIG_PATH}(gitignore 里,别提交)
@@ -998,6 +1067,7 @@ const COMMANDS = {
   'guide-lint': cmdGuideLint,
   'ai-check': cmdAiCheck,
   'guide-gen': cmdGuideGen,
+  'ai-cost': cmdAiCost,
   audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,

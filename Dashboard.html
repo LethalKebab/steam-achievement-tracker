@@ -1284,8 +1284,11 @@
             : r.searchQueries && r.searchQueries.length
               ? '<br><span class="warn">🔎 实际发出 ' + r.searchQueries.length + ' 次搜索。</span>'
               : '<br><span class="warn">⚠️ 挂了联网工具但模型一次都没搜,内容等同于凭记忆写的。</span>';
+          const spend = typeof r.usd === 'number'
+            ? '花费 $' + r.usd.toFixed(4)
+            : (r.tokens || 0) + ' token(这个模型没有价格表,不估价)';
           showGen(
-            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就)' +
+            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就,' + spend + ')' +
               research +
               '<br><span class="warn">机器只验了格式和数据,<strong>内容对不对请自己读一遍</strong>。</span>'
           );

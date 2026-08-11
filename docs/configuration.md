@@ -36,6 +36,12 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 100,   // refuse to generate above this — one context has to hold it
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
+
+    "maxTokensPerRun": 400000,// spend caps — see below. Token caps always work
+    "maxSpendPerRunUsd": 0,   // 0 = off. Only bites when the model has a price
+    "maxTokensPerDay": 0,     // 0 = off. Cumulative, checked before each run
+    "maxSpendPerDayUsd": 0,   // 0 = off
+    "pricing": null,          // {"input": 0.28, "output": 0.42} per MTok, from your bill
     "maxSearches": 8,         // web_search calls per request
     "maxFetches": 10,         // web_fetch calls per request
     "maxFetchTokens": 50000,  // how much of one page to pull back
@@ -109,6 +115,20 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 Cost is reported after every run: model tokens are priced exactly, and the number of web searches is reported as a **count**, never folded into the dollar figure, because how search itself is billed hasn't been measured. A model with no price-table entry reports "no price table" rather than `$0.00`.
 
 **You don't normally write this block by hand — `node tracker.js init --ai` does it**, and verifies the key with a real request before saving.
+
+**Spend caps are denominated in tokens first, dollars second — and that is deliberate.** There is no built-in price table for DeepSeek or Gemini (their rates change and haven't been verified here), and those are the two you're most likely to use. A dollar-only cap on them would be a switch that looks like protection and never fires: you set `$5`, the code computes "can't price this", and nothing is ever blocked. Token counts are exact for every provider, so `maxTokensPerRun` / `maxTokensPerDay` are the real backstop.
+
+Dollar caps do work when the model has a price — and you can give it one. Copy the per-million-token rates off your own bill into `ai.pricing` and both the dollar caps and the reported cost become real for that provider. When a dollar cap can't be evaluated, the tool says so rather than staying quiet about it.
+
+The two caps catch different failures. `*PerRun` aborts a single generation that runs away — checked **between rewrite rounds**, which is the one place cost multiplies (3 rounds = 3 full contexts) and also the only point where stopping doesn't throw away work already paid for. `*PerDay` is checked before a run starts and catches the other shape: twenty well-behaved generations in an afternoon.
+
+Every paid call is written to an `ai_usage` ledger, **including failed ones** — a failed call still consumed quota, and not recording it would let "failures don't count" quietly hollow out the cap. See what you've spent with:
+
+```bash
+node tracker.js ai-cost
+```
+
+That reports today, this month and all time, and separately reports how many requests **couldn't be priced** — because a bare `$0.00` would otherwise read as "nothing was spent" when it might mean twenty runs on an unpriced model.
 
 **Choosing a provider.** `deepseek` is cheapest and is what this was developed against; `anthropic` is the best quality and the most expensive; `gemini` has a free tier, though in practice that tier often has no quota for the models worth using. All three do server-side web search, so guide quality doesn't silently depend on which you picked. (`deepseek-openai` is the same vendor's OpenAI-compatible endpoint, which has **no** search — it exists for the no-research path and for future OpenAI-shaped providers, and `guide-gen` refuses to use it without an explicit `--no-research`.)
 
