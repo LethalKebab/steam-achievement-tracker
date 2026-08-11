@@ -28,10 +28,10 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "overviewDbId": "…"
   },
 
-  "ai": {                     // only needed for AI guide generation
-    "provider": "anthropic",  // "anthropic" (pay-as-you-go) or "gemini" (has a free tier)
-    "apiKey": "…",            // or ANTHROPIC_API_KEY / GEMINI_API_KEY, picked by provider
-    "model": "claude-opus-5", // claude-* for anthropic, gemini-* for gemini
+  "ai": {                     // only needed for AI guide generation; `init --ai` writes it
+    "provider": "deepseek",   // "deepseek" | "anthropic" | "gemini" | "deepseek-openai"
+    "apiKey": "…",            // or DEEPSEEK_/ANTHROPIC_/GEMINI_API_KEY, picked by provider
+    "model": "",              // blank = that provider's own default; names aren't portable
     "effort": "high",         // low | medium | high | xhigh | max
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 100,   // refuse to generate above this — one context has to hold it
@@ -108,7 +108,11 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 Cost is reported after every run: model tokens are priced exactly, and the number of web searches is reported as a **count**, never folded into the dollar figure, because how search itself is billed hasn't been measured. A model with no price-table entry reports "no price table" rather than `$0.00`.
 
-**Choosing a provider.** `anthropic` is pay-as-you-go with no free allowance; `gemini` has a free tier, which makes it the cheaper way to try this out. Both satisfy the same hard requirement — server-side web search — so guide quality doesn't silently depend on which you picked. Switch with `ai.provider`, and change `ai.model` to match (`claude-*` vs `gemini-*`). If you don't know what model names your key can use, ask the API rather than guessing:
+**You don't normally write this block by hand — `node tracker.js init --ai` does it**, and verifies the key with a real request before saving.
+
+**Choosing a provider.** `deepseek` is cheapest and is what this was developed against; `anthropic` is the best quality and the most expensive; `gemini` has a free tier, though in practice that tier often has no quota for the models worth using. All three do server-side web search, so guide quality doesn't silently depend on which you picked. (`deepseek-openai` is the same vendor's OpenAI-compatible endpoint, which has **no** search — it exists for the no-research path and for future OpenAI-shaped providers, and `guide-gen` refuses to use it without an explicit `--no-research`.)
+
+**Leave `ai.model` blank unless you want to pin a version.** Model names are not portable between providers, so there is no sensible cross-provider default — each provider supplies its own. Filling in one vendor's name is exactly how you end up with "供应商是 deepseek，模型名却是 anthropic 的". If you want to know what your key can actually use, ask the API rather than guessing:
 
 ```bash
 node tracker.js ai-check --models

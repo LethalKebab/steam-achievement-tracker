@@ -432,3 +432,59 @@ test('配了 baseUrl 就不查模型名和供应商对不对得上', async () =>
     assertModelMatchesProvider('anthropic', 'deepseek-v4-flash', { baseUrl: 'https://api.deepseek.com/anthropic' })
   );
 });
+
+// ---------------------------------------------------------------------------
+// 供应商预设:好路径必须是默认
+// ---------------------------------------------------------------------------
+
+test('provider: deepseek 走的是**有联网**的那个端点', async () => {
+  // DeepSeek 有两个端点:/anthropic 有服务端搜索,/chat/completions 没有。
+  // 在这个预设之前,好路径要写成 provider: "anthropic" + 一个 DeepSeek 的 URL
+  // (看起来像配错了),而直觉写法 provider: "deepseek" 反而给没联网的那个。
+  // 好路径不该藏在反直觉的配置后面
+  const { createProvider } = await import('../lib/ai.js');
+  const p = await createProvider({ ai: { provider: 'deepseek', apiKey: 'k' } });
+  assert.equal(p.canSearch, true);
+  assert.equal(p.baseUrl, 'https://api.deepseek.com/anthropic');
+  assert.match(p.model, /^deepseek-/, '默认模型也要是 deepseek 的');
+  assert.equal(p.name, 'deepseek', '报错里得说对是哪一家');
+
+  // 没联网的那个仍然可达,但要显式点名
+  const openai = await createProvider({ ai: { provider: 'deepseek-openai', apiKey: 'k' } });
+  assert.equal(openai.canSearch, false);
+  assert.equal(openai.name, 'deepseek-openai', '两个不能重名,否则报错时分不清');
+});
+
+test('预设不会盖掉用户显式配的 model / baseUrl', async () => {
+  const { createProvider } = await import('../lib/ai.js');
+  const p = await createProvider({
+    ai: { provider: 'deepseek', apiKey: 'k', model: 'deepseek-v4-pro[1m]', baseUrl: 'https://proxy.example.com' },
+  });
+  assert.equal(p.model, 'deepseek-v4-pro[1m]');
+  assert.equal(p.baseUrl, 'https://proxy.example.com');
+});
+
+test('config 的默认 model 必须是空的 —— 具体名字是供应商专属的', async () => {
+  // 踩过:默认填 claude-opus-5,于是配了 provider: deepseek 但没填 model 的人,
+  // 一定会撞上"供应商是 deepseek,模型名却是 anthropic 的"
+  const { loadConfig } = await import('../lib/config.js');
+  const saved = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  assert.equal(loadConfig().ai.model, '', '填任何一家的具体模型名都会坑到用另一家的人');
+  if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+});
+
+test('401 报的是真实供应商和对应的环境变量,不是写死的 Anthropic', async () => {
+  // 这一层也用来打 DeepSeek 的兼容端点。让人去查 ANTHROPIC_API_KEY 是指错方向
+  const fetchImpl = fakeFetch([errResponse(401, { type: 'error', error: { type: 'authentication_error', message: 'bad' } })]);
+  const p = new AnthropicProvider(
+    { ...AI, providerName: 'deepseek', providerEnvVar: 'DEEPSEEK_API_KEY' },
+    { fetchImpl }
+  );
+  await assert.rejects(p.send({ messages: [{ role: 'user', content: 'q' }] }), (e) => {
+    assert.match(e.message, /^deepseek API HTTP 401/);
+    assert.match(e.message, /DEEPSEEK_API_KEY/);
+    assert.doesNotMatch(e.message, /ANTHROPIC_API_KEY/);
+    return true;
+  });
+});

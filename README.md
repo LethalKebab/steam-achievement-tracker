@@ -55,6 +55,16 @@ node tracker.js guides          # register your guide pages
 
 Details, and how matching works: [docs/guides.md](docs/guides.md).
 
+**Having guides written for you.** If you'd rather not write a guide from scratch, an AI can research the game online and draft one, which is then checked against your real achievement data before it lands. This is the only part of the project that costs money, and it's entirely optional — nothing else needs it.
+
+```bash
+node tracker.js init --ai            # pick a provider, paste a key; verified on the spot
+node tracker.js ai-check             # confirms web search actually works
+node tracker.js guide-gen <appid>    # asks before it starts spending
+```
+
+Works with DeepSeek (cheapest), Anthropic (best, priciest) or Gemini (has a free tier). What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
+
 ## Everyday use
 
 This section is the source install. In the app, opening it does what `serve` does and **立即同步** does what `sync` does, which covers everyday use — the rest of the table is available by running the commands in the app's own folder.
@@ -73,6 +83,8 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `checkbox-sync` | Ticks them | Steam + Notion |
 | `guide-status` | Aligns guide page status with completion | Notion |
 | `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
+| `ai-check` | Checks the AI provider and that its web search really works | AI provider |
+| `guide-gen <appid>` | Has an AI research and write a guide, then validates it | AI + Steam |
 
 `node tracker.js help` lists the rest.
 
