@@ -40,7 +40,7 @@
   .hint { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-bottom: 20px; }
   .hint a { color: var(--accent); }
   label { display: block; font-size: 13px; margin: 14px 0 6px; }
-  input {
+  input, select {
     width: 100%;
     background: var(--panel-alt);
     border: 1px solid var(--border);
@@ -49,8 +49,8 @@
     font-size: 13px;
     padding: 8px 10px;
   }
-  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-  input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   button {
     width: 100%;
     margin-top: 22px;
@@ -135,6 +135,27 @@
       <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
     </details>
 
+    <details id="ai-step">
+      <summary>⑤ AI 攻略生成(可选,会花钱)<span class="configured" id="ai-set" hidden>已配置</span></summary>
+      <ol>
+        <li>配好之后,Dashboard 上没有攻略的游戏会多出一个「✨ 生成」按钮,点了会联网查资料并写一份攻略</li>
+        <li><strong>这是整个工具里唯一会花钱的功能</strong>,其余部分都不需要它。点生成之前还会再问你一次</li>
+        <li>机器只保证格式和数据(每个成就一行、名字对得上、勾选等于真实解锁),<strong>攻略内容对不对没有任何东西能验</strong>,生成完自己读一遍</li>
+      </ol>
+      <label for="ai-provider">供应商</label>
+      <select id="ai-provider" name="ai-provider">
+        <option value="">不启用</option>
+        <option value="deepseek">DeepSeek —— 最便宜,有联网搜索</option>
+        <option value="anthropic">Anthropic (Claude) —— 质量最好,最贵</option>
+        <option value="gemini">Google Gemini —— 有免费额度,但常常没有可用模型</option>
+      </select>
+      <label for="ai-key">API Key<span class="configured" id="ai-key-set" hidden>已配置,留空则不改</span></label>
+      <input id="ai-key" name="ai-key" type="password" autocomplete="off" placeholder="sk-...">
+      <label for="ai-model">模型(可选)</label>
+      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用这一家的默认模型">
+      <p class="hint">保存时会<strong>真发一次请求</strong>验证 —— key 无效、模型停售、这一档没额度,都只有发出去才知道。</p>
+    </details>
+
     <button type="submit" id="submit-btn">保存并验证</button>
     <div class="msg" id="msg" role="status"></div>
   </form>
@@ -158,6 +179,8 @@
     // 以及之后从 Dashboard 点进来改设置。区别只在文案和"密钥留空表示不改",
     // 所以共用一份表单,靠 getSettings 的结果切换,不做两个页面。
     let isEditMode = false;
+    let loadedAiProvider = '';
+    let loadedAiModel = '';
     let loadedNotionDb = '';
 
     (async function load() {
@@ -168,6 +191,10 @@
       $('id').value = s.steamId || '';
       $('notion-db').value = s.notionDbId || '';
       loadedNotionDb = s.notionDbId || '';
+      $('ai-provider').value = s.aiProvider || '';
+      $('ai-model').value = s.aiModel || '';
+      loadedAiProvider = s.aiProvider || '';
+      loadedAiModel = s.aiModel || '';
 
       if (s.hasSteamKey) {
         $('key').required = false;
@@ -178,6 +205,11 @@
         $('token-set').hidden = false;
         $('notion-set').hidden = false;
         $('notion-token').placeholder = '留空则沿用现在的';
+      }
+      if (s.hasAiKey) {
+        $('ai-key-set').hidden = false;
+        $('ai-set').hidden = false;
+        $('ai-key').placeholder = '留空则沿用现在的';
       }
       if (isEditMode) {
         $('page-title').textContent = '设置';
@@ -193,6 +225,9 @@
       const csv = $('csv').value.trim();
       const notionToken = $('notion-token').value.trim();
       const notionDb = $('notion-db').value.trim();
+      const aiProvider = $('ai-provider').value.trim();
+      const aiKey = $('ai-key').value.trim();
+      const aiModel = $('ai-model').value.trim();
 
       // 编辑模式下 key 可以留空(表示沿用),首次设置则必填
       if ((!key && !isEditMode) || !id) return;
@@ -216,6 +251,19 @@
         // **只在真的动过 Notion 时才调**——数据库 ID 是回填的,不比对一下的话,
         // 进来只想改 SteamID 的人也会顺带触发一次 Notion 验证(白等几秒,
         // 而且 Notion 那边一旦出问题就会把一次成功的保存报成失败)。
+        // AI 同理:只在真的动过的时候才验证。这一步会**发一次真请求**,
+        // 不比对一下的话,只想改 SteamID 的人也要白等几秒、还可能被 AI 那边的
+        // 临时故障把一次成功的保存报成失败
+        const aiChanged =
+          Boolean(aiKey) || aiProvider !== loadedAiProvider || aiModel !== loadedAiModel;
+        if (aiChanged && aiProvider) {
+          const r = await call('saveAiConfig', [aiProvider, aiKey, aiModel]);
+          if (r.error) throw new Error('AI:' + r.error);
+          done.push(
+            `AI 可用(${r.provider} / ${r.model}${r.canSearch ? '' : ',注意这家没有联网搜索'})`
+          );
+        }
+
         const notionChanged = Boolean(notionToken) || notionDb !== loadedNotionDb;
         if (notionChanged) {
           const r = await call('saveNotionConfig', [notionToken, notionDb]);

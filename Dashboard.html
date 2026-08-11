@@ -412,6 +412,26 @@
       cursor: default;
       pointer-events: none;
     }
+    /* 配了 AI 之后,没攻略的行变成"可以生成一份" */
+    .guide-btn.can-gen {
+      opacity: 1;
+      cursor: pointer;
+      pointer-events: auto;
+      color: var(--good);
+      border-color: var(--good);
+    }
+    .guide-btn.can-gen:disabled { opacity: 0.4; cursor: default; }
+    #gen-bar {
+      display: none;
+      margin: 0 0 10px;
+      padding: 8px 12px;
+      border: 1px solid var(--good);
+      border-radius: 4px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+    #gen-bar .warn { color: var(--text-dim); }
     .ach-guide-link {
       font-size: 11px;
       color: var(--accent);
@@ -454,6 +474,8 @@
        title="改 Steam 凭据、配置 Notion 攻略同步、从表格导入">设置</a>
     <span class="sync-msg" id="syncMsg"></span>
   </div>
+
+  <div id="gen-bar" role="status"></div>
 
   <div class="cards">
     <div class="card">
@@ -750,9 +772,13 @@
         const starChar = g.priority ? '★' : '☆';
         const starClass = 'icon-btn' + (g.priority ? ' active-star' : '');
         const guideBtnClass = 'guide-btn ' + (g.guideUrl ? 'has-guide' : 'no-guide');
+        const canGen = !g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0;
         const guideBtn = g.guideUrl
           ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">📖 攻略</a>'
-          : '<span class="' + guideBtnClass + '">📖 攻略</span>';
+          : canGen
+            ? '<button class="' + guideBtnClass + ' can-gen" data-gen="' + g.appid + '" data-name="'
+              + escapeHtml(g.name) + '" onclick="event.stopPropagation()">✨ 生成</button>'
+            : '<span class="' + guideBtnClass + '">📖 攻略</span>';
         const gameCell = '<div class="game-cell">'
           + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '">' + starChar + '</button>'
           + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '">' + heartSvg(g.favorite) + '</button>'
@@ -1166,6 +1192,110 @@
       }
       wasSyncRunning = s.running;
     };
+
+    // ---------------------------------------------------------------
+    // AI 生成攻略
+    // ---------------------------------------------------------------
+    // 这是页面上**唯一一个会花钱的按钮**,所以点下去之前必须先问一次,而且要把
+    // "会发生什么、机器验不了什么"说清楚 —— 用户看不到 CLI 那些提示。
+    const genBar = document.getElementById('gen-bar');
+    let aiReady = false;
+
+    (async function loadAiState() {
+      const s = await new Promise((resolve) => {
+        rpc.withSuccessHandler(resolve).withFailureHandler(() => resolve({})).getSettings();
+      });
+      aiReady = Boolean(s && s.hasAiKey);
+      if (aiReady) loadDashboard();  // 重画一次,把「✨ 生成」按钮放出来
+    })();
+
+    document.addEventListener('click', function (e) {
+      const btn = e.target.closest('button[data-gen]');
+      if (!btn) return;
+      const appid = btn.getAttribute('data-gen');
+      const name = btn.getAttribute('data-name') || appid;
+      const ok = window.confirm([
+        '要为《' + name + '》生成一份攻略吗?',
+        '',
+        '· 会调用 AI 联网查资料并撰写,这一步会花钱',
+        '· 通常要两到四分钟,期间可以继续用这个页面',
+        '· 机器只保证格式和数据:每个成就一行、名字对得上、勾选等于你的真实解锁状态',
+        '· 攻略内容对不对没有任何东西能验,生成完请自己读一遍',
+      ].join('\n'));
+      if (!ok) return;
+      btn.disabled = true;
+      rpc
+        .withSuccessHandler(function (r) {
+          if (r && r.error) {
+            btn.disabled = false;
+            showGen('⚠️ ' + r.error, true);
+            return;
+          }
+          showGen('⏳ 已开始生成《' + name + '》…');
+          pollGen();
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          showGen('⚠️ ' + err, true);
+        })
+        .startGuideGen(appid);
+    });
+
+    function showGen(html, dim) {
+      genBar.style.display = 'block';
+      genBar.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
+    }
+
+    // 只在有任务在跑的时候轮询 —— 平时不给这个本地服务加一份常驻请求。
+    // 页面加载时也查一次:另一个标签页(或上一次刷新前)发起的生成还在跑的话,这里要接上
+    let genTimer = null;
+    function pollGen() {
+      if (genTimer) return;
+      genTimer = setInterval(fetchGen, 3000);
+      fetchGen();
+    }
+
+    function fetchGen() {
+      rpc
+        .withSuccessHandler(function (s) {
+          if (!s) return;
+          if (s.running) {
+            const round = s.rounds ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
+            showGen('⏳ 正在生成《' + s.game + '》' + round + (s.note ? ' —— ' + s.note : ''));
+            return;
+          }
+          clearInterval(genTimer);
+          genTimer = null;
+          if (s.error) return showGen('⚠️ 生成失败:' + s.error, true);
+          const r = s.result;
+          if (!r) return (genBar.style.display = 'none');
+
+          if (!r.ok) {
+            showGen(
+              '⚠️ 《' + s.game + '》没通过校验,草稿已留下,没有写进攻略目录。' +
+                (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
+              true
+            );
+            return;
+          }
+          // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 必须明写
+          const research = !r.researched
+            ? '<br><span class="warn">⚠️ 这一份没有经过联网调研,内容是模型凭已有知识写的。</span>'
+            : r.searchQueries && r.searchQueries.length
+              ? '<br><span class="warn">🔎 实际发出 ' + r.searchQueries.length + ' 次搜索。</span>'
+              : '<br><span class="warn">⚠️ 挂了联网工具但模型一次都没搜,内容等同于凭记忆写的。</span>';
+          showGen(
+            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就)' +
+              research +
+              '<br><span class="warn">机器只验了格式和数据,<strong>内容对不对请自己读一遍</strong>。</span>'
+          );
+          loadDashboard();  // 攻略已登记,刷新一下让「📖 攻略」链接出来
+        })
+        .withFailureHandler(function () {})
+        .guideGenStatus();
+    }
+
+    fetchGen();  // 接上可能还在跑的任务
 
     // 后台同步结束后 lib/rpc.js 会调这个就地刷新数据。暴露成全局是故意的:
     // 用 location.reload() 会把搜索词、筛选勾选、排序状态全清掉,那些是用户自己设的。
