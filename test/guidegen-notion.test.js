@@ -24,7 +24,10 @@ import { openDb, insertGame, replaceAchievements, getGuide } from '../lib/db.js'
 import { landToNotion, DRAFTS_DIR } from '../lib/guidegen.js';
 // planNotionTarget 住在 notion.js 而不是 guidegen.js —— 它是"写 Notion 前该问什么",
 // 跟 AI 没有关系,搬家那条路(guidemigrate.js)也要用它
-import { planNotionTarget, NOTION_NEW_STATUS } from '../lib/notion.js';
+import { planNotionTarget, newGuideStatus } from '../lib/notion.js';
+
+/** 以前这里是个写死的常量。现在状态由进度算出来,测试跟着改成"算出来的那个值" */
+const SOME_STATUS = 'Paused';
 
 // ---------------------------------------------------------------------------
 // 脚手架
@@ -71,7 +74,7 @@ function freshEnv({ draft = DRAFT } = {}) {
  */
 function fakeNotion(opts = {}) {
   const {
-    statusOptions = ['Not started', NOTION_NEW_STATUS, 'Done'],
+    statusOptions = ['Not started', 'Paused', 'Staged', 'Done'],
     pages = [],
     childCounts = {},
     titleProperty = 'Name',
@@ -132,7 +135,21 @@ const basePlan = (draftPath, notionPlan) => ({
 describe('planNotionTarget —— 写之前把该问的问完', () => {
   test('状态属性里没有我们要写的那个选项 → 拒绝,并列出现有选项', async () => {
     const notion = fakeNotion({ statusOptions: ['待办', '完成'] });
-    await assert.rejects(planNotionTarget(notion, '测试游戏'), /待办 \/ 完成/);
+    await assert.rejects(
+      planNotionTarget(notion, '测试游戏', { statusValue: SOME_STATUS }),
+      /待办 \/ 完成/
+    );
+  });
+
+  test('校验的是这次真要写的值,不是某个固定值', async () => {
+    const notion = fakeNotion({ statusOptions: ['Paused'] });
+    // Paused 在选项里 → 放行
+    await planNotionTarget(notion, '测试游戏', { statusValue: 'Paused' });
+    // Not started 不在 → 当场拦下,而不是写下去之后被 Notion 拒
+    await assert.rejects(
+      planNotionTarget(notion, '测试游戏', { statusValue: 'Not started' }),
+      /没有「Not started」/
+    );
   });
 
   test('同名的空页就是要写的那一页,不再并排建一个', async () => {
@@ -165,10 +182,35 @@ describe('planNotionTarget —— 写之前把该问的问完', () => {
     assert.equal(plan.titleProperty, '名称');
   });
 
-  test('新页给 Staged —— 游戏真打完了的话 guide-status 会自己提成 Done', async () => {
+  test('状态原样透传给建页,不在中间被换掉', async () => {
+    const notion = fakeNotion();
+    const plan = await planNotionTarget(notion, '测试游戏', { statusValue: SOME_STATUS });
+    assert.equal(plan.status.value, SOME_STATUS);
+  });
+
+  test('不给 statusValue 就不设状态 —— 别替用户瞎填一个', async () => {
     const notion = fakeNotion();
     const plan = await planNotionTarget(notion, '测试游戏');
-    assert.equal(plan.status.value, NOTION_NEW_STATUS);
+    assert.equal(plan.status, null);
+  });
+
+  describe('newGuideStatus —— 按真实进度算,不是固定值', () => {
+    test('满成就 → Done', () => {
+      assert.equal(newGuideStatus({ achieved: 51, total: 51 }), 'Done');
+    });
+    test('解锁了一部分 → Paused', () => {
+      assert.equal(newGuideStatus({ achieved: 50, total: 51 }), 'Paused');
+    });
+    test('一个都没解锁 → Not started', () => {
+      assert.equal(newGuideStatus({ achieved: 0, total: 51 }), 'Not started');
+    });
+    test('还没同步过(total 是 null)→ Not started,不能当成满成就', () => {
+      assert.equal(newGuideStatus({ achieved: null, total: null }), 'Not started');
+      assert.equal(newGuideStatus(undefined), 'Not started');
+    });
+    test('0/0 不算满成就 —— 没有成就系统不等于打完了', () => {
+      assert.equal(newGuideStatus({ achieved: 0, total: 0 }), 'Not started');
+    });
   });
 });
 
@@ -186,12 +228,12 @@ describe('landToNotion —— 写进去,然后回读验一遍', () => {
     notion.extractAppIdFromPageContent = async () => '1';
 
     const r = await land(db, config, draftPath, notion, {
-      status: { property: 'Status', type: 'status', value: NOTION_NEW_STATUS },
+      status: { property: 'Status', type: 'status', value: SOME_STATUS },
     });
 
     assert.equal(notion.created.length, 1);
     assert.equal(notion.created[0].title, '测试游戏');
-    assert.equal(notion.created[0].status.value, NOTION_NEW_STATUS);
+    assert.equal(notion.created[0].status.value, SOME_STATUS);
     assert.match(notion.created[0].icon, /^https:\/\/cdn\.cloudflare\.steamstatic\.com\/.*deadbeef\.jpg$/);
     assert.equal(r.url, 'https://notion.so/new-page');
     // 登记走的是真的发现逻辑,所以 guides 表里应该真出现这一条

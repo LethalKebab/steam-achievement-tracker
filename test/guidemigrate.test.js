@@ -22,7 +22,7 @@ import { mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openDb, insertGame, upsertGuide, getGuide } from '../lib/db.js';
+import { openDb, insertGame, updateGameStats, upsertGuide, getGuide } from '../lib/db.js';
 import { markdownToBlocks } from '../lib/notionblocks.js';
 import {
   planMigration,
@@ -53,11 +53,12 @@ const GUIDE = [
   '',
 ].join('\n');
 
-function freshEnv({ text = GUIDE, file = 'test_guide.md', kind = 'local' } = {}) {
+function freshEnv({ text = GUIDE, file = 'test_guide.md', kind = 'local', achieved = 3, total = 10 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'migrate-'));
   writeFileSync(join(dir, file), text);
   const db = openDb(':memory:');
   insertGame(db, { appid: '1', name: '测试游戏' });
+  updateGameStats(db, '1', { achieved, total });
   upsertGuide(db, { appid: '1', name: '测试游戏', url: file, kind });
   return { db, config: { guidesDir: dir }, dir, file };
 }
@@ -73,7 +74,15 @@ function fakeNotion({ pages = [], corrupt = null } = {}) {
     pages,
     configured: true,
     async fetchGuideDbSchema() {
-      return { titleProperty: 'Name', status: { property: 'Status', type: 'status', options: ['Staged'] } };
+      // 选项照抄真实攻略库,不然测试会在一个现实中不存在的库上通过
+      return {
+        titleProperty: 'Name',
+        status: {
+          property: 'Status',
+          type: 'status',
+          options: ['Not started', 'Staged', 'Paused', 'In progress', 'Differed', 'Done'],
+        },
+      };
     },
     async queryGuideDatabase() { return this.pages; },
     async countChildren() { return 0; },
@@ -274,5 +283,32 @@ describe('搬过去的内容本身', () => {
     const todos = blocks.filter((b) => b.type === 'to_do');
     assert.equal(todos.length, 2);
     assert.equal(todos[1].to_do.children.length, 1);
+  });
+});
+
+describe('新页的状态按真实进度算', () => {
+  const statusOf = async (achieved, total) => {
+    const { db, config } = freshEnv({ achieved, total });
+    const notion = fakeNotion();
+    await run(db, config, notion);
+    return notion.created[0].status.value;
+  };
+
+  test('解锁了一部分 → Paused(部落幸存者 50/51 就是这一档)', async () => {
+    assert.equal(await statusOf(50, 51), 'Paused');
+  });
+
+  test('一个都没解锁 → Not started', async () => {
+    assert.equal(await statusOf(0, 51), 'Not started');
+  });
+
+  test('满成就 → Done', async () => {
+    assert.equal(await statusOf(51, 51), 'Done');
+  });
+
+  test('绝不会是 Staged —— 那一档的含义是"曾经满成就又被顶下来"', async () => {
+    for (const [a, t] of [[0, 51], [50, 51], [51, 51]]) {
+      assert.notEqual(await statusOf(a, t), 'Staged');
+    }
   });
 });

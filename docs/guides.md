@@ -50,6 +50,8 @@ Headings, checkboxes (including nested sub-steps and their ticked state), plain 
 
 **Your ticks come across untouched.** Migration never re-derives checked state from Steam; that's `checkbox-sync`'s job, and quietly doing it here would mean a move could change your data.
 
+New pages get their `Status` the same way as generated ones — `Done` / `Paused` / `Not started` by real progress. 
+
 Afterwards the page is **read back and compared line by line** against the file — same count, same text, same ticks. Only if that matches does the local file move to `guides/.migrated/`. If anything is off, the migration fails, says which line, and **your file stays exactly where it was**. Nothing is ever deleted.
 
 Two refusals, same as for generated guides: a page with that game's title that already has content, and two pages sharing the title.
@@ -92,7 +94,7 @@ Two cases get refused rather than guessed at, because both would damage notes yo
 
 An existing page that is *empty* is treated as the page you meant — those "created the page, haven't written the guide yet" placeholders get filled in, and its title, icon and status are left exactly as you set them.
 
-New pages get the Steam icon and `Status: Staged`, which `guide-status` promotes to `Done` on its own if the game turns out to be finished. Notion's block format can't carry everything markdown can (`<details>`, tables, third-level headings); anything it can't represent is written as a plain paragraph — **the text is never dropped** — and the affected lines are listed when it finishes.
+New pages get the Steam icon and a `Status` derived from where you actually are in the game: **`Done`** at 100%, **`Paused`** with some achievements unlocked, **`Not started`** with none. Nothing later revisits a page that isn't at 100%, so the value written at creation is the one that sticks — which is why it's computed rather than fixed. Notion's block format can't carry everything markdown can (`<details>`, tables, third-level headings); anything it can't represent is written as a plain paragraph — **the text is never dropped** — and the affected lines are listed when it finishes.
 
 After writing, the page is **read back and re-validated with the same linter**, because a Notion write returns 200 whether or not the content came out the way you meant.
 
