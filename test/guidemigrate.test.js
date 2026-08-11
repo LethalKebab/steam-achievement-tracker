@@ -67,12 +67,28 @@ function freshEnv({ text = GUIDE, file = 'test_guide.md', kind = 'local', achiev
  * 假 Notion。回读**从真写进去的块里还原**,所以保真校验比的确实是"写出去的那份",
  * 不是另编一份数据。`corrupt` 用来模拟各种"写进去了但不对"的情况。
  */
+/**
+ * 假 Steam。搬家只用得到图标 hash 这一件事。
+ * `img = null` 模拟"这游戏 Steam 那边没有图标",页面照样要建得出来。
+ */
+function fakeSteam(img = 'deadbeef') {
+  return {
+    async fetchOwnedGames() {
+      return [{ appid: 1, img_icon_url: img }];
+    },
+  };
+}
+
 function fakeNotion({ pages = [], corrupt = null } = {}) {
   return {
     written: [],
     created: [],
+    iconSets: [],
     pages,
     configured: true,
+    async setPageIcon(pageId, url) {
+      this.iconSets.push({ pageId, url });
+    },
     async fetchGuideDbSchema() {
       // 选项照抄真实攻略库,不然测试会在一个现实中不存在的库上通过
       return {
@@ -114,7 +130,8 @@ function fakeNotion({ pages = [], corrupt = null } = {}) {
   };
 }
 
-const run = (db, config, notion) => migrateGuideToNotion(db, { notion, config, appid: '1' });
+const run = (db, config, notion, steam = fakeSteam()) =>
+  migrateGuideToNotion(db, { notion, steam, config, appid: '1' });
 
 // ---------------------------------------------------------------------------
 
@@ -267,6 +284,54 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
     notion.countChildren = async () => 7;
     await assert.rejects(run(db, config, notion), /里面有内容/);
     assert.equal(existsSync(join(dir, file)), true);
+  });
+});
+
+/**
+ * 图标。搬过去的页面和 `guide-gen` 生成的页面躺在同一个攻略库里,一批有图标一批没有,
+ * 看着就是搬运漏了东西 —— 这几条守的就是那个"少了一样东西"的静默失败:
+ * 它不报错、回读校验也全绿,只有人打开 Notion 才看得见。
+ */
+describe('页面图标', () => {
+  test('新建的页面带上 Steam 图标', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion();
+    await run(db, config, notion);
+    assert.match(notion.created[0].icon, /deadbeef\.jpg$/);
+  });
+
+  test('Steam 没有图标 → 照常建页,不因为这个卡住', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion();
+    const r = await run(db, config, notion, fakeSteam(null));
+    assert.equal(notion.created[0].icon, null);
+    assert.equal(r.count, 3, '图标拿不到不影响搬家本身');
+  });
+
+  test('Steam 接口挂了 → 照常建页', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion();
+    const steam = { async fetchOwnedGames() { throw new Error('429'); } };
+    const r = await run(db, config, notion, steam);
+    assert.equal(notion.created[0].icon, null);
+    assert.equal(r.count, 3);
+  });
+
+  test('接管的空页原本没有图标 → 补上', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: null }] });
+    await run(db, config, notion);
+    assert.equal(notion.iconSets.length, 1);
+    assert.equal(notion.iconSets[0].pageId, 'p1');
+  });
+
+  test('接管的空页已经有图标 → 一个字都不动(哪怕是个 emoji)', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion({
+      pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: { type: 'emoji', emoji: '🌯' } }],
+    });
+    await run(db, config, notion);
+    assert.deepEqual(notion.iconSets, [], '用户自己挑的图标不是我们该"顺手改一下"的东西');
   });
 });
 

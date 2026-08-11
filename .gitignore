@@ -16,6 +16,10 @@ guides/.drafts/
 # 每搬一份就多一份永远不会再更新的副本
 guides/.migrated/
 
+# 覆盖已有攻略前存下的原文(`guide-gen --overwrite`)。同样是本机的后悔药:
+# 里面是用户攻略的历史版本,收进仓库等于把每次重写都存成一份永远不会更新的副本
+guides/.backups/
+
 # launcher/ 的 Electron 依赖,以及打包产物(仓库根目录的 dist/)——体积大(上百 MB),不该进仓库
 launcher/node_modules/
 dist/

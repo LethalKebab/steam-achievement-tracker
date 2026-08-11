@@ -16,7 +16,7 @@
  *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
- *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词)
+ *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词,--overwrite 重写已有的)
  *   node tracker.js guide-to-notion <appid>  把本地 markdown 攻略搬到 Notion(--dry-run 只预览)
  *   node tracker.js log [n]         看最近的同步日志
  */
@@ -40,6 +40,9 @@ import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
 import { generateGuide, planGuide, buildSystemPrompt } from './lib/guidegen.js';
 import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
+import {
+  BACKUPS_DIR, overwritePreflight, formatPreflight, diffGuides, formatDiff,
+} from './lib/guidebackup.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -809,8 +812,11 @@ async function cmdAiCheck() {
  */
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
-  if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local]');
+  if (!appid) {
+    throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local] [--overwrite]');
+  }
   const dryRun = flags.has('--dry-run');
+  const overwrite = flags.has('--overwrite');
 
   const config = applyAiFlags(loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] }));
   const db = openDb(config.dbPath);
@@ -820,7 +826,7 @@ async function cmdGuideGen() {
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
-  const plan = await planGuide(db, { config, steam, appid, fileName, notion, local });
+  const plan = await planGuide(db, { config, steam, appid, fileName, notion, local, overwrite });
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
   console.log(`  成就 ${plan.defs.length} 个,其中已解锁 ${plan.unlocked.size} 个(用来机械打勾,不会喂给模型)`);
@@ -835,7 +841,16 @@ async function cmdGuideGen() {
   // config 里是空的,真正用的是这一家的默认值
   console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
   warnEnvOverrides();
-  if (plan.target === 'notion') {
+  if (plan.existing) {
+    // 覆盖是这条命令里唯一不可逆的动作,所以它自己占一段,而且**在问"继续吗"之前**印出来
+    const where = plan.existing.kind === 'notion' ? 'Notion 页面' : '本地文件';
+    console.log(`\n  ⚠️  覆盖已有攻略(${where}:${plan.existing.url})`);
+    console.log(formatPreflight(overwritePreflight(plan), { defsCount: plan.defs.length }));
+    console.log(`  原文会先备份进 ${join(config.guidesDir, BACKUPS_DIR)}/,备份失败就不会动它`);
+    if (plan.existing.kind === 'notion') {
+      console.log('  Notion 删块是归档,30 天内还能在 Notion 回收站里找回来');
+    }
+  } else if (plan.target === 'notion') {
     console.log(
       plan.notion.existingPage
         ? `  写进 Notion 已有的空页:${plan.notion.existingPage.url}`
@@ -867,9 +882,14 @@ async function cmdGuideGen() {
   }
 
   if (!flags.has('--yes')) {
-    // 花钱的操作默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)
+    // 花钱的操作默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)。
+    // 覆盖的时候这句话还要多担一件事:它同时是那次不可逆写入的人工确认
     const io = makeSecretReader();
-    const answer = await io.ask('\n这一步会调用 AI 并产生费用。继续?(y/N)');
+    const answer = await io.ask(
+      plan.existing
+        ? `\n这一步会调用 AI 并产生费用,而且会**覆盖《${plan.game}》现在那份攻略**。继续?(y/N)`
+        : '\n这一步会调用 AI 并产生费用。继续?(y/N)'
+    );
     io.close();
     if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
   }
@@ -879,7 +899,7 @@ async function cmdGuideGen() {
   const started = Date.now();
 
   const r = await generateGuide(db, {
-    config, provider, steam, appid, rounds, fileName, notion, local,
+    config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan,
     onProgress(ev) {
       if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮:联网研究 + 撰写…`);
       else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
@@ -888,7 +908,9 @@ async function cmdGuideGen() {
         p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
       } else if (ev.phase === 'notion-create' || ev.phase === 'notion-fill') {
         p.update(`  写进 Notion(${ev.blocks} 个块)…`);
-      }
+      } else if (ev.phase === 'backup') p.update('  备份原文…');
+      else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
+      else if (ev.phase === 'notion-clear') p.update(`  清掉页面上原来的 ${ev.blocks} 个块…`);
     },
   });
   p.done();
@@ -897,6 +919,19 @@ async function cmdGuideGen() {
   console.log('\n' + '─'.repeat(70));
   if (r.ok) {
     console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.url}`);
+    if (r.overwrote) {
+      // 覆盖之后才算得出真正的新旧对照 —— 花钱前那份预检只能讲旧的那一半。
+      // 这一段是给"我到底换掉了什么"一个可以当场核对的答案,备份路径就在下面
+      console.log('\n  覆盖前后对照:');
+      console.log(formatDiff(diffGuides({
+        oldTodos: plan.oldTodos,
+        newTodos: r.todos,
+        defs: plan.defs,
+        oldText: plan.oldText,
+        newText: r.text,
+      })));
+      if (r.backup) console.log(`  原文备份:${r.backup.path}`);
+    }
     if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action ?? '新增'}),Dashboard 上就能看到链接了`);
     else console.log('  ⚠️  没被 guides 发现逻辑收进去,手动跑一次 `node tracker.js guides --local` 看看为什么');
     // 转换器认不出来的行没丢,但排版降级成了普通段落。用户有权知道是哪几行
@@ -945,8 +980,8 @@ async function cmdGuideGen() {
 async function cmdGuideToNotion() {
   const appid = positionalArgs()[0];
   if (!appid) throw new Error('用法:node tracker.js guide-to-notion <appid> [--dry-run] [--yes]');
-  const config = loadConfig({ required: ['steam'] });
-  const db = openDb(config.dbPath);
+  // steam 是给页面图标用的(建页时补一个 Steam 游戏图标,和 guide-gen 建的页一致)
+  const { config, db, steam } = withSteam();
   const notion = new NotionClient(config);
 
   const plan = await planMigration(db, { notion, config, appid });
@@ -976,7 +1011,7 @@ async function cmdGuideToNotion() {
   }
 
   const r = await migrateGuideToNotion(db, {
-    notion, config, appid, plan,
+    notion, steam, config, appid, plan,
     onProgress(ev) {
       if (ev.phase === 'create') console.log(`  建好页面,写 ${ev.blocks} 个块…`);
       else if (ev.phase === 'fill') console.log(`  填进已有的空页,写 ${ev.blocks} 个块…`);
@@ -1057,6 +1092,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
                                           (ai-check 和 guide-gen 都支持)
   node tracker.js guide-gen <appid>       让 AI 写一份本地攻略(会花钱,默认先问一句)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
+              guide-gen --overwrite       重写已有的那份攻略(先备份原文,再告诉你会失去什么)
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
   node tracker.js log [n]                 最近 n 条同步日志
 
