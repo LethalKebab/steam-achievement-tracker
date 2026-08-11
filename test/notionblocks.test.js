@@ -148,3 +148,53 @@ test('表格结束后普通行照常解析,表格在文件末尾也不会漏', (
     ['table', 'heading_2', 'table']
   );
 });
+
+// ---------------------------------------------------------------------------
+// 互斥标注的下划线
+// ---------------------------------------------------------------------------
+// 踩过(2026-08-11):`<span underline="true">…</span>` 是 SKILL.md 规则 3.1 的固定写法,
+// 以前原样落进正文 —— Notion 上显示的是标签本身,而不是一条下划线。搬过去的罗曼圣诞那页
+// 有 9 处长这样,和用户手写的一百多页不一致。
+// 它和 `**` 是同一类东西:是标记不是正文,所以三处必须一起改 —— 转换器产出注解,
+// 而两个文本归一化(保真校验、成就匹配)必须把标签削掉,否则两种后端永远比不相等。
+
+test('互斥标注变成 underline 注解,标签本身不进正文', () => {
+  const rt = toRichText('选了这个。<span underline="true">如果选另一个则无法获得本成就。</span>');
+  assert.ok(!plain(rt).includes('<span'), '标签不该出现在正文里');
+  assert.ok(!plain(rt).includes('</span>'));
+  assert.equal(plain(rt), '选了这个。如果选另一个则无法获得本成就。');
+
+  const underlined = rt.filter((r) => r.annotations.underline);
+  assert.equal(underlined.length, 1);
+  assert.equal(underlined[0].text.content, '如果选另一个则无法获得本成就。');
+  assert.equal(rt.find((r) => r.text.content === '选了这个。').annotations.underline, false);
+});
+
+test('粗体和下划线互不干扰 —— 成就名还是粗的', () => {
+  const rt = toRichText('**成就名**<br>描述<br>心得。<span underline="true">互斥警告。</span>');
+  const bold = rt.filter((r) => r.annotations.bold);
+  assert.equal(bold.length, 1);
+  assert.equal(bold[0].text.content, '成就名');
+  assert.equal(bold[0].annotations.underline, false, '成就名不该被连带划线');
+  assert.equal(rt.filter((r) => r.annotations.underline).length, 1);
+});
+
+test('单引号写法和大小写都认', () => {
+  assert.equal(toRichText("<span underline='true'>甲</span>").filter((r) => r.annotations.underline).length, 1);
+  assert.equal(toRichText('<SPAN UNDERLINE="TRUE">甲</SPAN>').filter((r) => r.annotations.underline).length, 1);
+});
+
+test('一行里有两处标注,两处都要划上', () => {
+  const rt = toRichText('<span underline="true">甲</span>中间<span underline="true">乙</span>');
+  assert.deepEqual(
+    rt.filter((r) => r.annotations.underline).map((r) => r.text.content),
+    ['甲', '乙']
+  );
+  assert.equal(plain(rt), '甲中间乙');
+});
+
+test('没有标注时 underline 一律 false,不留下 undefined', () => {
+  for (const r of toRichText('**名字**<br>普通描述')) {
+    assert.equal(r.annotations.underline, false);
+  }
+});

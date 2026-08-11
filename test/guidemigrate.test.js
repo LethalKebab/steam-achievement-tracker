@@ -67,12 +67,28 @@ function freshEnv({ text = GUIDE, file = 'test_guide.md', kind = 'local', achiev
  * 假 Notion。回读**从真写进去的块里还原**,所以保真校验比的确实是"写出去的那份",
  * 不是另编一份数据。`corrupt` 用来模拟各种"写进去了但不对"的情况。
  */
+/**
+ * 假 Steam。搬家只用得到图标 hash 这一件事。
+ * `img = null` 模拟"这游戏 Steam 那边没有图标",页面照样要建得出来。
+ */
+function fakeSteam(img = 'deadbeef') {
+  return {
+    async fetchOwnedGames() {
+      return [{ appid: 1, img_icon_url: img }];
+    },
+  };
+}
+
 function fakeNotion({ pages = [], corrupt = null } = {}) {
   return {
     written: [],
     created: [],
+    iconSets: [],
     pages,
     configured: true,
+    async setPageIcon(pageId, url) {
+      this.iconSets.push({ pageId, url });
+    },
     async fetchGuideDbSchema() {
       // 选项照抄真实攻略库,不然测试会在一个现实中不存在的库上通过
       return {
@@ -114,7 +130,8 @@ function fakeNotion({ pages = [], corrupt = null } = {}) {
   };
 }
 
-const run = (db, config, notion) => migrateGuideToNotion(db, { notion, config, appid: '1' });
+const run = (db, config, notion, steam = fakeSteam()) =>
+  migrateGuideToNotion(db, { notion, steam, config, appid: '1' });
 
 // ---------------------------------------------------------------------------
 
@@ -270,6 +287,54 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
   });
 });
 
+/**
+ * 图标。搬过去的页面和 `guide-gen` 生成的页面躺在同一个攻略库里,一批有图标一批没有,
+ * 看着就是搬运漏了东西 —— 这几条守的就是那个"少了一样东西"的静默失败:
+ * 它不报错、回读校验也全绿,只有人打开 Notion 才看得见。
+ */
+describe('页面图标', () => {
+  test('新建的页面带上 Steam 图标', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion();
+    await run(db, config, notion);
+    assert.match(notion.created[0].icon, /deadbeef\.jpg$/);
+  });
+
+  test('Steam 没有图标 → 照常建页,不因为这个卡住', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion();
+    const r = await run(db, config, notion, fakeSteam(null));
+    assert.equal(notion.created[0].icon, null);
+    assert.equal(r.count, 3, '图标拿不到不影响搬家本身');
+  });
+
+  test('Steam 接口挂了 → 照常建页', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion();
+    const steam = { async fetchOwnedGames() { throw new Error('429'); } };
+    const r = await run(db, config, notion, steam);
+    assert.equal(notion.created[0].icon, null);
+    assert.equal(r.count, 3);
+  });
+
+  test('接管的空页原本没有图标 → 补上', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: null }] });
+    await run(db, config, notion);
+    assert.equal(notion.iconSets.length, 1);
+    assert.equal(notion.iconSets[0].pageId, 'p1');
+  });
+
+  test('接管的空页已经有图标 → 一个字都不动(哪怕是个 emoji)', async () => {
+    const { db, config } = freshEnv();
+    const notion = fakeNotion({
+      pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: { type: 'emoji', emoji: '🌯' } }],
+    });
+    await run(db, config, notion);
+    assert.deepEqual(notion.iconSets, [], '用户自己挑的图标不是我们该"顺手改一下"的东西');
+  });
+});
+
 describe('搬过去的内容本身', () => {
   test('表格搬成 table 块,不是三行文字', () => {
     const { blocks } = markdownToBlocks(GUIDE);
@@ -310,5 +375,50 @@ describe('新页的状态按真实进度算', () => {
     for (const [a, t] of [[0, 51], [50, 51], [51, 51]]) {
       assert.notEqual(await statusOf(a, t), 'Staged');
     }
+  });
+});
+
+/**
+ * 互斥标注(`<span underline="true">…</span>`)转成 Notion 的下划线注解之后,
+ * **回读的文字里不再有标签** —— 而文件里有。保真校验要是不知道这件事,
+ * 每一份带互斥标注的攻略都会在"回读对不上"这一步失败,而且失败得毫无道理:
+ * 内容一个字没变,只是标记搬去了 annotations。`**` 早就是这么处理的。
+ */
+describe('互斥标注不该把保真校验搞崩', () => {
+  const WITH_SPAN = [
+    'appid: 1',
+    '',
+    '- [x] **第一步**<br>完成第一关。<br>选了这个。<span underline="true">如果选另一个则无法获得本成就。</span>',
+    '- [ ] **第二步**<br>完成第二关。<br>接着打',
+    '',
+  ].join('\n');
+
+  test('归一化之后,文件里的标签和 Notion 读回来的纯文字相等', () => {
+    assert.equal(
+      normalizeForCompare('心得。<span underline="true">互斥警告。</span>'),
+      normalizeForCompare('心得。互斥警告。')
+    );
+  });
+
+  test('带互斥标注的攻略搬得过去,而且逐条核对通过', async () => {
+    const { db, config } = freshEnv({ text: WITH_SPAN });
+    const notion = fakeNotion();
+    const r = await run(db, config, notion);
+    assert.equal(r.count, 2);
+    assert.equal(getGuide(db, '1').kind, 'notion');
+  });
+
+  test('搬过去的那一条真的带了下划线注解,不是把标签当文字写进去', async () => {
+    const { db, config } = freshEnv({ text: WITH_SPAN });
+    const notion = fakeNotion();
+    await run(db, config, notion);
+    const runs = notion.written.flatMap((b) => b[b.type].rich_text ?? []);
+    const underlined = runs.filter((x) => x.annotations?.underline);
+    assert.equal(underlined.length, 1);
+    assert.equal(underlined[0].text.content, '如果选另一个则无法获得本成就。');
+    assert.ok(
+      !runs.some((x) => x.text.content.includes('<span')),
+      '标签不能作为字面文字写进 Notion —— 那正是这次要修的东西'
+    );
   });
 });

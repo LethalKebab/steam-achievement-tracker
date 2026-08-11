@@ -470,6 +470,18 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
     assert.match(p, /待确认/, '不写"推测/待确认"这类文档化备注');
     assert.match(p, /机制速查/, '成就列表前的机制速查');
   });
+
+  // 2026-08-11 实际生成出来的:Wrap House Simulator 四个"玩满 7 天"成就下面
+  // 各挂了 `第1天`…`第7天`,一共 28 个子框。旧提示词只拦"互斥选项"(任一结局那种),
+  // 而这一批**每一条都要做**,合法地穿过了那道门。真正的问题是它们一条信息都不带,
+  // 而且其中一个父成就已解锁 —— cascade 会把 7 个空框勾成 7 条假记录。
+  test('提示词要拦住无意义的子 checkbox,不只拦互斥选项', () => {
+    const p = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    assert.match(p, /子 checkbox 默认不写/, '默认不嵌套 —— 嵌套要给理由,不是反过来');
+    assert.match(p, /序号不是身份/, '`第1天`/`第2天` 这种序号不构成子步骤');
+    assert.match(p, /游戏自己不替你数/, '游戏里已有计数器的(7 天、100 只)不该拆成子框');
+    assert.match(p, /互相替代/, '互斥选项那条老规则不能在改写中丢掉');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -515,11 +527,42 @@ describe('Dashboard 上的「生成」按钮', () => {
     // 而处理器是挂在 document 上的委托 —— stopPropagation 正好把它挡死。
     // 表现是"点了什么都没发生",**控制台里一个错都没有**,最难查的那种
     assert.match(html, /onclick="event\.stopPropagation\(\);window\.genGuide\(this\)"/);
-    assert.match(html, /window\.genGuide = function/);
+    assert.match(html, /window\.genGuide = async function/);
     assert.doesNotMatch(
       html,
       /document\.addEventListener\('click'[\s\S]{0,120}data-gen/,
       '别再改回事件委托 —— stopPropagation 会让它收不到'
     );
+  });
+
+  // 踩过(2026-08-11,打包版):原生 confirm 弹出来立刻就消失,人来不及点确定,
+  // 于是"从 Dashboard 生成攻略"在打包版上整条路是断的 —— 而同一份页面在浏览器里
+  // 完全正常,所以浏览器里怎么点都复现不出来。原生对话框归 Electron 主进程管,
+  // 页面夺不回来;页面内的框没有这个问题,两边行为也一致
+  test('确认框不能用原生 confirm/alert —— 打包版里它们会自己消失', () => {
+    // 先把注释削掉再查。**注释里提到这些名字是应该的** —— 那几段注释写的正是
+    // "为什么不许用原生的",拿它们判定"你还在用",等于禁止解释自己的决定。
+    // (这条测试第一次跑就是被自己的说明注释绊倒的)
+    const code = html
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/^\s*(\*|\/\/).*$/gm, '');
+
+    assert.doesNotMatch(code, /window\.confirm\s*\(/, 'window.confirm 在 Electron 里点不到,改用 askConfirm()');
+    assert.doesNotMatch(code, /(?<![.\w])alert\s*\(/, 'alert 换成 askConfirm({notifyOnly:true})');
+    assert.doesNotMatch(code, /(?<![.\w])confirm\s*\(/, '裸 confirm( 也不行');
+    assert.match(html, /function askConfirm\(o\)/, '通用确认框本体');
+    assert.match(html, /id="askModal"/, '页面里得真有那个框,不能只有函数');
+  });
+
+  test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
+    // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
+    // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默
+    for (const m of html.matchAll(/(?<!await\s)askConfirm\(\{/g)) {
+      const before = html.slice(Math.max(0, m.index - 400), m.index);
+      assert.ok(
+        /await\s*$/.test(before) || /notifyOnly/.test(html.slice(m.index, m.index + 240)),
+        `askConfirm 的返回值没有被 await(位置 ${m.index}) —— 除非是 notifyOnly 的纯提示`
+      );
+    }
   });
 });

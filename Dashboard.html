@@ -556,6 +556,23 @@
     </div>
   </div>
 
+  <!--
+    通用确认框。**替代 window.confirm()**,不是为了好看 —— 打包版(Electron)里原生
+    confirm 弹出来会立刻消失,人根本来不及点确定,而浏览器里一切正常。原生对话框归
+    Electron 主进程管,渲染进程说了不算;页面内的框谁都夺不走。
+    顺带还解决了原生 confirm 的两个老问题:排版只能靠 \n,以及没法把危险动作标红。
+  -->
+  <div class="modal-overlay" id="askModal">
+    <div class="modal-box" style="max-width:520px;">
+      <div class="game-name" id="askTitle"></div>
+      <div id="askBody" style="font-size:13px; color:var(--text-dim); text-align:left; white-space:pre-wrap; margin:12px 0 20px;"></div>
+      <div class="modal-btns">
+        <button class="add-game-btn" id="askOkBtn">确认</button>
+        <button class="add-game-btn" id="askCancelBtn" style="background:var(--panel-alt); color:var(--text-dim);">取消</button>
+      </div>
+    </div>
+  </div>
+
   <table id="gameTable">
     <thead>
       <tr>
@@ -907,18 +924,24 @@
       });
 
       body.querySelectorAll('[data-delete-appid]').forEach(function(btn) {
-        btn.addEventListener('click', function(e) {
+        btn.addEventListener('click', async function(e) {
           e.stopPropagation();
           const appid = btn.dataset.deleteAppid;
           const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
           if (!game) return;
-          if (!confirm('确定要删除《' + game.name + '》吗?这会从本地数据库里彻底删掉这一行,无法撤销。')) return;
+          const ok = await askConfirm({
+            title: '删除《' + game.name + '》?',
+            body: '这会从本地数据库里彻底删掉这一行,无法撤销。',
+            okText: '删除',
+            danger: true,
+          });
+          if (!ok) return;
 
           btn.disabled = true;
           rpc.withSuccessHandler(function(result) {
             if (result && result.error) {
               btn.disabled = false;
-              alert(result.error);
+              askConfirm({ title: '删除失败', body: result.error, okText: '知道了', notifyOnly: true });
               return;
             }
             allGames = allGames.filter(function(g){ return String(g.appid) !== String(appid); });
@@ -927,7 +950,7 @@
             render();
           }).withFailureHandler(function(err) {
             btn.disabled = false;
-            alert('删除失败: ' + err.message);
+            askConfirm({ title: '删除失败', body: String(err && err.message || err), okText: '知道了', notifyOnly: true });
           }).deleteGame(appid);
         });
       });
@@ -1130,6 +1153,56 @@
       document.getElementById('addConfirmModal').classList.remove('show');
     });
 
+    /**
+     * 页面内的确认框,回一个 Promise<boolean>。**所有确认都走这里,不要再用 window.confirm。**
+     *
+     * 原因是打包版:Electron 里原生 confirm 弹出后会立刻消失,用户点不到确定,
+     * 而同一份页面在浏览器里完全正常 —— 于是"从 Dashboard 生成攻略"这条路在打包版上
+     * 是断的,还断得毫无提示。原生对话框的生命周期归主进程管,页面夺不回来;
+     * 页面内的框没有这个问题,而且浏览器和打包版行为完全一致。
+     *
+     * `notifyOnly` 时只有一个按钮,用来替掉 `alert()` —— 原生 alert 在打包版里
+     * 和原生 confirm 是同一个毛病,只是后果轻些(错误提示看不见,而不是动作做不了)
+     *
+     * @param {{title: string, body: string, okText?: string, danger?: boolean, notifyOnly?: boolean}} o
+     */
+    function askConfirm(o) {
+      return new Promise(function (resolve) {
+        const modal = document.getElementById('askModal');
+        const okBtn = document.getElementById('askOkBtn');
+        const cancelBtn = document.getElementById('askCancelBtn');
+        document.getElementById('askTitle').textContent = o.title;
+        document.getElementById('askBody').textContent = o.body || '';
+        okBtn.textContent = o.okText || '确认';
+        okBtn.style.background = o.danger ? '#a33' : '';
+        cancelBtn.style.display = o.notifyOnly ? 'none' : '';
+
+        function close(answer) {
+          modal.classList.remove('show');
+          okBtn.removeEventListener('click', onOk);
+          cancelBtn.removeEventListener('click', onCancel);
+          modal.removeEventListener('click', onOutside);
+          document.removeEventListener('keydown', onKey);
+          resolve(answer);
+        }
+        function onOk() { close(true); }
+        function onCancel() { close(false); }
+        // 点框外和按 Esc 都算取消 —— 和原生 confirm 的习惯一致,别让人找不到出口
+        function onOutside(e) { if (e.target === modal) close(false); }
+        function onKey(e) {
+          if (e.key === 'Escape') close(false);
+          else if (e.key === 'Enter') close(true);
+        }
+
+        okBtn.addEventListener('click', onOk);
+        cancelBtn.addEventListener('click', onCancel);
+        modal.addEventListener('click', onOutside);
+        document.addEventListener('keydown', onKey);
+        modal.classList.add('show');
+        okBtn.focus();
+      });
+    }
+
     // Click outside modal to dismiss
     document.getElementById('addConfirmModal').addEventListener('click', function(e) {
       if (e.target === this) this.classList.remove('show');
@@ -1236,16 +1309,15 @@
       btn.disabled = true;
       showGen('⏳ 正在检查《' + name + '》的攻略…');
       rpc
-        .withSuccessHandler(function (p) {
+        .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             btn.disabled = false;
             return showGen('⚠️ ' + ((p && p.error) || '预览失败'), true);
           }
           const lines = [
-            '把《' + p.game + '》的本地攻略搬到 Notion?',
-            '',
             '· ' + p.todos + ' 个 checkbox,其中 ' + p.checked + ' 个已勾选(勾选状态会原样带过去)',
             p.existingPage ? '· 写进 Notion 上已有的那个空页面' : '· 在 Notion 攻略库里新建一页',
+            '· 页面会带上这个游戏的 Steam 图标',
             '· 搬完逐条核对,对不上就不动本地文件',
             '· 核对通过后本地文件挪进 guides/.migrated/,不会删',
           ];
@@ -1253,7 +1325,12 @@
             lines.push('', '⚠️ 有 ' + p.unconverted.length + ' 行 Notion 放不下原来的排版,会变成普通段落(文字不丢):');
             p.unconverted.slice(0, 5).forEach(function (l) { lines.push('    ' + l); });
           }
-          if (!window.confirm(lines.join('\n'))) {
+          const goMigrate = await askConfirm({
+            title: '把《' + p.game + '》的本地攻略搬到 Notion?',
+            body: lines.join('\n'),
+            okText: '搬过去',
+          });
+          if (!goMigrate) {
             btn.disabled = false;
             genBar.style.display = 'none';
             return;
@@ -1289,17 +1366,19 @@
     // (行本身也可点,不拦住就会同时展开成就详情),而 stopPropagation 会让挂在
     // document 上的委托永远收不到这次点击 —— 表现就是"点了什么都没发生",
     // 而且控制台里一个错都没有。踩过一次
-    window.genGuide = function (btn) {
+    window.genGuide = async function (btn) {
       const appid = btn.getAttribute('data-gen');
       const name = btn.getAttribute('data-name') || appid;
-      const ok = window.confirm([
-        '要为《' + name + '》生成一份攻略吗?',
-        '',
-        '· 会调用 AI 联网查资料并撰写,这一步会花钱',
-        '· 通常要两到四分钟,期间可以继续用这个页面',
-        '· 机器只保证格式和数据:每个成就一行、名字对得上、勾选等于你的真实解锁状态',
-        '· 攻略内容对不对没有任何东西能验,生成完请自己读一遍',
-      ].join('\n'));
+      const ok = await askConfirm({
+        title: '要为《' + name + '》生成一份攻略吗?',
+        body: [
+          '· 会调用 AI 联网查资料并撰写,这一步会花钱',
+          '· 通常要两到四分钟,期间可以继续用这个页面',
+          '· 机器只保证格式和数据:每个成就一行、名字对得上、勾选等于你的真实解锁状态',
+          '· 攻略内容对不对没有任何东西能验,生成完请自己读一遍',
+        ].join('\n'),
+        okText: '开始生成',
+      });
       if (!ok) return;
       btn.disabled = true;
       rpc

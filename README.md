@@ -85,7 +85,9 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
 | `ai-check` | Checks the AI provider and that its web search really works | AI provider |
 | `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
+| `guide-gen <appid> --overwrite` | Regenerates over an existing guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |
 | `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, checking it arrived intact | Notion |
+| `drafts` | Lists what's piled up in `guides/.drafts/`; `--clean` removes it | — |
 
 `node tracker.js help` lists the rest.
 

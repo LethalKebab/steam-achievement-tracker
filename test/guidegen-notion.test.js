@@ -82,6 +82,7 @@ function fakeNotion(opts = {}) {
   return {
     written: [],
     created: [],
+    iconSets: [],
     pages,
     async fetchGuideDbSchema() {
       return {
@@ -100,6 +101,9 @@ function fakeNotion(opts = {}) {
       const page = { id: 'new-page', url: 'https://notion.so/new-page' };
       this.pages.push({ ...page, title: args.title, status: args.status?.value ?? null });
       return page;
+    },
+    async setPageIcon(pageId, url) {
+      this.iconSets.push({ pageId, url });
     },
     async appendBlocks(pageId, blocks) {
       this.written.push(...blocks);
@@ -240,7 +244,7 @@ describe('landToNotion —— 写进去,然后回读验一遍', () => {
     assert.equal(getGuide(db, '1').kind, 'notion');
   });
 
-  test('用已有的空页时不建新页,也不去动它的标题/图标/状态', async () => {
+  test('用已有的空页时不建新页,也不去动它的标题和状态', async () => {
     const { db, config, draftPath } = freshEnv();
     const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏' }] });
     notion.extractAppIdFromPageContent = async () => '1';
@@ -252,6 +256,46 @@ describe('landToNotion —— 写进去,然后回读验一遍', () => {
     assert.equal(notion.created.length, 0, '那一页是用户建的,不该再建一个');
     assert.equal(r.url, 'u1');
     assert.ok(notion.written.length > 0);
+  });
+
+  // 图标是「接管的页面一个字都不动」这条规矩里唯一的例外,而且只补空着的那一格:
+  // 没有图标不是"用户选了不要图标",是那一格还没人填过。填空不是覆盖。
+  test('接管的空页原本没有图标 → 补上', async () => {
+    const { db, config, draftPath } = freshEnv();
+    const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: null }] });
+    notion.extractAppIdFromPageContent = async () => '1';
+
+    await land(db, config, draftPath, notion, {
+      existingPage: { id: 'p1', url: 'u1', title: '测试游戏', icon: null },
+    });
+
+    assert.equal(notion.iconSets.length, 1);
+    assert.equal(notion.iconSets[0].pageId, 'p1');
+    assert.match(notion.iconSets[0].url, /deadbeef\.jpg$/);
+  });
+
+  test('接管的空页已经有图标 → 一个字都不动', async () => {
+    const { db, config, draftPath } = freshEnv();
+    const page = { id: 'p1', url: 'u1', title: '测试游戏', icon: { type: 'emoji', emoji: '🌯' } };
+    const notion = fakeNotion({ pages: [page] });
+    notion.extractAppIdFromPageContent = async () => '1';
+
+    await land(db, config, draftPath, notion, { existingPage: page });
+
+    assert.deepEqual(notion.iconSets, [], '用户自己挑的图标不是我们该"顺手改一下"的东西');
+  });
+
+  test('补图标失败不影响落地 —— 正文才是本体', async () => {
+    const { db, config, draftPath } = freshEnv();
+    const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: null }] });
+    notion.extractAppIdFromPageContent = async () => '1';
+    notion.setPageIcon = async () => { throw new Error('Notion 挂了'); };
+
+    const r = await land(db, config, draftPath, notion, {
+      existingPage: { id: 'p1', url: 'u1', title: '测试游戏', icon: null },
+    });
+
+    assert.equal(r.url, 'u1', '攻略正文已经写进去了,不能因为一个图标把它报成失败');
   });
 
   test('# 标题不进正文(标题在属性里),appid 行进正文(发现逻辑要读它)', async () => {

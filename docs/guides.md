@@ -73,6 +73,32 @@ node tracker.js ai-check              # confirms search actually works
 node tracker.js guide-gen <appid>     # asks before it starts spending
 ```
 
+If a guide is already registered for that appid, `guide-gen` refuses — regenerating over
+one is a separate, explicit action:
+
+```bash
+node tracker.js guide-gen <appid> --overwrite
+```
+
+That backs the old guide up first (a local `.md` is copied, a Notion page is dumped as raw
+block JSON, both into `guides/.backups/`) and shows you what you are about to replace
+**before** it spends anything: how big the current guide is, how many achievements it
+covers, and which boxes you ticked by hand will not survive. Achievement checkboxes are
+re-ticked from your Steam data automatically, so their state comes back exactly; boxes for
+sub-steps match no achievement, so those come back unticked. If the backup fails, nothing
+is written. Add `--dry-run` to see all of that and stop there.
+
+A guide that fails validation three times is left in `guides/.drafts/` rather than thrown away —
+you paid for it, and *which* checks failed is itself information. Nothing scans that directory, so
+leftovers are harmless, but they do accumulate. To see and clear them:
+
+```bash
+node tracker.js drafts               # list only, never deletes
+node tracker.js drafts --clean       # delete them
+```
+
+`--older-than N` limits `--clean` to drafts older than N days, so today's failure survives a sweep.
+
 Three providers work, and all three do server-side web search, so guide quality doesn't depend on which you pick:
 
 | | |
