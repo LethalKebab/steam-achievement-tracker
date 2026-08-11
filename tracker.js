@@ -254,24 +254,30 @@ async function cmdInitNotion() {
   }
 }
 
-/** 供应商选项。顺序就是推荐顺序,第一个是默认 */
+/**
+ * 供应商选项。第一个是默认。
+ *
+ * **note 里只写可核实的事:有没有联网搜索、key 在哪申请。** 不写贵不贵、好不好、
+ * 推不推荐 —— 单价随时会变、质量我们没有可比的测量,写出来就是我们的臆断,
+ * 而用户会当成事实照着选。
+ */
 const AI_PROVIDERS = [
   {
     key: 'deepseek',
     label: 'DeepSeek',
-    note: '有联网搜索,便宜。key 在 https://platform.deepseek.com/api_keys',
+    note: '有联网搜索。key 在 https://platform.deepseek.com/api_keys',
     env: 'DEEPSEEK_API_KEY',
   },
   {
     key: 'anthropic',
     label: 'Anthropic (Claude)',
-    note: '有联网搜索,质量最好也最贵。key 在 https://platform.claude.com/settings/keys',
+    note: '有联网搜索。key 在 https://platform.claude.com/settings/keys',
     env: 'ANTHROPIC_API_KEY',
   },
   {
     key: 'gemini',
     label: 'Google Gemini',
-    note: '有免费额度,但实测免费层常常拿不到能用的模型。https://aistudio.google.com/apikey',
+    note: '有联网搜索。key 在 https://aistudio.google.com/apikey',
     env: 'GEMINI_API_KEY',
   },
 ];

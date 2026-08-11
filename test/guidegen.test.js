@@ -620,6 +620,22 @@ describe('Dashboard 上的「生成」按钮', () => {
     assert.match(html, /内容需要你自己过一遍/, '攻略写完之后仍要如实说内容未经验证');
   });
 
+  // **第二次了**(第一次是设置页,commit 4d66ce9,标题就写着「去掉对供应商的评价」)。
+  // 那次只改了设置页,没搜别处,于是 README、docs、CLI 的选择器里全留着。
+  // 单价随时变、质量我们没有可比的测量 —— 写出来就是臆断,而用户会当事实照着选。
+  // 只写可核实的:有没有联网搜索、key 在哪申请。
+  test('任何面向用户的地方都不写对供应商的评价', () => {
+    const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*(\*|\/\/).*$/gm, '');
+    const JUDGEMENT = /cheapest|priciest|most expensive|best quality|最便宜|最贵|质量最好|有免费额度/i;
+    const surfaces = ['../README.md', '../docs/guides.md', '../docs/configuration.md',
+      '../tracker.js', '../lib/config.js', '../lib/ai.js', '../Setup.html', '../Dashboard.html'];
+    for (const rel of surfaces) {
+      const text = strip(readFileSync(new URL(rel, import.meta.url), 'utf8'));
+      const hit = text.match(JUDGEMENT);
+      assert.equal(hit, null, `${rel} 里还有对供应商的评价:「${hit && hit[0]}」`);
+    }
+  });
+
   test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
     // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
     // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默

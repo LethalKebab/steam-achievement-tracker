@@ -103,13 +103,15 @@ node tracker.js drafts --clean       # delete them
 
 `--older-than N` limits `--clean` to drafts older than N days, so today's failure survives a sweep.
 
-Three providers work, and all three do server-side web search, so guide quality doesn't depend on which you pick:
+Three providers work. All three do server-side web search, which is what the research step needs.
 
-| | |
+| `ai.provider` | Where the key comes from |
 |---|---|
-| `deepseek` | Cheapest. What this was developed against. |
-| `anthropic` | Best quality, most expensive. |
-| `gemini` | Has a free tier, though in practice the free tier often has no quota for the models you'd want — `ai-check --models` will tell you what your key can actually use. |
+| `deepseek` | [platform.deepseek.com/api_keys](https://platform.deepseek.com/api_keys) |
+| `anthropic` | [platform.claude.com/settings/keys](https://platform.claude.com/settings/keys) |
+| `gemini` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
+
+Pricing and rate limits are the vendors' to state and change, so they aren't reproduced here. `ai-check --models` asks your key which models it can actually use, and `ai-check` confirms search is working before you spend a run on it.
 
 `--dry-run` shows you the assembled prompt and where the guide would land without sending anything.
 
