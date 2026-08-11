@@ -88,6 +88,17 @@ re-ticked from your Steam data automatically, so their state comes back exactly;
 sub-steps match no achievement, so those come back unticked. If the backup fails, nothing
 is written. Add `--dry-run` to see all of that and stop there.
 
+A guide that fails validation three times is left in `guides/.drafts/` rather than thrown away —
+you paid for it, and *which* checks failed is itself information. Nothing scans that directory, so
+leftovers are harmless, but they do accumulate. To see and clear them:
+
+```bash
+node tracker.js drafts               # list only, never deletes
+node tracker.js drafts --clean       # delete them
+```
+
+`--older-than N` limits `--clean` to drafts older than N days, so today's failure survives a sweep.
+
 Three providers work, and all three do server-side web search, so guide quality doesn't depend on which you pick:
 
 | | |

@@ -377,3 +377,48 @@ describe('新页的状态按真实进度算', () => {
     }
   });
 });
+
+/**
+ * 互斥标注(`<span underline="true">…</span>`)转成 Notion 的下划线注解之后,
+ * **回读的文字里不再有标签** —— 而文件里有。保真校验要是不知道这件事,
+ * 每一份带互斥标注的攻略都会在"回读对不上"这一步失败,而且失败得毫无道理:
+ * 内容一个字没变,只是标记搬去了 annotations。`**` 早就是这么处理的。
+ */
+describe('互斥标注不该把保真校验搞崩', () => {
+  const WITH_SPAN = [
+    'appid: 1',
+    '',
+    '- [x] **第一步**<br>完成第一关。<br>选了这个。<span underline="true">如果选另一个则无法获得本成就。</span>',
+    '- [ ] **第二步**<br>完成第二关。<br>接着打',
+    '',
+  ].join('\n');
+
+  test('归一化之后,文件里的标签和 Notion 读回来的纯文字相等', () => {
+    assert.equal(
+      normalizeForCompare('心得。<span underline="true">互斥警告。</span>'),
+      normalizeForCompare('心得。互斥警告。')
+    );
+  });
+
+  test('带互斥标注的攻略搬得过去,而且逐条核对通过', async () => {
+    const { db, config } = freshEnv({ text: WITH_SPAN });
+    const notion = fakeNotion();
+    const r = await run(db, config, notion);
+    assert.equal(r.count, 2);
+    assert.equal(getGuide(db, '1').kind, 'notion');
+  });
+
+  test('搬过去的那一条真的带了下划线注解,不是把标签当文字写进去', async () => {
+    const { db, config } = freshEnv({ text: WITH_SPAN });
+    const notion = fakeNotion();
+    await run(db, config, notion);
+    const runs = notion.written.flatMap((b) => b[b.type].rich_text ?? []);
+    const underlined = runs.filter((x) => x.annotations?.underline);
+    assert.equal(underlined.length, 1);
+    assert.equal(underlined[0].text.content, '如果选另一个则无法获得本成就。');
+    assert.ok(
+      !runs.some((x) => x.text.content.includes('<span')),
+      '标签不能作为字面文字写进 Notion —— 那正是这次要修的东西'
+    );
+  });
+});

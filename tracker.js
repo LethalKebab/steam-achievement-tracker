@@ -21,7 +21,7 @@
  *   node tracker.js log [n]         看最近的同步日志
  */
 import { createInterface } from 'node:readline/promises';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { stdin, stdout } from 'node:process';
 import { Writable } from 'node:stream';
@@ -38,7 +38,7 @@ import { NotionClient } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
-import { generateGuide, planGuide, buildSystemPrompt } from './lib/guidegen.js';
+import { generateGuide, planGuide, buildSystemPrompt, DRAFTS_DIR } from './lib/guidegen.js';
 import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
 import {
   BACKUPS_DIR, overwritePreflight, formatPreflight, diffGuides, formatDiff,
@@ -1027,6 +1027,52 @@ async function cmdGuideToNotion() {
   );
 }
 
+/**
+ * `drafts`:看看 `guides/.drafts/` 里堆了什么,`--clean` 清掉。
+ *
+ * 草稿目录是**故意**会留东西的:三轮没过的攻略留在这儿,因为"丢弃等于烧掉钱和时间
+ * 还什么都不留",而且"哪条没过"本身有信息量。但留下的东西没人清就会一直堆着 ——
+ * 实测堆了三份几个月前做 A/B 对比用的文件,早就没人记得是干嘛的了。
+ *
+ * **默认只列不删。** 这个目录里躺的是花钱生成出来的东西,删要说出口。
+ * `--older-than N` 只动 N 天前的,今天刚失败的那份不会被顺手带走。
+ */
+function cmdDrafts() {
+  const config = loadConfig({ required: [] });
+  const dir = join(config.guidesDir, DRAFTS_DIR);
+  if (!existsSync(dir)) return console.log('草稿目录还不存在,没什么可清的。');
+
+  const days = Number(flagValue('older-than') ?? 0);
+  const cutoff = Date.now() - days * 86400_000;
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .map((f) => {
+      const path = join(dir, f);
+      const { mtime, size } = statSync(path);
+      return { f, path, mtime, size, ageDays: Math.floor((Date.now() - mtime.getTime()) / 86400_000) };
+    })
+    .sort((a, b) => a.mtime - b.mtime);
+
+  if (!files.length) return console.log('草稿目录是空的。');
+
+  const doomed = files.filter((x) => x.mtime.getTime() < cutoff);
+  console.log(`\n${join(config.guidesDir, DRAFTS_DIR)}:${files.length} 份草稿\n`);
+  for (const x of files) {
+    const mark = flags.has('--clean') && doomed.includes(x) ? '删' : '  ';
+    console.log(`  ${mark} ${String(x.ageDays).padStart(4)} 天前  ${String(x.size).padStart(7)} B  ${x.f}`);
+  }
+
+  if (!flags.has('--clean')) {
+    console.log('\n草稿不会被攻略发现逻辑扫到,留着不影响任何东西 —— 只是会一直堆着。');
+    console.log('要清:node tracker.js drafts --clean [--older-than N]');
+    return;
+  }
+  if (!doomed.length) return console.log(`\n没有超过 ${days} 天的草稿,什么都没删。`);
+
+  for (const x of doomed) rmSync(x.path, { force: true });
+  console.log(`\n✅ 删了 ${doomed.length} 份,还剩 ${files.length - doomed.length} 份。`);
+}
+
 function cmdImport() {
   const dir = positional[0];
   if (!dir) throw new Error('用法:node tracker.js import <放 CSV 的目录>');
@@ -1094,6 +1140,8 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       重写已有的那份攻略(先备份原文,再告诉你会失去什么)
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
+  node tracker.js drafts                  列出 guides/.drafts/ 里堆的草稿(只列不删)
+              drafts --clean              清掉;--older-than N 只清 N 天前的
   node tracker.js log [n]                 最近 n 条同步日志
 
 配置:${CONFIG_PATH}(gitignore 里,别提交)
@@ -1115,6 +1163,7 @@ const COMMANDS = {
   'ai-check': cmdAiCheck,
   'guide-gen': cmdGuideGen,
   'guide-to-notion': cmdGuideToNotion,
+  drafts: cmdDrafts,
   audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,
