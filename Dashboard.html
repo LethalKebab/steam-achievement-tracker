@@ -430,17 +430,52 @@
       border-color: var(--good);
     }
     .guide-btn.can-gen:disabled { opacity: 0.4; cursor: default; }
+    /*
+      悬浮,不跟着页面滚走。一次生成要两到四分钟,而这段时间里人多半在往下翻表格 ——
+      进度条钉在文档流最上面等于"想看就得先滚回去"。
+
+      **靠左下角,因为右下角被 lib/rpc.js 的同步状态条占了**(那边写死
+      right:16px / bottom:16px / z-index:9999)。两个浮层各占一角,谁也不压谁;
+      z-index 比它低一档,万一真挤到一起也是同步状态条在上面。
+    */
     #gen-bar {
       display: none;
-      margin: 0 0 10px;
-      padding: 8px 12px;
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      z-index: 9990;
+      max-width: min(420px, calc(100vw - 32px));
+      max-height: 60vh;
+      overflow-y: auto;
+      /* 右边留出关闭按钮的位置 */
+      padding: 10px 30px 10px 12px;
       border: 1px solid var(--good);
-      border-radius: 4px;
+      border-radius: 6px;
+      /* 浮起来就必须有不透明背景,否则和下面的表格文字叠在一起没法读 */
+      background: var(--panel);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
       font-size: 12px;
       line-height: 1.6;
       color: var(--text);
     }
     #gen-bar .warn { color: var(--text-dim); }
+    #gen-bar .gen-close {
+      position: absolute;
+      top: 3px;
+      right: 6px;
+      background: none;
+      border: none;
+      padding: 2px 4px;
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 15px;
+      line-height: 1;
+    }
+    #gen-bar .gen-close:hover { color: var(--text); }
+    /* 窄屏上两个角会挤到一起,改成横跨一行并让开下面的同步状态条 */
+    @media (max-width: 720px) {
+      #gen-bar { left: 12px; right: 12px; bottom: 76px; max-width: none; }
+    }
     .ach-guide-link {
       font-size: 11px;
       color: var(--accent);
@@ -484,7 +519,10 @@
     <span class="sync-msg" id="syncMsg"></span>
   </div>
 
-  <div id="gen-bar" role="status"></div>
+  <div id="gen-bar" role="status">
+    <button type="button" class="gen-close" id="genClose" title="收起">×</button>
+    <span id="gen-msg"></span>
+  </div>
 
   <div class="cards">
     <div class="card">
@@ -1286,6 +1324,16 @@
     // 这是页面上**唯一一个会花钱的按钮**,所以点下去之前必须先问一次,而且要把
     // "会发生什么、机器验不了什么"说清楚 —— 用户看不到 CLI 那些提示。
     const genBar = document.getElementById('gen-bar');
+    const genMsg = document.getElementById('gen-msg');
+    // 关掉 = "这一轮不想看了"。轮询每 3 秒还会再调一次 showGen,不把这个意图记下来的话,
+    // 关掉三秒之后它自己又回来了。下一次**主动**发起生成/搬运时才重新打开 ——
+    // 那时候是用户自己要看进度的
+    let genDismissed = false;
+    document.getElementById('genClose').addEventListener('click', function () {
+      genDismissed = true;
+      genBar.style.display = 'none';
+    });
+
     let aiReady = false;
     let notionReady = false;
 
@@ -1306,6 +1354,7 @@
     window.migrateGuide = function (btn) {
       const appid = btn.getAttribute('data-migrate');
       const name = btn.getAttribute('data-name') || appid;
+      genDismissed = false; // 自己点的搬运,进度条要露出来
       btn.disabled = true;
       showGen('⏳ 正在检查《' + name + '》的攻略…');
       rpc
@@ -1380,6 +1429,7 @@
         okText: '开始生成',
       });
       if (!ok) return;
+      genDismissed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;
       rpc
         .withSuccessHandler(function (r) {
@@ -1399,8 +1449,11 @@
     };
 
     function showGen(html, dim) {
+      if (genDismissed) return;
       genBar.style.display = 'block';
-      genBar.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
+      // 写进内层 span,不要覆盖 genBar 本身 —— 关闭按钮是它的兄弟节点,
+      // 覆盖 innerHTML 会把按钮一起冲掉
+      genMsg.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
     }
 
     // 只在有任务在跑的时候轮询 —— 平时不给这个本地服务加一份常驻请求。
