@@ -1286,8 +1286,16 @@
             : r.searchQueries && r.searchQueries.length
               ? '<br><span class="warn">🔎 实际发出 ' + r.searchQueries.length + ' 次搜索。</span>'
               : '<br><span class="warn">⚠️ 挂了联网工具但模型一次都没搜,内容等同于凭记忆写的。</span>';
+          // 只报 token,不报钱 —— 单价我们核实不过来,一个不知道错多少的金额
+          // 比不给金额更糟。token 是 API 回的硬数字
+          const spend = (r.tokens || 0) + ' token';
+          // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
+          const where = r.target === 'notion'
+            ? '已写进 Notion:<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开页面</a>'
+            : '已写到本地:' + escapeHtml(r.path || '');
           showGen(
-            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就)' +
+            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就,' + spend + ')' +
+              '<br>' + where +
               research +
               '<br><span class="warn">机器只验了格式和数据,<strong>内容对不对请自己读一遍</strong>。</span>'
           );

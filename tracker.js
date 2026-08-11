@@ -804,16 +804,18 @@ async function cmdAiCheck() {
  */
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
-  if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes]');
+  if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local]');
   const dryRun = flags.has('--dry-run');
 
   const config = applyAiFlags(loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] }));
   const db = openDb(config.dbPath);
   const steam = new SteamClient(config, { log: () => {} });
+  const notion = new NotionClient(config);
+  const local = flags.has('--local');
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
-  const plan = await planGuide(db, { config, steam, appid, fileName });
+  const plan = await planGuide(db, { config, steam, appid, fileName, notion, local });
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
   console.log(`  成就 ${plan.defs.length} 个,其中已解锁 ${plan.unlocked.size} 个(用来机械打勾,不会喂给模型)`);
@@ -828,7 +830,15 @@ async function cmdGuideGen() {
   // config 里是空的,真正用的是这一家的默认值
   console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
   warnEnvOverrides();
-  console.log(`  落盘到 ${plan.finalPath}`);
+  if (plan.target === 'notion') {
+    console.log(
+      plan.notion.existingPage
+        ? `  写进 Notion 已有的空页:${plan.notion.existingPage.url}`
+        : '  在 Notion 攻略库里新建一页(要写本地文件就加 --local)'
+    );
+  } else {
+    console.log(`  落盘到 ${plan.finalPath}`);
+  }
 
   if (probe.canSearch === false && !flags.has('--no-research')) {
     throw new Error(
@@ -864,13 +874,15 @@ async function cmdGuideGen() {
   const started = Date.now();
 
   const r = await generateGuide(db, {
-    config, provider, steam, appid, rounds, fileName,
+    config, provider, steam, appid, rounds, fileName, notion, local,
     onProgress(ev) {
       if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮:联网研究 + 撰写…`);
       else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
       else if (ev.phase === 'check') p.update(`  第 ${ev.round} 轮:机械打勾 + 校验…`);
       else if (ev.phase === 'lint') {
         p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
+      } else if (ev.phase === 'notion-create' || ev.phase === 'notion-fill') {
+        p.update(`  写进 Notion(${ev.blocks} 个块)…`);
       }
     },
   });
@@ -879,9 +891,14 @@ async function cmdGuideGen() {
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   console.log('\n' + '─'.repeat(70));
   if (r.ok) {
-    console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.path}`);
-    if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action}),Dashboard 上就能看到链接了`);
+    console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.url}`);
+    if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action ?? '新增'}),Dashboard 上就能看到链接了`);
     else console.log('  ⚠️  没被 guides 发现逻辑收进去,手动跑一次 `node tracker.js guides --local` 看看为什么');
+    // 转换器认不出来的行没丢,但排版降级成了普通段落。用户有权知道是哪几行
+    if (r.unconverted.length) {
+      console.log(`  ⚠️  ${r.unconverted.length} 行 Notion 放不下原来的排版,已经降级成普通段落(内容没丢):`);
+      for (const line of r.unconverted.slice(0, 5)) console.log(`       ${line}`);
+    }
   } else {
     console.log(`❌ ${r.rounds} 轮之后仍有 ${r.blocking.length} 条没过,草稿留在 ${r.draftPath}`);
     console.log('  (草稿目录不会被攻略发现逻辑扫到,不会被同步拿去勾框)');
