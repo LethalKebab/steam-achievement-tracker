@@ -308,7 +308,7 @@ async function cmdInitAi() {
     const verdict = checkResult(r);
     if (!verdict.ok) throw new Error(`验证没通过:${verdict.reason}`);
     console.log(`\r✅ 可用:${provider.name} / ${provider.model},回了「${r.text.trim().slice(0, 10)}」      `);
-    console.log(`   ${formatUsage(r.usage, provider.model)}`);
+    console.log(`   ${formatUsage(r.usage)}`);
 
     // model 留空就不写进 config,让代码里的默认值继续生效(那个会跟着版本更新)
     saveConfig({ ai: model.trim() ? ai : { provider: ai.provider, apiKey: ai.apiKey } });
@@ -698,7 +698,7 @@ function pickSmokeTarget(db, appid) {
 
 /**
  * `ai-check`:把 lib/ai.js 整条链路真跑一遍——组装请求 → 服务端搜索 → 抓页 →
- * pause_turn 续跑 → 用量和花费。
+ * pause_turn 续跑 → token 用量。
  *
  * 这是「动手顺序」第 3 步的验收命令,不是攻略生成本身:它只问一个成就,拿三句话回来。
  * 攻略怎么写是 guidegen(下一步)的事。**要花钱**,所以 `--dry` 只组装不发送,
@@ -784,7 +784,7 @@ async function cmdAiCheck() {
     `  stop_reason: ${r.stopReason}${r.rawStopReason && r.rawStopReason !== r.stopReason ? `(原值 ${r.rawStopReason})` : ''}` +
       ` · 续跑 ${r.continuations} 次 · 耗时 ${secs}s`
   );
-  console.log('  ' + formatUsage(session.usage, provider.model));
+  console.log('  ' + formatUsage(session.usage));
 
   // 这一行是这个命令最该看的:**声明了联网工具,模型到底搜没搜**。
   // 免费层带不带联网是文档上查不准的事,回包比定价页可靠
@@ -801,8 +801,11 @@ async function cmdAiCheck() {
  * `guide-gen <appid>`:让 AI 写一份本地 markdown 攻略。
  *
  * **会花钱**,所以默认要人工确认一次(`--yes` 跳过),`--dry-run` 则只打印会发出去的
- * 提示词和落盘计划、一个请求都不发。硬上限和实时花费是「动手顺序」第 5 步,还没做——
- * 现在只有跑完之后的事后账。
+ * 提示词和落盘计划、一个请求都不发。
+ *
+ * 这里一度有一套花费上限(每次 / 每天,token 和美元各一组)和一张模型单价表,
+ * 现在整套删了:单价我们核实不过来、搜索工具怎么计费也没实测,于是那些"上限"
+ * 建立在一个连我们自己都不信的金额上。跑完只报 token 数 —— 那是 API 回的硬数字。
  */
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
@@ -864,7 +867,7 @@ async function cmdGuideGen() {
   }
 
   if (!flags.has('--yes')) {
-    // 花钱的操作默认问一句。硬上限 + 实时花费是第 5 步,这里只是最低限度的闸门
+    // 花钱的操作默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)
     const io = makeSecretReader();
     const answer = await io.ask('\n这一步会调用 AI 并产生费用。继续?(y/N)');
     io.close();
@@ -914,7 +917,7 @@ async function cmdGuideGen() {
     console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
       `${r.lint.stats.warnings} 条 warn`);
   }
-  console.log('  ' + formatUsage(r.usage, r.model));
+  console.log('  ' + formatUsage(r.usage));
   console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
     '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
     '"易错过"是不是真的,都要你自己看一遍。');
@@ -1047,7 +1050,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
   node tracker.js guide-to-notion <appid> 把本地 markdown 攻略搬到 Notion(逐条核对后才动本地文件)
               guide-to-notion --dry-run   只预览转换结果,一个字节都不写
-  node tracker.js ai-check [appid]        AI 联网研究链路自检(用量和花费会打出来)
+  node tracker.js ai-check [appid]        AI 联网研究链路自检(token 用量会打出来)
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
               --provider X --model Y      临时换供应商/模型,不改 config.json

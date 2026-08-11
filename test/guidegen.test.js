@@ -22,7 +22,9 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openDb, insertGame, replaceAchievements, upsertGuide, allGuides } from '../lib/db.js';
+import {
+  openDb, insertGame, replaceAchievements, upsertGuide, allGuides,
+} from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
