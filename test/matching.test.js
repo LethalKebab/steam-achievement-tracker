@@ -9,7 +9,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -623,5 +623,38 @@ describe('撞名闸门按名字关,不按成就关', () => {
     const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
     assert.equal(m.length, 1);
     assert.equal(m[0].via, 'description', '第一遍先跑 —— 描述比名字精确');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 换行风格
+// ---------------------------------------------------------------------------
+
+describe('CRLF 的本地攻略必须照常工作', () => {
+
+  test('CRLF 文件读得出 checkbox —— 这是个静默失败,两个工具都不报错', () => {
+    // 踩过(2026-08-10):Windows 上的编辑器默认写 CRLF。原来是 split('\n'),
+    // 行尾剩一个 \r,而 JS 正则里 `.` **不匹配 \r**(它算行终止符),
+    // 于是 `(.*)$` 匹配不上,整份攻略读出 0 个 checkbox。
+    // 表现是 checkbox-sync 一个框都不勾、guide-lint 报"所有成就都缺 checkbox",
+    // **两边都不报错**,看起来就像攻略写错了
+    const dir = mkdtempSync(join(tmpdir(), 'crlf-'));
+    const p = join(dir, 'g.md');
+    writeFileSync(p, '# 游戏\r\n\r\nappid: 1\r\n\r\n- [ ] **第一步**<br>描述\r\n  - [ ] 子步骤\r\n');
+    const todos = loadTodos(p);
+    assert.equal(todos.length, 2);
+    assert.equal(todos[0].text, '**第一步**<br>描述');
+    assert.equal(todos[1].parent, todos[0].key, '缩进层级也要认得出来');
+  });
+
+  test('打勾之后保持原来的换行风格(不要把整个文件改成 LF)', () => {
+    // 顺手全文改成 LF 会让 git diff 变成"每一行都改了",真正的改动淹没在里面
+    const dir = mkdtempSync(join(tmpdir(), 'crlf-'));
+    const p = join(dir, 'g.md');
+    writeFileSync(p, '- [ ] **甲**\r\n- [ ] **乙**\r\n');
+    applyChecks(p, [0]);
+    const after = readFileSync(p, 'utf8');
+    assert.match(after, /^- \[x\] \*\*甲\*\*\r\n/, '该勾的勾上了');
+    assert.ok(!/[^\r]\n/.test(after), '不能混进裸 LF');
   });
 });
