@@ -136,18 +136,17 @@
     </details>
 
     <details id="ai-step">
-      <summary>⑤ AI 攻略生成(可选,会花钱)<span class="configured" id="ai-set" hidden>已配置</span></summary>
+      <summary>⑤ AI 攻略生成(可选)<span class="configured" id="ai-set" hidden>已配置</span></summary>
       <ol>
         <li>配好之后,Dashboard 上没有攻略的游戏会多出一个「✨ 生成」按钮,点了会联网查资料并写一份攻略</li>
-        <li><strong>这是整个工具里唯一会花钱的功能</strong>,其余部分都不需要它。点生成之前还会再问你一次</li>
         <li>机器只保证格式和数据(每个成就一行、名字对得上、勾选等于真实解锁),<strong>攻略内容对不对没有任何东西能验</strong>,生成完自己读一遍</li>
       </ol>
       <label for="ai-provider">供应商</label>
       <select id="ai-provider" name="ai-provider">
         <option value="">不启用</option>
-        <option value="deepseek">DeepSeek —— 最便宜,有联网搜索</option>
-        <option value="anthropic">Anthropic (Claude) —— 质量最好,最贵</option>
-        <option value="gemini">Google Gemini —— 有免费额度,但常常没有可用模型</option>
+        <option value="deepseek">DeepSeek</option>
+        <option value="anthropic">Anthropic (Claude)</option>
+        <option value="gemini">Google Gemini</option>
       </select>
       <label for="ai-key">API Key<span class="configured" id="ai-key-set" hidden>已配置,留空则不改</span></label>
       <input id="ai-key" name="ai-key" type="password" autocomplete="off" placeholder="sk-...">

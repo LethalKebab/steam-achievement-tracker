@@ -777,7 +777,7 @@
           ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">📖 攻略</a>'
           : canGen
             ? '<button class="' + guideBtnClass + ' can-gen" data-gen="' + g.appid + '" data-name="'
-              + escapeHtml(g.name) + '" onclick="event.stopPropagation()">✨ 生成</button>'
+              + escapeHtml(g.name) + '" onclick="event.stopPropagation();window.genGuide(this)">✨ 生成</button>'
             : '<span class="' + guideBtnClass + '">📖 攻略</span>';
         const gameCell = '<div class="game-cell">'
           + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '">' + starChar + '</button>'
@@ -1209,9 +1209,11 @@
       if (aiReady) loadDashboard();  // 重画一次,把「✨ 生成」按钮放出来
     })();
 
-    document.addEventListener('click', function (e) {
-      const btn = e.target.closest('button[data-gen]');
-      if (!btn) return;
+    // **按钮直接调这个,不走事件委托。** 按钮上带着 event.stopPropagation()
+    // (行本身也可点,不拦住就会同时展开成就详情),而 stopPropagation 会让挂在
+    // document 上的委托永远收不到这次点击 —— 表现就是"点了什么都没发生",
+    // 而且控制台里一个错都没有。踩过一次
+    window.genGuide = function (btn) {
       const appid = btn.getAttribute('data-gen');
       const name = btn.getAttribute('data-name') || appid;
       const ok = window.confirm([
@@ -1239,7 +1241,7 @@
           showGen('⚠️ ' + err, true);
         })
         .startGuideGen(appid);
-    });
+    };
 
     function showGen(html, dim) {
       genBar.style.display = 'block';
