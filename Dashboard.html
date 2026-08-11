@@ -413,6 +413,15 @@
       pointer-events: none;
     }
     /* 配了 AI 之后,没攻略的行变成"可以生成一份" */
+    .guide-btn.to-notion {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .guide-btn.to-notion:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
+    .guide-btn.to-notion:disabled { opacity: 0.4; cursor: default; }
     .guide-btn.can-gen {
       opacity: 1;
       cursor: pointer;
@@ -777,7 +786,7 @@
           ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">📖 攻略</a>'
           : canGen
             ? '<button class="' + guideBtnClass + ' can-gen" data-gen="' + g.appid + '" data-name="'
-              + escapeHtml(g.name) + '" onclick="event.stopPropagation()">✨ 生成</button>'
+              + escapeHtml(g.name) + '" onclick="event.stopPropagation();window.genGuide(this)">✨ 生成</button>'
             : '<span class="' + guideBtnClass + '">📖 攻略</span>';
         const gameCell = '<div class="game-cell">'
           + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '">' + starChar + '</button>'
@@ -785,6 +794,11 @@
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
           + guideBtn
+          + (g.guideKind === 'local' && notionReady
+              ? '<button class="guide-btn to-notion" data-migrate="' + g.appid + '" data-name="'
+                + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
+                + ' onclick="event.stopPropagation();window.migrateGuide(this)">⬆ Notion</button>'
+              : '')
           + '<button class="delete-btn" data-delete-appid="' + g.appid + '" title="删除这一行">🗑</button>'
           + '</div>';
 
@@ -1200,18 +1214,82 @@
     // "会发生什么、机器验不了什么"说清楚 —— 用户看不到 CLI 那些提示。
     const genBar = document.getElementById('gen-bar');
     let aiReady = false;
+    let notionReady = false;
 
     (async function loadAiState() {
       const s = await new Promise((resolve) => {
         rpc.withSuccessHandler(resolve).withFailureHandler(() => resolve({})).getSettings();
       });
       aiReady = Boolean(s && s.hasAiKey);
-      if (aiReady) loadDashboard();  // 重画一次,把「✨ 生成」按钮放出来
+      // 搬去 Notion 要两样都有:token(能写)和数据库 ID(知道写去哪)
+      notionReady = Boolean(s && s.hasNotionToken && s.notionDbId);
+      if (aiReady || notionReady) loadDashboard();  // 重画一次,把那两个按钮放出来
     })();
 
-    document.addEventListener('click', function (e) {
-      const btn = e.target.closest('button[data-gen]');
-      if (!btn) return;
+    /**
+     * 本地攻略 → Notion。**先预览再问**:转换可能把表格、折叠块降级成普通段落,
+     * 不把这件事摆在确认框里,用户就是在不知道会损失什么的情况下点的"确定"。
+     */
+    window.migrateGuide = function (btn) {
+      const appid = btn.getAttribute('data-migrate');
+      const name = btn.getAttribute('data-name') || appid;
+      btn.disabled = true;
+      showGen('⏳ 正在检查《' + name + '》的攻略…');
+      rpc
+        .withSuccessHandler(function (p) {
+          if (!p || p.error) {
+            btn.disabled = false;
+            return showGen('⚠️ ' + ((p && p.error) || '预览失败'), true);
+          }
+          const lines = [
+            '把《' + p.game + '》的本地攻略搬到 Notion?',
+            '',
+            '· ' + p.todos + ' 个 checkbox,其中 ' + p.checked + ' 个已勾选(勾选状态会原样带过去)',
+            p.existingPage ? '· 写进 Notion 上已有的那个空页面' : '· 在 Notion 攻略库里新建一页',
+            '· 搬完逐条核对,对不上就不动本地文件',
+            '· 核对通过后本地文件挪进 guides/.migrated/,不会删',
+          ];
+          if (p.unconverted && p.unconverted.length) {
+            lines.push('', '⚠️ 有 ' + p.unconverted.length + ' 行 Notion 放不下原来的排版,会变成普通段落(文字不丢):');
+            p.unconverted.slice(0, 5).forEach(function (l) { lines.push('    ' + l); });
+          }
+          if (!window.confirm(lines.join('\n'))) {
+            btn.disabled = false;
+            genBar.style.display = 'none';
+            return;
+          }
+          showGen('⏳ 正在搬《' + p.game + '》…');
+          rpc
+            .withSuccessHandler(function (r) {
+              if (!r || r.error) {
+                btn.disabled = false;
+                return showGen('⚠️ ' + ((r && r.error) || '搬运失败'), true);
+              }
+              showGen(
+                '✅ 《' + r.game + '》已搬到 Notion,' + r.count + ' 个 checkbox 逐条核对一致。' +
+                  '<a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开页面</a>' +
+                  (r.archivedTo ? '<br><span class="warn">本地文件已挪进 guides/.migrated/,没有删除。</span>' : '')
+              );
+              loadDashboard();
+            })
+            .withFailureHandler(function (err) {
+              btn.disabled = false;
+              showGen('⚠️ ' + err, true);
+            })
+            .migrateGuideToNotion(appid);
+        })
+        .withFailureHandler(function (err) {
+          btn.disabled = false;
+          showGen('⚠️ ' + err, true);
+        })
+        .previewGuideToNotion(appid);
+    };
+
+    // **按钮直接调这个,不走事件委托。** 按钮上带着 event.stopPropagation()
+    // (行本身也可点,不拦住就会同时展开成就详情),而 stopPropagation 会让挂在
+    // document 上的委托永远收不到这次点击 —— 表现就是"点了什么都没发生",
+    // 而且控制台里一个错都没有。踩过一次
+    window.genGuide = function (btn) {
       const appid = btn.getAttribute('data-gen');
       const name = btn.getAttribute('data-name') || appid;
       const ok = window.confirm([
@@ -1239,7 +1317,7 @@
           showGen('⚠️ ' + err, true);
         })
         .startGuideGen(appid);
-    });
+    };
 
     function showGen(html, dim) {
       genBar.style.display = 'block';
@@ -1284,8 +1362,16 @@
             : r.searchQueries && r.searchQueries.length
               ? '<br><span class="warn">🔎 实际发出 ' + r.searchQueries.length + ' 次搜索。</span>'
               : '<br><span class="warn">⚠️ 挂了联网工具但模型一次都没搜,内容等同于凭记忆写的。</span>';
+          // 只报 token,不报钱 —— 单价我们核实不过来,一个不知道错多少的金额
+          // 比不给金额更糟。token 是 API 回的硬数字
+          const spend = (r.tokens || 0) + ' token';
+          // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
+          const where = r.target === 'notion'
+            ? '已写进 Notion:<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开页面</a>'
+            : '已写到本地:' + escapeHtml(r.path || '');
           showGen(
-            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就)' +
+            '✅ 《' + s.game + '》攻略写完了(' + r.rounds + ' 轮,覆盖 ' + r.covered + '/' + r.total + ' 个成就,' + spend + ')' +
+              '<br>' + where +
               research +
               '<br><span class="warn">机器只验了格式和数据,<strong>内容对不对请自己读一遍</strong>。</span>'
           );

@@ -36,6 +36,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 100,   // refuse to generate above this — one context has to hold it
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
+
     "maxSearches": 8,         // web_search calls per request
     "maxFetches": 10,         // web_fetch calls per request
     "maxFetchTokens": 50000,  // how much of one page to pull back
@@ -106,9 +107,21 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 `fallbacks` lets Anthropic re-run a request on a different model when a safety classifier declines it. It costs one extra beta header, and if your account doesn't accept that header the whole request fails with a 400 — the error message says to set `"fallbacks": false`, which is the fix.
 
-Cost is reported after every run: model tokens are priced exactly, and the number of web searches is reported as a **count**, never folded into the dollar figure, because how search itself is billed hasn't been measured. A model with no price-table entry reports "no price table" rather than `$0.00`.
+Token usage is reported after every run — requests, input, output, and how many web searches the model actually issued. **No dollar figure.**
 
 **You don't normally write this block by hand — `node tracker.js init --ai` does it**, and verifies the key with a real request before saving.
+
+### There are no spend caps, and that's deliberate
+
+An earlier version had four: `maxTokensPerRun`, `maxSpendPerRunUsd`, `maxTokensPerDay`, `maxSpendPerDayUsd`, backed by a built-in price table and a `ai_usage` ledger. All of it is gone.
+
+The dollar half never worked honestly. Rates change, there was no verified table for DeepSeek or Gemini — the two providers you're most likely to use — and **how server-side web search is billed was never measured at all**. So a "$5 cap" was a number computed from an amount nobody could stand behind. A cap you can't trust is worse than no cap: it reads as protection while protecting nothing.
+
+The token half worked, but it asked you to pick a number you had no basis for choosing, in a unit that doesn't map to anything you care about.
+
+What actually bounds a run is still there and measures real things: `maxSearches`, `maxFetches`, `maxTokens` and `maxRounds`. And `guide-gen` asks before it starts.
+
+For what you actually spent, read your provider's own dashboard. The token counts printed after each run are the API's own figures, so they're what you'd reconcile against a bill.
 
 **Choosing a provider.** `deepseek` is cheapest and is what this was developed against; `anthropic` is the best quality and the most expensive; `gemini` has a free tier, though in practice that tier often has no quota for the models worth using. All three do server-side web search, so guide quality doesn't silently depend on which you picked. (`deepseek-openai` is the same vendor's OpenAI-compatible endpoint, which has **no** search — it exists for the no-research path and for future OpenAI-shaped providers, and `guide-gen` refuses to use it without an explicit `--no-research`.)
 

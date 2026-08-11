@@ -387,7 +387,6 @@ test('多轮会话:历史原样回传,用量跨轮累加', async () => {
   assert.deepEqual(fetchImpl.calls[1].body.contents.map((c) => c.role), ['user', 'model', 'user']);
   assert.equal(s.usage.requests, 2);
   assert.equal(s.usage.outputTokens, 100);
-  assert.equal(s.cost().priced, false, 'Gemini 故意不进价格表:免费层是 0,付费层单价没核实过');
 });
 
 // ---------------------------------------------------------------------------

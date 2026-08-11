@@ -63,7 +63,7 @@ node tracker.js ai-check             # confirms web search actually works
 node tracker.js guide-gen <appid>    # asks before it starts spending
 ```
 
-Works with DeepSeek (cheapest), Anthropic (best, priciest) or Gemini (has a free tier). What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
+Works with DeepSeek (cheapest), Anthropic (best, priciest) or Gemini (has a free tier). The finished guide goes **into Notion** when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead. What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
 
 ## Everyday use
 
@@ -84,7 +84,8 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `guide-status` | Aligns guide page status with completion | Notion |
 | `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
 | `ai-check` | Checks the AI provider and that its web search really works | AI provider |
-| `guide-gen <appid>` | Has an AI research and write a guide, then validates it | AI + Steam |
+| `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
+| `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, checking it arrived intact | Notion |
 
 `node tracker.js help` lists the rest.
 

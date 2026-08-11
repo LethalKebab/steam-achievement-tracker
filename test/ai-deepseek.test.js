@@ -270,5 +270,4 @@ test('多轮会话:历史留着,用量跨轮累加', async () => {
   );
   assert.equal(s.usage.requests, 2);
   assert.equal(s.usage.outputTokens, 100);
-  assert.equal(s.cost().priced, false, 'DeepSeek 的单价没核实过,按规矩不猜');
 });

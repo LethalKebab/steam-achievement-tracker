@@ -37,9 +37,30 @@ Checkboxes are ordinary markdown — `- [ ]` becomes `- [x]`, in place, with the
 
 If a game already has a Notion guide registered, a same-appid local `.md` is left alone unless you pass `--force`. One appid, one backend.
 
+### Moving a local guide into Notion
+
+Either the **⬆ Notion** button on that game's row in the Dashboard, or:
+
+```bash
+node tracker.js guide-to-notion <appid> --dry-run   # shows exactly what would happen, writes nothing
+node tracker.js guide-to-notion <appid>
+```
+
+Headings, checkboxes (including nested sub-steps and their ticked state), plain bullets and markdown tables all carry over as real Notion blocks. Anything Notion can't represent — `<details>`, third-level headings — becomes a plain paragraph, and the dry run lists those lines before you commit to it.
+
+**Your ticks come across untouched.** Migration never re-derives checked state from Steam; that's `checkbox-sync`'s job, and quietly doing it here would mean a move could change your data.
+
+New pages get their `Status` the same way as generated ones — `Done` / `Paused` / `Not started` by real progress. 
+
+Afterwards the page is **read back and compared line by line** against the file — same count, same text, same ticks. Only if that matches does the local file move to `guides/.migrated/`. If anything is off, the migration fails, says which line, and **your file stays exactly where it was**. Nothing is ever deleted.
+
+Two refusals, same as for generated guides: a page with that game's title that already has content, and two pages sharing the title.
+
+This is not a quality check. Your guide is your guide — it is moved as written, not graded on the way through.
+
 ### Having one written for you
 
-`node tracker.js guide-gen <appid>` has an AI research the game online and write the file, then validates the result against your actual achievement data and registers it. Set it up once:
+`node tracker.js guide-gen <appid>` has an AI research the game online and write the guide, then validates the result against your actual achievement data and registers it. Set it up once:
 
 ```bash
 node tracker.js init --ai
@@ -60,9 +81,24 @@ Three providers work, and all three do server-side web search, so guide quality 
 | `anthropic` | Best quality, most expensive. |
 | `gemini` | Has a free tier, though in practice the free tier often has no quota for the models you'd want — `ai-check --models` will tell you what your key can actually use. |
 
-`--dry-run` shows you the assembled prompt and where the file would land without sending anything.
+`--dry-run` shows you the assembled prompt and where the guide would land without sending anything.
 
-The checkboxes are **not** written by the model. It only ever emits `- [ ]`; the ticks are applied afterwards from your real unlock data, which makes "checked state equals real unlock state" impossible to get wrong rather than merely checkable. The `# 游戏名` and `appid:` header lines are written by the program too — a mis-transcribed appid would file the guide under a different game.
+#### Where the finished guide goes
+
+**If Notion is configured, into Notion** — a new page in your guide database, next to the ones you wrote by hand. Splitting your notes across two places just because one of them was machine-written is the wrong default. Pass `--local` for a `guides/*.md` file instead; with no Notion token, local is all there is.
+
+Two cases get refused rather than guessed at, because both would damage notes you can't get back:
+
+- **A page with that game's title already exists and has content in it.** Very likely something you wrote. It says so and stops; clear the page yourself if you really want it regenerated.
+- **Two pages share that title.** It won't pick one.
+
+An existing page that is *empty* is treated as the page you meant — those "created the page, haven't written the guide yet" placeholders get filled in, and its title, icon and status are left exactly as you set them.
+
+New pages get the Steam icon and a `Status` derived from where you actually are in the game: **`Done`** at 100%, **`Paused`** with some achievements unlocked, **`Not started`** with none. Nothing later revisits a page that isn't at 100%, so the value written at creation is the one that sticks — which is why it's computed rather than fixed. Notion's block format can't carry everything markdown can (`<details>`, tables, third-level headings); anything it can't represent is written as a plain paragraph — **the text is never dropped** — and the affected lines are listed when it finishes.
+
+After writing, the page is **read back and re-validated with the same linter**, because a Notion write returns 200 whether or not the content came out the way you meant.
+
+The checkboxes are **not** written by the model. It only ever emits `- [ ]`; the ticks are applied afterwards from your real unlock data, which makes "checked state equals real unlock state" impossible to get wrong rather than merely checkable. The `# 游戏名` and `appid:` header lines are written by the program too — a mis-transcribed appid would file the guide under a different game. (On a Notion page the title comes from the page property, so only the `appid:` line goes into the body.)
 
 What the machine checks is **format and data**: every achievement has its own checkbox row, no merged rows, names match Steam exactly, descriptions are quoted verbatim, ticks match reality. If that fails it feeds the specific errors back and asks for a rewrite, up to three times; still failing, the attempt is kept under `guides/.drafts/`, which guide discovery cannot see — so a draft that didn't pass can never end up ticking your notes.
 

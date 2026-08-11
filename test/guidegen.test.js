@@ -22,7 +22,9 @@ import { mkdtempSync, existsSync, readFileSync, writeFileSync, mkdirSync } from 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openDb, insertGame, replaceAchievements, upsertGuide, allGuides } from '../lib/db.js';
+import {
+  openDb, insertGame, replaceAchievements, upsertGuide, allGuides,
+} from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
@@ -498,5 +500,26 @@ describe('全球解锁率', () => {
       config, provider: fakeProvider([GOOD]), steam: fakeSteam(['A'], null), appid: '1',
     });
     assert.equal(r.ok, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dashboard 的生成按钮
+// ---------------------------------------------------------------------------
+
+describe('Dashboard 上的「生成」按钮', () => {
+  const html = readFileSync(new URL('../Dashboard.html', import.meta.url), 'utf8');
+
+  test('按钮直接调具名函数,不靠事件冒泡', () => {
+    // 踩过:按钮自己带 event.stopPropagation()(不拦住的话点它会同时展开成就详情),
+    // 而处理器是挂在 document 上的委托 —— stopPropagation 正好把它挡死。
+    // 表现是"点了什么都没发生",**控制台里一个错都没有**,最难查的那种
+    assert.match(html, /onclick="event\.stopPropagation\(\);window\.genGuide\(this\)"/);
+    assert.match(html, /window\.genGuide = function/);
+    assert.doesNotMatch(
+      html,
+      /document\.addEventListener\('click'[\s\S]{0,120}data-gen/,
+      '别再改回事件委托 —— stopPropagation 会让它收不到'
+    );
   });
 });

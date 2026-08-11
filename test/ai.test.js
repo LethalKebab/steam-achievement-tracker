@@ -17,14 +17,14 @@
  *
  * 全部离线:fetch 是注入的,一个字节都不发出去。
  */
-import { test } from 'node:test';
+import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
   emptyUsage,
+  formatUsage,
   mergeMessageUsage,
   addUsage,
-  estimateCost,
   checkResult,
   createSession,
 } from '../lib/ai.js';
@@ -132,29 +132,20 @@ test('搜索次数从 server_tool_use 里读出来', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 估价
+// 用量摘要
 // ---------------------------------------------------------------------------
 
-test('估价按 Opus 5 单价算,缓存写 1.25 倍、读 0.1 倍', () => {
-  const u = { ...emptyUsage(), inputTokens: 1_000_000, outputTokens: 1_000_000, cacheCreationTokens: 1_000_000, cacheReadTokens: 1_000_000 };
-  const c = estimateCost(u, 'claude-opus-5');
-  assert.equal(c.priced, true);
-  // 5 + 5*1.25 + 5*0.1 + 25 = 36.75
-  assert.equal(Number(c.usd.toFixed(2)), 36.75);
-});
-
-test('价格表里没有的模型报 null,不报 0', () => {
-  const u = { ...emptyUsage(), inputTokens: 999_999, outputTokens: 999_999 };
-  const c = estimateCost(u, 'some-future-model');
-  assert.equal(c.priced, false);
-  assert.equal(c.usd, null, '报 0 等于告诉用户这次不花钱,那是最糟的错数字');
-});
-
-test('搜索次数如实返回,但不折算成钱(搜索计费还没实测)', () => {
-  const c = estimateCost({ ...emptyUsage(), outputTokens: 1000, webSearches: 5 }, 'claude-opus-5');
-  assert.equal(c.webSearches, 5);
-  // 1000 output token = $0.025,和搜索次数无关
-  assert.equal(Number(c.usd.toFixed(3)), 0.025);
+// 这里以前有三条估价测试(内置单价表、表里没有的模型报 null 而不是 0、
+// 搜索次数不折算成钱)。**估价整套删了**:各家单价会变、我们核实不过来,
+// 搜索工具怎么计费也从没实测 —— 一个不知道错多少的金额比不给金额更糟。
+// 剩下的只有 token,而 token 是 API 回的硬数字,没什么可估的。
+test('摘要只报 token 和请求数,不出现金额', () => {
+  const u = { ...emptyUsage(), requests: 2, inputTokens: 1234, outputTokens: 567, webSearches: 3 };
+  const line = formatUsage(u);
+  assert.match(line, /1234/);
+  assert.match(line, /567/);
+  assert.match(line, /联网搜索 3 次/);
+  assert.ok(!line.includes('$'), '不能再出现美元 —— 那正是删掉的原因');
 });
 
 // ---------------------------------------------------------------------------
@@ -406,7 +397,6 @@ test('多轮会话:历史留着(回灌重写要用),用量跨轮累加', async (
   assert.equal(fetchImpl.calls[1].body.messages.length, 3);
   assert.equal(s.usage.requests, 2);
   assert.equal(s.usage.outputTokens, 100);
-  assert.equal(s.cost().priced, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -488,3 +478,7 @@ test('401 报的是真实供应商和对应的环境变量,不是写死的 Anthr
     return true;
   });
 });
+
+// ---------------------------------------------------------------------------
+// 花费上限
+// ---------------------------------------------------------------------------

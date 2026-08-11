@@ -11,6 +11,11 @@ exports/
 # 仓库也不该收——没验过的内容不该有任何一条路径流向别人
 guides/.drafts/
 
+# 搬去 Notion 之后留下的本地备份。**是本机的后悔药,不是仓库内容** ——
+# 那份攻略现在的家在 Notion,这里只是"万一搬砸了还能找回来"。收进仓库的话,
+# 每搬一份就多一份永远不会再更新的副本
+guides/.migrated/
+
 # launcher/ 的 Electron 依赖,以及打包产物(仓库根目录的 dist/)——体积大(上百 MB),不该进仓库
 launcher/node_modules/
 dist/

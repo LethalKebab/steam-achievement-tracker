@@ -16,7 +16,8 @@
  *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
- *   node tracker.js guide-gen <appid>  让 AI 写一份本地攻略(--dry-run 只打印提示词)
+ *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词)
+ *   node tracker.js guide-to-notion <appid>  把本地 markdown 攻略搬到 Notion(--dry-run 只预览)
  *   node tracker.js log [n]         看最近的同步日志
  */
 import { createInterface } from 'node:readline/promises';
@@ -38,6 +39,7 @@ import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideT
 import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
 import { generateGuide, planGuide, buildSystemPrompt } from './lib/guidegen.js';
+import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
 import { importAll, exportAll } from './lib/csv.js';
 
 // ---------------------------------------------------------------------------
@@ -306,7 +308,7 @@ async function cmdInitAi() {
     const verdict = checkResult(r);
     if (!verdict.ok) throw new Error(`验证没通过:${verdict.reason}`);
     console.log(`\r✅ 可用:${provider.name} / ${provider.model},回了「${r.text.trim().slice(0, 10)}」      `);
-    console.log(`   ${formatUsage(r.usage, provider.model)}`);
+    console.log(`   ${formatUsage(r.usage)}`);
 
     // model 留空就不写进 config,让代码里的默认值继续生效(那个会跟着版本更新)
     saveConfig({ ai: model.trim() ? ai : { provider: ai.provider, apiKey: ai.apiKey } });
@@ -696,7 +698,7 @@ function pickSmokeTarget(db, appid) {
 
 /**
  * `ai-check`:把 lib/ai.js 整条链路真跑一遍——组装请求 → 服务端搜索 → 抓页 →
- * pause_turn 续跑 → 用量和花费。
+ * pause_turn 续跑 → token 用量。
  *
  * 这是「动手顺序」第 3 步的验收命令,不是攻略生成本身:它只问一个成就,拿三句话回来。
  * 攻略怎么写是 guidegen(下一步)的事。**要花钱**,所以 `--dry` 只组装不发送,
@@ -782,7 +784,7 @@ async function cmdAiCheck() {
     `  stop_reason: ${r.stopReason}${r.rawStopReason && r.rawStopReason !== r.stopReason ? `(原值 ${r.rawStopReason})` : ''}` +
       ` · 续跑 ${r.continuations} 次 · 耗时 ${secs}s`
   );
-  console.log('  ' + formatUsage(session.usage, provider.model));
+  console.log('  ' + formatUsage(session.usage));
 
   // 这一行是这个命令最该看的:**声明了联网工具,模型到底搜没搜**。
   // 免费层带不带联网是文档上查不准的事,回包比定价页可靠
@@ -799,21 +801,26 @@ async function cmdAiCheck() {
  * `guide-gen <appid>`:让 AI 写一份本地 markdown 攻略。
  *
  * **会花钱**,所以默认要人工确认一次(`--yes` 跳过),`--dry-run` 则只打印会发出去的
- * 提示词和落盘计划、一个请求都不发。硬上限和实时花费是「动手顺序」第 5 步,还没做——
- * 现在只有跑完之后的事后账。
+ * 提示词和落盘计划、一个请求都不发。
+ *
+ * 这里一度有一套花费上限(每次 / 每天,token 和美元各一组)和一张模型单价表,
+ * 现在整套删了:单价我们核实不过来、搜索工具怎么计费也没实测,于是那些"上限"
+ * 建立在一个连我们自己都不信的金额上。跑完只报 token 数 —— 那是 API 回的硬数字。
  */
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
-  if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes]');
+  if (!appid) throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local]');
   const dryRun = flags.has('--dry-run');
 
   const config = applyAiFlags(loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] }));
   const db = openDb(config.dbPath);
   const steam = new SteamClient(config, { log: () => {} });
+  const notion = new NotionClient(config);
+  const local = flags.has('--local');
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
-  const plan = await planGuide(db, { config, steam, appid, fileName });
+  const plan = await planGuide(db, { config, steam, appid, fileName, notion, local });
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
   console.log(`  成就 ${plan.defs.length} 个,其中已解锁 ${plan.unlocked.size} 个(用来机械打勾,不会喂给模型)`);
@@ -828,7 +835,15 @@ async function cmdGuideGen() {
   // config 里是空的,真正用的是这一家的默认值
   console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
   warnEnvOverrides();
-  console.log(`  落盘到 ${plan.finalPath}`);
+  if (plan.target === 'notion') {
+    console.log(
+      plan.notion.existingPage
+        ? `  写进 Notion 已有的空页:${plan.notion.existingPage.url}`
+        : '  在 Notion 攻略库里新建一页(要写本地文件就加 --local)'
+    );
+  } else {
+    console.log(`  落盘到 ${plan.finalPath}`);
+  }
 
   if (probe.canSearch === false && !flags.has('--no-research')) {
     throw new Error(
@@ -852,7 +867,7 @@ async function cmdGuideGen() {
   }
 
   if (!flags.has('--yes')) {
-    // 花钱的操作默认问一句。硬上限 + 实时花费是第 5 步,这里只是最低限度的闸门
+    // 花钱的操作默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)
     const io = makeSecretReader();
     const answer = await io.ask('\n这一步会调用 AI 并产生费用。继续?(y/N)');
     io.close();
@@ -864,13 +879,15 @@ async function cmdGuideGen() {
   const started = Date.now();
 
   const r = await generateGuide(db, {
-    config, provider, steam, appid, rounds, fileName,
+    config, provider, steam, appid, rounds, fileName, notion, local,
     onProgress(ev) {
       if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮:联网研究 + 撰写…`);
       else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
       else if (ev.phase === 'check') p.update(`  第 ${ev.round} 轮:机械打勾 + 校验…`);
       else if (ev.phase === 'lint') {
         p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
+      } else if (ev.phase === 'notion-create' || ev.phase === 'notion-fill') {
+        p.update(`  写进 Notion(${ev.blocks} 个块)…`);
       }
     },
   });
@@ -879,9 +896,14 @@ async function cmdGuideGen() {
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   console.log('\n' + '─'.repeat(70));
   if (r.ok) {
-    console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.path}`);
-    if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action}),Dashboard 上就能看到链接了`);
+    console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.url}`);
+    if (r.registered) console.log(`  已登记进 guides 表(${r.registered.action ?? '新增'}),Dashboard 上就能看到链接了`);
     else console.log('  ⚠️  没被 guides 发现逻辑收进去,手动跑一次 `node tracker.js guides --local` 看看为什么');
+    // 转换器认不出来的行没丢,但排版降级成了普通段落。用户有权知道是哪几行
+    if (r.unconverted.length) {
+      console.log(`  ⚠️  ${r.unconverted.length} 行 Notion 放不下原来的排版,已经降级成普通段落(内容没丢):`);
+      for (const line of r.unconverted.slice(0, 5)) console.log(`       ${line}`);
+    }
   } else {
     console.log(`❌ ${r.rounds} 轮之后仍有 ${r.blocking.length} 条没过,草稿留在 ${r.draftPath}`);
     console.log('  (草稿目录不会被攻略发现逻辑扫到,不会被同步拿去勾框)');
@@ -895,7 +917,7 @@ async function cmdGuideGen() {
     console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
       `${r.lint.stats.warnings} 条 warn`);
   }
-  console.log('  ' + formatUsage(r.usage, r.model));
+  console.log('  ' + formatUsage(r.usage));
   console.log('\n⚠️  机器只验了格式和数据:每个成就有独立 checkbox、名字对得上、描述是原文、' +
     '勾选等于真实解锁。\n    **攻略内容本身没有验证过** —— 步骤可不可行、难度准不准、' +
     '"易错过"是不是真的,都要你自己看一遍。');
@@ -912,6 +934,62 @@ async function cmdGuideGen() {
     console.log(`\n🔎 实际发出 ${r.searchQueries.length} 次搜索,前几条:` +
       r.searchQueries.slice(0, 4).join(' / '));
   }
+}
+
+/**
+ * 把一份本地 markdown 攻略搬到 Notion。
+ *
+ * `--dry-run` 是推荐的第一步:转换会不会掉排版、Notion 那边接不接得住,
+ * 预览里全看得见,而且一个字节都不写。
+ */
+async function cmdGuideToNotion() {
+  const appid = positionalArgs()[0];
+  if (!appid) throw new Error('用法:node tracker.js guide-to-notion <appid> [--dry-run] [--yes]');
+  const config = loadConfig({ required: ['steam'] });
+  const db = openDb(config.dbPath);
+  const notion = new NotionClient(config);
+
+  const plan = await planMigration(db, { notion, config, appid });
+  const checked = plan.todos.filter((t) => t.checked).length;
+
+  console.log(`\n《${plan.game}》(appid ${appid})`);
+  console.log(`  来源:${plan.path}`);
+  console.log(`  ${plan.todos.length} 个 checkbox,其中 ${checked} 个已勾选(勾选状态原样带过去)`);
+  console.log('  转换成 ' + Object.entries(plan.byType).map(([k, n]) => `${n} 个 ${k}`).join('、'));
+  console.log(
+    plan.target.existingPage
+      ? `  写进 Notion 上已有的空页:${plan.target.existingPage.url}`
+      : '  在 Notion 攻略库里新建一页'
+  );
+  if (plan.unconverted.length) {
+    console.log(`  ⚠️  ${plan.unconverted.length} 行 Notion 放不下原来的排版,会降级成普通段落(文字不丢):`);
+    for (const line of plan.unconverted.slice(0, 8)) console.log(`       ${line}`);
+  }
+
+  if (flags.has('--dry-run')) return console.log('\n--dry-run:什么都没写。');
+
+  if (!flags.has('--yes')) {
+    const io = makeSecretReader();
+    const answer = await io.ask('\n搬过去?本地文件会挪进 guides/.migrated/(不删)(y/N)');
+    io.close();
+    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+  }
+
+  const r = await migrateGuideToNotion(db, {
+    notion, config, appid, plan,
+    onProgress(ev) {
+      if (ev.phase === 'create') console.log(`  建好页面,写 ${ev.blocks} 个块…`);
+      else if (ev.phase === 'fill') console.log(`  填进已有的空页,写 ${ev.blocks} 个块…`);
+      else if (ev.phase === 'verify') console.log('  回读逐条核对…');
+    },
+  });
+
+  console.log(`\n✅ 搬完了,${r.count} 个 checkbox 逐条核对一致 → ${r.url}`);
+  console.log(
+    r.archivedTo
+      ? `  本地文件挪到 ${r.archivedTo}(没删)`
+      : '  ⚠️  本地文件没挪成,留在原地了 —— 不影响,发现逻辑不会把攻略抢回本地'
+  );
 }
 
 function cmdImport() {
@@ -970,7 +1048,9 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
   node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
   node tracker.js guide-lint [appid]      校验攻略写法:成就有没有漏、格式对不对(只读)
               guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
-  node tracker.js ai-check [appid]        AI 联网研究链路自检(用量和花费会打出来)
+  node tracker.js guide-to-notion <appid> 把本地 markdown 攻略搬到 Notion(逐条核对后才动本地文件)
+              guide-to-notion --dry-run   只预览转换结果,一个字节都不写
+  node tracker.js ai-check [appid]        AI 联网研究链路自检(token 用量会打出来)
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
               --provider X --model Y      临时换供应商/模型,不改 config.json
@@ -998,6 +1078,7 @@ const COMMANDS = {
   'guide-lint': cmdGuideLint,
   'ai-check': cmdAiCheck,
   'guide-gen': cmdGuideGen,
+  'guide-to-notion': cmdGuideToNotion,
   audit: cmdAudit,
   import: cmdImport,
   export: cmdExport,
