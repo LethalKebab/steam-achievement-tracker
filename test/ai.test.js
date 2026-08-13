@@ -10,6 +10,8 @@
  *  - 没有价格表的模型必须报 null,不能报 $0.00——悄悄显示 0 是最糟的那种错数字
  *  - web_search 出错时 content 是**对象**、成功时是**数组**。不分支就把"被限流"读成
  *    "搜到空结果",模型接着空手写攻略
+ *  - 而 **web_fetch 成功时 content 也是对象**。把 web_search 那条规则套到它身上,
+ *    每一次成功抓页都会被读成失败 —— 反方向的同一个 bug,而且是真炸过的那个
  *  - refusal 和 max_tokens 都是 HTTP 200。前者 content 空、后者正文被砍一半,
  *    而一份截断的攻略比一次失败更糟
  *  - pause_turn 续跑不能补一句"继续"(会打断服务端的工具循环),前几轮的 content
@@ -180,8 +182,19 @@ test('流里的 error 事件按可重试/不可重试分类', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 服务端工具的错误:成功是数组,失败是对象
+// 服务端工具:**两个工具的「成功」形状不一样**
 // ---------------------------------------------------------------------------
+
+/** 成功抓页的真实形状:一个**对象**。整个 bug 就长在这一行上 */
+const FETCH_OK = {
+  type: 'web_fetch_tool_result',
+  content: {
+    type: 'web_fetch_result',
+    url: 'https://www.3dmgame.com/gl/1.html',
+    retrieved_at: '2026-08-13T00:00:00Z',
+    content: { type: 'document', source: { type: 'text', media_type: 'text/plain', data: '页面全文' } },
+  },
+};
 
 test('web_search 失败时 content 是对象,不能当数组取下标', () => {
   const content = [
@@ -192,6 +205,38 @@ test('web_search 失败时 content 是对象,不能当数组取下标', () => {
   const errs = serverToolErrors(content);
   assert.equal(errs.length, 2, '成功那条不该被算成失败');
   assert.deepEqual(errs.map((e) => e.errorCode), ['max_uses_exceeded', 'url_not_accessible']);
+  assert.deepEqual(errs.map((e) => e.tool), ['search', 'fetch'], 'tool 是中立词,不外泄块名');
+});
+
+test('web_fetch 成功时 content 也是对象——判成功不能靠 Array.isArray', () => {
+  // 回归测试。曾经两个工具共用 `Array.isArray` 判成功,于是每一次**成功**抓页都被记成
+  // 一条错误,错误码是成功块自己的 type(`web_fetch_result`),而 checkResult 见到
+  // 任何工具错误就枪毙整轮。web_fetch 只在官方端点默认开着,而此前跑通的实盘全在
+  // DeepSeek 兼容端点上(那里它默认关着)—— 所以这个 bug 一路跑到用户手上才炸
+  assert.deepEqual(serverToolErrors([FETCH_OK]), []);
+});
+
+test('认不出的结果形状按失败算,不默认放行', () => {
+  // 方向是故意的:少写一次攻略,好过悄悄拿半份资料写一份看着正常的攻略
+  const errs = serverToolErrors([{ type: 'web_fetch_tool_result', content: { type: '将来某个新形状' } }]);
+  assert.deepEqual(errs, [{ tool: 'fetch', errorCode: '将来某个新形状' }]);
+});
+
+test('进度事件:成功抓页是 ok,不是「失败(unknown)」', async () => {
+  const fetchImpl = fakeFetch([okResponse([
+    { type: 'message_start', message: { id: 'm', model: 'claude-opus-5', usage: { input_tokens: 10 } } },
+    { type: 'content_block_start', index: 0, content_block: FETCH_OK },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 1 } },
+  ])]);
+  const events = [];
+  const p = new AnthropicProvider(AI, { fetchImpl });
+  await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], onEvent: (ev) => events.push(ev) });
+  assert.deepEqual(
+    events.filter((e) => e.type === 'tool-result').map((e) => ({ ok: e.ok, tool: e.tool, errorCode: e.errorCode })),
+    [{ ok: true, tool: 'fetch', errorCode: null }],
+    '判断和 serverToolErrors 共用一份,两边不该再各写一次'
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -335,6 +380,51 @@ test('工具报错也是 HTTP 200,这轮的资料是不完整的', async () => {
   const r = await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] });
   assert.equal(r.stopReason, 'end_turn', '停止原因是正常的,骗人的正是这一点');
   assert.equal(checkResult(r).ok, false);
+});
+
+test('抓页失败只报不拦——但必须报', () => {
+  // `url_not_allowed`(模型自己拼的 URL,只能抓已出现在对话里的)和 `url_not_accessible`
+  // (404 / 反爬 / 超时)在一次正常研究里几乎必然出现几条。搜了十页、抓失败两页,
+  // 资料是够的;作废整轮等于把常态当故障,而代价是用户已经付掉的几分钟和 token
+  const v = checkResult({
+    stopReason: 'end_turn',
+    text: '- [ ] **成就**',
+    usage: emptyUsage(),
+    toolErrors: [
+      { tool: 'fetch', errorCode: 'url_not_allowed' },
+      { tool: 'fetch', errorCode: 'url_not_accessible' },
+    ],
+  });
+  assert.equal(v.ok, true);
+  assert.equal(v.warnings.length, 1, '不拦路不等于可以不吭声');
+  assert.match(v.warnings[0], /url_not_allowed、url_not_accessible/);
+});
+
+test('搜索失败照样枪毙整轮,哪怕同一轮里抓页也失败了', () => {
+  // 搜索是研究的入口:它没成,模型就是凭记忆写的。两种错误混在一起时,
+  // 拦路的原因里也不该混进不拦路的那条——否则报错指向的是错的那个问题
+  const v = checkResult({
+    stopReason: 'end_turn',
+    text: '有正文',
+    usage: emptyUsage(),
+    toolErrors: [
+      { tool: 'fetch', errorCode: 'url_not_accessible' },
+      { tool: 'search', errorCode: 'max_uses_exceeded' },
+    ],
+  });
+  assert.equal(v.ok, false);
+  assert.match(v.reason, /max_uses_exceeded/);
+  assert.ok(!v.reason.includes('url_not_accessible'), '拦路原因里不该混进不拦路的那条');
+});
+
+test('认不出 tool 的工具错误按拦路处理', () => {
+  const v = checkResult({
+    stopReason: 'end_turn',
+    text: '有正文',
+    usage: emptyUsage(),
+    toolErrors: [{ tool: '将来某个新工具', errorCode: 'boom' }],
+  });
+  assert.equal(v.ok, false, '新供应商接进来时,宁可多拦一次也不要默认放行');
 });
 
 // ---------------------------------------------------------------------------

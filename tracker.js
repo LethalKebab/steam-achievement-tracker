@@ -940,7 +940,11 @@ async function cmdAiCheck() {
     console.log('  ⚠️  声明了联网工具,但这一轮一次搜索都没发出去 —— 可能是这个层级/模型不支持,');
     console.log('      也可能是模型觉得不用查。攻略生成如果一直这样,内容就是它凭记忆编的');
   }
-  for (const e of r.toolErrors ?? []) console.log(`  ⚠️  ${e.tool} 报错:${e.errorCode}`);
+  // 抓页失败是逐个 URL 的常态,标出来免得下一个看到这行的人又去查"联网是不是坏了"
+  for (const e of r.toolErrors ?? []) {
+    const tail = e.tool === 'fetch' ? '(逐个 URL 的常态,不影响这一轮)' : '';
+    console.log(`  ⚠️  ${e.tool === 'fetch' ? '抓页' : '搜索'}报错:${e.errorCode}${tail}`);
+  }
 }
 
 /**
