@@ -51,9 +51,12 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 **Guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked. The setup form covers Notion (step ④) and stays reachable afterwards from the **设置** button on the Dashboard. From source:
 
 ```bash
-node tracker.js init --notion   # only if you use Notion; local markdown needs no setup
-node tracker.js guides          # register your guide pages
+node tracker.js init --notion --create   # builds the Notion database for you and saves its ID
+node tracker.js notion-check             # read-only: is that side actually working?
+node tracker.js guides                   # register your guide pages
 ```
+
+Guides live in a Notion **database**, not a plain page. `--create` builds one under a page you pick, with the status options already right, so you never copy a database ID by hand — drop the flag and paste an ID instead if you already have one. Local markdown needs no setup at all.
 
 Details, and how matching works: [docs/guides.md](docs/guides.md).
 
@@ -85,6 +88,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `checkbox-sync` | Ticks them | Steam + Notion |
 | `guide-status` | Aligns guide page status with completion | Notion |
 | `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
+| `notion-check` | Checks the Notion side: token, database, status options, page count. Writes nothing | Notion |
 | `ai-check` | Checks the AI provider and that its web search really works | AI provider |
 | `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
 | `guide-gen <appid> --overwrite` | Regenerates over an existing guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |

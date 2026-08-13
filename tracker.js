@@ -14,6 +14,7 @@
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
  *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
+ *   node tracker.js notion-check    Notion 侧只读体检(token/数据库/状态选项)
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
  *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词,--overwrite 重写已有的)
@@ -34,7 +35,7 @@ import {
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
 import { serve } from './lib/server.js';
-import { NotionClient } from './lib/notion.js';
+import { NotionClient, pickGuideDbProperties, GUIDE_STATUS_OPTIONS } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
@@ -203,11 +204,49 @@ function makeSecretReader() {
 }
 
 /**
+ * `--create` 的交互部分:列页面 → 选一个 → 建库。
+ *
+ * **列表为空本身就是诊断**:token 有效却一个页面都看不到,只可能是 Connections
+ * 那一步没做。以前这个处境只能靠一条和「数据库 ID 填错了」共用的报错去猜。
+ */
+async function createGuideDbInteractively(io, probe) {
+  stdout.write('正在看这个 integration 能访问哪些页面…');
+  const { pages, truncated } = await probe.searchPages();
+  if (!pages.length) {
+    console.log('\r⚠️  这个 integration 一个页面都看不到                    ');
+    console.log('   token 是好的,所以缺的是共享:在 Notion 里打开要放攻略的那一页');
+    console.log('   → 右上角 ••• → Connections → 加上这个 integration,然后重跑一次');
+    return '';
+  }
+  console.log(`\r能访问 ${pages.length} 个页面${truncated ? '(还有更多没列完)' : ''}:                    \n`);
+  pages.forEach((p, i) => console.log(`  ${String(i + 1).padStart(2)}. ${p.title}`));
+
+  const pick = Number(await io.ask(`\n建在哪一页下面?(1-${pages.length}): `));
+  if (!Number.isInteger(pick) || pick < 1 || pick > pages.length) {
+    throw new Error('没选一个有效的编号,什么都没建');
+  }
+  const title = (await io.ask('数据库名字(回车用「Steam 攻略」): ')) || 'Steam 攻略';
+
+  stdout.write('正在建…');
+  const db = await probe.createGuideDatabase({ parentPageId: pages[pick - 1].id, title });
+  console.log(`\r✅ 建好了:${db.url}        `);
+  console.log(`   状态选项:${db.options.join(' / ')}`);
+  console.log('   (四个选项都在 To-do 分组里 —— Notion 的 API 设不了分组,试过,静默无效。');
+  console.log('    不影响功能,想整理 board 视图的话自己在 Notion 里拖一下)');
+  return db.id;
+}
+
+/**
  * `init --notion`:配置攻略同步用的 Notion token。
  * 输入不回显,而且**当场验证**——token 本身 + 那个数据库能不能访问,
  * 分开报错,因为这两件事的修法完全不同(换 token vs. 去 Notion 加 connection)。
+ *
+ * `--create` 换一条路:不问数据库 ID,而是列出能看到的页面、选一个、在它下面
+ * 建一个属性配好的库。**给没有现成数据库的人用** —— 手工那条路要先在 Notion 建库、
+ * 配齐状态选项、再整页打开从 URL 里抠 ID,三步各有各的坑。
  */
 async function cmdInitNotion() {
+  const create = flags.has('--create');
   const io = makeSecretReader();
   try {
     const cfg = loadConfig();
@@ -219,38 +258,136 @@ async function cmdInitNotion() {
     const token = await io.askSecret('Notion Integration Token(输入不会显示): ');
     if (!token) throw new Error('没输入 token');
 
-    const dbDefault = cfg.notion?.overviewDbId || '';
-    const dbId =
-      (await io.ask(`攻略数据库 ID${dbDefault ? `(回车用 ${dbDefault})` : ''}: `)) || dbDefault;
-
-    const probe = new NotionClient({ notion: { token, overviewDbId: dbId } });
+    const probe = new NotionClient({ notion: { token } });
 
     stdout.write('\n正在验证 token…');
     const me = await probe.request('get', '/users/me');
     console.log(`\r✅ token 可用:integration「${me.name || me.bot?.workspace_name || '未命名'}」        `);
 
+    let dbId = '';
     let dbOk = false;
-    if (dbId) {
-      stdout.write('正在验证数据库访问…');
-      try {
-        const pages = await probe.queryGuideDatabase(dbId);
-        console.log(`\r✅ 数据库可访问:里面有 ${pages.length} 个页面        `);
-        dbOk = true;
-      } catch (err) {
-        console.log(`\r⚠️  数据库访问失败:${err.message}`);
-        console.log('   token 本身是好的,所以问题在权限或 ID:');
-        console.log('   Notion 里打开那个数据库(或它的父页面)→ 右上角 ••• → Connections → 加上这个 integration');
+
+    if (create) {
+      // 建出来的 ID 会盖掉现有的那个,而那会把一个有上百篇攻略的库整个移出工具的视野。
+      // 不拦死(命令行是明示操作),但必须先问一句 —— GUI 那边直接拒绝,因为点一下太容易了
+      const had = cfg.notion?.overviewDbId;
+      if (had) {
+        console.log(`\n⚠️  已经配了攻略库:${had}`);
+        console.log('   新建一个会把配置改指到新库 —— 现有攻略一篇都不会丢,但工具会看不到它们。');
+        const yes = await io.ask('   确定还要建一个新的?(y/N) ');
+        if (!/^y/i.test(yes)) throw new Error('取消了,什么都没建');
+      }
+      dbId = await createGuideDbInteractively(io, probe);
+      dbOk = Boolean(dbId);
+      // 用户中途没选到页面(比如一个页面都看不到)时 dbId 是空的 —— 这时候绝不能
+      // 拿空值去覆盖已有配置,那等于因为一次失败的尝试把人的库配没了
+      if (!dbId && had) dbId = had;
+    } else {
+      const dbDefault = cfg.notion?.overviewDbId || '';
+      dbId = (await io.ask(`攻略数据库 ID${dbDefault ? `(回车用 ${dbDefault})` : ''}: `)) || dbDefault;
+      if (!dbId) {
+        console.log('   (没有现成的库?`node tracker.js init --notion --create` 让程序建一个)');
+      } else {
+        stdout.write('正在验证数据库访问…');
+        try {
+          const pages = await probe.queryGuideDatabase(dbId);
+          console.log(`\r✅ 数据库可访问:里面有 ${pages.length} 个页面        `);
+          dbOk = true;
+        } catch (err) {
+          // 以前这里只提 Connections,于是「填的是页面 ID」的人会被赶去反复检查权限。
+          // 三种毛病,三种修法,一次说完
+          console.log(`\r⚠️  数据库访问失败:${err.message}`);
+          console.log('   token 本身是好的,所以问题在 ID 或权限:');
+          console.log('   · 它不是数据库 —— 要整页打开,取 URL 里 ?v= 之前那 32 位十六进制');
+          console.log('     (页面 ID、视图 ID、整条链接都不行)');
+          console.log('   · 还没共享 —— 打开它(或父页面)→ ••• → Connections → 加上这个 integration');
+          console.log('   · 压根还没有库 —— 改用 `init --notion --create`');
+        }
       }
     }
 
     saveConfig({ notion: { token, overviewDbId: dbId } });
     console.log(`\n✅ 已写入 ${CONFIG_PATH}(权限 600,已 gitignore,不会被提交)`);
     console.log('\n接下来:');
-    console.log('  node tracker.js guides --notion             ← 应该报「新增 0 条」');
-    console.log('  node tracker.js checkbox-sync --dry-run     ← 只算不写,先看会勾掉哪些');
-    if (!dbOk && dbId) console.log('\n(数据库那一步没通过的话,上面两条命令会失败,先按提示加 connection)');
+    console.log('  node tracker.js notion-check               ← 只读体检,确认这一侧全通了');
+    console.log('  node tracker.js guides --notion            ← 发现攻略页并登记');
+    console.log('  node tracker.js checkbox-sync --dry-run    ← 只算不写,先看会勾掉哪些');
+    if (!dbOk && dbId) console.log('\n(数据库那一步没通过的话,上面几条会失败,先按上面的提示修)');
   } finally {
     io.close();
+  }
+}
+
+/**
+ * `notion-check`:Notion 这一侧的只读体检。和 `ai-check` 是一对 —— 都拿真接口问一遍,
+ * 把「到底配好了没有」变成当场能看见答案的事,而不是等跑真流程时才炸。
+ *
+ * **一个字节都不写。** 存在的理由是这条链上的失败全都长得很像:token 不对、
+ * ID 不是数据库、库没共享、状态选项缺一个 —— 前三个以前共用一句话,最后一个
+ * 要等到第一次 `guide-gen` 才暴露。
+ */
+async function cmdNotionCheck() {
+  const { config, db } = withSteam({ requireSteam: false });
+  const token = config.notion?.token;
+  const dbId = config.notion?.overviewDbId;
+
+  if (!token) {
+    console.log('❌ 没配 Notion token(config.json 的 notion.token)');
+    console.log('   跑 `node tracker.js init --notion` 配一下');
+    return;
+  }
+  const notion = new NotionClient(config);
+
+  const me = await notion.request('get', '/users/me');
+  console.log(`✅ token:integration「${me.name || me.bot?.workspace_name || '未命名'}」`);
+
+  if (!dbId) {
+    console.log('❌ 没配攻略数据库 ID(config.json 的 notion.overviewDbId)');
+    console.log('   `node tracker.js init --notion --create` 可以直接建一个');
+    return;
+  }
+
+  let raw;
+  try {
+    raw = await notion.request('get', `/databases/${dbId}`);
+  } catch (err) {
+    console.log(`❌ 读不到数据库:${err.message}`);
+    console.log('   两种可能,修法不一样:');
+    console.log('   · 它不是数据库 —— 页面 ID、视图 ID(?v= 后面那段)、整条链接都不行,');
+    console.log('     要把库整页打开,取 URL 里 ?v= 之前那 32 位十六进制');
+    console.log('   · 还没共享 —— 打开它(或父页面)→ ••• → Connections → 加上这个 integration');
+    return;
+  }
+  console.log(`✅ 数据库:「${(raw.title ?? []).map((t) => t.plain_text).join('') || '(无标题)'}」`);
+
+  // 用下游真正的那套挑选逻辑,不自己解析 —— 这里报「能用」就得是 guide-gen 眼里的能用
+  const picked = pickGuideDbProperties(raw.properties);
+  console.log(`✅ 标题属性:${picked.titleProperty}`);
+
+  if (!picked.status) {
+    console.log('ℹ️  没有状态属性 —— 合法。攻略照样能建、能同步勾选,只是');
+    console.log('   guide-status 那套(打满→Done、掉出 100%→Staged)没东西可写。');
+    console.log(`   想要的话加一个 Status 属性,选项:${GUIDE_STATUS_OPTIONS.join(' / ')}`);
+  } else {
+    const missing = GUIDE_STATUS_OPTIONS.filter((o) => !picked.status.options.includes(o));
+    console.log(`${missing.length ? '⚠️ ' : '✅'} 状态属性:${picked.status.property}(${picked.status.type})`);
+    console.log(`   现有选项:${picked.status.options.join(' / ')}`);
+    if (missing.length) {
+      console.log(`   缺:${missing.join(' / ')}`);
+      console.log('   缺的那个会在程序真要写它的时候把命令拦下来:');
+      if (missing.includes('Not started') || missing.includes('In progress') || missing.includes('Done')) {
+        console.log('     · guide-gen / guide-to-notion 建新页时按完成度写这三档');
+      }
+      if (missing.includes('Staged')) console.log('     · guide-status 把掉出 100% 的页面退回 Staged 时写它');
+      console.log('   去 Notion 那个属性上把缺的选项加出来就行,名字要一模一样(注意大小写)。');
+    }
+  }
+
+  const pages = await notion.queryGuideDatabase(dbId);
+  const registered = allGuides(db).filter((g) => g.kind === 'notion').length;
+  console.log(`✅ 库里 ${pages.length} 个页面,其中 ${registered} 个已登记进 guides 表`);
+  if (pages.length > registered) {
+    console.log(`   剩下 ${pages.length - registered} 个没有 \`appid: NNNNNN\` 行 —— 那是还没写的攻略,不是错误`);
   }
 }
 
@@ -1144,6 +1281,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
   node tracker.js guide-to-notion <appid> 把本地 markdown 攻略搬到 Notion(逐条核对后才动本地文件)
               guide-to-notion --dry-run   只预览转换结果,一个字节都不写
+  node tracker.js notion-check            Notion 这一侧的只读体检:token、库、状态选项
   node tracker.js ai-check [appid]        AI 联网研究链路自检(token 用量会打出来)
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
@@ -1173,6 +1311,7 @@ const COMMANDS = {
   'checkbox-sync': cmdCheckboxSync,
   'guide-status': cmdGuideStatus,
   'guide-lint': cmdGuideLint,
+  'notion-check': cmdNotionCheck,
   'ai-check': cmdAiCheck,
   'guide-gen': cmdGuideGen,
   'guide-to-notion': cmdGuideToNotion,
