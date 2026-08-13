@@ -8,20 +8,40 @@ Guide *content* stays wherever you write it — the database only stores a point
 
 A guide is any page whose body starts with a line like `appid: 3117820`. That's how a page gets matched to a game.
 
+Those pages live in a Notion **database**, not a plain page. The tool reads it with `GET /databases/{id}` and `POST /databases/{id}/query`, so handing it a page ID — or a view ID, or a pasted URL — fails with a 404 that looks exactly like a permissions problem.
+
 **One-time setup:**
 
 1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy its secret.
-2. Find your guide database's ID: open it as a full page, and take the 32-character hex string from the URL — the part *before* `?v=`, which is the view ID rather than the database.
-3. Run `node tracker.js init --notion`. It prompts for both (the token isn't echoed), verifies the token and the database access separately, and only saves once the token works.
-4. In Notion, open the guide pages' shared parent → `•••` → **Connections** → add your integration. Child pages inherit it. Without this the API returns 404s.
+2. In Notion, open the page that will hold your guides → `•••` → **Connections** → add your integration. Child pages and databases inherit it. Without this every call returns 404.
+3. Run `node tracker.js init --notion --create`. It prompts for the secret (not echoed), lists the pages your integration can see, and builds a guide database under the one you pick — properties and status options already correct. The database ID is saved for you, so you never copy one by hand.
 
-In the packaged app, step 3 is the **④ Notion 攻略同步** section of the setup page instead — reachable on first run, and afterwards from the **设置** button on the Dashboard. It performs the same two checks and reports them separately, because the fixes differ: a rejected token means re-copying it from `my-integrations`, while a token that works but a database it cannot read means step 4 above was skipped. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
+Already have a database you want to use? Run `node tracker.js init --notion` instead and paste its ID: open the database as a full page and take the 32-character hex string from the URL, the part *before* `?v=` (that part is the view ID, not the database).
 
-Then:
+In the packaged app, step 3 is the **④ Notion 攻略同步** section of the setup page — reachable on first run, and afterwards from the **设置** button on the Dashboard. It has the same **帮我建一个** flow, and the same manual field if you already have a database. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
+
+### What the database needs
+
+| | |
+|---|---|
+| Title property | Any `title` property. The name doesn't matter — it's read, never assumed. |
+| Status property | **Optional.** If present it needs the options `Not started`, `In progress`, `Staged`, `Done`. |
+| Everything else | Ignored. Extra properties and extra status options are harmless. |
+
+Those four are exactly the values the program ever writes: `Not started` / `In progress` / `Done` when a page is created (chosen from real progress), and `Done` / `Staged` when the status convergence runs. Validation only asks whether the value *being written* is one of the options, so anything extra you keep for your own workflow is untouched. Three of the four are Notion's own defaults for a status property, so a hand-made one usually only needs `Staged` adding.
+
+A database with **no** status property at all is legal — guides are created, discovered and ticked normally, and only the `Status` convergence has nothing to write.
+
+An auto-created database leaves all four options in the `To-do` group, because **Notion's API silently ignores status groups**: passing them at creation and PATCHing them afterwards both return HTTP 200 and change nothing. It affects no behaviour (only `options` is ever read) — drag them into the right groups by hand if the board view bothers you.
+
+**Then check it:**
 
 ```bash
+node tracker.js notion-check      # read-only: token, database, status options, page count
 node tracker.js guides --notion   # finds pages not yet registered and links them up
 ```
+
+`notion-check` exists because every failure on this path looks like every other one: a bad token, an ID that isn't a database, a database that was never shared, a status option that's missing. The first three used to share one error message, and the fourth stayed invisible until the first `guide-gen`.
 
 Pages without an `appid:` line are skipped quietly every run — they're guides you haven't written yet, not errors.
 
@@ -50,7 +70,7 @@ Headings, checkboxes (including nested sub-steps and their ticked state), plain 
 
 **Your ticks come across untouched.** Migration never re-derives checked state from Steam; that's `checkbox-sync`'s job, and quietly doing it here would mean a move could change your data.
 
-New pages get their `Status` the same way as generated ones — `Done` / `Paused` / `Not started` by real progress. 
+New pages get their `Status` the same way as generated ones — `Done` / `In progress` / `Not started` by real progress. 
 
 Afterwards the page is **read back and compared line by line** against the file — same count, same text, same ticks. Only if that matches does the local file move to `guides/.migrated/`. If anything is off, the migration fails, says which line, and **your file stays exactly where it was**. Nothing is ever deleted.
 
@@ -126,7 +146,7 @@ Two cases get refused rather than guessed at, because both would damage notes yo
 
 An existing page that is *empty* is treated as the page you meant — those "created the page, haven't written the guide yet" placeholders get filled in, and its title, icon and status are left exactly as you set them.
 
-New pages get the Steam icon and a `Status` derived from where you actually are in the game: **`Done`** at 100%, **`Paused`** with some achievements unlocked, **`Not started`** with none. Nothing later revisits a page that isn't at 100%, so the value written at creation is the one that sticks — which is why it's computed rather than fixed. Notion's block format can't carry everything markdown can (`<details>`, tables, third-level headings); anything it can't represent is written as a plain paragraph — **the text is never dropped** — and the affected lines are listed when it finishes.
+New pages get the Steam icon and a `Status` derived from where you actually are in the game: **`Done`** at 100%, **`In progress`** with some achievements unlocked, **`Not started`** with none. Nothing later revisits a page that isn't at 100%, so the value written at creation is the one that sticks — which is why it's computed rather than fixed. Notion's block format can't carry everything markdown can (`<details>`, tables, third-level headings); anything it can't represent is written as a plain paragraph — **the text is never dropped** — and the affected lines are listed when it finishes.
 
 After writing, the page is **read back and re-validated with the same linter**, because a Notion write returns 200 whether or not the content came out the way you meant.
 

@@ -24,10 +24,10 @@ import { openDb, insertGame, replaceAchievements, getGuide } from '../lib/db.js'
 import { landToNotion, DRAFTS_DIR } from '../lib/guidegen.js';
 // planNotionTarget 住在 notion.js 而不是 guidegen.js —— 它是"写 Notion 前该问什么",
 // 跟 AI 没有关系,搬家那条路(guidemigrate.js)也要用它
-import { planNotionTarget, newGuideStatus } from '../lib/notion.js';
+import { planNotionTarget, newGuideStatus, GUIDE_STATUS_OPTIONS } from '../lib/notion.js';
 
 /** 以前这里是个写死的常量。现在状态由进度算出来,测试跟着改成"算出来的那个值" */
-const SOME_STATUS = 'Paused';
+const SOME_STATUS = 'In progress';
 
 // ---------------------------------------------------------------------------
 // 脚手架
@@ -74,7 +74,8 @@ function freshEnv({ draft = DRAFT } = {}) {
  */
 function fakeNotion(opts = {}) {
   const {
-    statusOptions = ['Not started', 'Paused', 'Staged', 'Done'],
+    // 用真的那一份,不另抄一遍:抄一遍就多一个会和 GUIDE_STATUS_OPTIONS 悄悄分家的地方
+    statusOptions = GUIDE_STATUS_OPTIONS,
     pages = [],
     childCounts = {},
     titleProperty = 'Name',
@@ -146,6 +147,8 @@ describe('planNotionTarget —— 写之前把该问的问完', () => {
   });
 
   test('校验的是这次真要写的值,不是某个固定值', async () => {
+    // 特意用 `Paused` —— 它是个合法值但**程序已经不再写它了**(见 newGuideStatus),
+    // 所以拿它做正例最能说明校验问的是"这次要写的那个",而不是某张内置清单
     const notion = fakeNotion({ statusOptions: ['Paused'] });
     // Paused 在选项里 → 放行
     await planNotionTarget(notion, '测试游戏', { statusValue: 'Paused' });
@@ -202,8 +205,8 @@ describe('planNotionTarget —— 写之前把该问的问完', () => {
     test('满成就 → Done', () => {
       assert.equal(newGuideStatus({ achieved: 51, total: 51 }), 'Done');
     });
-    test('解锁了一部分 → Paused', () => {
-      assert.equal(newGuideStatus({ achieved: 50, total: 51 }), 'Paused');
+    test('解锁了一部分 → In progress', () => {
+      assert.equal(newGuideStatus({ achieved: 50, total: 51 }), 'In progress');
     });
     test('一个都没解锁 → Not started', () => {
       assert.equal(newGuideStatus({ achieved: 0, total: 51 }), 'Not started');

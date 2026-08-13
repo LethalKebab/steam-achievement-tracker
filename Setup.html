@@ -65,6 +65,17 @@
   }
   button:hover:not(:disabled) { opacity: 0.9; }
   button:disabled { opacity: 0.5; cursor: default; }
+  /* 次级按钮:主按钮是整行的「保存并验证」,这些嵌在小节里,不能跟着满宽 */
+  .btn-sub {
+    width: auto;
+    margin-top: 0;
+    padding: 4px 10px;
+    font-size: 12px;
+    background: var(--panel-alt);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn-wide { width: 100%; margin-top: 14px; }
   .msg { font-size: 12px; margin-top: 14px; min-height: 16px; line-height: 1.5; }
   .msg.error { color: var(--low); }
   .msg.ok { color: var(--good); }
@@ -126,13 +137,31 @@
       <summary>④ Notion 攻略同步(可选)<span class="configured" id="notion-set" hidden>已配置</span></summary>
       <ol>
         <li>打开 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a>,新建一个 Internal Integration,复制它的 secret</li>
-        <li>回到 Notion,打开放攻略的数据库(或它们的父页面)→ 右上角 <code>•••</code> → <code>Connections</code> → 加上刚建的 integration。<strong>不做这一步会读不到页面。</strong></li>
-        <li>把那个数据库当整页打开,地址栏里 <code>?v=</code> 之前的 32 位十六进制就是数据库 ID</li>
+        <li>回到 Notion,打开要放攻略的那个页面 → 右上角 <code>•••</code> → <code>Connections</code> → 加上刚建的 integration。<strong>不做这一步什么都读不到。</strong></li>
+        <li>攻略要放在一个 <strong>database</strong> 里,普通页面不行。没有现成的就填完 secret 用下面的「帮我建一个」;已经有了就把它<strong>当整页打开</strong>,地址栏里 <code>?v=</code> 之前那 32 位十六进制就是 ID</li>
       </ol>
       <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空则不改</span></label>
       <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="secret_...">
       <label for="notion-db">攻略数据库 ID</label>
       <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
+      <p class="hint" style="margin: 10px 0 0;">
+        还没有?<button type="button" class="btn-sub" id="notion-make">帮我建一个</button>
+        会在你选的页面下建好、ID 自动填进上面那栏。
+      </p>
+      <div id="notion-create" hidden>
+        <label for="notion-parent">建在哪一页下面</label>
+        <select id="notion-parent"></select>
+        <label for="notion-title">数据库名字</label>
+        <input id="notion-title" type="text" value="Steam 攻略">
+        <button type="button" class="btn-sub btn-wide" id="notion-make-go">建立</button>
+      </div>
+      <div class="msg" id="notion-msg" role="status"></div>
+      <p class="hint" style="margin-top: 12px;">
+        用现成的数据库也行:它的状态属性要有
+        <code>Not started</code> / <code>In progress</code> / <code>Staged</code> / <code>Done</code> 四个选项 ——
+        前三个是 Notion 自带的,通常只差 <code>Staged</code> 要自己加。完全没有状态属性也能跑,
+        只是攻略页的状态不会自动跟着完成度走。
+      </p>
     </details>
 
     <details id="ai-step">
@@ -216,6 +245,65 @@
         document.title = '设置 · Steam 成就追踪器';
       }
     })();
+
+    /**
+     * 「帮我建一个」。两步:先列出这个 integration 能看到的页面,选一个,再建。
+     *
+     * 分两步不只是流程需要 —— **列表为空本身是一个精确诊断**:token 有效却一个页面
+     * 都看不到,只可能是上面第 2 步(Connections)没做。以前这个处境只能靠一条
+     * 和「数据库 ID 填错了」共用的报错去猜。
+     */
+    const setNotionMsg = (text, cls) => {
+      const el = $('notion-msg');
+      el.className = 'msg' + (cls ? ' ' + cls : '');
+      el.textContent = text;
+    };
+
+    $('notion-make').addEventListener('click', async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      setNotionMsg('正在看这个 integration 能访问哪些页面…');
+      const r = await call('listNotionParents', [$('notion-token').value.trim()]);
+      b.disabled = false;
+      if (r.error) return setNotionMsg(r.error, 'error');
+      if (!r.pages.length) {
+        return setNotionMsg(
+          'token 有效,但这个 integration 一个页面都看不到 —— 上面第 2 步还没做:'
+            + '在 Notion 里打开要放攻略的页面 → ••• → Connections → 加上它,然后再点一次。',
+          'error'
+        );
+      }
+      const sel = $('notion-parent');
+      sel.innerHTML = '';
+      for (const p of r.pages) {
+        const o = document.createElement('option');
+        o.value = p.id;
+        // textContent 不是 innerHTML:标题是 Notion 那边的数据,不是我们写的文案
+        o.textContent = p.title;
+        sel.appendChild(o);
+      }
+      $('notion-create').hidden = false;
+      setNotionMsg('找到 ' + r.pages.length + ' 个可用页面'
+        + (r.truncated ? '(还有更多没列完)' : '') + ',选一个再点建立。');
+    });
+
+    $('notion-make-go').addEventListener('click', async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      setNotionMsg('正在建…');
+      const r = await call('createNotionGuideDb', [
+        $('notion-token').value.trim(), $('notion-parent').value, $('notion-title').value.trim(),
+      ]);
+      b.disabled = false;
+      if (r.error) return setNotionMsg(r.error, 'error');
+      $('notion-db').value = r.id;
+      // 服务端建完就存盘了。这里同步 loadedNotionDb,否则待会儿按「保存并验证」会为了
+      // 同一个值再往 Notion 跑一趟(submit 那边靠和它比对来决定要不要调 saveNotionConfig)
+      loadedNotionDb = r.id;
+      $('notion-create').hidden = true;
+      setNotionMsg('建好了:「' + r.title + '」,状态选项 ' + r.options.join(' / ')
+        + '。ID 已填好并存盘。', 'ok');
+    });
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();

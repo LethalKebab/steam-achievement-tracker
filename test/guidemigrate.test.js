@@ -359,8 +359,8 @@ describe('新页的状态按真实进度算', () => {
     return notion.created[0].status.value;
   };
 
-  test('解锁了一部分 → Paused(部落幸存者 50/51 就是这一档)', async () => {
-    assert.equal(await statusOf(50, 51), 'Paused');
+  test('解锁了一部分 → In progress(部落幸存者 50/51 就是这一档)', async () => {
+    assert.equal(await statusOf(50, 51), 'In progress');
   });
 
   test('一个都没解锁 → Not started', async () => {
