@@ -42,34 +42,114 @@
       margin-bottom: 24px;
     }
     .subtitle-row .subtitle { margin-bottom: 0; }
-    /* 「设置」是个 <a>,和「立即同步」这个 <button> 共用这套样式,
-       所以要把链接的默认下划线和 inline 布局压掉 */
-    .sync-btn {
+
+    /* 冻结的顶栏。
+       **负外边距是为了满宽**:body 有 24px 内边距,不抵消掉的话左右两侧会留出缝,
+       表格从缝里滚过去,看着像背景漏了。
+       z-index 100 —— 要压住表格,但必须让开两个浮层:#gen-bar(9990)和
+       lib/rpc.js 的同步状态条(9999)。它们钉在屏幕底部,顶栏跟它们抢层级没有意义。
+       背景必须是**不透明**的 var(--bg),否则滚动的表格会从下面透出来。 */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      margin: -24px -24px 20px;
+      padding: 14px 24px 12px;
+    }
+    .topbar h1 { margin: 0 0 8px 0; }
+    .topbar .subtitle-row { margin-bottom: 0; }
+
+    /* 图标按钮。「设置」是 <a>、「同步」和铃铛是 <button>,共用这一套,
+       所以链接的默认下划线和 inline 布局要压掉 */
+    .icon-btn {
       background: var(--panel-alt);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 4px;
-      padding: 5px 12px;
-      font-size: 12px;
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      line-height: 1;
       cursor: pointer;
       flex-shrink: 0;
-      display: inline-block;
       text-decoration: none;
-      line-height: normal;
       font-family: inherit;
     }
-    .sync-btn:hover:not(:disabled) {
-      background: var(--accent);
-      border-color: var(--accent);
-      color: #0e141b;
+    .icon-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
+    .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .icon-btn:disabled { opacity: 0.5; cursor: default; }
+    /* 转的是里面那个字形,不是按钮本身 —— 转按钮会把边框和背景一起转起来 */
+    .icon-glyph { display: inline-block; }
+    @keyframes icon-spin { to { transform: rotate(360deg); } }
+    .icon-btn.spinning .icon-glyph { animation: icon-spin 1.1s linear infinite; }
+    @media (prefers-reduced-motion: reduce) {
+      .icon-btn.spinning .icon-glyph { animation: none; opacity: 0.55; }
     }
-    .sync-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .sync-btn:disabled { opacity: 0.5; cursor: default; }
+
+    /* 铃铛 */
+    .bell-wrap { position: relative; display: inline-flex; }
+    .bell-dot {
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--low);
+      /* 描边用页面底色,红点压在按钮边框上时才分得开 */
+      border: 1.5px solid var(--bg);
+      pointer-events: none;
+    }
+    .bell-panel {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      width: 360px;
+      max-width: calc(100vw - 48px);
+      max-height: 60vh;
+      overflow-y: auto;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px;
+      z-index: 200;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+      text-align: left;
+    }
+    .bell-group {
+      font-size: 11px;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 8px 8px 4px;
+    }
+    .bell-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 8px;
+      border-radius: 4px;
+    }
+    .bell-item:hover { background: var(--panel-alt); }
+    .bell-item img { width: 40px; height: 19px; object-fit: cover; border-radius: 2px; flex-shrink: 0; }
+    .bell-item .bell-name { font-size: 13px; color: var(--text); flex: 1; min-width: 0; }
+    .bell-item .bell-when { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+    .bell-empty { font-size: 12px; color: var(--text-dim); padding: 14px 8px; text-align: center; }
+    /* 「设置」是个 <a>,和「立即同步」这个 <button> 共用这套样式,
+       所以要把链接的默认下划线和 inline 布局压掉 */
     .sync-msg { font-size: 12px; color: var(--text-dim); }
     .sync-msg.error { color: var(--low); }
+    /* 盒子偏大、数字偏小 → 反过来:盒子收紧,数字撑满。
+       数字才是这三块的内容,标签只是给它一个名字 */
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
       gap: 14px;
       margin-bottom: 28px;
     }
@@ -77,24 +157,27 @@
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 6px;
-      padding: 16px 18px;
+      padding: 12px 16px 14px;
     }
     .card .label {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-dim);
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 6px;
+      margin-bottom: 2px;
     }
     .card .value {
-      font-size: 26px;
+      font-size: 42px;
       font-weight: 700;
       color: var(--accent);
+      line-height: 1.1;
+      /* 等宽数字:三块的数字位数不同,不锁的话每次同步完宽度会跳一下 */
+      font-variant-numeric: tabular-nums;
     }
     .card .sub {
-      font-size: 12px;
+      font-size: 11px;
       color: var(--text-dim);
-      margin-top: 4px;
+      margin-top: 2px;
     }
     .tabs {
       display: flex;
@@ -519,15 +602,25 @@
   </style>
 </head>
 <body>
-  <h1>Steam Achievement Tracker</h1>
-  <div class="subtitle-row">
-    <div class="subtitle" id="lastUpdated">加载中...</div>
-    <button class="sync-btn" id="syncNowBtn"
-            title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。">立即同步</button>
-    <!-- 打包版没有地址栏,不给入口的话设置页在首次设置之后就再也打不开了 -->
-    <a class="sync-btn" href="/setup" id="settingsLink"
-       title="改 Steam 凭据、配置 Notion 攻略同步、从表格导入">设置</a>
-    <span class="sync-msg" id="syncMsg"></span>
+  <div class="topbar">
+    <h1>Steam Achievement Tracker</h1>
+    <div class="subtitle-row">
+      <div class="subtitle" id="lastUpdated">加载中...</div>
+      <button class="icon-btn" id="syncNowBtn"
+              title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。"
+              aria-label="立即同步"><span class="icon-glyph">🔄</span></button>
+      <!-- 打包版没有地址栏,不给入口的话设置页在首次设置之后就再也打不开了 -->
+      <a class="icon-btn" href="/setup" id="settingsLink"
+         title="改 Steam 凭据、配置 Notion 攻略同步、从表格导入"
+         aria-label="设置"><span class="icon-glyph">⚙️</span></a>
+      <span class="bell-wrap">
+        <button class="icon-btn" id="bellBtn" type="button"
+                title="提醒" aria-label="提醒" aria-expanded="false"><span class="icon-glyph">🔔</span></button>
+        <span class="bell-dot" id="bellDot" hidden></span>
+        <div class="bell-panel" id="bellPanel" hidden role="dialog" aria-label="提醒"></div>
+      </span>
+      <span class="sync-msg" id="syncMsg"></span>
+    </div>
   </div>
 
   <div id="gen-bar" role="status">
@@ -549,21 +642,6 @@
       <div class="label">完美游戏数</div>
       <div class="value" id="cardPerfect">-</div>
     </div>
-  </div>
-
-  <div id="newAchSection" style="display:none; margin-bottom: 24px;">
-    <h1 style="font-size:15px; margin-bottom:10px;">🆕 最近新增成就的游戏(30天内)</h1>
-    <table>
-      <thead>
-        <tr>
-          <th>游戏</th>
-          <th>新增时间</th>
-          <th>完成数</th>
-          <th>成就总数</th>
-        </tr>
-      </thead>
-      <tbody id="newAchTableBody"></tbody>
-    </table>
   </div>
 
   <div class="tabs">
@@ -697,34 +775,102 @@
       return '<svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="' + path + '"/></svg>';
     }
 
-    function renderNewAchTable() {
-      const section = document.getElementById('newAchSection');
-      section.style.display = 'block';
+    // ---- 🔔 提醒 --------------------------------------------------------------
+    //
+    // 两类,都是**跃迁**,时间戳由 lib/db.js 的 updateGameStats 在唯一还看得见旧值的
+    // 地方盖下。这里只负责按窗口筛、按类分组 —— **别试图从 achieved/total 现算**:
+    // 一个掉出 100% 的游戏和一个从来没打满过的游戏,当前状态长得一模一样。
+    //
+    // 「已读」拿原始时间戳当键存 localStorage。用天数当键不行:天数每天都在变,
+    // 存下来的已读第二天就对不上,红点会天天复活。
+    const BELL_DAYS = 30;
+    const BELL_SEEN_KEY = 'satBellSeen';
+    const BELL_GROUPS = [
+      ['perfect', '打满之后又出了新成就'],
+      ['added', '以前没有成就,现在有了'],
+    ];
 
-      const recent = allGames
-        .filter(function(g){ return g.newAchDaysAgo !== null && g.newAchDaysAgo <= 30; })
-        .sort(function(a, b){ return a.newAchDaysAgo - b.newAchDaysAgo; });
+    function bellItems() {
+      const out = [];
+      allGames.forEach(function(g) {
+        if (g.perfectLostDaysAgo !== null && g.perfectLostDaysAgo <= BELL_DAYS) {
+          out.push({ kind: 'perfect', game: g, days: g.perfectLostDaysAgo,
+                     key: g.appid + '|perfect|' + g.perfectLostAt });
+        }
+        if (g.achAddedDaysAgo !== null && g.achAddedDaysAgo <= BELL_DAYS) {
+          out.push({ kind: 'added', game: g, days: g.achAddedDaysAgo,
+                     key: g.appid + '|added|' + g.achAddedAt });
+        }
+      });
+      return out.sort(function(a, b){ return a.days - b.days; });
+    }
 
-      if (recent.length === 0) {
-        document.getElementById('newAchTableBody').innerHTML =
-          '<tr><td colspan="4" class="empty">最近30天没有游戏新增成就</td></tr>';
+    function bellSeen() {
+      // 存坏了就当没读过。重新提醒一遍是小烦恼,静默吞掉一条提醒是真丢东西
+      try { return new Set(JSON.parse(localStorage.getItem(BELL_SEEN_KEY) || '[]')); }
+      catch (e) { return new Set(); }
+    }
+
+    function renderBell() {
+      const items = bellItems();
+      const seen = bellSeen();
+      const unread = items.filter(function(i){ return !seen.has(i.key); });
+      document.getElementById('bellDot').hidden = unread.length === 0;
+
+      const panel = document.getElementById('bellPanel');
+      if (!items.length) {
+        panel.innerHTML = '<div class="bell-empty">最近 ' + BELL_DAYS + ' 天没有新动静</div>';
         return;
       }
-
-      document.getElementById('newAchTableBody').innerHTML = recent.map(function(g) {
-        const achievedText = (g.achieved !== null) ? g.achieved : '-';
-        const totalText = (g.total !== null && g.total !== 'N/A') ? g.total : '-';
-        return '<tr class="game-row">'
-          + '<td><div class="game-cell">'
-          + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-          + '<div class="game-name-main">' + escapeHtml(g.name) + '</div>'
-          + '</div></td>'
-          + '<td>' + g.newAchDaysAgo + ' 天前</td>'
-          + '<td>' + achievedText + '</td>'
-          + '<td>' + totalText + '</td>'
-          + '</tr>';
-      }).join('');
+      let html = '';
+      BELL_GROUPS.forEach(function(pair) {
+        const rows = items.filter(function(i){ return i.kind === pair[0]; });
+        if (!rows.length) return;
+        html += '<div class="bell-group">' + pair[1] + '</div>';
+        html += rows.map(function(i) {
+          return '<div class="bell-item">'
+            + '<img src="' + thumbUrl(i.game.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            + '<span class="bell-name">' + escapeHtml(i.game.name) + '</span>'
+            + '<span class="bell-when">' + (i.days === 0 ? '今天' : i.days + ' 天前') + '</span>'
+            + '</div>';
+        }).join('');
+      });
+      panel.innerHTML = html;
     }
+
+    (function initBell() {
+      const btn = document.getElementById('bellBtn');
+      const panel = document.getElementById('bellPanel');
+      const close = function() {
+        panel.hidden = true;
+        btn.setAttribute('aria-expanded', 'false');
+      };
+
+      btn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        const opening = panel.hidden;
+        panel.hidden = !opening;
+        btn.setAttribute('aria-expanded', String(opening));
+        // 打开即算读过 —— 红点回答的是"有没有新东西",不是"有没有处理完"
+        if (opening) {
+          try {
+            localStorage.setItem(BELL_SEEN_KEY,
+              JSON.stringify(bellItems().map(function(i){ return i.key; })));
+          } catch (e) { /* 存不下就下次再提醒一遍,比报错好 */ }
+          document.getElementById('bellDot').hidden = true;
+        }
+      });
+
+      // 点别处收起来。**不能用 blur** —— 面板里的元素拿到焦点也会触发 blur,
+      // 于是在面板里点一下就自己关了。用 btn.contains 而不是 e.target !== btn:
+      // 点到的很可能是按钮里那个 <span> 字形
+      document.addEventListener('click', function(e) {
+        if (!panel.hidden && !panel.contains(e.target) && !btn.contains(e.target)) close();
+      });
+      document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape' && !panel.hidden) close();
+      });
+    })();
 
     function renderFavGrid(games) {
       const grid = document.getElementById('favGrid');
@@ -1275,7 +1421,7 @@
         document.getElementById('cardAvgPrecise').textContent = data.avgPrecise ? ('精确值: ' + data.avgPrecise) : '';
         document.getElementById('cardPerfect').textContent = data.perfectCount;
         document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
-        renderNewAchTable();
+        renderBell();
         render();
       }).withFailureHandler(function(err) {
         document.getElementById('gameTableBody').innerHTML =
@@ -1324,7 +1470,13 @@
     window.onSyncState = function(s) {
       if (s.running) syncStarting = false;
       syncBtn.disabled = s.running || syncStarting;
-      syncBtn.textContent = s.running ? '同步中...' : '立即同步';
+      // 按钮现在是个图标,**不能再写 textContent** —— 那会把 🔄 换成文字,
+      // 而且连带删掉 .icon-glyph 这个 span,转圈动画从此再也挂不上去。
+      // 状态改走视觉(转圈)和 title(悬停能读到),两者都不动按钮内容
+      syncBtn.classList.toggle('spinning', s.running);
+      syncBtn.title = s.running
+        ? '正在同步…'
+        : '立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。';
 
       // 只清掉"正在启动..."这类过程提示。错误必须留着:轮询每 3 秒来一次,
       // 无条件清空会把刚显示出来的报错冲掉,而那是点击唯一的反馈。
