@@ -24,7 +24,9 @@
       padding: 24px;
     }
     h1 {
-      font-size: 20px;
+      /* 顶栏冻结、卡片数字提到 42px 之后,20px 的标题在同一屏里显得像个副标题。
+         页面标题得撑得住它下面那三个数字 */
+      font-size: 28px;
       font-weight: 600;
       margin: 0 0 4px 0;
       color: #fff;
@@ -84,12 +86,40 @@
     .icon-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
     .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .icon-btn:disabled { opacity: 0.5; cursor: default; }
-    /* 转的是里面那个字形,不是按钮本身 —— 转按钮会把边框和背景一起转起来 */
     .icon-glyph { display: inline-block; }
-    @keyframes icon-spin { to { transform: rotate(360deg); } }
-    .icon-btn.spinning .icon-glyph { animation: icon-spin 1.1s linear infinite; }
+
+    /* 同步中的提示:顶栏底边那条来回扫的线。
+       **图标不再转。** 🔄 在 Windows 上是「蓝色圆角方块 + 白箭头」的一整个字形,
+       转它转的是那块底板而不是箭头,看着很蠢;而单独转箭头 CSS 够不着 ——
+       那是字形内部的像素,除非换成内联 SVG,但那样它就和 ⚙️ 🔔 两个彩色 emoji 不是
+       一套东西了。挪到顶栏底边反而更好:顶栏是冻结的,所以滚到哪儿都看得见,
+       而按钮那一小格只有盯着它才注意得到。
+       **不能给 .topbar 加 overflow: hidden** —— 铃铛面板是它的绝对定位子元素,
+       会被裁掉。所以让这条线在 0%~65% 之间来回,自己不越界。 */
+    @keyframes sync-sweep {
+      0%   { left: 0; }
+      50%  { left: 65%; }
+      100% { left: 0; }
+    }
+    .topbar::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;          /* 压在顶栏那条 1px 边框上 */
+      left: 0;
+      width: 35%;
+      height: 2px;
+      background: var(--accent);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .topbar.syncing::after {
+      opacity: 1;
+      animation: sync-sweep 1.6s ease-in-out infinite;
+    }
     @media (prefers-reduced-motion: reduce) {
-      .icon-btn.spinning .icon-glyph { animation: none; opacity: 0.55; }
+      /* 不动的话就整条亮着 —— 状态仍然看得见,只是不扫 */
+      .topbar.syncing::after { animation: none; width: 100%; opacity: 0.6; }
     }
 
     /* 铃铛 */
@@ -160,14 +190,18 @@
       padding: 12px 16px 14px;
     }
     .card .label {
-      font-size: 11px;
+      /* 标签和数字是**一起定的**,别单独调其中一个。踩过两次:
+         先是把数字 26→42 却顺手把标签 12→11(比例 0.46 崩到 0.26,标签读起来像脚注),
+         再是把标签补到 18px 配 42px 的数字(比例对了,但两个都太大,卡片压过了页面)。
+         现在 15/34 ≈ 0.44 —— 保住原来那个关系,整体收回到不抢戏的体量 */
+      font-size: 15px;
       color: var(--text-dim);
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
     .card .value {
-      font-size: 42px;
+      font-size: 34px;
       font-weight: 700;
       color: var(--accent);
       line-height: 1.1;
@@ -175,9 +209,10 @@
       font-variant-numeric: tabular-nums;
     }
     .card .sub {
-      font-size: 11px;
+      /* 跟着标签一起提一档 —— 它是数字的精确值,不该比标签还细 */
+      font-size: 13px;
       color: var(--text-dim);
-      margin-top: 2px;
+      margin-top: 3px;
     }
     .tabs {
       display: flex;
@@ -1470,10 +1505,14 @@
     window.onSyncState = function(s) {
       if (s.running) syncStarting = false;
       syncBtn.disabled = s.running || syncStarting;
-      // 按钮现在是个图标,**不能再写 textContent** —— 那会把 🔄 换成文字,
-      // 而且连带删掉 .icon-glyph 这个 span,转圈动画从此再也挂不上去。
-      // 状态改走视觉(转圈)和 title(悬停能读到),两者都不动按钮内容
-      syncBtn.classList.toggle('spinning', s.running);
+      // 按钮现在是个图标,**不能写 textContent** —— 那会把 🔄 换成文字,
+      // 而且连带删掉里面那个 .icon-glyph。
+      // 进行中的提示挂在顶栏底边那条线上(见 .topbar.syncing),不在按钮上:
+      // 按钮本身只靠 disabled 变淡,title 给悬停时读
+      // **Boolean() 不能省。** classList.toggle 的第二个参数是 undefined 时会**翻转**,
+      // 不是关闭 —— 状态对象一旦缺了 running(轮询拿到异常响应就会这样),这条线
+      // 会每 3 秒亮灭一次,永远停不下来。写死成布尔,最坏情况是"不亮",不是"乱闪"
+      document.querySelector('.topbar').classList.toggle('syncing', Boolean(s.running));
       syncBtn.title = s.running
         ? '正在同步…'
         : '立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。';
