@@ -18,9 +18,9 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at`
+`appid` (primary key) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date`
 
-Three decisions worth knowing before you write queries:
+Four decisions worth knowing before you write queries:
 
 - **"This game has no achievements" is `has_achievements = 0` with `NULL` counts** — not a `0` total, and not a string like `N/A` sitting in a numeric column. `total IS NULL AND has_achievements IS NULL` means "not synced yet", which is a different thing.
 - **`status` and `sync_locked` are separate columns.** `status` is the label you see and sort by (`''`, `Unvetted`, `Manual`); `sync_locked` is what actually makes a sync skip the row. The Dashboard moves both together, but you can keep the label while re-enabling the daily refresh:
@@ -38,6 +38,12 @@ Three decisions worth knowing before you write queries:
   ```sql
   UPDATE games SET stats_checked_at = NULL WHERE appid = '...';
   ```
+
+- **`perfect_lost_date` and `ach_added_date` record two things that happened, not two things that are true.** They feed the 🔔 notifications on the Dashboard: a game you had at 100% that the developer then added achievements to, and a game Steam previously reported as having no achievement system that now has one.
+
+  Both are stamped inside `updateGameStats`, which is the only moment the previous values are still visible. A row that has dropped below 100% looks exactly like a row that was never at 100%, and `has_achievements` is overwritten with `1` the instant new stats arrive — so neither event can be reconstructed afterwards from the row itself. That is also why the notifications start out empty on an existing database: nothing recorded these events before the columns existed, and there is no way to backfill them.
+
+  A repeat of either event overwrites the stamp with the newer time, so "how long ago" always refers to the most recent occurrence.
 
 ## What Steam can't tell us
 
