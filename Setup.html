@@ -38,7 +38,10 @@
   h1 { font-size: 18px; font-weight: 600; color: #fff; margin: 0 0 4px; }
   .subtitle { font-size: 13px; color: var(--text-dim); margin-bottom: 20px; }
   .hint { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-bottom: 20px; }
-  .hint a { color: var(--accent); }
+  /* **作用域是整张卡片,不是 .hint。** 原来只给 .hint 里的链接上色,而说明列表里的
+     链接挂在 ol > li 上,拿到的是浏览器默认深蓝 —— 在这个深色底上几乎看不见。
+     :visited 必须一起写死,否则点过一次变紫,照样糊进背景 */
+  .card a, .card a:visited { color: var(--accent); }
   label { display: block; font-size: 13px; margin: 14px 0 6px; }
   input, select {
     width: 100%;
@@ -76,100 +79,102 @@
     border: 1px solid var(--border);
   }
   .btn-wide { width: 100%; margin-top: 14px; }
+  /* 「新建数据库」是**填 ID 之外的另一条路**,不是一句补充说明。做成整行虚线框,
+     一眼看得出"没有就在这里造一个";挤在 hint 里的小按钮读起来像个脚注 */
+  .btn-outline {
+    width: 100%;
+    margin-top: 10px;
+    background: transparent;
+    color: var(--accent);
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    padding: 9px;
+    font-size: 13px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .btn-outline:hover { border-color: var(--accent); background: var(--panel-alt); }
+  .btn-outline:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* 空状态行不占位。`.msg` 的 min-height 是给页面底部那条留的(它要防止提交时
+     整页跳动),但这一条挂在按钮和「跳过」之间,空着就是一个 40px 的洞 */
+  #notion-msg:empty { display: none; }
   .msg { font-size: 12px; margin-top: 14px; min-height: 16px; line-height: 1.5; }
   .msg.error { color: var(--low); }
   .msg.ok { color: var(--good); }
 
-  /* 可选步骤:默认折叠。展开后才显示操作说明,不然首次打开一屏全是字 */
-  details {
-    margin-top: 18px;
-    border-top: 1px solid var(--border);
-    padding-top: 14px;
-  }
-  summary {
-    font-size: 13px;
-    cursor: pointer;
-    color: var(--text);
-    list-style: none;
-  }
-  summary::-webkit-details-marker { display: none; }
-  summary::before { content: '▸ '; color: var(--text-dim); }
-  details[open] summary::before { content: '▾ '; }
-  summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  details .hint { margin: 12px 0 0; }
-  details ol { margin: 10px 0 0; padding-left: 20px; font-size: 12px; color: var(--text-dim); line-height: 1.7; }
-  details ol code {
+  /* 各节里的操作说明。**选择器从 `details ol` 挪到 `.step ol`** —— 折叠面板换成
+     分步之后,原来那套还挂在 <details> 上,于是 Notion 和 AI 两段说明一夜之间
+     变回浏览器默认样式,而没有任何东西会报错 */
+  .step .hint { margin: 12px 0 0; }
+  .step ol { margin: 10px 0 0; padding-left: 20px; font-size: 12px; color: var(--text-dim); line-height: 1.7; }
+  /* **`.step code`,不是 `.step ol code`** —— 说明文字不只出现在有序列表里,
+     也出现在 .hint 段落里。限定在 ol 下的话,段落里的 <code> 掉回浏览器默认:
+     等宽字、没底色,和周围的正文明显不是一套东西 */
+  .step code {
     background: var(--panel-alt);
     padding: 1px 4px;
     border-radius: 3px;
     font-size: 11px;
   }
   .configured { font-size: 11px; color: var(--good); margin-left: 6px; }
+
+  /* 分步。**两种身份共用一套「一次只显示一节」的机制**:
+     步骤条两种模式下都能点着跳,区别只在下面那个按钮是「下一步 / 跳过」还是「保存」。
+     以前四块全堆在一页上,必填的和可选的挤在一起,看不出哪些是"现在必须处理的"。 */
+  .steps { display: flex; list-style: none; padding: 0; margin: 0 0 20px; gap: 6px; }
+  .steps li {
+    flex: 1;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-align: center;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  .steps li.done { color: var(--text); border-bottom-color: var(--panel-alt); }
+  .steps li.current { color: var(--accent); border-bottom-color: var(--accent); }
+  .steps li.clickable { cursor: pointer; }
+  .steps li.clickable:hover { color: var(--text); }
+  .step[hidden] { display: none; }
+  .step-title { font-size: 14px; font-weight: 600; color: #fff; margin: 0 0 6px; }
+  .step-title .tag { font-size: 11px; font-weight: 400; margin-left: 6px; }
+  .step-title .tag.req { color: var(--low); }
+  .step-title .tag.opt { color: var(--text-dim); }
+  /* 一步一个按钮,所以谁出现谁就占满整行。「跳过」保持次级配色 —— 它是出口,
+     不是推荐动作,不该长得和「下一步」「完成设置」一样显眼 */
+  .step-actions { display: flex; margin-top: 22px; }
+  .step-actions button { margin-top: 0; flex: 1; }
 </style>
 </head>
 <body>
   <form class="card" id="setup-form">
     <h1 id="page-title">初始设置</h1>
     <div class="subtitle" id="page-subtitle">只需要填一次,凭据存在本机的 config.json 里</div>
-    <div class="hint">
-      ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
-      ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>(把你的个人资料链接粘进去查)
-    </div>
-    <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空则不改</span></label>
-    <input id="key" name="key" type="text" autocomplete="off" required>
-    <label for="id">② SteamID64</label>
-    <input id="id" name="id" type="text" autocomplete="off" required placeholder="17 位数字">
+    <ol class="steps" id="step-nav" hidden>
+      <li data-goto="1">Steam</li>
+      <li data-goto="2">AI</li>
+      <li data-goto="3">Notion</li>
+      <li data-goto="4">表格</li>
+    </ol>
 
-    <details id="csv-step">
-      <summary>③ 从表格导入(可选)</summary>
-      <input id="csv" name="csv" type="text" autocomplete="off" placeholder="CSV 所在文件夹路径" style="margin-top:10px">
+    <section class="step" data-step="1">
+      <h2 class="step-title">Step 1 · Steam<span class="tag req">必填</span></h2>
       <div class="hint">
-        文件名里要含 <code>RAW DATA</code> / <code>ACHIEVEMENTS</code> / <code>GUIDES</code> 其中之一。
-        列按位置读,表头叫什么都行。<br>
-        空模板:
-        <a href="/template/RAW DATA.csv">RAW DATA</a> ·
-        <a href="/template/ACHIEVEMENTS.csv">ACHIEVEMENTS</a> ·
-        <a href="/template/GUIDES.csv">GUIDES</a>
+        ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
+        ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>(把你的个人资料链接粘进去查)
       </div>
-    </details>
+      <!-- 没有 required 属性是**故意的**:一次只显示一节,而浏览器拒绝校验一个
+           display:none 的必填控件 —— 它会静默阻止提交并报「not focusable」。
+           必填由下面提交处理里那段人工检查负责,不通过时会跳回这一步并说明原因 -->
+      <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空则不改</span></label>
+      <input id="key" name="key" type="text" autocomplete="off">
+      <label for="id">② SteamID64</label>
+      <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字">
+    </section>
 
-    <details id="notion-step">
-      <summary>④ Notion 攻略同步(可选)<span class="configured" id="notion-set" hidden>已配置</span></summary>
-      <ol>
-        <li>打开 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a>,新建一个 Internal Integration,复制它的 secret</li>
-        <li>回到 Notion,打开要放攻略的那个页面 → 右上角 <code>•••</code> → <code>Connections</code> → 加上刚建的 integration。<strong>不做这一步什么都读不到。</strong></li>
-        <li>攻略要放在一个 <strong>database</strong> 里,普通页面不行。没有现成的就填完 secret 用下面的「帮我建一个」;已经有了就把它<strong>当整页打开</strong>,地址栏里 <code>?v=</code> 之前那 32 位十六进制就是 ID</li>
-      </ol>
-      <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空则不改</span></label>
-      <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="secret_...">
-      <label for="notion-db">攻略数据库 ID</label>
-      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
-      <p class="hint" style="margin: 10px 0 0;">
-        还没有?<button type="button" class="btn-sub" id="notion-make">帮我建一个</button>
-        会在你选的页面下建好、ID 自动填进上面那栏。
-      </p>
-      <div id="notion-create" hidden>
-        <label for="notion-parent">建在哪一页下面</label>
-        <select id="notion-parent"></select>
-        <label for="notion-title">数据库名字</label>
-        <input id="notion-title" type="text" value="Steam 攻略">
-        <button type="button" class="btn-sub btn-wide" id="notion-make-go">建立</button>
-      </div>
-      <div class="msg" id="notion-msg" role="status"></div>
-      <p class="hint" style="margin-top: 12px;">
-        用现成的数据库也行:它的状态属性要有
-        <code>Not started</code> / <code>In progress</code> / <code>Staged</code> / <code>Done</code> 四个选项 ——
-        前三个是 Notion 自带的,通常只差 <code>Staged</code> 要自己加。完全没有状态属性也能跑,
-        只是攻略页的状态不会自动跟着完成度走。
-      </p>
-    </details>
-
-    <details id="ai-step">
-      <summary>⑤ AI 攻略生成(可选)<span class="configured" id="ai-set" hidden>已配置</span></summary>
-      <ol>
-        <li>配好之后,Dashboard 上没有攻略的游戏会多出一个「✨ 生成」按钮,点了会联网查资料并写一份攻略</li>
-        <li>机器只保证格式和数据(每个成就一行、名字对得上、勾选等于真实解锁),<strong>攻略内容对不对没有任何东西能验</strong>,生成完自己读一遍</li>
-      </ol>
+    <section class="step" data-step="2" hidden>
+      <h2 class="step-title">Step 2 · AI 攻略生成<span class="tag opt">可选</span><span class="configured" id="ai-set" hidden>已配置</span></h2>
+      <div class="hint">给没有攻略的游戏联网查资料、写一份。<strong>内容对不对没有东西能验,生成完自己读一遍。</strong></div>
       <label for="ai-provider">供应商</label>
       <select id="ai-provider" name="ai-provider">
         <option value="">不启用</option>
@@ -181,10 +186,51 @@
       <input id="ai-key" name="ai-key" type="password" autocomplete="off" placeholder="sk-...">
       <label for="ai-model">模型(可选)</label>
       <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用这一家的默认模型">
-      <p class="hint">保存时会<strong>真发一次请求</strong>验证 —— key 无效、模型停售、这一档没额度,都只有发出去才知道。</p>
-    </details>
+    </section>
 
-    <button type="submit" id="submit-btn">保存并验证</button>
+    <section class="step" data-step="3" hidden>
+      <h2 class="step-title">Step 3 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
+      <ol>
+        <li>在 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a> 建一个 Internal Integration,复制 secret</li>
+        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>Connections</code> → 加上它</li>
+      </ol>
+      <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空则不改</span></label>
+      <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="secret_...">
+      <label for="notion-db">攻略数据库 ID</label>
+      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
+      <button type="button" class="btn-outline" id="notion-make">＋ 新建一个攻略数据库</button>
+      <div id="notion-create" hidden>
+        <label for="notion-parent">建在哪一页下面</label>
+        <select id="notion-parent"></select>
+        <label for="notion-title">数据库名字</label>
+        <input id="notion-title" type="text" value="Steam 攻略">
+        <button type="button" class="btn-sub btn-wide" id="notion-make-go">建立</button>
+      </div>
+      <div class="msg" id="notion-msg" role="status"></div>
+    </section>
+
+    <section class="step" data-step="4" hidden>
+      <h2 class="step-title">Step 4 · 从表格导入<span class="tag opt">可选</span></h2>
+      <input id="csv" name="csv" type="text" autocomplete="off" placeholder="CSV 所在文件夹路径">
+      <div class="hint">
+        文件名里要含 <code>RAW DATA</code> / <code>ACHIEVEMENTS</code> / <code>GUIDES</code>。
+        空模板:
+        <a href="/template/RAW DATA.csv">RAW DATA</a> ·
+        <a href="/template/ACHIEVEMENTS.csv">ACHIEVEMENTS</a> ·
+        <a href="/template/GUIDES.csv">GUIDES</a><br>
+        <!-- 这一句留着是因为它警告的是**不可恢复的数据丢失**,不是在解释功能怎么用 -->
+        <strong>在第一次同步之前导。</strong>喜爱、置顶和手工改的行,Steam 补不回来。
+      </div>
+    </section>
+
+    <!-- **每一步只出一个按钮。** 上面的步骤条本身可以点着跳,所以「上一步」是多余的;
+         而在可选步骤上,「跳过」就是前进那个动作,再摆一个「下一步」是同一件事说两遍。
+         剩下的分工:第 1 步必填走「下一步」,可选步骤走「跳过」,最后一步走提交 -->
+    <div class="step-actions" id="step-actions" hidden>
+      <button type="button" class="btn-sub" id="step-skip">跳过</button>
+      <button type="button" id="step-next">下一步</button>
+      <button type="submit" id="submit-btn">保存并验证</button>
+    </div>
     <div class="msg" id="msg" role="status"></div>
   </form>
   <script>
@@ -213,19 +259,26 @@
 
     (async function load() {
       const s = await call('getSettings', []);
-      if (s.error) return;
+      // 读设置失败也要把分步装起来 —— 否则导航条不出现、四节里只有第一节可见,
+      // 页面看着像坏了。降级成"首次设置"那套是安全的默认
+      if (s.error) { initSteps(); return; }
       isEditMode = s.hasSteamKey && Boolean(s.steamId);
 
       $('id').value = s.steamId || '';
       $('notion-db').value = s.notionDbId || '';
       loadedNotionDb = s.notionDbId || '';
+      // 已经配了库就把「帮我建一个」收起来:服务端护栏一定会拒绝它(建新库会把配置
+      // 改指到空库),摆一个注定被拒的按钮和一个点了没反应的按钮是同一类毛病。
+      // 想换库的路子写在那条拒绝提示里 —— 清空这一栏、保存、再回来建
+      if (s.notionDbId) $('notion-make').hidden = true;
       $('ai-provider').value = s.aiProvider || '';
       $('ai-model').value = s.aiModel || '';
       loadedAiProvider = s.aiProvider || '';
       loadedAiModel = s.aiModel || '';
 
       if (s.hasSteamKey) {
-        $('key').required = false;
+        // required 属性已经不用了(分步之后隐藏的必填控件会让浏览器静默拒绝提交),
+        // 校验走 stepOneOk;这里只改提示文案
         $('key').placeholder = '留空则沿用现在的';
         $('key-set').hidden = false;
       }
@@ -241,10 +294,104 @@
       }
       if (isEditMode) {
         $('page-title').textContent = '设置';
-        $('page-subtitle').textContent = '改完点保存;没动的项目留空即可';
+        $('page-subtitle').textContent = '点上面的标签跳到要改的那一节;没动的项目留空即可';
         document.title = '设置 · Steam 成就追踪器';
       }
+      initSteps();
     })();
+
+    // ---- 分步 -------------------------------------------------------------
+    //
+    // **一套机制,两种身份。** 步骤条在两种模式下都能点着跳到任意一节 —— 一步步走
+    // 太慢,而首次设置的人也常常想先看看后面有什么。两者的区别只剩底下那个按钮:
+    // 首次设置给「下一步 / 跳过 / 完成设置」(一步只出一个),设置模式只给「保存并验证」。
+    //
+    // 各步的输入框**始终在同一个 <form> 里**,只是被 hidden 掉;提交时读的是
+    // `$(id).value`,隐藏节点照样读得到。于是"跳过"就等于"没填",
+    // 保存那一整套逻辑一个字都不用改。
+    const STEP_COUNT = 4;
+    let currentStep = 1;
+
+    /**
+     * 这一步填了东西没有 —— 决定按钮写「跳过」还是「下一步」。
+     *
+     * **这个标签是在回答一个用户会有的疑问:「我填了东西,按跳过会不会丢?」**
+     * 不会 —— 所有输入始终在同一个 form 里,提交时照读隐藏节点。但一个一直写着
+     * 「跳过」的按钮传达的正好是相反的意思,所以让标签跟着内容变。
+     */
+    const STEP_INPUTS = {
+      2: ['ai-provider', 'ai-key', 'ai-model'],
+      3: ['notion-token', 'notion-db'],
+    };
+    const stepHasInput = (n) => (STEP_INPUTS[n] ?? []).some((id) => $(id).value.trim() !== '');
+
+    function refreshSkipLabel() {
+      $('step-skip').textContent = stepHasInput(currentStep) ? '下一步' : '跳过';
+    }
+
+    /** 第 1 步的人工校验。见 HTML 里那段注释:为什么不用 required 属性 */
+    function stepOneOk() {
+      const ok = ($('key').value.trim() || isEditMode) && $('id').value.trim();
+      if (!ok) {
+        msg.className = 'msg error';
+        msg.textContent = 'Steam Web API Key 和 SteamID64 都要填 —— 这两个是必需的,跳不过去。';
+      }
+      return Boolean(ok);
+    }
+
+    function showStep(n) {
+      currentStep = Math.min(Math.max(n, 1), STEP_COUNT);
+      document.querySelectorAll('.step').forEach((s) => {
+        s.hidden = Number(s.dataset.step) !== currentStep;
+      });
+      document.querySelectorAll('#step-nav li').forEach((li) => {
+        const i = Number(li.dataset.goto);
+        li.classList.toggle('current', i === currentStep);
+        li.classList.toggle('done', i < currentStep);
+      });
+      if (!isEditMode) {
+        // 一步一个按钮:第 1 步必填走「下一步」,中间可选步骤走「跳过」,
+        // 最后一步走提交。回上一步交给步骤条,那边随便点
+        $('step-next').hidden = currentStep !== 1;
+        $('step-skip').hidden = currentStep === 1 || currentStep === STEP_COUNT;
+        btn.hidden = currentStep !== STEP_COUNT;
+        refreshSkipLabel();
+      }
+      msg.className = 'msg';
+      msg.textContent = '';
+    }
+
+    function initSteps() {
+      $('step-nav').hidden = false;
+      // 这一行始终显示 —— 提交按钮住在里面。收起的是里面那两个向导按钮,不是整行
+      $('step-actions').hidden = false;
+
+      // **两种模式下步骤条都能点。** 一步步走太慢,而这四节本来就互相独立,
+      // 没有哪一节的内容依赖前一节填了什么。第 1 步的必填由提交时的校验兜底,
+      // 所以直接跳到第 4 步也不会漏掉它
+      document.querySelectorAll('#step-nav li').forEach((li) => {
+        li.classList.add('clickable');
+        li.addEventListener('click', () => showStep(Number(li.dataset.goto)));
+      });
+
+      if (isEditMode) {
+        $('step-skip').hidden = true;
+        $('step-next').hidden = true;
+        btn.hidden = false;
+      } else {
+        btn.textContent = '完成设置';
+        // 边填边换标签。`input` 覆盖打字,`change` 兜住 <select>(它的 input 事件
+        // 在旧浏览器上不保证)。绑在 form 上而不是逐个输入框,新增字段不用再来改这里
+        form.addEventListener('input', refreshSkipLabel);
+        form.addEventListener('change', refreshSkipLabel);
+        $('step-skip').addEventListener('click', () => showStep(currentStep + 1));
+        // 「下一步」只出现在第 1 步,所以这里无条件校验
+        $('step-next').addEventListener('click', () => {
+          if (stepOneOk()) showStep(2);
+        });
+      }
+      showStep(1);
+    }
 
     /**
      * 「帮我建一个」。两步:先列出这个 integration 能看到的页面,选一个,再建。
@@ -316,8 +463,14 @@
       const aiKey = $('ai-key').value.trim();
       const aiModel = $('ai-model').value.trim();
 
-      // 编辑模式下 key 可以留空(表示沿用),首次设置则必填
-      if ((!key && !isEditMode) || !id) return;
+      // 编辑模式下 key 可以留空(表示沿用),首次设置则必填。
+      // **以前这里是个静默 return** —— 分步之后必填项可能根本不在屏幕上,
+      // 点保存没反应会让人以为按钮坏了。现在跳回第 1 步并说明原因
+      if ((!key && !isEditMode) || !id) {
+        showStep(1);
+        stepOneOk();
+        return;
+      }
 
       btn.disabled = true;
       msg.className = 'msg';
