@@ -24,7 +24,9 @@
       padding: 24px;
     }
     h1 {
-      font-size: 20px;
+      /* 顶栏冻结、卡片数字提到 42px 之后,20px 的标题在同一屏里显得像个副标题。
+         页面标题得撑得住它下面那三个数字 */
+      font-size: 28px;
       font-weight: 600;
       margin: 0 0 4px 0;
       color: #fff;
@@ -84,12 +86,40 @@
     .icon-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
     .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
     .icon-btn:disabled { opacity: 0.5; cursor: default; }
-    /* 转的是里面那个字形,不是按钮本身 —— 转按钮会把边框和背景一起转起来 */
     .icon-glyph { display: inline-block; }
-    @keyframes icon-spin { to { transform: rotate(360deg); } }
-    .icon-btn.spinning .icon-glyph { animation: icon-spin 1.1s linear infinite; }
+
+    /* 同步中的提示:顶栏底边那条来回扫的线。
+       **图标不再转。** 🔄 在 Windows 上是「蓝色圆角方块 + 白箭头」的一整个字形,
+       转它转的是那块底板而不是箭头,看着很蠢;而单独转箭头 CSS 够不着 ——
+       那是字形内部的像素,除非换成内联 SVG,但那样它就和 ⚙️ 🔔 两个彩色 emoji 不是
+       一套东西了。挪到顶栏底边反而更好:顶栏是冻结的,所以滚到哪儿都看得见,
+       而按钮那一小格只有盯着它才注意得到。
+       **不能给 .topbar 加 overflow: hidden** —— 铃铛面板是它的绝对定位子元素,
+       会被裁掉。所以让这条线在 0%~65% 之间来回,自己不越界。 */
+    @keyframes sync-sweep {
+      0%   { left: 0; }
+      50%  { left: 65%; }
+      100% { left: 0; }
+    }
+    .topbar::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;          /* 压在顶栏那条 1px 边框上 */
+      left: 0;
+      width: 35%;
+      height: 2px;
+      background: var(--accent);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .topbar.syncing::after {
+      opacity: 1;
+      animation: sync-sweep 1.6s ease-in-out infinite;
+    }
     @media (prefers-reduced-motion: reduce) {
-      .icon-btn.spinning .icon-glyph { animation: none; opacity: 0.55; }
+      /* 不动的话就整条亮着 —— 状态仍然看得见,只是不扫 */
+      .topbar.syncing::after { animation: none; width: 100%; opacity: 0.6; }
     }
 
     /* 铃铛 */
@@ -160,14 +190,18 @@
       padding: 12px 16px 14px;
     }
     .card .label {
-      font-size: 11px;
+      /* 标签和数字是**一起定的**,别单独调其中一个。踩过两次:
+         先是把数字 26→42 却顺手把标签 12→11(比例 0.46 崩到 0.26,标签读起来像脚注),
+         再是把标签补到 18px 配 42px 的数字(比例对了,但两个都太大,卡片压过了页面)。
+         现在 15/34 ≈ 0.44 —— 保住原来那个关系,整体收回到不抢戏的体量 */
+      font-size: 15px;
       color: var(--text-dim);
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      margin-bottom: 2px;
+      margin-bottom: 3px;
     }
     .card .value {
-      font-size: 42px;
+      font-size: 34px;
       font-weight: 700;
       color: var(--accent);
       line-height: 1.1;
@@ -175,9 +209,10 @@
       font-variant-numeric: tabular-nums;
     }
     .card .sub {
-      font-size: 11px;
+      /* 跟着标签一起提一档 —— 它是数字的精确值,不该比标签还细 */
+      font-size: 13px;
       color: var(--text-dim);
-      margin-top: 2px;
+      margin-top: 3px;
     }
     .tabs {
       display: flex;
@@ -320,18 +355,24 @@
     .icon-btn.active-heart { color: var(--low); }
     .icon-btn.active-star { color: var(--mid); }
     .icon-btn:hover { opacity: 0.8; }
+    /* 行尾的「更多」入口。字形必须是**单色文本符号**(⋮),不能用 emoji ——
+       emoji 的颜色是字形自带的,CSS 的 color 管不着,所以 ✏️ 再怎么压透明度
+       都还是一支扎眼的黄铅笔。⋮ 吃 color,能真的淡下去,而且它本来就是
+       「这里有个菜单」的通用符号 */
     .delete-btn {
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 14px;
+      font-size: 17px;
+      line-height: 1;
       color: var(--text-dim);
-      opacity: 0.35;
+      opacity: 0.45;
       flex-shrink: 0;
-      padding: 0 4px;
+      padding: 0 6px;
       margin-left: auto;
     }
-    .delete-btn:hover { opacity: 1; color: var(--low); }
+    /* 悬停不再变红:它已经不是删除按钮,红色会把「打开菜单」暗示成危险动作 */
+    .delete-btn:hover { opacity: 1; color: var(--text); }
     .game-thumb {
       width: 64px;
       height: 30px;
@@ -599,6 +640,46 @@
     .modal-box .game-name { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 4px; }
     .modal-box .appid-hint { margin-bottom: 20px; }
     .modal-box .modal-btns { display: flex; gap: 10px; justify-content: center; }
+    .modal-check {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      font-size: 13px;
+      color: var(--text);
+      margin-bottom: 18px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .modal-check input { cursor: pointer; }
+
+    /* 行的 Edit 菜单。**整页共用一个元素**,按点击位置移过去 —— 每行各挂一个
+       意味着几百个隐藏节点,而同一时刻只可能开着一个 */
+    .row-menu {
+      position: absolute;
+      z-index: 200;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 4px;
+      min-width: 148px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    }
+    .row-menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      padding: 8px 10px;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .row-menu button:hover { background: var(--panel-alt); }
+    .row-menu button.danger { color: var(--low); }
   </style>
 </head>
 <body>
@@ -672,10 +753,18 @@
   </div>
   <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
 
+  <div class="row-menu" id="rowEditMenu" hidden></div>
+
   <div class="modal-overlay" id="addConfirmModal">
     <div class="modal-box">
       <div style="font-size:13px; color:var(--text-dim); margin-bottom:8px;">确认将这款游戏添加到列表？</div>
       <div class="game-name" id="confirmGameName"></div>
+      <!-- 默认勾上:手动添加的绝大多数就是家庭共享/赠送的游戏 —— 自购的早就在
+           GetOwnedGames 里了,根本不需要手动加 -->
+      <label class="modal-check">
+        <input type="checkbox" id="confirmFamily" checked>
+        家庭组游戏
+      </label>
       <div class="modal-btns">
         <button class="add-game-btn" id="confirmAddBtn">确认</button>
         <button class="add-game-btn" id="cancelAddBtn" style="background:var(--panel-alt); color:var(--text-dim);">取消</button>
@@ -749,6 +838,13 @@
     let sortDir = -1;
     let activeTab = 'incomplete';
     let expandedAppid = null;
+    /**
+     * 正在改数字的那一行。**编辑是一个要主动进入、会自己退出的模式**,不是锁定行的
+     * 常驻状态 —— 以前只要行锁着,两个输入框就一直摆在那儿,滚动时一次误触就能改掉
+     * 一个数字,而且没有任何提示。现在只有从菜单里选「编辑成就数量」才进,焦点一离开
+     * 这一行就退出;锁还在,数字变回普通文本。
+     */
+    let editingAppid = null;
     const missingAchCache = {};
 
     function fmtPct(rate) {
@@ -761,6 +857,19 @@
       if (rate >= 1) return 'var(--good)';
       if (rate >= 0.5) return 'var(--mid)';
       return 'var(--low)';
+    }
+
+    /**
+     * 就地改写某一行的进度条格。**编辑期间用它代替整页 render()** ——
+     * render 会重建 innerHTML,焦点跟着没了,而编辑时焦点正是要守住的东西。
+     * 这段标记必须和 render 里那份保持一致,改一处要改两处。
+     */
+    function updateRateCell(tr, rate) {
+      const cell = tr.lastElementChild;
+      if (!cell) return;
+      cell.innerHTML = '<div class="bar-wrap"><div class="bar-track"><div class="bar-fill" style="width:'
+        + (rate * 100).toFixed(1) + '%; background:' + barColor(rate) + '"></div></div>'
+        + '<span class="rate-text">' + fmtPct(rate) + '</span></div>';
     }
 
     function thumbUrl(appid) {
@@ -977,9 +1086,13 @@
       let html = '';
       rows.forEach(function(g) {
         const unvettedBadge = g.unvetted ? '<span class="badge">Unvetted</span>' : '';
+        // 「Manual」这个词只在库里(status 列)还叫这个名字;界面上它是一把**锁** ——
+        // 它真正做的事就是「停掉这一行的自动同步」,而那正是锁的含义。
+        // 沿用 data-manual-appid,原来那个切换处理器一个字都不用改
         const manualBadgeClass = 'badge-btn ' + (g.manual ? 'badge-btn-on' : 'badge-btn-off');
         const manualBadge = '<button class="' + manualBadgeClass + '" data-manual-appid="' + g.appid + '" title="'
-          + (g.manual ? '取消Manual(恢复自动同步)' : '设为Manual(停止自动同步)') + '">Manual</button>';
+          + (g.manual ? '已锁定:不参与自动同步,数字由你自己填。点一下解锁' : '锁定这一行:停止自动同步')
+          + '">' + (g.manual ? '🔒' : '🔓') + '</button>';
         const familyBadgeClass = 'badge-btn ' + (g.family ? 'badge-btn-family-on' : 'badge-btn-off');
         const familyBadge = '<button class="' + familyBadgeClass + '" data-family-appid="' + g.appid + '" title="'
           + (g.family ? '取消家庭共享标记' : '标记为家庭共享(非自购,纯信息用途)') + '">家庭</button>';
@@ -1018,13 +1131,17 @@
                 + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
                 + ' onclick="event.stopPropagation();window.migrateGuide(this)">⬆ Notion</button>'
               : '')
-          + '<button class="delete-btn" data-delete-appid="' + g.appid + '" title="删除这一行">🗑</button>'
+          // 改数字和删除**合到一个入口**。它们原来是行上并排的两个按钮,而删除不可撤销 ——
+          // 挨着一个日常会点的按钮,迟早点错。现在都藏在菜单第二层
+          + '<button class="delete-btn" data-edit-appid="' + g.appid + '" title="更多操作">⋮</button>'
           + '</div>';
 
         const canExpand = activeTab === 'incomplete' && g.total !== 'N/A' && g.total !== null && g.appid;
         const rowClass = 'game-row' + (canExpand ? ' expandable' : '');
 
-        if (g.manual) {
+        // **只有正在编辑的那一行才给输入框。** 锁着但没在编辑的行,数字和普通行一样
+        // 是纯文本 —— 常驻的输入框等于把一个可以误触改数的控件摆在每一条锁定行上
+        if (g.manual && String(editingAppid) === String(g.appid)) {
           const achievedVal = (typeof g.achieved === 'number') ? g.achieved : 0;
           const totalVal = (typeof g.total === 'number') ? g.total : 0;
           const manualRate = totalVal > 0 ? achievedVal / totalVal : 0;
@@ -1036,6 +1153,9 @@
             + '</tr>';
         } else if (g.total === 'N/A') {
           html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">无成就系统</td></tr>';
+        } else if (g.total === null && g.manual) {
+          // 锁着的行不会自动同步,所以「数据同步中」对它是句假话 —— 它在等你自己填
+          html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">还没填数字</td></tr>';
         } else if (g.total === null) {
           html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中...</td></tr>';
         } else {
@@ -1125,41 +1245,26 @@
         });
       });
 
-      body.querySelectorAll('[data-delete-appid]').forEach(function(btn) {
-        btn.addEventListener('click', async function(e) {
+      body.querySelectorAll('[data-edit-appid]').forEach(function(btn) {
+        btn.addEventListener('click', function(e) {
           e.stopPropagation();
-          const appid = btn.dataset.deleteAppid;
-          const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
-          if (!game) return;
-          const ok = await askConfirm({
-            title: '删除《' + game.name + '》?',
-            body: '从本地数据库删掉这一行,无法撤销。',
-            okText: '删除',
-            danger: true,
-          });
-          if (!ok) return;
-
-          btn.disabled = true;
-          rpc.withSuccessHandler(function(result) {
-            if (result && result.error) {
-              btn.disabled = false;
-              askConfirm({ title: '删除失败', body: result.error, okText: '知道了', notifyOnly: true });
-              return;
-            }
-            allGames = allGames.filter(function(g){ return String(g.appid) !== String(appid); });
-            if (expandedAppid === String(appid)) expandedAppid = null;
-            document.getElementById('cardTotal').textContent = allGames.length;
-            render();
-          }).withFailureHandler(function(err) {
-            btn.disabled = false;
-            askConfirm({ title: '删除失败', body: String(err && err.message || err), okText: '知道了', notifyOnly: true });
-          }).deleteGame(appid);
+          openRowMenu(btn, btn.dataset.editAppid);
         });
       });
 
       body.querySelectorAll('.manual-input').forEach(function(input) {
         input.addEventListener('keydown', function(e) {
           if (e.key === 'Enter') input.blur();
+          if (e.key === 'Escape') { input.blur(); stopManualEdit(); }
+        });
+        // 焦点离开**这一行**才退出编辑 —— 在两个输入框之间跳不算离开。
+        // setTimeout 是必须的:focusout 触发时 relatedTarget 有时还没落定,
+        // 而且要让同一次失焦上的 change 先跑完(它负责存盘)
+        input.addEventListener('focusout', function() {
+          const row = input.closest('tr');
+          setTimeout(function() {
+            if (!row.contains(document.activeElement)) stopManualEdit();
+          }, 0);
         });
         input.addEventListener('change', function() {
           const appid = input.dataset.manualRowAppid;
@@ -1176,12 +1281,22 @@
           game.achieved = achieved; // 先本地乐观更新,界面立刻响应
           game.total = total;
           game.rate = total > 0 ? achieved / total : 0;
-          render();
+          // **编辑中不整页重绘。** render() 会重建 innerHTML,焦点跟着没了 ——
+          // 于是从「完成数」跳到「成就总数」的那一下,第二个输入框会在手底下被换掉。
+          // 编辑期间只就地更新进度条那一格,整页重绘留到退出编辑时
+          if (String(editingAppid) === String(appid)) updateRateCell(row, game.rate);
+          else render();
           function revert() {
             game.achieved = prevAchieved;
             game.total = prevTotal;
             game.rate = prevRate;
-            render();
+            if (String(editingAppid) === String(appid)) {
+              achievedInput.value = (typeof prevAchieved === 'number') ? prevAchieved : 0;
+              totalInput.value = (typeof prevTotal === 'number') ? prevTotal : 0;
+              updateRateCell(row, game.rate ?? 0);
+            } else {
+              render();
+            }
           }
           rpc.withSuccessHandler(function(result) {
             if (!result || result.error) revert(); // 服务器端校验没过(比如完成数>总数),改回去
@@ -1264,7 +1379,120 @@
     document.getElementById('hideUnvetted').addEventListener('change', render);
     document.getElementById('hideNoAch').addEventListener('change', render);
 
-    function addSelectedGame(appid, name) {
+    // ---- 行的 Edit 菜单 -------------------------------------------------------
+    //
+    // 「改成就数量」和「删除」原来是行上并排的两个按钮。删除**不可撤销**,而它紧挨着
+    // 一个日常会点的按钮 —— 这种排布迟早会点错。现在两个都收进菜单的第二层,
+    // 而「锁定」(原来的 Manual)反过来提到行上做一个图标:它可逆、要常用,不该藏。
+
+    /** 删除一行。从 🗑 按钮搬进菜单,所以提成独立函数 */
+    async function deleteGameFlow(appid) {
+      const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
+      if (!game) return;
+      const ok = await askConfirm({
+        title: '删除《' + game.name + '》?',
+        body: '从本地数据库删掉这一行,无法撤销。',
+        okText: '删除',
+        danger: true,
+      });
+      if (!ok) return;
+      rpc.withSuccessHandler(function(result) {
+        if (result && result.error) {
+          askConfirm({ title: '删除失败', body: result.error, okText: '知道了', notifyOnly: true });
+          return;
+        }
+        allGames = allGames.filter(function(g){ return String(g.appid) !== String(appid); });
+        if (expandedAppid === String(appid)) expandedAppid = null;
+        document.getElementById('cardTotal').textContent = allGames.length;
+        render();
+      }).withFailureHandler(function(err) {
+        askConfirm({ title: '删除失败', body: String(err && err.message || err), okText: '知道了', notifyOnly: true });
+      }).deleteGame(appid);
+    }
+
+    /**
+     * 「编辑成就数量」。**必然连带上锁。**
+     *
+     * 后端的 setManualAchievements 只接受锁定的行,而那个守卫是对的:没锁的话
+     * 下一次同步会拿 Steam 的数字把你手填的直接覆盖掉,而且不会有任何提示。
+     * 所以这里先锁再让输入框出现 —— 行上那把锁当场亮起来,就是这件事的反馈。
+     */
+    function startManualEdit(appid) {
+      const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
+      if (!game) return;
+      const focusInput = function() {
+        const el = document.querySelector(
+          '[data-manual-row-appid="' + appid + '"][data-manual-field="achieved"]');
+        if (el) { el.focus(); el.select(); }
+      };
+      editingAppid = String(appid);
+      if (game.manual) { render(); focusInput(); return; }
+
+      game.manual = true;   // 乐观更新:输入框立刻出现,不等往返
+      render();
+      focusInput();
+      rpc.withSuccessHandler(function(result) {
+        if (result && typeof result.manual === 'boolean') game.manual = result.manual;
+      }).withFailureHandler(function() {
+        game.manual = false;
+        editingAppid = null;
+        render();
+      }).setManualStatus(appid, true);
+    }
+
+    /** 退出编辑模式:锁保持不变,数字变回纯文本 */
+    function stopManualEdit() {
+      if (editingAppid === null) return;
+      editingAppid = null;
+      render();
+    }
+
+    const rowMenu = document.getElementById('rowEditMenu');
+    const closeRowMenu = function() { rowMenu.hidden = true; };
+
+    function openRowMenu(btn, appid) {
+      const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
+      if (!game) return;
+      rowMenu.innerHTML = '';
+      const item = function(label, cls, title, fn) {
+        const b = document.createElement('button');
+        b.textContent = label;
+        if (cls) b.className = cls;
+        if (title) b.title = title;
+        b.addEventListener('click', function(e) { e.stopPropagation(); closeRowMenu(); fn(); });
+        rowMenu.appendChild(b);
+      };
+      // 「会连带上锁」放在 title 里而不是标签上:锁图标当场亮起来已经说明了这件事,
+      // 标签里再写一遍就是在屏幕上堆解释
+      item('编辑成就数量', '', game.manual ? '' : '会同时锁定这一行(停止自动同步)',
+        function(){ startManualEdit(appid); });
+      item('删除这一行', 'danger', '', function(){ deleteGameFlow(appid); });
+
+      rowMenu.hidden = false;
+      const r = btn.getBoundingClientRect();
+      // 贴按钮下方左对齐,但不许越出右边缘 —— 这个按钮在行尾,靠右的行会顶出去
+      const maxLeft = window.scrollX + document.documentElement.clientWidth - rowMenu.offsetWidth - 8;
+      rowMenu.style.top = (window.scrollY + r.bottom + 6) + 'px';
+      rowMenu.style.left = Math.max(8, Math.min(window.scrollX + r.left, maxLeft)) + 'px';
+    }
+
+    // 点别处 / Esc 收起。不能用 blur —— 菜单里的按钮拿到焦点也会触发,一点就自己关了
+    document.addEventListener('click', function(e) {
+      if (!rowMenu.hidden && !rowMenu.contains(e.target)) closeRowMenu();
+
+      // **退出编辑的第二条路,和 focusout 并存。** 点空白处在有些浏览器里根本不移动
+      // 焦点,那样 focusout 永远不来,行就一直停在可编辑状态 —— 而这正是这次要消除的
+      // 「随时能被误改」。两条路都指向同一个 stopManualEdit,重复调用是安全的
+      if (editingAppid !== null) {
+        const row = document.querySelector('tr[data-appid="' + editingAppid + '"]');
+        if (!row || !row.contains(e.target)) stopManualEdit();
+      }
+    });
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && !rowMenu.hidden) closeRowMenu();
+    });
+
+    function addSelectedGame(appid, name, family) {
       const msg = document.getElementById('addGameMsg');
       msg.textContent = '添加中...';
       msg.className = 'add-game-msg';
@@ -1283,7 +1511,7 @@
       }).withFailureHandler(function(err) {
         msg.textContent = '添加失败: ' + err.message;
         msg.className = 'add-game-msg error';
-      }).addGame(appid, name);
+      }).addGame(appid, name, family);
     }
 
     function renderSearchResults(items) {
@@ -1345,10 +1573,13 @@
       const appid = modal.dataset.appid;
       const name = modal.dataset.name;
       if (!appid) return;
+      const family = document.getElementById('confirmFamily').checked;
       modal.classList.remove('show');
       renderSearchResults([]);
       document.getElementById('gameSearchBox').value = '';
-      addSelectedGame(appid, name);
+      // 复位成默认勾选:这个框会被复用,上一次取消勾选不该留给下一款游戏
+      document.getElementById('confirmFamily').checked = true;
+      addSelectedGame(appid, name, family);
     });
 
     document.getElementById('cancelAddBtn').addEventListener('click', function() {
@@ -1470,10 +1701,14 @@
     window.onSyncState = function(s) {
       if (s.running) syncStarting = false;
       syncBtn.disabled = s.running || syncStarting;
-      // 按钮现在是个图标,**不能再写 textContent** —— 那会把 🔄 换成文字,
-      // 而且连带删掉 .icon-glyph 这个 span,转圈动画从此再也挂不上去。
-      // 状态改走视觉(转圈)和 title(悬停能读到),两者都不动按钮内容
-      syncBtn.classList.toggle('spinning', s.running);
+      // 按钮现在是个图标,**不能写 textContent** —— 那会把 🔄 换成文字,
+      // 而且连带删掉里面那个 .icon-glyph。
+      // 进行中的提示挂在顶栏底边那条线上(见 .topbar.syncing),不在按钮上:
+      // 按钮本身只靠 disabled 变淡,title 给悬停时读
+      // **Boolean() 不能省。** classList.toggle 的第二个参数是 undefined 时会**翻转**,
+      // 不是关闭 —— 状态对象一旦缺了 running(轮询拿到异常响应就会这样),这条线
+      // 会每 3 秒亮灭一次,永远停不下来。写死成布尔,最坏情况是"不亮",不是"乱闪"
+      document.querySelector('.topbar').classList.toggle('syncing', Boolean(s.running));
       syncBtn.title = s.running
         ? '正在同步…'
         : '立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。';

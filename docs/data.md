@@ -51,9 +51,13 @@ Steam's API is the source of truth for nearly everything, but a few situations n
 
 **`Unvetted`** — games Steam hides from the owned-games API by default (its "Profile Features Limited" classification). They're still synced normally; they're just excluded from the aggregate completion average, which matches Steam's own AGCR methodology.
 
-**`Manual`** — for when Steam genuinely can't give *your* account real data. The usual case is a Family Library Sharing title that a *different* family member actually plays: Steam records achievements against the playing account, not the licence holder, so your own account will permanently read 0 on it. These rows are edited by hand from the Dashboard and always skipped by the sync.
+**`Manual`** — for when Steam genuinely can't give *your* account real data. The usual case is a Family Library Sharing title that a *different* family member actually plays: Steam records achievements against the playing account, not the licence holder, so your own account will permanently read 0 on it. These rows are edited by hand and always skipped by the sync.
 
-**The family flag** (the Dashboard's 家庭 badge) — purely informational, and a different situation from `Manual`: a shared or gifted game that *you* actually play, so Steam does return your real progress even though it isn't in your owned-games list. Use this rather than `Manual` so the game keeps syncing automatically; the flag just reminds you it wasn't self-purchased.
+On the Dashboard this is **the 🔒 lock on each row**, not the word "Manual" — locking a row is exactly "stop syncing this one, I'll keep the numbers myself", which is what the column has always meant. The database still calls it `Manual`; only the on-screen vocabulary changed.
+
+**The family flag** (the Dashboard's 家庭 badge) — purely informational, and a different situation from `Manual`: a shared or gifted game that *you* actually play, so Steam does return your real progress even though it isn't in your owned-games list. Use this rather than the lock so the game keeps syncing automatically; the flag just reminds you it wasn't self-purchased.
+
+Adding a game by hand asks whether it's a family-library title, **defaulting to yes** — anything you bought yourself is already in `GetOwnedGames` and never needed adding. Added rows are **not** locked: family sharing is precisely the case where Steam does return your progress, so locking them would freeze the numbers at whatever they were the moment you added the row. Lock a row later if it turns out Steam has nothing for it.
 
 Two more things that look like bugs and aren't:
 
