@@ -173,6 +173,8 @@ TRACKER_DATA_DIR=/path/to/steam-achievement-tracker node tracker.js status
 
 Code assets (`Dashboard.html`, `Setup.html`, `lib/rpc.js`) are never affected — they always load from wherever the running code is, so the variable cannot make one copy of the code serve another copy's pages. A path that doesn't exist is ignored by the launcher rather than used. Don't run the CLI and the packaged app against the same directory at the same time; the two will both write to one SQLite file.
 
+The launcher reads that path from its own `local.config.json`, which is **not** part of `config.json` and is documented with the launcher rather than here — it holds `dataDir` (the value above) and `autoUpdate` (set `false` to stop the app checking for new versions). See [launcher/README.md](../launcher/README.md).
+
 ## Changing the port
 
 Either set `port` in `config.json`, or pass it per-run:
