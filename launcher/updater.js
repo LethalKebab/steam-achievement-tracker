@@ -30,6 +30,18 @@ export const REPO = 'LethalKebab/steam-achievement-tracker';
 
 /** 装在 app 目录里的那份清单 —— 描述「当前这一版装了什么」 */
 export const MANIFEST_NAME = 'update-manifest.json';
+
+/**
+ * helper 起来之后**头一件事**写的标记文件。
+ *
+ * 存在的理由是一次真实事故:app 退了,helper 没接上,用户面对一个自己关掉、
+ * 再也不回来的程序 —— 而 app 那边日志还写着「helper 已启动」,因为 `spawn()`
+ * 返回从来就不代表进程真的起来了(启动失败走的是 `error` 事件)。
+ *
+ * 现在的顺序是:启动 helper → **等这个文件出现** → 才 app.quit()。等不到就
+ * 不退,报错给用户看。最坏结果从「程序没了」降级成「更新没成,但程序还在」。
+ */
+export const ALIVE_MARKER_NAME = 'helper-alive.txt';
 /** 跳过的版本记在这里。不在任何清单里,所以更新永远不会删掉它 */
 export const STATE_NAME = 'update-state.json';
 
@@ -145,6 +157,24 @@ export function parseManifest(text) {
 }
 
 /**
+ * 本机专属、绝不属于程序本体的文件。
+ *
+ * 目前只有一个:`local.config.json`(把打包版指回一份已有 CLI 数据的指针)。
+ * 它进了清单就等于下次更新会把它当程序文件删掉 —— 用户的数据目录会静默地
+ * 跳回默认位置,表现是"我的数据全没了"。postbuild 生成清单时排在复制它之前,
+ * 顺序是机制,这个检查是安全网 —— 顺序是人改的。
+ */
+export const MACHINE_LOCAL_FILES = ['local.config.json'];
+
+/** 清单里混进了哪些本机专属文件(空数组 = 干净) */
+export function machineLocalEntries(files = []) {
+  return files.filter((f) => {
+    const base = String(f).split(/[/\\]/).pop()?.toLowerCase();
+    return MACHINE_LOCAL_FILES.includes(base);
+  });
+}
+
+/**
  * 走一遍目录,列出所有文件的相对路径 —— 打包时用来生成清单。
  *
  * 读的是 electron-builder 解包出来的目录,而不是去解析 zip:那个目录**就是**
@@ -254,6 +284,81 @@ export async function downloadVerified(asset, dest, opts = {}) {
   return dest;
 }
 
+// ---------------------------------------------------------------- 更新提示界面
+
+/** 选择结果通过 document.title 回传,这是标题的前缀 */
+export const PROMPT_TITLE_PREFIX = 'choice:';
+
+/**
+ * 更新提示是**一个真正的网页**,不是原生对话框。
+ *
+ * 这不是偏好问题,是实测:`dialog.showMessageBox` 在这个项目里根本立不住 ——
+ * 框闪一下就消失,promise 立刻返回一个不在按钮范围里的 `response: 420`。
+ * 把选项拆到只剩 `{ message }`、换成同步版 `showMessageBoxSync`、挂父窗口、
+ * 不挂父窗口,十种组合全是 420;而同一台机器上纯 Win32 的 MessageBox 立得好好的。
+ * 所以问题出在 Electron 这一层,不是系统。
+ *
+ * **这是这个仓库第二次撞上同一类事。** 第一次是渲染进程的 `window.confirm`,
+ * 「生成攻略」在打包版里整个是死的(CLAUDE.md 有记录),当时的结论写成了
+ * 「原生对话框归主进程所有」—— 那个结论太窄了,主进程的一样不能用。仓库当时
+ * 给出的解法是 `askConfirm`,一个页面内的组件,「在浏览器和打包版里完全一致」。
+ * 这里走的是同一条路。
+ *
+ * 结果靠 `document.title` 回传,不用 preload、不用 IPC:窗口里没有任何需要
+ * 特权的东西,而 `page-title-updated` 是一定会触发的。
+ */
+export function renderUpdatePromptHtml({ version, sizeMb }) {
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>Steam 成就追踪器</title>
+<style>
+  :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #f7f7f8; --muted: #6b6b70; --line: #d8d8dc; --accent: #2f6fed; }
+  @media (prefers-color-scheme: dark) {
+    :root { --fg: #eaeaec; --bg: #26262a; --muted: #a0a0a8; --line: #3d3d44; --accent: #5a8cf5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 22px 24px; font: 14px/1.6 "Microsoft YaHei", system-ui, sans-serif;
+         color: var(--fg); background: var(--bg); user-select: none; }
+  h1 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+  p { margin: 0 0 18px; color: var(--muted); }
+  label { display: flex; align-items: center; gap: 7px; margin-bottom: 18px; color: var(--muted); cursor: pointer; }
+  .row { display: flex; gap: 10px; justify-content: flex-end; }
+  button { font: inherit; padding: 7px 18px; border-radius: 6px; border: 1px solid var(--line);
+           background: transparent; color: var(--fg); cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style></head>
+<body>
+  <h1>有新版本 ${esc(version)}</h1>
+  <p>下载约 ${esc(sizeMb)} MB,完成后会自动重启。</p>
+  <label><input type="checkbox" id="skip">不再提示这个版本</label>
+  <div class="row">
+    <button id="later">以后再说</button>
+    <button id="now" class="primary">立即更新</button>
+  </div>
+<script>
+  // 结果走 document.title —— 主进程监听 page-title-updated。不需要 preload,
+  // 也就不需要给这个窗口开任何特权
+  var sent = false;
+  function choose(what) {
+    if (sent) return;
+    sent = true;
+    document.title = ${JSON.stringify(PROMPT_TITLE_PREFIX)} + what + ':' + (document.getElementById('skip').checked ? '1' : '0');
+  }
+  document.getElementById('now').onclick = function () { choose('update'); };
+  document.getElementById('later').onclick = function () { choose('later'); };
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') choose('later'); });
+  document.getElementById('now').focus();
+</script>
+</body></html>`;
+}
+
+/** 解析上面那个页面回传的标题。认不出来返回 null(普通的标题变化会走到这儿) */
+export function parsePromptChoice(title) {
+  const m = new RegExp(`^${PROMPT_TITLE_PREFIX}(update|later):(0|1)$`).exec(String(title ?? ''));
+  return m ? { update: m[1] === 'update', skip: m[2] === '1' } : null;
+}
+
 // ---------------------------------------------------------------- helper 脚本
 
 /** PowerShell 单引号字符串:内部的单引号写成两个。和 postbuild.js 里那个同源 */
@@ -280,6 +385,7 @@ export function renderHelperScript({
   manifestPath,
   newManifestPath = '',
   logPath,
+  aliveMarkerPath,
   releasesPage = RELEASES_PAGE,
 }) {
   return `$ErrorActionPreference = 'Stop'
@@ -292,10 +398,18 @@ $ZipPath     = ${psQuote(zipPath)}
 $Manifest    = ${psQuote(manifestPath)}
 $NewManifest = ${psQuote(newManifestPath)}
 $LogPath     = ${psQuote(logPath)}
+$AliveMarker = ${psQuote(aliveMarkerPath)}
 
 function Log($m) { "$(Get-Date -Format 'HH:mm:ss') $m" | Out-File -FilePath $LogPath -Append -Encoding utf8 }
 
 try {
+  # --- 0. 报到 ---
+  # app 会等这个文件出现才退出。**必须是第一件事**:在此之前 app 什么都不做,
+  # 所以哪怕 PowerShell 起不来,最坏也只是"更新没成,程序还在",而不是
+  # "程序自己退了,再也没回来" —— 后者真的发生过一次
+  Set-Content -LiteralPath $AliveMarker -Value 'alive'
+  Log '已报到,开始接手'
+
   # --- 1. 等进程真的退出 ---
   # 约束 3:托盘改动之后关窗口只是隐藏,exe 还锁着。没等干净就替换,Windows
   # 会拒绝,而且报出来的错跟真正的原因毫无关系
@@ -385,6 +499,72 @@ try {
   } catch { }
 }
 `;
+}
+
+/**
+ * Windows 上 PowerShell 的绝对路径。
+ *
+ * 不靠 PATH:PATH 里找不到时 `spawn` 报的是异步的 `error` 事件,而不是抛异常 ——
+ * 正是那种"看起来启动了"的失败。
+ */
+export function powershellPath(systemRoot = process.env.SystemRoot || 'C:\\Windows') {
+  return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+}
+
+/**
+ * **helper 必须活过 app.quit(),而这在 Electron 里不是默认行为。**
+ *
+ * 实测(在真实会话里,四种方式各起一个假 helper 然后立刻 app.quit()):
+ *
+ * | 方式                          | 活下来了吗 |
+ * |------------------------------|-----------|
+ * | `detached: true` + unref      | **否**    |
+ * | 普通 spawn + unref            | **否**    |
+ * | `cmd /c start`                | 是        |
+ * | WMI `Win32_Process.Create`    | 是        |
+ *
+ * 这是**作业对象**(Job Object)的特征:Electron 把子进程放进一个带
+ * kill-on-close 的 job,job 一关全家一起走。Windows 的 `DETACHED_PROCESS`
+ * (也就是 Node 的 `detached`)**逃不出 job** —— 它管的是控制台,不是 job。
+ * 能逃出来的只有"根本不是我们的子进程"这一类办法,上面两种都属于这类。
+ *
+ * 第一版就是用 `detached` 的,于是 app 退了、helper 没接上、程序再也没回来。
+ * 别改回去。
+ */
+export function primaryLaunch({ scriptPath, psPath = powershellPath() }) {
+  // `""` 是 start 的窗口标题参数,必须给 —— 不给的话 start 会把后面第一个
+  // 带引号的路径当成标题,然后什么都不启动
+  return {
+    file: 'cmd',
+    args: [
+      '/c', 'start', '""', '/min',
+      psPath, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', scriptPath,
+    ],
+  };
+}
+
+/**
+ * 备用:让 WMI 去建这个进程,建出来的不是我们的子进程,同样逃出 job。
+ *
+ * 为什么留一条备用而不是只用一种 —— 这个组件有个别处没有的性质:
+ * **坏掉的那一版已经在用户机器上了,而修好的那一版要靠它送过去。** 主路一旦
+ * 在某台机器上不灵,那台机器就再也收不到修复。所以这里的冗余是值得的。
+ *
+ * 两条路的失败原因是正交的:主路怕的是 `start` 的引号规则和脚本执行策略
+ * (GPO 下发的 Restricted 会挡掉 `-File`);备用路把整段脚本用
+ * `-EncodedCommand` 传进去,执行策略管不着,但要求 WMI 可用。
+ */
+export function fallbackLaunch({ script, psPath = powershellPath() }) {
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  const commandLine = `"${psPath}" -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
+  return {
+    file: psPath,
+    args: [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create ` +
+        `-Arguments @{CommandLine=${psQuote(commandLine)}}; exit $r.ReturnValue`,
+    ],
+  };
 }
 
 /** 写 helper 脚本。**BOM 是必需的**,理由见 renderHelperScript 的注释 */

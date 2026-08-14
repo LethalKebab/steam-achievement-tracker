@@ -10,8 +10,9 @@
  *   `launcher/updater.js` 里,那个文件故意不 import electron,所以能直接加载。
  * - **不可单测的**:真正的文件替换。靠排练(让它指向 v1.1.2 做一次「降级」)。
  *   这里能做的是把生成出来的 PowerShell **拿去解析一遍**,以及断言那段脚本的
- *   结构没有违反三条约束 —— 脚本是在一个 detached、没有控制台的进程里跑的,
- *   语法错了不会有任何人看到,表现只是"程序自己退了,再也没起来"。
+ *   结构没有违反三条约束 —— 脚本跑在一个没有控制台、也没人看着的进程里,
+ *   语法错了不会有任何人看到,表现只是"程序自己退了,再也没起来"。那句话不是
+ *   比喻:真实排练里就发生过一次,而当时 app 的日志还写着「helper 已启动」。
  *
  * `launcher/main.js` 要 Electron 才能加载,所以那半只能用**源码断言**,和
  * `test/tray.test.js` 同源。
@@ -34,9 +35,14 @@ import {
   compareVersions,
   downloadVerified,
   hashFile,
+  fallbackLaunch,
   isSafeManifestPath,
+  machineLocalEntries,
+  primaryLaunch,
   parseManifest,
+  parsePromptChoice,
   pickAssets,
+  renderUpdatePromptHtml,
   readUpdateState,
   renderHelperScript,
   sha256FromDigest,
@@ -55,11 +61,19 @@ const postbuildSrc = stripComments(
   readFileSync(new URL('../launcher/postbuild.js', import.meta.url), 'utf8')
 );
 
-/** 从 needle 起按大括号配平截出整块 —— 固定长度切片会随上下文增删而错位 */
+/**
+ * 从 needle 起按大括号配平截出整块 —— 固定长度切片会随上下文增删而错位。
+ *
+ * **找 `{` 要从 needle 结束之后开始找,不是从它开头。** 不然
+ * `function askUpdate({ version, sizeMb })` 这种解构参数的第一个 `{` 就是参数
+ * 本身,配平在参数列表就闭合了,截出来只有一行签名 —— 于是断言对着一行签名
+ * 做匹配,恒假(或者更糟,恒真)。tray.test.js 里那份没踩到只是因为它的 needle
+ * 都不含大括号;needle 要带上参数列表才能定位到函数体。
+ */
 function blockFrom(src, needle, label = needle) {
   const start = src.indexOf(needle);
   assert.ok(start > 0, `找不到 ${label} —— 这条检查失去了目标,不是通过了`);
-  const open = src.indexOf('{', start);
+  const open = src.indexOf('{', start + needle.length);
   assert.ok(open > start, `${label} 后面没有代码块`);
   let depth = 0;
   for (let i = open; i < src.length; i++) {
@@ -557,15 +571,6 @@ describe('main.js 的接线', () => {
     assert.match(body, /downloadVerified/, '下载没有走校验路径');
   });
 
-  test('helper 必须 detached 且 unref,并且启动后才退出', () => {
-    const body = checkBlock();
-    assert.match(body, /detached: true/, 'helper 没有 detached —— 会跟着我们一起死');
-    assert.match(body, /\.unref\(\)/, '没有 unref');
-    const spawnAt = body.indexOf('spawn(');
-    const quitAt = body.indexOf('app.quit()');
-    assert.ok(spawnAt > 0 && quitAt > spawnAt, 'helper 必须在 app.quit() 之前启动');
-  });
-
   test('helper 收到的是我们自己的 PID', () => {
     // 传错的话 Wait-Process 立刻返回,替换发生在 exe 还锁着的时候
     assert.match(checkBlock(), /processId: process\.pid/, 'PID 不是当前进程的');
@@ -573,10 +578,10 @@ describe('main.js 的接线', () => {
 
   test('跳过的版本真的写盘', () => {
     const body = checkBlock();
-    const dismissed = body.slice(body.indexOf('if (response !== 0)'));
+    const dismissed = body.slice(body.indexOf('if (!choice.update)'));
     assert.match(
       dismissed.slice(0, 300),
-      /writeUpdateState/,
+      /if \(choice\.skip\) writeUpdateState/,
       '勾了"不再提示这个版本"却没有落盘 —— 下次开机照弹'
     );
   });
@@ -585,7 +590,13 @@ describe('main.js 的接线', () => {
     // 收进托盘之后"启动"变成很稀少的事件。只查一次的话,一个连着开几天的
     // 用户永远收不到更新提示,而且完全不报错
     const body = blockFrom(mainSrc, 'function scheduleUpdateCheck');
-    assert.match(body, /scheduleUpdateCheck\(UPDATE_CHECK_INTERVAL_MS\)/, '定时器没有自己续上');
+    // 只看回调体,别让函数声明那一行满足断言
+    const callback = body.slice(body.indexOf('setTimeout'));
+    assert.match(
+      callback,
+      /scheduleUpdateCheck\([^)]*UPDATE_CHECK_INTERVAL_MS/,
+      '定时器没有自己续上下一次 —— 查一次就再也不查了'
+    );
     assert.match(mainSrc, /UPDATE_CHECK_INTERVAL_MS = 24 \* 60 \* 60 \* 1000/, '检查周期不是一天');
   });
 
@@ -602,11 +613,178 @@ describe('main.js 的接线', () => {
     assert.match(checkBlock(), /!app\.isPackaged/, 'dev 模式也会去检查更新');
   });
 
-  test('对话框不挂在 mainWindow 上', () => {
-    // 此刻窗口多半正藏在托盘里,挂上去就是一个看不见的模态框 ——
-    // 而模态框看不见的表现是"程序卡住了"
+  test('更新提示绝不能用原生对话框', () => {
+    /**
+     * **这条断言原本是反的,而且正因为它是反的,它保护着一个真 bug。**
+     *
+     * 第一版是 `dialog.showMessageBox`。真实排练里它闪一下就消失,promise 立刻
+     * 带着 `response: 420` 返回 —— 那个值不在按钮范围里。把选项拆到只剩
+     * `{ message }`、换成同步版、挂父窗口、不挂父窗口,十种组合全是 420;
+     * 而同一台机器上纯 Win32 的 MessageBox 立得好好的。
+     *
+     * 这是这个仓库第二次撞上同一类事(第一次是渲染进程的 `window.confirm`,
+     * 「生成攻略」在打包版里整个是死的)。当时的结论「原生对话框归主进程所有」
+     * 太窄了 —— 主进程的一样不能用。解法和当时一样:用页面。
+     */
     const body = checkBlock();
-    assert.match(body, /dialog\.showMessageBox\(\{/, '对话框挂到了某个窗口上');
+    assert.doesNotMatch(
+      body,
+      /dialog\.showMessageBox/,
+      '更新提示又用回原生对话框了 —— 实测它会自己消失,而且不报错,功能静默失效'
+    );
+    assert.match(body, /await askUpdate\(/, '没有走网页版提示');
+
+    const showAt = body.indexOf('showWindow()');
+    const askAt = body.indexOf('askUpdate(');
+    assert.ok(showAt > 0 && showAt < askAt, '问之前要先把窗口叫到前面来');
+  });
+
+  test('提示窗口靠 page-title-updated 回传,关掉窗口算「以后再说」', () => {
+    // needle 必须带上参数列表:`function askUpdate({ version, sizeMb })` 的第一个
+    // `{` 是**解构参数**,blockFrom 会从那里开始配平,截出来的只有参数本身
+    const body = blockFrom(mainSrc, 'function askUpdate({ version, sizeMb })');
+    assert.match(body, /page-title-updated/, '没有监听标题回传 —— 用户点了也没人接');
+    assert.match(body, /parsePromptChoice/, '没有解析回传的标题');
+    // 问了问题却因为用户关了窗口就永远卡住,比不问更糟
+    assert.match(
+      body,
+      /win\.on\('closed'[\s\S]{0,120}?update: false/,
+      '关掉窗口没有当作「以后再说」—— 那条路径会让 promise 永远不 resolve'
+    );
+    // 页面不需要任何特权,就别给
+    assert.match(body, /nodeIntegration: false/, '提示窗口开了 nodeIntegration');
+    assert.match(body, /contextIsolation: true/, '提示窗口关了 contextIsolation');
+  });
+
+  test('提示页面是自给自足的,而且三个出口都在', () => {
+    const html = renderUpdatePromptHtml({ version: '1.1.4', sizeMb: 133 });
+    assert.match(html, /有新版本 1\.1\.4/);
+    assert.match(html, /133 MB/);
+    assert.match(html, /立即更新/);
+    assert.match(html, /以后再说/);
+    assert.match(html, /不再提示这个版本/);
+    assert.match(html, /document\.title\s*=/, '页面没有把选择写回标题 —— 主进程收不到');
+    // data: URL 里加载不了外部资源,而且这个窗口本来就该离线可用
+    assert.doesNotMatch(html, /https?:\/\//, '页面引用了外部资源');
+    assert.doesNotMatch(html, /<img|<link/i, '页面引用了外部资源');
+  });
+
+  test('版本号是转义后才进页面的', () => {
+    // 版本号来自 GitHub 的 tag_name —— 是网上来的数据,不是我们的常量
+    const html = renderUpdatePromptHtml({ version: '<img src=x onerror=alert(1)>', sizeMb: 1 });
+    assert.doesNotMatch(html, /<img src=x/, 'tag_name 被原样插进了 HTML');
+    assert.match(html, /&#60;img/, '没有转义');
+  });
+
+  test('标题回传只认得出自己那一种', () => {
+    assert.deepEqual(parsePromptChoice('choice:update:0'), { update: true, skip: false });
+    assert.deepEqual(parsePromptChoice('choice:update:1'), { update: true, skip: true });
+    assert.deepEqual(parsePromptChoice('choice:later:1'), { update: false, skip: true });
+    // 页面自己的 <title> 会先触发一次 page-title-updated,不能被误读成选择
+    assert.equal(parsePromptChoice('Steam 成就追踪器'), null);
+    assert.equal(parsePromptChoice('choice:update'), null);
+    assert.equal(parsePromptChoice('choice:maybe:1'), null);
+    assert.equal(parsePromptChoice(''), null);
+    assert.equal(parsePromptChoice(null), null);
+  });
+
+  test('窗口还没建好时不弹,而且要短间隔重来', () => {
+    // 服务器启动慢的时候(waitForServer 最多 15 秒)窗口会晚于第一次检查出现。
+    // 直接跳到 24 小时后等于白白丢掉这一天唯一的机会,且没有任何征兆
+    const body = checkBlock();
+    const guardAt = body.indexOf('if (!mainWindow)');
+    assert.ok(guardAt > 0, '没有判断窗口在不在');
+    // **要断到分支返回什么,不能只断言那个 if 还在。** 变异验证证明后者是空跑的:
+    // 把分支体改成 return true,那行 if 原封不动,断言照样通过 —— 而调度器会
+    // 把这一轮当成"查过了",直接等到明天
+    const branch = body.slice(guardAt, body.indexOf('}', guardAt));
+    assert.match(
+      branch,
+      /return false;/,
+      '窗口没建好时没有返回 false —— 调度器会当作查过了,整整一天不再检查'
+    );
+
+    const sched = blockFrom(mainSrc, 'function scheduleUpdateCheck');
+    assert.match(
+      sched,
+      /checked \? UPDATE_CHECK_INTERVAL_MS : UPDATE_CHECK_RETRY_MS/,
+      '没查成也照样等一天 —— 启动慢的机器会整天收不到更新提示'
+    );
+  });
+
+  test('helper 绝不能再用 detached 启动', () => {
+    /**
+     * 拿一次真实事故换来的。第一版是 `spawn(..., { detached: true })`,日志写着
+     * 「helper 已启动」,实际上它随 app.quit() 一起被杀了,程序退了再也没回来。
+     *
+     * 真实会话里四种方式各起一个假 helper 再立刻 app.quit(),实测:
+     * detached ✗ / 普通 spawn ✗ / `cmd /c start` ✓ / WMI ✓ ——
+     * 这是**作业对象**的特征,而 Windows 的 DETACHED_PROCESS 逃不出 job。
+     */
+    const launch = blockFrom(mainSrc, 'async function launchHelper({ scriptPath, renderedScript, aliveMarkerPath })');
+    assert.doesNotMatch(
+      launch,
+      /detached:\s*true/,
+      'helper 又用 detached 启动了 —— 它会跟着 app.quit() 一起死,而且不报错'
+    );
+    assert.match(launch, /primaryLaunch\(/, '没走能逃出作业对象的启动方式');
+    assert.match(launch, /fallbackLaunch\(/, '没有备用启动方式');
+    // spawn 的启动失败是异步 error 事件,不是抛异常
+    assert.match(launch, /child\.on\('error'/, '没监听 spawn 的 error —— 启动失败会表现成"启动成功"');
+  });
+
+  test('确认 helper 活着才准退出,等不到就不退', () => {
+    // 「启动了」和「活着」是两回事。等不到就退,用户得到的是一个自己关掉、
+    // 再也不回来的程序 —— 这正是真实排练里发生的事
+    const body = checkBlock();
+    const launchAt = body.indexOf('await launchHelper(');
+    const quitAt = body.indexOf('app.quit()');
+    assert.ok(launchAt > 0 && launchAt < quitAt, '没等确认就退出了');
+    const guard = body.slice(launchAt, quitAt);
+    assert.match(guard, /if \(!launched\)/, '没有"起不来就别退"的分支');
+    assert.match(guard, /showErrorBox/, '起不来却不吭声');
+    assert.match(guard, /return true;/, '起不来还继续往下走到 app.quit()');
+  });
+
+  test('两条启动路子都逃得出作业对象', () => {
+    const primary = primaryLaunch({ scriptPath: 'C:\\t\\apply.ps1', psPath: 'C:\\ps.exe' });
+    assert.equal(primary.file, 'cmd', '主路不是 cmd start —— 普通 spawn 逃不出作业对象');
+    assert.deepEqual(primary.args.slice(0, 4), ['/c', 'start', '""', '/min']);
+    // 空标题参数必须给:不给的话 start 会把后面第一个带引号的路径当成窗口标题
+    assert.equal(primary.args[2], '""', 'start 少了空标题参数,带空格的路径会被当成标题');
+    assert.ok(primary.args.includes('-File'), '主路应当走脚本文件(命令行短,不会撞 cmd 的 8191 上限)');
+
+    const fallback = fallbackLaunch({ script: 'Write-Output 1', psPath: 'C:\\ps.exe' });
+    assert.equal(fallback.file, 'C:\\ps.exe');
+    const joined = fallback.args.join(' ');
+    assert.match(joined, /Win32_Process/, '备用路不是 WMI 建进程');
+    assert.match(joined, /-EncodedCommand/, '备用路应当用 EncodedCommand —— 执行策略管不着它');
+  });
+
+  test('helper 头一件事就是报到', () => {
+    // 报到必须排在等进程退出之前:app 就是在等这个文件,晚一步等于让 app
+    // 白等 15 秒然后判定失败
+    const s = renderHelperScript({
+      processId: 1,
+      appDir: 'D:\\App',
+      exePath: 'D:\\App\\X.exe',
+      zipPath: 'C:\\t\\n.zip',
+      manifestPath: 'D:\\App\\update-manifest.json',
+      logPath: 'C:\\t\\u.log',
+      aliveMarkerPath: 'C:\\t\\helper-alive.txt',
+    });
+    const aliveAt = s.indexOf('Set-Content -LiteralPath $AliveMarker');
+    assert.ok(aliveAt > 0, 'helper 不写报到文件 —— app 会永远等不到,然后判定更新失败');
+    assert.ok(aliveAt < s.indexOf('Wait-Process'), '报到必须排在等待主进程之前');
+    assert.ok(aliveAt < s.indexOf('Expand-Archive'), '报到必须排在动手之前');
+  });
+
+  test('dev 模式连定时器都不起', () => {
+    assert.match(
+      blockFrom(mainSrc, 'app.whenReady()'),
+      /app\.isPackaged && autoUpdateEnabled\(\)/,
+      'dev 模式也起了更新定时器'
+    );
   });
 
   test('能整个关掉', () => {
@@ -641,12 +819,35 @@ describe('打包与发布', () => {
     assert.ok(manifestAt < copyAt, '清单生成排到了复制 local.config.json 之后');
   });
 
-  test('postbuild 显式挡住 local.config.json 进清单', () => {
+  test('清单里混进本机专属文件要认得出来', () => {
+    /**
+     * 这条本来是纯源码断言(「postbuild 里有没有那段 if」),而变异验证证明它是
+     * 空跑的:把守卫改成恒假,那段文本还在,断言照样通过。源码断言只能证明
+     * 某段字符还在,证明不了它还起作用。
+     *
+     * 所以判断本身被搬进了 updater.js —— 现在这里测的是行为,守卫失效就红。
+     */
+    assert.deepEqual(machineLocalEntries(['App.exe', 'lib/db.js']), [], '干净的清单被误报了');
+    assert.deepEqual(machineLocalEntries(['App.exe', 'local.config.json']), ['local.config.json']);
+    // 大小写和分隔符都不该成为漏网的理由
+    assert.deepEqual(machineLocalEntries(['Local.Config.JSON']), ['Local.Config.JSON']);
+    assert.deepEqual(machineLocalEntries(['a/b/local.config.json']), ['a/b/local.config.json']);
+    assert.deepEqual(machineLocalEntries(['a\\b\\local.config.json']), ['a\\b\\local.config.json']);
+    // 只匹配整个文件名,不能靠后缀撞上别的文件
+    assert.deepEqual(machineLocalEntries(['my-local.config.json.bak']), []);
+  });
+
+  test('postbuild 真的用它挡住了,并且失败要让 build 红', () => {
+    assert.match(postbuildSrc, /machineLocalEntries\(manifest\.files\)/, 'postbuild 没有检查清单');
+    const guard = postbuildSrc.slice(postbuildSrc.indexOf('machineLocalEntries(manifest.files)'));
     assert.match(
-      postbuildSrc,
-      /local\.config\.json'\)\)\)?\s*\{[\s\S]{0,400}?process\.exit\(1\)/,
-      'postbuild 没有对清单里出现 local.config.json 报错'
+      guard.slice(0, 900),
+      /process\.exit\(1\)/,
+      '发现了却没让 build 失败 —— 那等于没发现'
     );
+    const guardAt = postbuildSrc.indexOf('machineLocalEntries(manifest.files)');
+    const writeAt = postbuildSrc.indexOf('writeFileSync(manifestPath');
+    assert.ok(guardAt < writeAt, '检查必须排在写出清单之前,否则坏清单已经落盘了');
   });
 
   test('清单文件名带版本号,和 zip 一致', () => {

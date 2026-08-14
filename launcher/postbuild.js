@@ -20,7 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildManifest } from './updater.js';
+import { buildManifest, machineLocalEntries } from './updater.js';
 
 /** PowerShell 单引号字符串:内部的单引号写成两个 */
 const psQuote = (s) => `'${s.replace(/'/g, "''")}'`;
@@ -73,9 +73,10 @@ const manifest = buildManifest(appDir, version);
 
 // local.config.json 进了清单就等于下次更新会删掉它。第 3 步还没跑,这里本该
 // 干干净净——但顺序是人改的,所以显式验一次,别让它变成一个静默的坑
-if (manifest.files.some((f) => f.toLowerCase().endsWith('local.config.json'))) {
+const leaked = machineLocalEntries(manifest.files);
+if (leaked.length > 0) {
   console.error(
-    '[postbuild] 清单里出现了 local.config.json,拒绝写出。\n' +
+    `[postbuild] 清单里出现了本机专属文件(${leaked.join(', ')}),拒绝写出。\n` +
       '           进了清单就等于下次更新会把它当程序文件删掉,用户的数据目录\n' +
       '           会静默地跳回默认位置——看起来就像"数据全没了"。\n' +
       '           两种可能:(a) 生成清单被挪到了第 3 步复制之后;\n' +
