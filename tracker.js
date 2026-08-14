@@ -14,7 +14,7 @@
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
  *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
- *   node tracker.js notion-check    Notion 侧只读体检(token/数据库/状态选项)
+ *   node tracker.js notion-check    Notion 侧体检(token/库/属性/选项;--fix 补选项,--probe-write 试写)
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
  *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词,--overwrite 重写已有的)
@@ -35,7 +35,14 @@ import {
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
 import { serve } from './lib/server.js';
-import { NotionClient, pickGuideDbProperties, GUIDE_STATUS_OPTIONS } from './lib/notion.js';
+import {
+  NotionClient,
+  pickGuideDbProperties,
+  GUIDE_STATUS_OPTIONS,
+  inspectGuideDb,
+  repairGuideDb,
+  DB_PROBLEM,
+} from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
@@ -319,7 +326,7 @@ async function cmdInitNotion() {
 }
 
 /**
- * `notion-check`:Notion 这一侧的只读体检。和 `ai-check` 是一对 —— 都拿真接口问一遍,
+ * `notion-check`:Notion 这一侧的体检。和 `ai-check` 是一对 —— 都拿真接口问一遍,
  * 把「到底配好了没有」变成当场能看见答案的事,而不是等跑真流程时才炸。
  *
  * **一个字节都不写。** 存在的理由是这条链上的失败全都长得很像:token 不对、
@@ -338,50 +345,79 @@ async function cmdNotionCheck() {
   }
   const notion = new NotionClient(config);
 
-  const me = await notion.request('get', '/users/me');
-  console.log(`✅ token:integration「${me.name || me.bot?.workspace_name || '未命名'}」`);
+  // **判定来自 inspectGuideDb,和设置页共用一份。** 以前这条命令查得很全而设置页
+   // 几乎不查,两条路查的东西不一样正是那类"到上传时才现形"的 bug 的形状。
+  // 这里只负责把判定讲成一份人读的报告 —— 共享的是计算,不是措辞。
+  //
+  // `--probe-write` 要单独开:它会在库里建一页再立刻归档,而只读体检有权在默认路径上。
+  const verdict = await inspectGuideDb(notion, dbId, { probeWrite: argv.includes('--probe-write') });
 
-  if (!dbId) {
+  const problem = (code) => verdict.problems.find((p) => p.code === code);
+  const say = (p) => console.log(`${p.severity === 'error' ? '❌' : '⚠️ '} ${p.message}`);
+
+  if (problem(DB_PROBLEM.BAD_TOKEN)) return say(problem(DB_PROBLEM.BAD_TOKEN));
+  console.log(`✅ token:integration「${verdict.workspace}」`);
+
+  if (problem(DB_PROBLEM.NO_DB_ID)) {
     console.log('❌ 没配攻略数据库 ID(config.json 的 notion.overviewDbId)');
     console.log('   `node tracker.js init --notion --create` 可以直接建一个');
     return;
   }
 
-  let raw;
-  try {
-    raw = await notion.request('get', `/databases/${dbId}`);
-  } catch (err) {
-    console.log(`❌ 读不到数据库:${err.message}`);
+  const unreadable = problem(DB_PROBLEM.DB_UNREADABLE);
+  if (unreadable) {
+    console.log(`❌ ${unreadable.message}`);
     console.log('   两种可能,修法不一样:');
-    console.log('   · 它不是数据库 —— 页面 ID、视图 ID(?v= 后面那段)、整条链接都不行,');
-    console.log('     要把库整页打开,取 URL 里 ?v= 之前那 32 位十六进制');
-    console.log('   · 还没共享 —— 打开它(或父页面)→ ••• → Connections → 加上这个 integration');
+    for (const c of unreadable.causes) console.log(`   · ${c}`);
     return;
   }
-  console.log(`✅ 数据库:「${(raw.title ?? []).map((t) => t.plain_text).join('') || '(无标题)'}」`);
+  console.log(`✅ 数据库:「${verdict.database.title}」`);
+  if (problem(DB_PROBLEM.NO_TITLE_PROP)) say(problem(DB_PROBLEM.NO_TITLE_PROP));
+  else console.log(`✅ 标题属性:${verdict.schema.titleProperty}`);
 
-  // 用下游真正的那套挑选逻辑,不自己解析 —— 这里报「能用」就得是 guide-gen 眼里的能用
-  const picked = pickGuideDbProperties(raw.properties);
-  console.log(`✅ 标题属性:${picked.titleProperty}`);
-
-  if (!picked.status) {
+  const noStatus = problem(DB_PROBLEM.NO_STATUS_PROP);
+  const missingOpts = problem(DB_PROBLEM.MISSING_OPTIONS);
+  if (noStatus) {
     console.log('ℹ️  没有状态属性 —— 合法。攻略照样能建、能同步勾选,只是');
     console.log('   guide-status 那套(打满→Done、掉出 100%→Staged)没东西可写。');
-    console.log(`   想要的话加一个 Status 属性,选项:${GUIDE_STATUS_OPTIONS.join(' / ')}`);
-  } else {
-    const missing = GUIDE_STATUS_OPTIONS.filter((o) => !picked.status.options.includes(o));
-    console.log(`${missing.length ? '⚠️ ' : '✅'} 状态属性:${picked.status.property}(${picked.status.type})`);
-    console.log(`   现有选项:${picked.status.options.join(' / ')}`);
-    if (missing.length) {
-      console.log(`   缺:${missing.join(' / ')}`);
-      console.log('   缺的那个会在程序真要写它的时候把命令拦下来:');
-      if (missing.includes('Not started') || missing.includes('In progress') || missing.includes('Done')) {
-        console.log('     · guide-gen / guide-to-notion 建新页时按完成度写这三档');
-      }
-      if (missing.includes('Staged')) console.log('     · guide-status 把掉出 100% 的页面退回 Staged 时写它');
-      console.log('   去 Notion 那个属性上把缺的选项加出来就行,名字要一模一样(注意大小写)。');
+    console.log(`   想要的话加一个 Status 属性,选项:${noStatus.wanted.join(' / ')}`);
+  } else if (missingOpts) {
+    console.log(`⚠️  状态属性:${missingOpts.property}(${missingOpts.type})`);
+    console.log(`   现有选项:${missingOpts.have.join(' / ') || '无'}`);
+    console.log(`   缺:${missingOpts.missing.join(' / ')}`);
+    console.log('   缺的那个会在程序真要写它的时候把命令拦下来:');
+    if (missingOpts.missing.some((o) => ['Not started', 'In progress', 'Done'].includes(o))) {
+      console.log('     · guide-gen / guide-to-notion 建新页时按完成度写这三档');
     }
+    if (missingOpts.missing.includes('Staged')) {
+      console.log('     · guide-status 把掉出 100% 的页面退回 Staged 时写它(每次开 Dashboard 都跑)');
+    }
+    if (argv.includes('--fix')) {
+      // 补选项是**写用户的数据库**,所以只在明确要求时做,而且成功与否看回读不看 200
+      const r = await repairGuideDb(notion, dbId);
+      if (r.ok) console.log(`   🔧 已补上:${r.added.join(' / ')}(回读确认落地)`);
+      else if (r.reason === 'clobbered') {
+        console.log(`   ❌ 补的时候把已有选项冲掉了:${r.clobbered.join(' / ')} —— 请去 Notion 里加回来`);
+      } else {
+        console.log(`   ❌ Notion 收下了请求但选项没落地,还缺:${r.stillMissing.join(' / ')}`);
+        console.log('      手动加:打开那个库 → 点这个属性 → 加选项,名字要一模一样(注意大小写)');
+      }
+    } else {
+      console.log('   加 --fix 让程序试着补上,或者自己去 Notion 里加(名字要一模一样,注意大小写)');
+    }
+  } else {
+    console.log(`✅ 状态属性:${verdict.schema.status.property}(${verdict.schema.status.type}),四个选项齐全`);
   }
+
+  const noWrite = problem(DB_PROBLEM.NO_WRITE);
+  if (noWrite) {
+    console.log(`❌ ${noWrite.message}`);
+    console.log(`   ${noWrite.hint}`);
+  } else if (argv.includes('--probe-write')) {
+    console.log('✅ 试写:建页 + 归档都通过(这个 integration 确实有写权限)');
+  }
+  const stranded = problem(DB_PROBLEM.STRANDED_PROBE_PAGE);
+  if (stranded) console.log(`⚠️  ${stranded.message}:${stranded.url}`);
 
   const pages = await notion.queryGuideDatabase(dbId);
   const registered = allGuides(db).filter((g) => g.kind === 'notion').length;
@@ -1285,7 +1321,9 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
   node tracker.js guide-to-notion <appid> 把本地 markdown 攻略搬到 Notion(逐条核对后才动本地文件)
               guide-to-notion --dry-run   只预览转换结果,一个字节都不写
-  node tracker.js notion-check            Notion 这一侧的只读体检:token、库、状态选项
+  node tracker.js notion-check            Notion 这一侧的体检:token、库、标题属性、状态选项
+                                          --fix         缺的状态选项试着补上(会写你的库,补完回读确认)
+                                          --probe-write 建一页再立刻归档,验证 integration 真有写权限
   node tracker.js ai-check [appid]        AI 联网研究链路自检(token 用量会打出来)
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)

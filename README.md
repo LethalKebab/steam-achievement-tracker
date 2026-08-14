@@ -92,7 +92,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `checkbox-sync` | Ticks them | Steam + Notion |
 | `guide-status` | Aligns guide page status with completion | Notion |
 | `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
-| `notion-check` | Checks the Notion side: token, database, status options, page count. Writes nothing | Notion |
+| `notion-check` | Checks the Notion side: token, database, title property, status options, page count. Writes nothing unless you pass `--fix` (append missing options) or `--probe-write` (create + archive one page to prove write access) | Notion |
 | `ai-check` | Checks the AI provider and that its web search really works | AI provider |
 | `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
 | `guide-gen <appid> --overwrite` | Regenerates over an existing guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |

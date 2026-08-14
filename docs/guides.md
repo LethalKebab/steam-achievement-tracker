@@ -37,11 +37,17 @@ An auto-created database leaves all four options in the `To-do` group, because *
 **Then check it:**
 
 ```bash
-node tracker.js notion-check      # read-only: token, database, status options, page count
+node tracker.js notion-check      # token, database, title property, status options, page count
+node tracker.js notion-check --fix          # try to append the missing status options
+node tracker.js notion-check --probe-write  # create a page and archive it: proves write access
 node tracker.js guides --notion   # finds pages not yet registered and links them up
 ```
 
 `notion-check` exists because every failure on this path looks like every other one: a bad token, an ID that isn't a database, a database that was never shared, a status option that's missing. The first three used to share one error message, and the fourth stayed invisible until the first `guide-gen`.
+
+**The setup page now runs the same check when you connect a database**, so you no longer have to know this command exists to find out your database is unusable. Pasting an ID validates the whole schema, not just that the ID resolves; anything wrong is reported there and then, with a 帮我补上 button when it is the kind of problem the program can fix. It also creates one page and immediately archives it — that is the only way to tell a read-only integration from a working one, and a read-only token otherwise passes every check and fails at the first `guide-gen`.
+
+Appending options writes to your database, so it only ever happens from a button or `--fix`, never silently on save. Existing options are carried over untouched; nothing is renamed or removed. Whether it worked is decided by reading the database back afterwards rather than by the API's response code — Notion is known to accept a status-property edit with a 200 and change nothing, and a repair that lies about succeeding is worse than one that admits it cannot. If that happens you get told exactly which options to add by hand.
 
 Pages without an `appid:` line are skipped quietly every run — they're guides you haven't written yet, not errors.
 
