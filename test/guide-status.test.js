@@ -14,7 +14,12 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDb, insertGame, upsertGuide, updateGameStats } from '../lib/db.js';
-import { selectGuideStatusUpdates, GUIDE_STATUS_DONE, GUIDE_STATUS_STAGED } from '../lib/guides.js';
+import {
+  selectGuideStatusUpdates,
+  syncGuideStatuses,
+  GUIDE_STATUS_DONE,
+  GUIDE_STATUS_STAGED,
+} from '../lib/guides.js';
 
 const freshDb = () => openDb(':memory:');
 const PAGE = (n) => `3af1fee6252b8073883ecea59b4d83${String(n).padStart(2, '0')}`;
@@ -162,5 +167,78 @@ describe('selectGuideStatusUpdates — 掉出 100% 退回 Staged', () => {
     seed(db, { appid: '1', achieved: 10, total: 10 });
     // 打满 + 已经是 Done → 完全不动
     assert.deepEqual(targets(db, [pageRow('1', GUIDE_STATUS_DONE)]), []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 网络那一半:数据库缺选项时,必须在写第一笔之前就停
+// ---------------------------------------------------------------------------
+
+/**
+ * 上面全是纯函数。这一段守的是 `syncGuideStatuses` 里那道"缺哪个说哪个"的前置检查,
+ * 而**它以前一条测试都没有** —— 整段删掉,全量测试依旧全绿(2026-08-14 变异验证抓到的)。
+ *
+ * 删掉不会有人报错,只会退化成:逐页去写、逐页拿一个很难读的 Notion 400,
+ * 而那个 400 被这条路自己的 `catch` 收进 `sync_log` 就接着跑下一页。偏偏这条路是
+ * **自动**的 —— 每次打开 Dashboard、每次点立即同步都跑一遍 —— 所以退化后的形态是
+ * 「日志里天天堆一句读不懂的 400,界面上什么都看不出来」。
+ *
+ * 这就是 2026-08-14 那份 1.1.2 报告的同一类失败:状态选项对不上,而错误信息不说人话。
+ * 建页那条路(`planNotionTarget`)早就钉住了,收敛这条路之前是个缺口。
+ *
+ * **正反两面都要钉。** 只钉"缺了要抛"的话,把判断条件写成恒真同样能通过 ——
+ * 而恒真意味着配得好好的库也再不能用。
+ */
+describe('syncGuideStatuses — 缺选项要拦在写之前', () => {
+  /** 只实现这条路真正会调的三个方法;`writes` 收下每一次真写 */
+  const stubNotion = (options) => {
+    const writes = [];
+    return {
+      writes,
+      fetchGuideStatusSchema: async () => ({ property: 'Status', type: 'status', options }),
+      queryGuideDatabase: async () => [pageRow('1', 'Not started')],
+      setPageStatus: async (_pageId, { value }) => void writes.push(value),
+    };
+  };
+
+  /** 打满了、页面还挂着 Not started —— 也就是"确实有一笔要写" */
+  const dbWithPendingWrite = () => {
+    const db = freshDb();
+    seed(db, { appid: '1', achieved: 10, total: 10 });
+    return db;
+  };
+
+  for (const missing of [GUIDE_STATUS_DONE, GUIDE_STATUS_STAGED]) {
+    test(`选项里缺 ${missing} → 抛错点名它,而且一笔都没写`, async () => {
+      const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done'].filter((o) => o !== missing));
+      await assert.rejects(
+        syncGuideStatuses(dbWithPendingWrite(), { notion }),
+        (err) => err.message.includes(missing) && err.message.includes('缺少'),
+        `报错必须点名缺的是「${missing}」,不能只说"有问题"`
+      );
+      // 检查得在**发请求之前**跑完。跑在后面的话,前几页已经写出去了,
+      // 而这条路正是自动跑的那条,用户不会看着它
+      assert.deepEqual(notion.writes, [], `缺 ${missing} 时不该写出任何一笔`);
+    });
+  }
+
+  test('缺 Staged 也拦 —— 哪怕这一轮要写的是 Done', async () => {
+    // 两个方向的选项都要提前查:只查"这次要写的那个",缺 Staged 的库会一路正常,
+    // 直到某天某个游戏掉出 100% 才第一次炸,而那时早就没人记得是设置没配好
+    const notion = stubNotion(['Not started', 'In progress', 'Done']);
+    await assert.rejects(syncGuideStatuses(dbWithPendingWrite(), { notion }), /Staged/);
+    assert.deepEqual(notion.writes, []);
+  });
+
+  test('选项齐全 → 正常写出去(反面:检查不能变成恒真)', async () => {
+    const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done']);
+    await syncGuideStatuses(dbWithPendingWrite(), { notion });
+    assert.deepEqual(notion.writes, [GUIDE_STATUS_DONE]);
+  });
+
+  test('dry-run 也不写', async () => {
+    const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done']);
+    await syncGuideStatuses(dbWithPendingWrite(), { notion, dryRun: true });
+    assert.deepEqual(notion.writes, []);
   });
 });
