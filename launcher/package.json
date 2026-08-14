@@ -17,7 +17,11 @@
     },
     "files": [
       "main.js",
-      "package.json"
+      "package.json",
+      "icon.ico"
+    ],
+    "asarUnpack": [
+      "icon.ico"
     ],
     "extraResources": [
       {
@@ -34,7 +38,8 @@
     "win": {
       "target": [
         "zip"
-      ]
+      ],
+      "icon": "icon.ico"
     }
   },
   "devDependencies": {
