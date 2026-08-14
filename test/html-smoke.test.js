@@ -143,9 +143,11 @@ describe('querySelector 用的选择器在标记里有对应', () => {
       const html = read(page);
       const src = emittingSource(html);
       const srcNoCss = src.replace(/<style[^>]*>[\s\S]*?<\/style>/g, '');
-      // 所有 class="…" 里出现过的类名 token(静态标记和 JS 模板串都算)
+      // 所有 class="…" 里出现过的类名 token(静态标记和 JS 模板串都算)。
+      // **不要求属性闭合** —— JS 里常写成 `'<div class="g-card' + (x ? ' y' : '') + '"'`,
+      // 属性的收尾引号在另一个字符串里。所以在 `"` 或 `'` 处截断,两种写法都能取到
       const classTokens = new Set(
-        [...srcNoCss.matchAll(/class="([^"]*)"/g)].flatMap((m) => m[1].split(/\s+/)).filter(Boolean)
+        [...srcNoCss.matchAll(/class="([^"']*)/g)].flatMap((m) => m[1].split(/\s+/)).filter(Boolean)
       );
       const defined = definedIds(html);
       const bad = [];
