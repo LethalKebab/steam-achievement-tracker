@@ -52,16 +52,33 @@ The app checks GitHub Releases 10 seconds after launch and then once a day, offe
 ```
 每天一次 → GitHub API 比版本
   ↓ 有新版
-dialog:立即更新 / 以后再说 □ 不再提示这个版本
+网页提示(不是原生对话框):立即更新 / 以后再说 □ 不再提示这个版本
   ↓ 立即更新
 下载 zip + 清单到 temp → 用 API 给的 sha256 校验
   ↓ 通过
-写 apply-update.ps1 到 temp,detached 启动 → app.quit()
+写 apply-update.ps1 → cmd /c start 拉起 → **等它报到** → app.quit()
   ↓ helper 接管
 等 PID 退出 → 按旧清单删 → Expand-Archive → 写新清单 → 重启 exe
 ```
 
 Still zero runtime dependencies: `Expand-Archive` ships with PowerShell, and `postbuild.js` already borrowed `WScript.Shell` for the shortcut.
+
+Three things on that diagram look like incidental detail and are not. Each was found by a real rehearsal, and each failed **silently** — the app looked fine and simply did nothing.
+
+**The prompt is a web page, not `dialog.showMessageBox`.** Native dialogs do not survive in this app: the call returns instantly with `response: 420`, a value outside the button range, which reads as "user declined". Ten variants were measured (bare `{message}`, `showMessageBoxSync`, with and without a parent window, …) — all 420, while a plain Win32 `MessageBox` on the same machine stayed up indefinitely. This is the **second** time this project has been bitten by it; the first was `window.confirm` in `Dashboard.html`, which left 「生成攻略」 dead in the packaged build. The conclusion recorded back then — "native dialogs belong to the main process" — was too narrow: the main process is no better. The boundary is native-vs-page. The prompt returns its result through `document.title`, so the window needs no preload and no privileges.
+
+**`detached: true` does not make the helper outlive the app.** Measured in a real session, four strategies each launching a dummy helper and then quitting immediately:
+
+| 启动方式 | 活过 `app.quit()` |
+|---|---|
+| `detached: true` + `unref()` | **否** |
+| 普通 `spawn` + `unref()` | **否** |
+| `cmd /c start` | 是 |
+| WMI `Win32_Process.Create` | 是 |
+
+That is a **Job Object**: Electron puts its children in one with kill-on-close, and Windows' `DETACHED_PROCESS` — what Node's `detached` maps to — governs the console, not job membership, so it cannot escape. Only strategies that don't create the process as our child work. The primary is `cmd /c start`; WMI is kept as a fallback because *a broken updater is already on the user's machine and the fix has to travel through it*, so if the primary ever fails somewhere it fails **there, permanently**. The primary uses `-File` rather than `-EncodedCommand` because cmd's command line caps at 8191 characters and the encoded script is ~10 700.
+
+**The app confirms the handoff before it quits.** The helper's first statement writes an alive-marker; the app polls for it, tries the fallback launcher if it doesn't appear, and only then quits — otherwise it reports the failure and **keeps running**. Without this the `detached` bug was catastrophic instead of merely annoying: the app closed itself and never came back, while its own log read 「helper 已启动」, because `spawn()` returning says nothing about whether the process started (launch failure arrives as an async `error` event, which had no listener). Keep both halves: the marker *and* the refusal to quit without it.
 
 **The manifest is the whole safety mechanism.** It lists what the *installed* build put on disk, and the helper deletes exactly those paths — never a keep-list of what to spare. The two get the failure direction backwards from each other: a wrong manifest leaves a junk file behind, a wrong keep-list deletes `resources/tracker/data/steam.db`. Three properties keep it honest, and each is pinned in `test/selfupdate.test.js`:
 
@@ -81,14 +98,18 @@ Still zero runtime dependencies: `Expand-Archive` ships with PowerShell, and `po
 
 ### Rehearsing it
 
-The replace step cannot be unit-tested — it needs two real versions. Point it at an older release and let it "downgrade":
+The replace step cannot be unit-tested — it needs a real release and a real packaged build. Point it at an older release and let it "downgrade":
 
 ```powershell
 $env:TRACKER_UPDATE_FORCE_TAG = 'v1.1.2'
 & .\dist\SteamAchievementTracker\SteamAchievementTracker.exe
 ```
 
-A forced tag skips the is-it-newer check, so the whole path (download → verify → delete by manifest → extract → restart) runs without cutting a release. Note that v1.1.2 has no manifest asset, so that particular rehearsal exercises the *fallback* path; to rehearse the manifest path, downgrade between two releases that both have one.
+A forced tag skips the is-it-newer check, so the whole path runs without cutting a release. **Set the rehearsal up from the zip, never by copying `dist/SteamAchievementTracker/`** — `postbuild.js` drops your `local.config.json` into that folder, which points at your real CLI data directory, and the rehearsal would then operate on your actual database. Plant fake `config.json` / `data/steam.db` / a guide inside `resources/tracker/`, plus a file the target version doesn't have, and write an `update-manifest.json` listing the zip's contents plus that extra file. Then check afterwards that the extra file is gone and the planted data is byte-identical.
+
+Done once on 2026-08-14 (1.1.4 → v1.1.2): 101 files deleted by manifest, extract, restart, and every planted user file intact. Compare against the two logs in `%TEMP%\steam-tracker-update\` — `updater.log` is the app's half, `apply-update.log` is the helper's. **Which of the two is missing tells you which half failed**, which is the whole reason both exist.
+
+Deleting by manifest is exercised by this rehearsal, because deletion reads the manifest **already on disk**. What it does *not* reach is the branch where the incoming release ships a manifest and the helper installs it — v1.1.2 has none, so the run takes the "clear the stale manifest" path instead. Covering that needs two releases that both carry one.
 
 ## Dev mode
 
