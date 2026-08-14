@@ -11,13 +11,53 @@
  */
 import { app, BrowserWindow, dialog, shell, Tray, Menu, nativeImage } from 'electron';
 import { spawn } from 'node:child_process';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, mkdirSync, appendFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  ALIVE_MARKER_NAME,
+  MANIFEST_NAME,
+  RELEASES_PAGE,
+  STATE_NAME,
+  downloadVerified,
+  fetchRelease,
+  fallbackLaunch,
+  parseManifest,
+  parsePromptChoice,
+  primaryLaunch,
+  pickAssets,
+  renderUpdatePromptHtml,
+  readUpdateState,
+  renderHelperScript,
+  shouldOffer,
+  writeHelperScript,
+  writeUpdateState,
+} from './updater.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 8777;
 const BASE_URL = `http://127.0.0.1:${PORT}/`;
+
+/** 启动后隔一会儿再查,别和服务器启动、首次同步抢带宽 */
+const UPDATE_CHECK_DELAY_MS = 10_000;
+/**
+ * 之后每天查一次。**不能只在启动时查** —— 收进托盘之后进程可以连着跑几天,
+ * 「启动」变成了很稀少的事件(和 maybeAutoSync 当初被迫从进程启动搬到窗口显示
+ * 是同一个原因)。挂在窗口显示上则太吵:一天开合十次不该查十次。
+ */
+const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+/**
+ * 窗口还没建好就查不了(要拿它当对话框的父窗口),过一分钟再来 —— 不能直接
+ * 跳到 24 小时后:服务器启动慢的时候(waitForServer 最多等 15 秒)窗口会晚于
+ * 第一次检查出现,那样等于白白丢掉这一天唯一的机会,而且不会有任何征兆。
+ */
+const UPDATE_CHECK_RETRY_MS = 60_000;
+/**
+ * 等 helper 报到的上限。PowerShell 冷启动一两秒是常事,给到 15 秒;
+ * 等不到就换备用路子,再等不到就报错并且**不退出**。
+ */
+const HELPER_ALIVE_TIMEOUT_MS = 15_000;
 
 // 开发模式(`npm start`)下核心文件就在上一级目录;打包后由 electron-builder 的
 // extraResources 复制进 resources/tracker(见 package.json 的 build 配置)。
@@ -37,14 +77,16 @@ const TRACKER_ROOT = app.isPackaged ? join(process.resourcesPath, 'tracker') : j
  * dist/ 每次 build 都会重建,所以 exe 旁边那份由 package.json 的 build 脚本
  * 从 launcher/local.config.json 自动复制过去——源文件在 launcher/ 下,不受 build 影响。
  */
-function loadDataDirOverride() {
-  const candidates = [
+function localConfigCandidates() {
+  return [
     join(dirname(process.execPath), 'local.config.json'),
     join(app.getPath('userData'), 'local.config.json'),
     join(__dirname, 'local.config.json'),
   ];
+}
 
-  for (const path of candidates) {
+function loadDataDirOverride() {
+  for (const path of localConfigCandidates()) {
     if (!existsSync(path)) continue;
     try {
       const dataDir = JSON.parse(readFileSync(path, 'utf8')).dataDir || null;
@@ -69,6 +111,8 @@ let mainWindow = null;
 let setupPollTimer = null;
 let tray = null;
 let hideHintShown = false;
+let updateTimer = null;
+let updateBusy = false;
 
 const ICON_PATH = join(__dirname, 'icon.ico');
 
@@ -239,6 +283,320 @@ function showWindow() {
   mainWindow.focus();
 }
 
+/**
+ * 自动更新的开关 —— 设计文档三个死细节里的「要能关掉」。
+ *
+ * 放在 local.config.json:那已经是 launcher 唯一的本机配置文件,不值得为一个
+ * 布尔值再开第二处。没写就是开着。
+ */
+function autoUpdateEnabled() {
+  for (const path of localConfigCandidates()) {
+    if (!existsSync(path)) continue;
+    try {
+      const v = JSON.parse(readFileSync(path, 'utf8')).autoUpdate;
+      if (typeof v === 'boolean') return v;
+    } catch {
+      // 坏文件跳过,和 loadDataDirOverride 一个态度
+    }
+  }
+  return true;
+}
+
+/**
+ * 更新器这一半的日志。
+ *
+ * helper 从一开始就有日志,app 这一半没有 —— 于是第一次真实排练里「弹窗闪了
+ * 一下就没了」只能靠猜,一个来回才问出它到底走了哪个分支。这条日志就是为了
+ * 让下一次失败直接变成证据。写在 helper 日志旁边,出事只要看一个目录。
+ *
+ * 写不进去就算了:日志失败绝不能反过来把更新弄挂。
+ */
+function logUpdater(msg) {
+  const line = `${new Date().toISOString().slice(11, 23)} ${msg}`;
+  console.log(`[updater] ${msg}`);
+  try {
+    const dir = join(app.getPath('temp'), 'steam-tracker-update');
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, 'updater.log'), `${line}\n`);
+  } catch {
+    // 没日志也得继续
+  }
+}
+
+/**
+ * 问用户要不要更新。
+ *
+ * 用一个小的 BrowserWindow 装一张网页,**不用 `dialog.showMessageBox`** ——
+ * 那个在这个项目里立不住,实测见 updater.js 里 renderUpdatePromptHtml 的注释。
+ * 这个窗口就是普通网页,和 Dashboard 是同一种东西,不存在"打包版里不一样"。
+ *
+ * 关掉窗口(点 X)当作「以后再说」:问一个问题却因为用户关了窗口就卡住,
+ * 比问都不问更糟。
+ */
+function askUpdate({ version, sizeMb }) {
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
+      parent: mainWindow,
+      modal: true,
+      width: 400,
+      height: 250,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      autoHideMenuBar: true,
+      title: 'Steam 成就追踪器',
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    });
+
+    let settled = false;
+    const finish = (choice) => {
+      if (settled) return;
+      settled = true;
+      if (!win.isDestroyed()) win.destroy();
+      resolve(choice);
+    };
+
+    // 页面把选择写进 document.title 回传 —— 不用 preload,也就不用给这个窗口
+    // 开任何特权。认不出来的标题变化直接忽略(页面自己的 <title> 就会先来一次)
+    win.webContents.on('page-title-updated', (e, title) => {
+      const choice = parsePromptChoice(title);
+      if (choice) {
+        e.preventDefault();
+        finish(choice);
+      }
+    });
+    win.on('closed', () => finish({ update: false, skip: false }));
+
+    win.loadURL(
+      `data:text/html;charset=utf-8,${encodeURIComponent(renderUpdatePromptHtml({ version, sizeMb }))}`
+    );
+  });
+}
+
+/**
+ * 查一次更新;有新版就问,答应了就下载、校验、交给 helper、退出。
+ *
+ * 整条路径见 docs/self-update.md 第四节。这里只做到「写好 helper 脚本并退出」,
+ * 真正的删除和解压发生在进程死掉之后 —— 因为 Windows 不让替换正在运行的 exe,
+ * 而托盘改动之后「关掉窗口」并不等于退出(约束 3)。
+ *
+ * 返回 false 表示「这一轮根本没查成」(窗口还没建好),调用方据此早点再来一次。
+ */
+async function checkForUpdate() {
+  // dev 模式(npm start)根本没有可替换的 zip 目录,整套逻辑无从谈起
+  if (!app.isPackaged || updateBusy || app.isQuitting) return true;
+
+  const appDir = dirname(process.execPath);
+  const manifestPath = join(appDir, MANIFEST_NAME);
+  const statePath = join(appDir, STATE_NAME);
+  const userAgent = `SteamAchievementTracker/${app.getVersion()}`;
+
+  /**
+   * 排练开关(设计文档第五节):指定 tag 时跳过「是不是更新」的判断,于是可以
+   * 让它「降级」到 v1.1.2,不发新版就把整条路径跑一遍。
+   *
+   *   $env:TRACKER_UPDATE_FORCE_TAG = 'v1.1.2'
+   *   & .\dist\SteamAchievementTracker\SteamAchievementTracker.exe
+   */
+  const forcedTag = process.env.TRACKER_UPDATE_FORCE_TAG || null;
+
+  /**
+   * 对话框必须挂在一个**已经显示出来的**窗口上。
+   *
+   * 第一版是无父窗口的 `dialog.showMessageBox(options)`,理由是「窗口多半藏在
+   * 托盘里,挂上去就是个看不见的模态框」。顾虑没错,解法错了 —— 打包版里那个
+   * 没有归属的框**自己闪一下就消失**,promise 立刻带着一个非法的 response 返回
+   * (实测在拿不到交互桌面时会返回 420 这种根本不在按钮范围里的值),于是代码
+   * 读成「以后再说」,静默地什么也没做。这正是 CLAUDE.md 里 `window.confirm`
+   * 那道疤的同一种病:原生对话框需要一个归属,没有归属就立不住。
+   *
+   * 正确的解法是把两件事都做了:先把窗口叫到前面来,再挂一个正经的模态框。
+   * 顺带也更合理 —— 要问用户问题,一个在托盘里躺了几天的程序本来就该自己
+   * 冒出来,而不是从背后弹一个孤儿框。
+   */
+  if (!mainWindow) {
+    // 服务器起得慢的时候会走到这儿(createWindow 还在 waitForServer 里)
+    logUpdater('窗口还没建好,这一轮跳过,过一分钟再来');
+    return false;
+  }
+
+  let release;
+  try {
+    release = await fetchRelease({ tag: forcedTag, userAgent });
+  } catch (err) {
+    // **检查失败必须静默。** 离线是常态,没网不该弹错误框——这是设计文档
+    // 三个死细节的第一条
+    logUpdater(`检查更新失败(忽略):${err.message}`);
+    return true;
+  }
+
+  const remoteVersion = String(release?.tag_name ?? '').replace(/^v/i, '');
+  const { skippedVersion } = readUpdateState(statePath);
+  logUpdater(
+    `当前 ${app.getVersion()},远端 ${release?.tag_name}` +
+      `${forcedTag ? '(强制指定 tag,跳过版本比较)' : ''}` +
+      `${skippedVersion ? `,已跳过 ${skippedVersion}` : ''}`
+  );
+  if (
+    !forcedTag &&
+    !shouldOffer({ currentVersion: app.getVersion(), remoteVersion, skippedVersion })
+  ) {
+    logUpdater('不需要更新');
+    return true;
+  }
+
+  const { zip, manifest } = pickAssets(release?.assets);
+  if (!zip) {
+    logUpdater(`${release?.tag_name} 没有 win zip 附件,跳过`);
+    return true;
+  }
+  logUpdater(`附件:${zip.name}${manifest ? ` + ${manifest.name}` : '(没有清单,会走覆盖回退)'}`);
+
+  // 复用托盘「打开面板」那条路径,别把 restore/show/focus 再抄一遍 ——
+  // 上面已经确认过 mainWindow 存在,所以这里不会走进它建窗口的分支
+  showWindow();
+
+  const choice = await askUpdate({
+    version: remoteVersion,
+    sizeMb: Math.round((zip.size ?? 0) / 1024 / 1024),
+  });
+  logUpdater(`用户选择:${choice.update ? '立即更新' : '以后再说'}${choice.skip ? '(并勾了不再提示)' : ''}`);
+
+  if (!choice.update) {
+    // 记住跳过的版本(第三个死细节)。不记的话每次开都弹一遍,两天就被训练成无视
+    if (choice.skip) writeUpdateState(statePath, { skippedVersion: remoteVersion });
+    return true;
+  }
+
+  updateBusy = true;
+  tray?.displayBalloon({
+    icon: ICON_PATH,
+    title: `正在下载 ${remoteVersion}`,
+    content: '下载完会自动重启,期间可以继续用。',
+  });
+
+  const stageDir = join(app.getPath('temp'), 'steam-tracker-update');
+  const zipPath = join(stageDir, zip.name);
+  const newManifestPath = manifest ? join(stageDir, manifest.name) : '';
+
+  try {
+    mkdirSync(stageDir, { recursive: true });
+    // 校验在退出之前做完:验不过就当无事发生,程序还好好地开着
+    await downloadVerified(zip, zipPath, { userAgent });
+    if (manifest) {
+      await downloadVerified(manifest, newManifestPath, { userAgent });
+      // 整份校验一次再让它落到 app 目录里。清单唯一的用途是喂删除循环,
+      // 有一条越界路径就整份拒收,而不是逐条过滤
+      parseManifest(readFileSync(newManifestPath, 'utf8'));
+    }
+  } catch (err) {
+    updateBusy = false;
+    logUpdater(`下载/校验失败:${err.message}`);
+    // **这一步的失败不静默。** 静默那条规则管的是"检查"——离线是常态;
+    // 这里是用户自己点的更新,他正在等结果,没有回音才是最坏的
+    dialog.showErrorBox(
+      'Steam 成就追踪器',
+      `更新失败:${err.message}\n\n数据没有受到影响。可以稍后再试,或到 ${RELEASES_PAGE} 手动下载。`
+    );
+    return true;
+  }
+  logUpdater(`下载并校验通过:${zipPath}`);
+
+  const scriptPath = join(stageDir, 'apply-update.ps1');
+  const aliveMarkerPath = join(stageDir, ALIVE_MARKER_NAME);
+  const renderedScript = renderHelperScript({
+    processId: process.pid,
+    appDir,
+    exePath: process.execPath,
+    zipPath,
+    manifestPath,
+    newManifestPath,
+    logPath: join(stageDir, 'apply-update.log'),
+    aliveMarkerPath,
+  });
+  writeHelperScript(scriptPath, renderedScript);
+  rmSync(aliveMarkerPath, { force: true }); // 上一次留下的标记不能算数
+
+  /**
+   * 启动 helper,**并且确认它真的活着**,然后才退出。
+   *
+   * 「启动了」和「活着」是两回事,这一条是拿一次真实事故换来的:第一版用
+   * `spawn(..., { detached: true })`,日志写着「helper 已启动」,实际上它随着
+   * app.quit() 一起被杀了(Electron 的子进程在一个 kill-on-close 的作业对象里,
+   * `detached` 逃不出去)。用户得到的是一个自己关掉、再也不回来的程序。
+   *
+   * 现在:helper 起来的第一件事是写一个标记文件,我们等到那个文件出现才退出。
+   * 等不到就**不退**,把失败说出来 —— 更新没成、程序还在,这个降级是可接受的。
+   */
+  const launched = await launchHelper({ scriptPath, renderedScript, aliveMarkerPath });
+  if (!launched) {
+    updateBusy = false;
+    dialog.showErrorBox(
+      'Steam 成就追踪器',
+      `更新没能开始:更新程序起不来。\n\n数据和程序都没有被改动。可以到 ${RELEASES_PAGE} 手动下载。\n\n诊断信息:${join(stageDir, 'updater.log')}`
+    );
+    return true;
+  }
+
+  logUpdater('helper 已确认接手,退出等待替换');
+  app.quit();
+  return true;
+}
+
+/** 等标记文件出现,最多 timeoutMs */
+async function waitForAlive(markerPath, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (existsSync(markerPath)) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
+
+/**
+ * 两条启动路子,主路不行就换备用 —— 理由见 updater.js 里 fallbackLaunch 的注释:
+ * 这个组件坏掉的那一版已经在用户机器上了,修复要靠它自己送过去。
+ */
+async function launchHelper({ scriptPath, renderedScript, aliveMarkerPath }) {
+  const attempts = [
+    ['start', primaryLaunch({ scriptPath })],
+    ['wmi', fallbackLaunch({ script: renderedScript })],
+  ];
+
+  for (const [name, { file, args }] of attempts) {
+    logUpdater(`启动 helper(${name})`);
+    try {
+      const child = spawn(file, args, { stdio: 'ignore', windowsHide: true });
+      // spawn 的启动失败是**异步**的 error 事件,不是抛异常。没有这个监听,
+      // 「找不到 powershell」会表现成"启动成功"然后石沉大海
+      child.on('error', (err) => logUpdater(`${name} 启动失败:${err.message}`));
+      child.unref();
+    } catch (err) {
+      logUpdater(`${name} 启动抛异常:${err.message}`);
+      continue;
+    }
+
+    if (await waitForAlive(aliveMarkerPath, HELPER_ALIVE_TIMEOUT_MS)) {
+      logUpdater(`helper 报到了(${name})`);
+      return true;
+    }
+    logUpdater(`${name} 没等到 helper 报到`);
+  }
+  return false;
+}
+
+/**
+ * 自己续自己的定时器:一次只会有一个检查在跑,也只需要清理一个句柄。
+ *
+ * 没查成(窗口还没建好)就用短间隔重来,别把这一天唯一的机会丢掉。
+ */
+function scheduleUpdateCheck(delayMs) {
+  updateTimer = setTimeout(async () => {
+    const checked = await checkForUpdate();
+    scheduleUpdateCheck(checked ? UPDATE_CHECK_INTERVAL_MS : UPDATE_CHECK_RETRY_MS);
+  }, delayMs);
+}
+
 function createTray() {
   // createFromPath 而不是把路径直接交给 Tray:路径错了它会返回一张空图,
   // 而空图在托盘里是**看不见的图标** —— 那时候关窗口又不退出,用户就只剩
@@ -268,6 +626,8 @@ app.whenReady().then(() => {
   startServer();
   createTray(); // 必须在窗口之前:关窗口会去读 tray 发气泡提示
   createWindow();
+  // dev 模式没有可替换的目录,连定时器都不用起
+  if (app.isPackaged && autoUpdateEnabled()) scheduleUpdateCheck(UPDATE_CHECK_DELAY_MS);
 });
 
 /**
@@ -287,6 +647,7 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   app.isQuitting = true;
   if (setupPollTimer) clearInterval(setupPollTimer);
+  if (updateTimer) clearTimeout(updateTimer);
   serverProcess?.kill();
   tray?.destroy();
 });
