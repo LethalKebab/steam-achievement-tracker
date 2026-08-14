@@ -9,7 +9,7 @@
  * 表现得像普通 node 可执行文件)——已经验证过 node:sqlite 在这条路径下能跑,
  * 不需要额外打包一份独立的 Node 运行时。
  */
-import { app, BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog, shell } from 'electron';
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -151,6 +151,22 @@ async function createWindow() {
     height: 800,
     title: 'Steam 成就追踪器',
     autoHideMenuBar: true,
+  });
+
+  /**
+   * 页面里 `target="_blank"` 的链接(攻略、Notion 页面)一律交给系统浏览器。
+   *
+   * **不设这个的话 Electron 会自己开一个裸窗口**,而那个窗口:标题回落成
+   * package.json 里的 `steam-achievement-tracker-launcher`(用户看到的就是这个),
+   * 没有地址栏、没有后退,更要命的是**没有用户的 Notion 登录态** —— 攻略页在里面
+   * 打不开,只会显示登录墙。这些链接指向的本来就是站外内容,归浏览器管。
+   *
+   * 只放行 http/https:`deny` 之外还要挡住 file:// 之类的协议,别把本地文件
+   * 交给系统去执行。
+   */
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   await mainWindow.loadURL(BASE_URL);

@@ -60,7 +60,8 @@
       margin: -24px -24px 20px;
       padding: 14px 24px 12px;
     }
-    .topbar h1 { margin: 0 0 8px 0; }
+    .topbar .title-row { margin-bottom: 10px; }
+    .topbar h1 { margin: 0; }
     .topbar .subtitle-row { margin-bottom: 0; }
 
     /* 图标按钮。「设置」是 <a>、「同步」和铃铛是 <button>,共用这一套,
@@ -175,68 +176,142 @@
        所以要把链接的默认下划线和 inline 布局压掉 */
     .sync-msg { font-size: 12px; color: var(--text-dim); }
     .sync-msg.error { color: var(--low); }
-    /* 盒子偏大、数字偏小 → 反过来:盒子收紧,数字撑满。
-       数字才是这三块的内容,标签只是给它一个名字 */
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 14px;
-      margin-bottom: 28px;
+    /* 标题行:标题在左,读数带贴右。整行可换行 —— 窄屏上读数带整条掉到标题下面 */
+    .title-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px 28px;
+      flex-wrap: wrap;
     }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 12px 16px 14px;
+
+    /* **这不是三张卡片,是一条仪表读数。**
+       盒子 + 标签在上 + 大数字,是 dashboard 的模板答案 —— 而这一页真正的内容是
+       下面那张表,这三个数字只是给它做的注脚。所以去掉盒子和边框,数值在前、
+       说明跟在后面,整条贴在标题右边:读数属于机箱边框,不该自己占一整行。 */
+    .readout {
+      display: flex;
+      align-items: baseline;
+      gap: 24px;
+      flex-wrap: wrap;
     }
-    .card .label {
-      /* 标签和数字是**一起定的**,别单独调其中一个。踩过两次:
-         先是把数字 26→42 却顺手把标签 12→11(比例 0.46 崩到 0.26,标签读起来像脚注),
-         再是把标签补到 18px 配 42px 的数字(比例对了,但两个都太大,卡片压过了页面)。
-         现在 15/34 ≈ 0.44 —— 保住原来那个关系,整体收回到不抢戏的体量 */
-      font-size: 15px;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 3px;
+    .reading {
+      display: flex;
+      align-items: baseline;
+      gap: 7px;
+      white-space: nowrap;
     }
-    .card .value {
-      font-size: 34px;
+    .reading .value {
+      font-size: 22px;
       font-weight: 700;
       color: var(--accent);
-      line-height: 1.1;
-      /* 等宽数字:三块的数字位数不同,不锁的话每次同步完宽度会跳一下 */
+      line-height: 1;
       font-variant-numeric: tabular-nums;
     }
-    .card .sub {
-      /* 跟着标签一起提一档 —— 它是数字的精确值,不该比标签还细 */
-      font-size: 13px;
+    .reading .label {
+      font-size: 12px;
       color: var(--text-dim);
-      margin-top: 3px;
+      letter-spacing: 0.03em;
     }
-    .tabs {
+
+    /* 表格上方那一行:左边切视图,右边报数量。两者说的都是下面这张列表 */
+    .table-bar {
       display: flex;
-      gap: 4px;
-      margin-bottom: 14px;
-      border-bottom: 1px solid var(--border);
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 8px;
     }
-    .tab-btn {
+    /* 结果计数**贴着表格**,因为它说的是这张表;顶栏那个读数说的是整个库。
+       两个数字含义不同,放在一处会被读成同一个 */
+    .row-count {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+    .view-toggle { display: flex; gap: 2px; }
+    .view-toggle button {
       background: none;
-      border: none;
+      border: 1px solid transparent;
+      border-radius: 4px;
       color: var(--text-dim);
-      font-size: 13px;
-      padding: 8px 16px;
+      font-family: inherit;
+      font-size: 12px;
+      padding: 4px 11px;
       cursor: pointer;
-      border-bottom: 2px solid transparent;
     }
-    .tab-btn.active {
+    .view-toggle button:hover { color: var(--text); }
+    .view-toggle button.on { color: #fff; background: var(--panel-alt); border-color: var(--border); }
+    .view-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    /* 图库视图。**整页唯一让视觉说话的地方。**
+       胶囊图是 Steam 自己的语言,所以它铺满整张卡;名字压在底部渐变上,而不是
+       缩成缩略图配一行说明 —— 那是表格已经在做的事。卡片最下沿那条 3px 的进度线
+       是这个工具唯一要说的事,所以它是卡上唯一的图形元素。 */
+    /* **一排四个,竖版。** 横版卡一排只放得下两个,一屏看不了几款;竖版是 Steam
+       库里本来的形状,同样高度能多塞一倍,而且不用把横图裁成竖的。
+       固定四列而不是 auto-fill:auto-fill 会随宽度在 3~5 列之间跳,
+       而「一排四个」是这个视图的形状本身,不该跟着窗口漂 */
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+    }
+    /* 断点压得比较低,是为了让「一排四个」尽量守住 —— 800px 宽时每张约 183px,
+       竖版封面在这个尺寸上还完全读得出来。第一版定在 900px,结果常用窗口下就掉成三列了 */
+    @media (max-width: 760px) { .gallery { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 520px) { .gallery { grid-template-columns: repeat(2, 1fr); } }
+    .g-card {
+      position: relative;
+      aspect-ratio: 600 / 900;
+      border-radius: 6px;
+      overflow: hidden;
+      background: #0e141b;
+      border: 1px solid var(--border);
+    }
+    .g-card.has-guide { cursor: pointer; }
+    .g-card img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      transition: transform 0.25s ease, filter 0.25s ease;
+    }
+    .g-card:hover img { transform: scale(1.04); filter: brightness(1.1); }
+    /* 竖版卡窄,名字和进度**上下叠**而不是左右排 —— 并排的话中文名两三个字就换行了 */
+    .g-scrim {
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      padding: 34px 11px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      /* 渐变兜住文字 —— 封面底部亮暗不一,没有它名字会在浅色封面上读不出来 */
+      background: linear-gradient(to top, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0));
+    }
+    .g-name {
+      font-size: 13px;
+      font-weight: 600;
       color: #fff;
-      border-bottom-color: var(--accent);
+      line-height: 1.35;
+      /* 最多两行,超出截断:封面高度是固定的,长名字撑开会把进度线顶出卡外 */
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
     }
-    .tab-btn .count {
-      color: var(--text-dim);
+    .g-rate {
       font-size: 11px;
-      margin-left: 4px;
+      color: rgba(255,255,255,0.78);
+      font-variant-numeric: tabular-nums;
+    }
+    .g-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.14); }
+    .g-bar span { display: block; height: 100%; }
+    .g-heart { position: absolute; top: 8px; right: 8px; z-index: 2; }
+    @media (prefers-reduced-motion: reduce) {
+      .g-card img, .g-card:hover img { transition: none; transform: none; }
     }
     .controls {
       display: flex;
@@ -336,6 +411,21 @@
       white-space: nowrap;
     }
     th:hover { color: #fff; }
+
+    /* 排序标记。**这里原来有两件事是不可见的**:按哪一列排、正序还是倒序,以及
+       「表头能点」这件事本身 —— 鼠标不划过去根本看不出来。所以每个可排序的表头
+       常驻一个淡的 ↕(告诉你能点),当前排序的那一列换成 ▲/▼ 并点亮。
+       用文本符号不用 emoji:emoji 自带颜色,吃不到 color,淡不下去也点不亮 */
+    th[data-key]::after {
+      content: '↕';
+      margin-left: 5px;
+      font-size: 10px;
+      opacity: 0.3;
+    }
+    th[data-key]:hover::after { opacity: 0.6; }
+    th[data-key].sort-asc::after { content: '▲'; opacity: 1; color: var(--accent); }
+    th[data-key].sort-desc::after { content: '▼'; opacity: 1; color: var(--accent); }
+    th[data-key].sort-asc, th[data-key].sort-desc { color: #fff; }
     tr.game-row.expandable { cursor: pointer; }
     tr.game-row:hover td { background: rgba(255,255,255,0.03); }
     .game-cell { display: flex; align-items: center; gap: 10px; }
@@ -459,41 +549,6 @@
     .missing-row td {
       background: rgba(0,0,0,0.15);
       padding: 14px 20px;
-    }
-    .fav-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 20px;
-    }
-    .fav-card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      overflow: hidden;
-    }
-    .fav-card-img {
-      width: 100%;
-      aspect-ratio: 460 / 215;
-      object-fit: cover;
-      display: block;
-      background: #0e141b;
-    }
-    .fav-card-body { padding: 14px 16px; }
-    .fav-card-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-      margin-bottom: 8px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .fav-card-name .icon-btn { font-size: 15px; }
-    .fav-card-name .icon-btn svg { width: 14px; height: 14px; }
-    .fav-card-bar {
-      display: flex;
-      align-items: center;
-      gap: 8px;
     }
     .missing-header { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
     .ach-grid {
@@ -639,7 +694,26 @@
     }
     .modal-box .game-name { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 4px; }
     .modal-box .appid-hint { margin-bottom: 20px; }
-    .modal-box .modal-btns { display: flex; gap: 10px; justify-content: center; }
+    /* **间距挂在按钮行上,不挂在标题或正文上。** 标题的 margin-bottom 只有 4px,
+       那是给「下面还有正文」准备的;没有正文的框(比如生成攻略那个只有一句问话的)
+       问句和按钮就贴到了一起,看着挤 */
+    .modal-box .modal-btns {
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 22px;
+    }
+    .modal-box .modal-btns button { min-width: 92px; padding: 9px 16px; }
+    /* 次级按钮:**透明底 + 正常字色 + 描边**。
+       原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
+       态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
+       次级动作要弱于主按钮,但必须一眼看得出可以点 */
+    .modal-box .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .modal-box .btn-secondary:hover { background: var(--panel-alt); border-color: var(--panel-alt); }
     .modal-check {
       display: flex;
       align-items: center;
@@ -647,7 +721,11 @@
       gap: 7px;
       font-size: 13px;
       color: var(--text);
-      margin-bottom: 18px;
+      /* 上边距挂在这儿,不去动 .game-name 的 4px —— 那个值在确认框里是标题的下边距,
+         改大了会把另一个框撑开。同一条 4px 已经造成过两次「挤」了,但两次的解法都是
+         在**后面那个元素**上补间距,而不是改共用的那一条 */
+      margin-top: 14px;
+      margin-bottom: 0;
       cursor: pointer;
       user-select: none;
     }
@@ -684,7 +762,23 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>Steam Achievement Tracker</h1>
+    <div class="title-row">
+      <h1>Steam Achievement Tracker</h1>
+      <!-- 精确值和口径放在 title 里(悬停可读),不占屏幕 -->
+      <div class="readout">
+        <!-- **恒定是库里的总数,不跟筛选走。** 筛选后的数量属于那张表,
+             放在表格上方(#rowCount);两个数字含义不同,混在一处会被读成同一个 -->
+        <span class="reading" title="库里的游戏总数">
+          <span class="value" id="cardTotal">–</span><span class="label">游戏</span>
+        </span>
+        <span class="reading" title="AGCR:所有游戏完成率的平均值">
+          <span class="value" id="cardAvg">–</span><span class="label">平均完成率</span>
+        </span>
+        <span class="reading" title="已经打满全部成就的游戏">
+          <span class="value" id="cardPerfect">–</span><span class="label">完美</span>
+        </span>
+      </div>
+    </div>
     <div class="subtitle-row">
       <div class="subtitle" id="lastUpdated">加载中...</div>
       <button class="icon-btn" id="syncNowBtn"
@@ -709,38 +803,20 @@
     <span id="gen-msg"></span>
   </div>
 
-  <div class="cards">
-    <div class="card">
-      <div class="label">游戏总数</div>
-      <div class="value" id="cardTotal">-</div>
-    </div>
-    <div class="card">
-      <div class="label">平均完成率 (AGCR)</div>
-      <div class="value" id="cardAvg">-</div>
-      <div class="sub" id="cardAvgPrecise"></div>
-    </div>
-    <div class="card">
-      <div class="label">完美游戏数</div>
-      <div class="value" id="cardPerfect">-</div>
-    </div>
-  </div>
-
-  <div class="tabs">
-    <button class="tab-btn active" id="tabIncomplete" data-tab="incomplete">进行中 <span class="count" id="countIncomplete"></span></button>
-    <button class="tab-btn" id="tabComplete" data-tab="complete">已完成 <span class="count" id="countComplete"></span></button>
-    <button class="tab-btn" id="tabFavorites" data-tab="favorites">喜爱 <span class="count" id="countFavorites"></span></button>
-  </div>
-
   <div class="controls">
     <input type="text" id="searchBox" placeholder="搜索游戏名...">
+    <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
+         打满的游戏对这个问题没有贡献 -->
+    <label class="checkbox">
+      <input type="checkbox" id="hideComplete" checked> 隐藏已完成
+    </label>
     <label class="checkbox">
       <input type="checkbox" id="favOnly"> 只看喜爱
     </label>
-    <label class="checkbox">
-      <input type="checkbox" id="priorityOnly"> 只看重点关注
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="hideUnvetted"> 隐藏 Unvetted 游戏
+    <!-- 默认勾上。**界面上不出现 "Unvetted"** —— 那是 Steam 接口里的词,不是用户的词;
+         数据库里那一列仍叫 Unvetted(会进 CSV,是兼容面)。解释放 title,不占屏幕 -->
+    <label class="checkbox" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上面那个平均完成率 —— 和 Steam 自己的算法一致。">
+      <input type="checkbox" id="hideUnvetted" checked> 隐藏受限游戏
     </label>
     <label class="checkbox">
       <input type="checkbox" id="hideNoAch"> 隐藏无成就系统的游戏
@@ -767,7 +843,7 @@
       </label>
       <div class="modal-btns">
         <button class="add-game-btn" id="confirmAddBtn">确认</button>
-        <button class="add-game-btn" id="cancelAddBtn" style="background:var(--panel-alt); color:var(--text-dim);">取消</button>
+        <button class="add-game-btn btn-secondary" id="cancelAddBtn">取消</button>
       </div>
     </div>
   </div>
@@ -781,14 +857,25 @@
   <div class="modal-overlay" id="askModal">
     <div class="modal-box" style="max-width:520px;">
       <div class="game-name" id="askTitle"></div>
-      <div id="askBody" style="font-size:13px; color:var(--text-dim); text-align:left; white-space:pre-wrap; margin:12px 0 20px;"></div>
+      <div id="askBody" style="font-size:13px; color:var(--text-dim); text-align:left; white-space:pre-wrap; margin:12px 0 0;"></div>
       <div class="modal-btns">
         <button class="add-game-btn" id="askOkBtn">确认</button>
-        <button class="add-game-btn" id="askCancelBtn" style="background:var(--panel-alt); color:var(--text-dim);">取消</button>
+        <button class="add-game-btn btn-secondary" id="askCancelBtn">取消</button>
       </div>
     </div>
   </div>
 
+  <!-- 「多少」和「怎么看」放同一行:两者说的都是下面这张列表 -->
+  <div class="table-bar">
+    <div class="view-toggle" role="group" aria-label="视图">
+      <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
+           前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
+           名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
+      <button type="button" class="on" data-view="table">列表</button>
+      <button type="button" data-view="gallery">网格</button>
+    </div>
+    <div class="row-count" id="rowCount"></div>
+  </div>
   <table id="gameTable">
     <thead>
       <tr>
@@ -802,8 +889,8 @@
       <tr><td colspan="4" class="loading">正在读取数据...</td></tr>
     </tbody>
   </table>
+  <div id="gallery" class="gallery" hidden></div>
 
-  <div id="favGrid" class="fav-grid" style="display:none;"></div>
 
   <!-- rpc:把 rpc.xxx(args) 转成 POST /api/xxx,见 lib/rpc.js -->
   <script src="/_rpc.js"></script>
@@ -836,8 +923,13 @@
     let allGames = [];
     let sortKey = 'rate';
     let sortDir = -1;
-    let activeTab = 'incomplete';
     let expandedAppid = null;
+    /**
+     * 'table' | 'gallery'。**这是「怎么看」,不是「看什么」** —— 筛选条件由上面那排
+     * 控件决定,两个视图共用同一批结果。以前那套标签页把两件事混在一起(进行中/已完成
+     * 是筛选,喜爱既是筛选又是另一种排版),所以它拆成了 checkbox + 这个开关
+     */
+    let viewMode = 'table';
     /**
      * 正在改数字的那一行。**编辑是一个要主动进入、会自己退出的模式**,不是锁定行的
      * 常驻状态 —— 以前只要行锁着,两个输入框就一直摆在那儿,滚动时一次误触就能改掉
@@ -874,6 +966,17 @@
 
     function thumbUrl(appid) {
       return 'https://cdn.akamai.steamstatic.com/steam/apps/' + appid + '/header.jpg';
+    }
+
+    /**
+     * 竖版封面。**Steam 自己就有这张图**(库里的竖版格),所以竖排的卡片用它,
+     * 而不是把横版 header 裁成竖的 —— 裁出来的构图是错的,主体经常被切掉。
+     *
+     * 不是每款游戏都有这张图(老游戏、部分家庭共享的),所以卡片上留了退回
+     * header.jpg 的一手,见 renderGallery 里的 onerror。
+     */
+    function portraitUrl(appid) {
+      return 'https://cdn.akamai.steamstatic.com/steam/apps/' + appid + '/library_600x900.jpg';
     }
 
     function heartSvg(filled) {
@@ -981,83 +1084,104 @@
       });
     })();
 
-    function renderFavGrid(games) {
-      const grid = document.getElementById('favGrid');
-      if (games.length === 0) {
-        grid.innerHTML = '<div class="empty" style="grid-column:1/-1;">还没有标记喜爱的游戏</div>';
-        return;
-      }
-
-      grid.innerHTML = games.map(function(g) {
-        const rate = g.rate !== null ? g.rate : 0;
-        const rateText = (g.total === 'N/A') ? '无成就系统' : (g.total === null ? '数据同步中...' : fmtPct(g.rate));
-        const barHtml = (g.total !== 'N/A' && g.total !== null)
-          ? '<div class="fav-card-bar"><div class="bar-track"><div class="bar-fill" style="width:' + (rate*100).toFixed(1) + '%; background:' + barColor(rate) + '"></div></div><span class="rate-text">' + rateText + '</span></div>'
-          : '<div class="na">' + rateText + '</div>';
-
-        return '<div class="fav-card">'
-          + '<img class="fav-card-img" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-          + '<div class="fav-card-body">'
-          + '<div class="fav-card-name"><button class="icon-btn active-heart" data-fav-appid="' + g.appid + '">' + heartSvg(true) + '</button>' + escapeHtml(g.name) + '</div>'
-          + barHtml
-          + '</div></div>';
-      }).join('');
-
-      grid.querySelectorAll('[data-fav-appid]').forEach(function(btn) {
+    /**
+     * ♥ 切换。**表格和图库共用这一份** —— 两处各写一遍的话,乐观更新、失败回滚、
+     * 服务端纠正这三件事迟早在一边被改、另一边没跟上
+     */
+    function bindFavButtons(root) {
+      root.querySelectorAll('[data-fav-appid]').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
           e.stopPropagation();
           const appid = btn.dataset.favAppid;
           const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
           if (!game) return;
-          game.favorite = !game.favorite;
+          game.favorite = !game.favorite; // 先本地乐观更新,界面立刻响应
           render();
           rpc.withSuccessHandler(function(result) {
             if (result && typeof result.favorite === 'boolean') game.favorite = result.favorite;
           }).withFailureHandler(function() {
-            game.favorite = !game.favorite;
+            game.favorite = !game.favorite; // 失败了就改回去
             render();
           }).toggleFavorite(appid);
         });
       });
     }
 
+    /**
+     * 图库视图。**表格给数字,图库给图。**
+     *
+     * 胶囊图是 Steam 自己的视觉语言,所以让它铺满整张卡,名字压在底部渐变上 ——
+     * 缩成缩略图再配一行说明,那是表格已经在做的事。卡片最下沿那条 3px 的进度线
+     * 是这个工具唯一要说的事,所以它是卡上唯一的图形元素。
+     *
+     * 筛选结果和表格**完全共用**:筛选决定看什么,视图只决定怎么看。
+     */
+    function renderGallery(rows) {
+      const el = document.getElementById('gallery');
+      if (!rows.length) {
+        el.innerHTML = '<div class="empty">没有符合条件的游戏</div>';
+        return;
+      }
+      el.innerHTML = rows.map(function(g) {
+        const rate = typeof g.rate === 'number' ? g.rate : 0;
+        const rateText = (g.total === 'N/A') ? '无成就系统'
+          : (g.total === null ? '同步中' : g.achieved + '/' + g.total + ' · ' + fmtPct(rate));
+        return '<div class="g-card' + (g.guideUrl ? ' has-guide' : '') + '"'
+          + (g.guideUrl ? ' data-guide="' + g.guideUrl + '"' : '')
+          + ' title="' + escapeHtml(g.name) + (g.guideUrl ? '(点开攻略)' : '') + '">'
+          // 竖版封面优先,没有就退回横版 header。**onerror 里先把自己清掉** ——
+          // 否则退回的那张也加载失败时会再次触发,变成死循环
+          + '<img src="' + portraitUrl(g.appid) + '" loading="lazy"'
+          + ' onerror="this.onerror=null; this.src=\'' + thumbUrl(g.appid) + '\'">'
+          + '<button class="icon-btn g-heart' + (g.favorite ? ' active-heart' : '') + '"'
+          + ' data-fav-appid="' + g.appid + '">' + heartSvg(g.favorite) + '</button>'
+          + '<div class="g-scrim">'
+          + '<span class="g-name">' + escapeHtml(g.name) + '</span>'
+          + '<span class="g-rate">' + rateText + '</span>'
+          + '</div>'
+          + '<div class="g-bar"><span style="width:' + (rate * 100).toFixed(1)
+          + '%; background:' + barColor(rate) + '"></span></div>'
+          + '</div>';
+      }).join('');
+
+      bindFavButtons(el);
+      el.querySelectorAll('.g-card.has-guide').forEach(function(card) {
+        card.addEventListener('click', function() {
+          window.open(card.dataset.guide, '_blank', 'noopener');
+        });
+      });
+    }
+
+
     function render() {
       const search = document.getElementById('searchBox').value.trim().toLowerCase();
+      const hideComplete = document.getElementById('hideComplete').checked;
       const hideUnvetted = document.getElementById('hideUnvetted').checked;
       const hideNoAch = document.getElementById('hideNoAch').checked;
       const favOnly = document.getElementById('favOnly').checked;
-      const priorityOnly = document.getElementById('priorityOnly').checked;
 
-      let filtered = allGames.filter(function(g) {
+      let rows = allGames.filter(function(g) {
         if (search && g.name.toLowerCase().indexOf(search) === -1) return false;
+        if (hideComplete && g.rate === 1) return false;
         if (hideUnvetted && g.unvetted) return false;
         if (hideNoAch && g.total === 'N/A') return false;
         if (favOnly && !g.favorite) return false;
-        if (priorityOnly && !g.priority) return false;
         return true;
       });
 
-      const completeGames = filtered.filter(function(g){ return g.rate === 1; });
-      const incompleteGames = filtered.filter(function(g){ return g.rate !== 1; });
-      const favoriteGames = filtered.filter(function(g){ return g.favorite; });
+      // 顶栏那个读数**恒定是库里的总数** —— 它回答「我一共有多少游戏」,不该被一次
+      // 搜索改写。筛选后的数量是另一个问题(「这张表现在给我看多少」),贴着表格放
+      document.getElementById('cardTotal').textContent = String(allGames.length);
+      document.getElementById('rowCount').textContent = '显示 ' + rows.length + ' / 共 ' + allGames.length;
 
-      document.getElementById('countIncomplete').textContent = '(' + incompleteGames.length + ')';
-      document.getElementById('countComplete').textContent = '(' + completeGames.length + ')';
-      document.getElementById('countFavorites').textContent = '(' + favoriteGames.length + ')';
-
-      const table = document.getElementById('gameTable');
-      const grid = document.getElementById('favGrid');
-
-      if (activeTab === 'favorites') {
-        table.style.display = 'none';
-        grid.style.display = 'grid';
-        renderFavGrid(favoriteGames);
-        return;
-      }
-      table.style.display = 'table';
-      grid.style.display = 'none';
-
-      let rows = activeTab === 'complete' ? completeGames : incompleteGames;
+      // 排序标记跟着 sortKey/sortDir 走。**放在 render 里而不是点击处理里** ——
+      // 排序状态有默认值(初次加载就是按完成率倒序),挂在点击上的话第一次进页面
+      // 什么都不显示,得先点一下才看得到自己本来在按什么排
+      document.querySelectorAll('th[data-key]').forEach(function(th) {
+        const active = th.dataset.key === sortKey;
+        th.classList.toggle('sort-asc', active && sortDir === 1);
+        th.classList.toggle('sort-desc', active && sortDir === -1);
+      });
 
       rows = rows.slice().sort(function(a, b) {
         let av = a[sortKey], bv = b[sortKey];
@@ -1077,6 +1201,12 @@
       rows = recent.concat(rest);
       rows = rows.filter(function(g){ return g.priority; }).concat(rows.filter(function(g){ return !g.priority; }));
 
+      // 视图分叉放在**排序和置顶之后** —— 图库和表格看到的是同一批、同一个顺序的行,
+      // 否则同一套筛选在两个视图里给出不同结果,那看起来像 bug 不像设计
+      document.getElementById('gameTable').hidden = viewMode !== 'table';
+      document.getElementById('gallery').hidden = viewMode === 'table';
+      if (viewMode === 'gallery') { renderGallery(rows); return; }
+
       const body = document.getElementById('gameTableBody');
       if (rows.length === 0) {
         body.innerHTML = '<tr><td colspan="4" class="empty">没有符合条件的游戏</td></tr>';
@@ -1085,7 +1215,9 @@
 
       let html = '';
       rows.forEach(function(g) {
-        const unvettedBadge = g.unvetted ? '<span class="badge">Unvetted</span>' : '';
+        const unvettedBadge = g.unvetted
+          ? '<span class="badge" title="Steam 归为「个人资料功能受限」,不计入平均完成率">受限</span>'
+          : '';
         // 「Manual」这个词只在库里(status 列)还叫这个名字;界面上它是一把**锁** ——
         // 它真正做的事就是「停掉这一行的自动同步」,而那正是锁的含义。
         // 沿用 data-manual-appid,原来那个切换处理器一个字都不用改
@@ -1136,7 +1268,10 @@
           + '<button class="delete-btn" data-edit-appid="' + g.appid + '" title="更多操作">⋮</button>'
           + '</div>';
 
-        const canExpand = activeTab === 'incomplete' && g.total !== 'N/A' && g.total !== null && g.appid;
+        // 展开看的是「还差哪些成就」,判据是**这一行确实没打完**,不是标签页选了哪个。
+        // 标签页没了之后,关掉「隐藏已完成」时打满的游戏也会出现在表里 —— 给它展开箭头
+        // 会展出一个空列表
+        const canExpand = g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid;
         const rowClass = 'game-row' + (canExpand ? ' expandable' : '');
 
         // **只有正在编辑的那一行才给输入框。** 锁着但没在编辑的行,数字和普通行一样
@@ -1175,22 +1310,7 @@
 
       body.innerHTML = html;
 
-      body.querySelectorAll('[data-fav-appid]').forEach(function(btn) {
-        btn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          const appid = btn.dataset.favAppid;
-          const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
-          if (!game) return;
-          game.favorite = !game.favorite; // 先本地乐观更新,界面立刻响应
-          render();
-          rpc.withSuccessHandler(function(result) {
-            if (result && typeof result.favorite === 'boolean') game.favorite = result.favorite;
-          }).withFailureHandler(function() {
-            game.favorite = !game.favorite; // 失败了就改回去
-            render();
-          }).toggleFavorite(appid);
-        });
-      });
+      bindFavButtons(body);
 
       body.querySelectorAll('[data-priority-appid]').forEach(function(btn) {
         btn.addEventListener('click', function(e) {
@@ -1363,21 +1483,26 @@
       });
     });
 
-    document.querySelectorAll('.tab-btn').forEach(function(btn) {
+
+    // 每个筛选控件都要在这儿挂一个,漏一个的表现是「点了没反应」而不是报错 ——
+    // 加 hideComplete 时就漏过一次:默认值照常生效(首次渲染读得到 checked),
+    // 只有取消勾选时才看得出来。所以按 id 一次性挂,别再逐行写
+    ['searchBox', 'hideComplete', 'favOnly', 'hideUnvetted', 'hideNoAch'].forEach(function(id) {
+      const el = document.getElementById(id);
+      el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', render);
+    });
+
+    document.querySelectorAll('.view-toggle button').forEach(function(btn) {
       btn.addEventListener('click', function() {
-        activeTab = btn.dataset.tab;
+        viewMode = btn.dataset.view;
+        // 换视图时收起展开的那一行:图库没有展开这回事,留着切回表格会突然冒出来
         expandedAppid = null;
-        document.querySelectorAll('.tab-btn').forEach(function(b){ b.classList.remove('active'); });
-        btn.classList.add('active');
+        document.querySelectorAll('.view-toggle button').forEach(function(b) {
+          b.classList.toggle('on', b === btn);
+        });
         render();
       });
     });
-
-    document.getElementById('searchBox').addEventListener('input', render);
-    document.getElementById('favOnly').addEventListener('change', render);
-    document.getElementById('priorityOnly').addEventListener('change', render);
-    document.getElementById('hideUnvetted').addEventListener('change', render);
-    document.getElementById('hideNoAch').addEventListener('change', render);
 
     // ---- 行的 Edit 菜单 -------------------------------------------------------
     //
@@ -1403,7 +1528,6 @@
         }
         allGames = allGames.filter(function(g){ return String(g.appid) !== String(appid); });
         if (expandedAppid === String(appid)) expandedAppid = null;
-        document.getElementById('cardTotal').textContent = allGames.length;
         render();
       }).withFailureHandler(function(err) {
         askConfirm({ title: '删除失败', body: String(err && err.message || err), okText: '知道了', notifyOnly: true });
@@ -1506,7 +1630,6 @@
         allGames.push(result);
         msg.textContent = '已添加: ' + result.name;
         msg.className = 'add-game-msg success';
-        document.getElementById('cardTotal').textContent = allGames.length;
         render();
       }).withFailureHandler(function(err) {
         msg.textContent = '添加失败: ' + err.message;
@@ -1647,9 +1770,8 @@
     function loadDashboard() {
       rpc.withSuccessHandler(function(data) {
         allGames = data.games;
-        document.getElementById('cardTotal').textContent = data.totalGames;
+        // cardTotal 由 render() 独占 —— 它才知道筛选结果
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
-        document.getElementById('cardAvgPrecise').textContent = data.avgPrecise ? ('精确值: ' + data.avgPrecise) : '';
         document.getElementById('cardPerfect').textContent = data.perfectCount;
         document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
         renderBell();
@@ -1958,20 +2080,21 @@
             : searches === 0
               ? '<br><span class="warn">⚠️ 一次都没搜,内容等同于凭记忆写的。</span>'
               : '';
-          // 只报 token,不报钱 —— 单价我们核实不过来,一个不知道错多少的金额
-          // 比不给金额更糟。token 是 API 回的硬数字
-          const facts = [
-            r.covered + '/' + r.total + ' 个成就',
-            searches ? searches + ' 次搜索' : null,
-            Math.round((r.tokens || 0) / 100) / 10 + 'k token',
-          ].filter(Boolean).join(' · ');
           // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
           const where = r.target === 'notion'
-            ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开 Notion 页面</a>'
+            ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开攻略</a>'
             : escapeHtml(r.path || '');
+          // **搜索次数和 token 移到悬停里。** 屏幕上留下的三样是:哪款游戏、覆盖了
+          // 多少成就、去哪看。token 仍然报(这是唯一花钱的功能,数字必须能查到),
+          // 但它是事后对账用的,不该和「成了没有」抢同一行。
+          // 「内容自己过一遍」留着 —— 机器只保证格式和数据,内容对不对没有任何东西能验,
+          // 这是这个功能唯一必须每次都说的话
+          genBar.title = [
+            searches ? searches + ' 次搜索' : '没有联网搜索',
+            Math.round((r.tokens || 0) / 100) / 10 + 'k token',
+          ].join(' · ');
           showGen(
-            '✅ 《' + s.game + '》 ' + facts +
-              '<br>' + where +
+            '✅ 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
               noResearch +
               '<br><span class="warn">内容需要你自己过一遍。</span>'
           );
