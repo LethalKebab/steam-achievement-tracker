@@ -168,6 +168,31 @@ gh release create v<version> \
 
 **Upload the manifest every time.** Forgetting it is not loud: that release installs fine, and the damage shows up one release later as an update that leaves stale files behind. The updater treats a missing manifest as "fall back to overwrite" precisely so a slip here degrades instead of breaking, but the degradation is silent.
 
+### Publish as a prerelease first, then flip — and flip *both* switches
+
+`/releases/latest` **skips prereleases** (measured, not assumed: an empty prerelease was published and `latest` still returned the older tag). That is what makes it safe to rehearse a real release on this public repo without any existing user being offered it.
+
+```bash
+# publish for rehearsal — invisible to /releases/latest, so no user sees it
+gh release create v<version> --prerelease --notes-file <notes> \
+  "dist/SteamAchievementTracker-<version>-win.zip" \
+  "dist/SteamAchievementTracker-<version>-manifest.json"
+
+# …rehearse against it (see "Rehearsing it" above)…
+
+# then go live — BOTH of these, see below
+gh release edit v<version> --prerelease=false
+gh release edit v<version> --latest
+```
+
+**`--prerelease=false` alone is not enough, and the failure is silent.** GitHub decides `/releases/latest` from a separate `make_latest` flag, not from the prerelease bit; a release created as a prerelease has it off, and clearing `prerelease` does not turn it on. The release page then looks completely normal — not marked prerelease, both assets attached — while `/releases/latest`, *which is the only endpoint the updater reads*, still points at the previous version. Nobody is ever offered the update and nothing errors. Hit for real on v1.1.4. **Always verify by asking the endpoint the app actually asks:**
+
+```bash
+gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
+```
+
+Note it can lag: the app calls `api.github.com` **unauthenticated**, and that path is CDN-cached for about a minute, so an immediate check can still show the old tag while an authenticated `gh` call already shows the new one. Wait a minute and re-check before concluding something is wrong.
+
 Build from a clean, committed tree so the tag actually corresponds to the binary — `dist/` is gitignored, so nothing else ties them together.
 
 Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, that a **manual** upgrade means **quitting from the tray** first (closing the window leaves the exe running, and Windows won't let it be replaced), and that the **CSV import only appears on the first-run form** — a user who clicks past it has to fall back to the CLI, and after the first sync the ♥/★/family/Manual columns can't be recovered at all.
