@@ -9,7 +9,7 @@
  * 表现得像普通 node 可执行文件)——已经验证过 node:sqlite 在这条路径下能跑,
  * 不需要额外打包一份独立的 Node 运行时。
  */
-import { app, BrowserWindow, dialog, shell } from 'electron';
+import { app, BrowserWindow, dialog, shell, Tray, Menu, nativeImage } from 'electron';
 import { spawn } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -67,6 +67,10 @@ function loadDataDirOverride() {
 let serverProcess = null;
 let mainWindow = null;
 let setupPollTimer = null;
+let tray = null;
+let hideHintShown = false;
+
+const ICON_PATH = join(__dirname, 'icon.ico');
 
 function startServer() {
   const dataDir = loadDataDirOverride();
@@ -151,6 +155,7 @@ async function createWindow() {
     height: 800,
     title: 'Steam 成就追踪器',
     autoHideMenuBar: true,
+    icon: ICON_PATH,
   });
 
   /**
@@ -177,19 +182,111 @@ async function createWindow() {
     pollSetupStatus();
   }
 
+  /**
+   * 关窗口 = 收进托盘,不退出。真正的退出只有托盘菜单那一条路,`app.isQuitting`
+   * 是两者的分界 —— 退出流程里这个 close 事件还会再来一次,那次必须放行,
+   * 否则 preventDefault 会把 app 卡在"永远退不掉"。
+   */
+  mainWindow.on('close', (e) => {
+    if (app.isQuitting) return;
+    e.preventDefault();
+    mainWindow.hide();
+
+    // 后台运行最经典的抱怨是"我关了它怎么还在跑"。托盘图标在 Windows 上默认被
+    // 折叠进溢出区,不主动说一次,用户根本不知道该去哪找它。只提示一次。
+    if (!hideHintShown) {
+      hideHintShown = true;
+      tray?.displayBalloon({
+        icon: ICON_PATH,
+        title: 'Steam 成就追踪器还在后台运行',
+        content: '同步和攻略生成会继续。要完全退出,右键任务栏托盘图标选「退出」。',
+      });
+    }
+  });
+
+  /**
+   * 自动同步原本挂在服务器启动上(`startupJobs` 里的 `maybeAutoSync`,全项目
+   * 唯一调用点)。以前每次开 app 都是一次新进程,所以"开一次 app = 查一次是否
+   * 过期"。收进托盘之后进程可以连着跑几天,那条触发就再也不会响 —— 数据会一直
+   * 停在打开那天,而且不报错,只是 Dashboard 上的数字不动了。
+   *
+   * 所以把触发点从"进程启动"搬到"窗口显示",语义保持原样:打开面板时查一次
+   * 新鲜度。`syncStaleHours` 的闸门还在 maybeAutoSync 里,所以频繁开关窗口
+   * 不会变成频繁同步。
+   */
+  mainWindow.on('show', () => {
+    fetch(`${BASE_URL}api/maybeSync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args: [] }),
+    }).catch(() => {
+      // 服务器正忙或刚起来,下次显示窗口再说——这不是用户需要知道的事
+    });
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
 }
 
+function showWindow() {
+  if (!mainWindow) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function createTray() {
+  // createFromPath 而不是把路径直接交给 Tray:路径错了它会返回一张空图,
+  // 而空图在托盘里是**看不见的图标** —— 那时候关窗口又不退出,用户就只剩
+  // 任务管理器一条路了。所以这里显式检查。
+  const icon = nativeImage.createFromPath(ICON_PATH);
+  if (icon.isEmpty()) {
+    dialog.showErrorBox(
+      'Steam 成就追踪器',
+      `托盘图标加载失败(${ICON_PATH})。程序会继续运行,但关闭窗口后需要在任务管理器里结束进程。`
+    );
+  }
+
+  tray = new Tray(icon);
+  tray.setToolTip('Steam 成就追踪器');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '打开面板', click: showWindow },
+      { type: 'separator' },
+      { label: '退出', click: () => app.quit() },
+    ])
+  );
+  tray.on('click', showWindow);
+  tray.on('double-click', showWindow);
+}
+
 app.whenReady().then(() => {
   startServer();
+  createTray(); // 必须在窗口之前:关窗口会去读 tray 发气泡提示
   createWindow();
 });
 
-app.on('window-all-closed', () => {
+/**
+ * 窗口全关了不再等于退出 —— 那只是收进了托盘。留成空实现是有意的:
+ * Electron 在没有这个监听时的默认行为(非 macOS)就是退出,而那正是要改掉的。
+ */
+app.on('window-all-closed', () => {});
+
+/**
+ * 所有退出路径的唯一汇合点:托盘「退出」、子进程意外挂掉后的 app.quit()、
+ * Windows 关机。清理放这里而不是 window-all-closed,后者现在根本不再触发退出。
+ *
+ * 顺序是死的:**先置 isQuitting 再 kill**。子进程的 exit 监听靠这个标志区分
+ * "我们主动关的"和"它自己挂了",反过来的话每次正常退出都会先弹一个
+ * 「后台服务意外退出」的错误框。
+ */
+app.on('before-quit', () => {
   app.isQuitting = true;
   if (setupPollTimer) clearInterval(setupPollTimer);
   serverProcess?.kill();
-  app.quit();
+  tray?.destroy();
 });

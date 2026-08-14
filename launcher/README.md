@@ -25,6 +25,24 @@ steam-achievement-tracker/
 
 First run with no `config.json` present: the server itself redirects `/` to `/setup` (see `lib/server.js`), which serves `Setup.html` — a plain form for the Steam API key + SteamID64, plus an optional CSV folder path (the GUI equivalent of `node tracker.js import`, for anyone migrating from a spreadsheet). `completeSetup` in `lib/api.js` validates Steam credentials, runs the import if a path was given, and only then writes anything — a bad import path fails the whole submission rather than saving half-finished state, since ♥/★/family/Manual fields can't be recovered from Steam once a sync has run. On success it patches the running process's in-memory `config`/`steam` state directly, so the same server process is immediately usable — no restart needed. `main.js` just polls `getSetupStatus` while parked on `/setup` and reloads the window once it flips true.
 
+## Closing the window doesn't quit
+
+The window hides into a tray icon; the process keeps running so syncing and guide generation survive a closed window. **The only real exit is the tray menu's 退出.**
+
+Three details are load-bearing, and each of them fails silently rather than loudly:
+
+- **`window-all-closed` is deliberately an empty handler.** With no listener at all Electron quits — which is precisely the old behaviour — so deleting the empty function reverts the feature while looking like a cleanup.
+- **The `close` handler must let `app.isQuitting` through.** During a real quit the event fires again; swallowing that one with `preventDefault` makes the app impossible to exit by any route.
+- **`before-quit` sets `isQuitting` *before* killing the child.** The child's `exit` listener reads that flag to tell a deliberate shutdown from a crash. Reversed, every normal quit first pops a 「后台服务意外退出」 error box. `before-quit` is also where cleanup lives now, because it is the one junction every exit path goes through.
+
+`test/tray.test.js` pins all three as source assertions — this file needs Electron, so it cannot be imported by a test.
+
+**The tray icon is a prerequisite, not decoration.** `new Tray()` with an unreadable path produces an *invisible* icon, and an invisible icon plus "closing doesn't quit" is a program the user can neither see nor exit except via Task Manager. The load is therefore checked with `isEmpty()` and reported. `icon.ico` comes from `make-icon.mjs` (`node:zlib`, no dependency) rather than being committed as an opaque binary, so it survives a palette change; it must appear in **both** `build.files` and `build.asarUnpack`, since missing the latter breaks only the packaged build while `npm start` stays perfect.
+
+**This changes the upgrade instruction.** "Close the app before unzipping over it" now means *quit from the tray* — closing the window leaves the exe running and Windows will refuse to replace it. Say that explicitly in release notes rather than the older "close the app".
+
+**Auto-sync had to move.** `maybeAutoSync` runs once per server start (`startupJobs`), so while every launch was a fresh process, opening the app *was* the staleness check. A process that lives in the tray for days removes that trigger and nothing errors — the Dashboard simply stops updating. The trigger now hangs off the window's `show` event via `api.maybeSync`. That method exists instead of reusing `startSync` because `startSync` intentionally ignores `syncStaleHours` (a button press has already decided), which as a window-raise hook would mean a full sync every time you look at the app.
+
 ## Dev mode
 
 ```
@@ -70,7 +88,7 @@ gh release create v<version> "dist/SteamAchievementTracker-<version>-win.zip" --
 
 Build from a clean, committed tree so the tag actually corresponds to the binary — `dist/` is gitignored, so nothing else ties them together.
 
-Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, and that the **CSV import only appears on the first-run form** — a user who clicks past it has to fall back to the CLI, and after the first sync the ♥/★/family/Manual columns can't be recovered at all.
+Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, that upgrading means **quitting from the tray** first (closing the window leaves the exe running, and Windows won't let it be replaced), and that the **CSV import only appears on the first-run form** — a user who clicks past it has to fall back to the CLI, and after the first sync the ♥/★/family/Manual columns can't be recovered at all.
 
 ## Personal use: pointing the launcher at an existing CLI checkout
 
