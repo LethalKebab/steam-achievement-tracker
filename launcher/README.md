@@ -74,11 +74,14 @@ To hand this to someone: send them `dist/SteamAchievementTracker-<version>-win.z
 
 Releases exist so the people using the app can find updates by URL instead of waiting to be sent a file. The repo is public, so **a release is downloadable by anyone**, not only the people you meant to give it to — that's a known and accepted trade, not an oversight.
 
-**The release version is `launcher/package.json`'s**, and it is deliberately *not* the root `package.json`'s. The root version tracks the tracker itself, which reached 2.0.0 long before any of this was packaged; the app started its own count at 1.0.0 because that was the first build anyone downloaded. Both get bumped on a release, but they are on **different counters** (tracker 2.x, app 1.x). The launcher's value is what names the zip and what the tag must match — bump it, and tag exactly that.
+**The release version is `launcher/package.json`'s**, and every other version number in the repo must equal it. It names the zip, `app.getVersion()` reads it, and the tag must match it — bump it, and tag exactly that.
+
+**There used to be two counters** (tracker 2.x in the root `package.json`, app 1.x here), on the reasoning that the tracker reached 2.0.0 long before any of this was packaged and the app started its own count at the first downloadable build. **Merged into one on 2026-08-14.** Every release from the first one on moved them in lockstep — 2.0.0/1.0.0, 2.1.0/1.1.0, … 2.1.3/1.1.3 — so across five releases the two numbers never differed by anything except the leading digit, and the second counter never once carried information. It did cost something: the root value is what `extraResources` copies to `resources/tracker/package.json`, which is the only place a user can read which code is actually on their disk, so a bug report had to be diagnosed against a number that looked like an independent fact and wasn't. The root version was moved *down* onto the app's counter rather than the reverse, so the release-tag line (`v1.0.0` … `v1.1.3`) stays continuous; nothing reads the root value at runtime, so there is no downgrade to worry about. `test/version.test.js` pins all four fields equal, and that test is the whole guardrail — a wrong version number does not error, it misdirects.
 
 ```bash
-# 1. bump version in BOTH package.json files, then:
-cd launcher && npm install --package-lock-only   # sync the lockfile
+# 1. bump version in launcher/package.json, then match it in the root package.json
+cd launcher && npm install --package-lock-only   # sync the lockfile (it carries the number twice)
+( cd .. && node --test test/version.test.js )    # all four must agree — check before building
 npm run build
 
 # 2. verify the artifact before it goes anywhere public
