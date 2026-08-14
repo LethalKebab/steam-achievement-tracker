@@ -8,12 +8,14 @@ Electron shell around the existing CLI/server — for people who shouldn't need 
 steam-achievement-tracker/
 ├── tracker.js, Dashboard.html, Setup.html, lib/   ← the tracker. Edit freely; packaging never needs to change
 ├── launcher/                                      ← this directory: the Electron wrap only
-│   ├── main.js            spawn + window lifecycle
-│   ├── postbuild.js       rename output, copy local config, make the root shortcut
+│   ├── main.js            spawn + window lifecycle + the update prompt
+│   ├── updater.js         everything about updating except touching the disk (no Electron import)
+│   ├── postbuild.js       rename output, write the manifest, copy local config, make the root shortcut
 │   └── local.config.json  gitignored, this machine only
 ├── dist/                                          ← build output (gitignored)
 │   ├── SteamAchievementTracker/       the app folder
-│   └── SteamAchievementTracker-<version>-win.zip   what you send people
+│   ├── SteamAchievementTracker-<version>-win.zip        what you send people
+│   └── SteamAchievementTracker-<version>-manifest.json  ships beside the zip; see "Self-update"
 └── SteamAchievementTracker.lnk                    ← gitignored shortcut; double-click this
 ```
 
@@ -43,6 +45,51 @@ Three details are load-bearing, and each of them fails silently rather than loud
 
 **Auto-sync had to move.** `maybeAutoSync` runs once per server start (`startupJobs`), so while every launch was a fresh process, opening the app *was* the staleness check. A process that lives in the tray for days removes that trigger and nothing errors — the Dashboard simply stops updating. The trigger now hangs off the window's `show` event via `api.maybeSync`. That method exists instead of reusing `startSync` because `startSync` intentionally ignores `syncStaleHours` (a button press has already decided), which as a window-raise hook would mean a full sync every time you look at the app.
 
+## Self-update
+
+The app checks GitHub Releases 10 seconds after launch and then once a day, offers the new version in a native dialog, and on acceptance downloads, verifies, quits, replaces itself and restarts. The full rationale — including why `electron-updater` is unusable here and why NSIS is not an option — is in [docs/self-update.md](../docs/self-update.md). **Read that before changing any of this.** What follows is what the code does.
+
+```
+每天一次 → GitHub API 比版本
+  ↓ 有新版
+dialog:立即更新 / 以后再说 □ 不再提示这个版本
+  ↓ 立即更新
+下载 zip + 清单到 temp → 用 API 给的 sha256 校验
+  ↓ 通过
+写 apply-update.ps1 到 temp,detached 启动 → app.quit()
+  ↓ helper 接管
+等 PID 退出 → 按旧清单删 → Expand-Archive → 写新清单 → 重启 exe
+```
+
+Still zero runtime dependencies: `Expand-Archive` ships with PowerShell, and `postbuild.js` already borrowed `WScript.Shell` for the shortcut.
+
+**The manifest is the whole safety mechanism.** It lists what the *installed* build put on disk, and the helper deletes exactly those paths — never a keep-list of what to spare. The two get the failure direction backwards from each other: a wrong manifest leaves a junk file behind, a wrong keep-list deletes `resources/tracker/data/steam.db`. Three properties keep it honest, and each is pinned in `test/selfupdate.test.js`:
+
+- **Deletion runs before extraction.** That is what makes over-deleting program files self-repairing — the zip puts them back. It is also why a stale manifest is merely untidy rather than dangerous.
+- **Only files are deleted, and only directories that are already empty.** `resources/tracker/data/` holds the database, so it is never empty, so it is never removed. Nothing is matched by name.
+- **The manifest never contains user data**, because it is generated from the unpacked build, and `config.json`/`data/` were never in the build (the `extraResources` allow-list is what guarantees that). Safety here is constructed, not filtered.
+
+**The manifest is a separate release asset, not a file inside the zip.** It has to be, and this is not a stylistic choice: electron-builder seals the zip before `postbuild.js` runs, and a manifest describing a zip that contains itself is circular. So it ships beside the zip and the helper writes it into the app folder after extracting. That gives the fallback for free — a fresh unzip has no manifest, so the first update after it is a plain overwrite, which is exactly the required behaviour for anyone coming from ≤1.1.3. **Never try to infer which files are program files when the manifest is missing.** Those users get one last dirty overwrite and are clean forever after; that cost is deliberately accepted.
+
+**`postbuild.js` must generate the manifest before it copies `local.config.json`.** Reversed, that file lands in the manifest and the next update deletes it — the user's data directory silently reverts to the default and it reads as "all my data is gone". The ordering is guarded by an explicit check that fails the build, because ordering alone is the kind of thing a later edit undoes without noticing.
+
+**Integrity is not optional.** GitHub returns a `sha256:…` digest on every asset, and both downloads are verified against it. If a digest is missing or unparseable the update is *refused* rather than installed unverified — silently skipping the check would mean executing 133 MB of unverified code, and nothing about the resulting install would look wrong.
+
+**Failure directions, deliberately different:** the *check* is silent (offline is the normal case, and an error box every morning trains you to dismiss it), while a *download or verification failure after the user clicked 立即更新* says so out loud — they are standing there waiting for it. If the helper itself fails, only program files are damaged (no user data is in the zip), so the message points at a manual re-download and the log in `%TEMP%\steam-tracker-update\apply-update.log`.
+
+**Turning it off:** `"autoUpdate": false` in `local.config.json` (same file, same three lookup locations as `dataDir`). Per-version dismissal is the checkbox in the dialog, remembered in `update-state.json` next to the exe.
+
+### Rehearsing it
+
+The replace step cannot be unit-tested — it needs two real versions. Point it at an older release and let it "downgrade":
+
+```powershell
+$env:TRACKER_UPDATE_FORCE_TAG = 'v1.1.2'
+& .\dist\SteamAchievementTracker\SteamAchievementTracker.exe
+```
+
+A forced tag skips the is-it-newer check, so the whole path (download → verify → delete by manifest → extract → restart) runs without cutting a release. Note that v1.1.2 has no manifest asset, so that particular rehearsal exercises the *fallback* path; to rehearse the manifest path, downgrade between two releases that both have one.
+
 ## Dev mode
 
 ```
@@ -64,7 +111,7 @@ Output goes to the **repo root** `dist/`, not inside `launcher/` — the built a
 
 **Where it actually persists is `resources/tracker/`, *not* beside the exe** — this said "next to the exe" for a while and that was simply wrong. `DATA_ROOT` defaults to `ROOT` (`lib/config.js`), and in a packaged build `ROOT` is the folder the tracker's code was copied into, so a distributed build with no `local.config.json` writes `resources/tracker/config.json` and `resources/tracker/data/steam.db`. Verified by importing the *packaged* `lib/config.js` and printing `CONFIG_PATH`, which is the only way to settle it — reading the source alone is what produced the wrong claim.
 
-The consequence is load-bearing and belongs next to any future updater: **user data is interleaved with program files.** Overwriting a build in place is safe only because extraction never deletes — `config.json`/`data/`/`guides/` aren't in the zip, so they survive. Anything that "cleans" the app folder before extracting would delete the user's database. Delete by a shipped manifest of what the previous build installed, never by a keep-list of what to spare: a wrong manifest leaves a junk file, a wrong keep-list destroys data.
+The consequence is load-bearing and is what shapes the updater below: **user data is interleaved with program files.** Overwriting a build in place is safe only because extraction never deletes — `config.json`/`data/`/`guides/` aren't in the zip, so they survive. Anything that "cleans" the app folder before extracting would delete the user's database. Delete by a shipped manifest of what the previous build installed, never by a keep-list of what to spare: a wrong manifest leaves a junk file, a wrong keep-list destroys data.
 
 To hand this to someone: send them `dist/SteamAchievementTracker-<version>-win.zip`. They unzip it somewhere permanent (not a temp/Downloads folder they'll clear out) and run the `.exe` inside. First launch shows the setup form; after that it opens straight to the Dashboard. The zip is built *before* `postbuild.js` runs, so it never contains your `local.config.json` — verified, but worth re-checking if you change the build order.
 
@@ -87,15 +134,24 @@ npm run build
 # 2. verify the artifact before it goes anywhere public
 unzip -l ../dist/SteamAchievementTracker-<version>-win.zip | grep -i local.config   # must find nothing
 unzip -l ../dist/SteamAchievementTracker-<version>-win.zip | grep -iE "config.json|steam.db"  # must find nothing
+grep -i local.config ../dist/SteamAchievementTracker-<version>-manifest.json       # must find nothing
 
 # 3. tag the exact commit the artifact was built from, then publish
+#    BOTH files — the manifest is what the *next* update deletes by
 cd .. && git tag -a v<version> -m "..." && git push origin v<version>
-gh release create v<version> "dist/SteamAchievementTracker-<version>-win.zip" --notes-file <notes>
+gh release create v<version> \
+  "dist/SteamAchievementTracker-<version>-win.zip" \
+  "dist/SteamAchievementTracker-<version>-manifest.json" \
+  --notes-file <notes>
 ```
+
+**Upload the manifest every time.** Forgetting it is not loud: that release installs fine, and the damage shows up one release later as an update that leaves stale files behind. The updater treats a missing manifest as "fall back to overwrite" precisely so a slip here degrades instead of breaking, but the degradation is silent.
 
 Build from a clean, committed tree so the tag actually corresponds to the binary — `dist/` is gitignored, so nothing else ties them together.
 
-Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, that upgrading means **quitting from the tray** first (closing the window leaves the exe running, and Windows won't let it be replaced), and that the **CSV import only appears on the first-run form** — a user who clicks past it has to fall back to the CLI, and after the first sync the ♥/★/family/Manual columns can't be recovered at all.
+Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, that a **manual** upgrade means **quitting from the tray** first (closing the window leaves the exe running, and Windows won't let it be replaced), and that the **CSV import only appears on the first-run form** — a user who clicks past it has to fall back to the CLI, and after the first sync the ♥/★/family/Manual columns can't be recovered at all.
+
+From 1.1.4 on the app updates itself, so the manual instruction is a fallback rather than the main path — but it still has to be there: everyone on ≤1.1.3 has to make that one hop by hand, since those builds have no updater in them at all.
 
 ## Personal use: pointing the launcher at an existing CLI checkout
 
@@ -125,4 +181,5 @@ None of this exists on a friend's machine — no file in any of the three locati
 - **Turning Notion sync back off** needs `config.json` — the settings page treats an empty Integration Secret as "keep the current one", the same rule the Steam API Key follows, so that changing a SteamID can't silently wipe a token. Everything else about Notion is configurable in the app.
 - **Port 8777 is hardcoded**, matching the project's default. If that port is already taken on someone's machine, the launcher will fail to start rather than pick another port.
 - **No code signing.** Windows SmartScreen will show an "Unknown Publisher" warning on first run — expected, not a bug. Warn recipients in advance.
-- **No auto-update** *yet* — this is the one item on this list that is being actively worked toward rather than accepted. The design is settled and written up in [docs/self-update.md](../docs/self-update.md); read it before touching this, because the two obvious approaches are both wrong here (`electron-updater` needs NSIS on Windows, and "clean the folder then extract" deletes the user's database, since data sits inside `resources/tracker/`).
+- **Updating from ≤1.1.3 leaves stale files once.** Those builds shipped no manifest, so the first self-update off them is a plain overwrite — anything a later version deleted stays on disk until the *next* update, which has a manifest to work from. Deliberate: see "Self-update" above, and never replace it with a guess about which files are program files.
+- **Self-update is Windows-only and PowerShell-based**, like the rest of the packaging. `Expand-Archive` and `Wait-Process` are the whole runtime.

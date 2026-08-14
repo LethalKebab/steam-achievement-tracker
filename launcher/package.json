@@ -17,6 +17,7 @@
     },
     "files": [
       "main.js",
+      "updater.js",
       "package.json",
       "icon.ico"
     ],

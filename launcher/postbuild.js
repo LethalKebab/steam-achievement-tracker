@@ -1,18 +1,26 @@
 /**
- * build 之后的收尾,三件事:
+ * build 之后的收尾,四件事:
  *
  * 1. electron-builder 固定把解包目录叫 win-unpacked,改成产品名——放在仓库根目录的
  *    dist/ 下,总得让人一眼看出这是什么。
- * 2. 把本机专属的 local.config.json 复制到 exe 旁边。源文件在 launcher/ 下,
+ * 2. **写更新清单**:这一版装了哪些文件。自更新靠它决定删什么(见下面的注释,
+ *    以及 docs/self-update.md)。
+ * 3. 把本机专属的 local.config.json 复制到 exe 旁边。源文件在 launcher/ 下,
  *    dist/ 每次 build 都重建,不复制的话每次都得手动放回去。
  *    没有这个文件(别人 clone 下来 build)就跳过——分发出去的包不该带任何人的本机路径。
- * 3. 在仓库根目录放一个快捷方式,双击即可,不用一层层点进 dist/。
+ * 4. 在仓库根目录放一个快捷方式,双击即可,不用一层层点进 dist/。
  *    .lnk 里存的是绝对路径,所以它和 local.config.json 一样是本机专属、不进仓库的。
+ *
+ * **2 必须排在 3 前面。** 清单是照着 appDir 现有内容生成的,而 3 会往里面放一份
+ * local.config.json —— 顺序反过来,那份本机配置就会进清单,下次更新时被当作
+ * 程序文件删掉,用户的数据目录会静默地跳回默认位置。下面有一条断言守着这件事。
  */
-import { copyFileSync, existsSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { buildManifest } from './updater.js';
 
 /** PowerShell 单引号字符串:内部的单引号写成两个 */
 const psQuote = (s) => `'${s.replace(/'/g, "''")}'`;
@@ -50,7 +58,38 @@ if (existsSync(unpacked)) {
   process.exit(1);
 }
 
-// --- 2. 本机数据目录配置 ---
+// --- 2. 更新清单 ---
+// 「上一版装了哪些文件」。自更新只按这份名单删,绝不按「保留名单」——用户数据和
+// 程序文件同层(resources/tracker/),保留名单漏一项就是删掉用户的数据库,而清单
+// 漏一项只是留下一个多余文件。两种写法的失败方向相反,这就是全部理由。
+//
+// 读的是解包目录而不是去解析 zip:那个目录**就是** zip 的内容,也正是用户解压
+// 之后磁盘上的样子。清单本身不在 zip 里(zip 早在 electron-builder 那步就封好了,
+// 让清单描述一个包含它自己的 zip 是循环的),所以它作为单独的发布附件跟 zip 一起
+// 上传,由更新脚本在解压后写进 app 目录。副作用正好是想要的:全新解压的用户手上
+// 没有清单,第一次更新自然退回覆盖,不需要为此写特例。
+const version = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).version;
+const manifest = buildManifest(appDir, version);
+
+// local.config.json 进了清单就等于下次更新会删掉它。第 3 步还没跑,这里本该
+// 干干净净——但顺序是人改的,所以显式验一次,别让它变成一个静默的坑
+if (manifest.files.some((f) => f.toLowerCase().endsWith('local.config.json'))) {
+  console.error(
+    '[postbuild] 清单里出现了 local.config.json,拒绝写出。\n' +
+      '           进了清单就等于下次更新会把它当程序文件删掉,用户的数据目录\n' +
+      '           会静默地跳回默认位置——看起来就像"数据全没了"。\n' +
+      '           两种可能:(a) 生成清单被挪到了第 3 步复制之后;\n' +
+      '           (b) 单独跑了 postbuild,dist/ 里是上一次 build 留下的目录。\n' +
+      '           (b) 的话跑一次完整的 npm run build 就好。'
+  );
+  process.exit(1);
+}
+
+const manifestPath = join(distDir, `${PRODUCT}-${version}-manifest.json`);
+writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+console.log(`[postbuild] 更新清单:${manifest.files.length} 个文件 → ${manifestPath}`);
+
+// --- 3. 本机数据目录配置 ---
 const localCfg = join(here, 'local.config.json');
 if (existsSync(localCfg)) {
   copyFileSync(localCfg, join(appDir, 'local.config.json'));
@@ -59,7 +98,7 @@ if (existsSync(localCfg)) {
   console.log('[postbuild] 没有 local.config.json,跳过(分发用的 build 就该是这样)');
 }
 
-// --- 3. 仓库根目录的快捷方式 ---
+// --- 4. 仓库根目录的快捷方式 ---
 const shortcut = join(repoRoot, `${PRODUCT}.lnk`);
 try {
   // Node 建不了 .lnk(那是 COM 对象),借 PowerShell 的 WScript.Shell 来做。
