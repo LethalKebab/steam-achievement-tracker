@@ -42,7 +42,11 @@ npm run build
 
 Output goes to the **repo root** `dist/`, not inside `launcher/` — the built app is what you actually open, so it shouldn't be buried under the wrapper's source. `postbuild.js` then renames electron-builder's `win-unpacked` to the product name and drops a `SteamAchievementTracker.lnk` at the repo root, so launching is one double-click from the top level.
 
-`zip` is the target deliberately, **not** electron-builder's `portable` target — the NSIS `portable` target self-extracts to a temp directory on every launch, which would silently lose `config.json` and the SQLite database between runs. The `zip` target ships a real, stable folder: unzip once anywhere, and `config.json`/`data/` persist right next to the exe, exactly like running the CLI from a normal checkout.
+`zip` is the target deliberately, **not** electron-builder's `portable` target — the NSIS `portable` target self-extracts to a temp directory on every launch, which would silently lose `config.json` and the SQLite database between runs. The `zip` target ships a real, stable folder: unzip once anywhere and the data persists across runs, exactly like running the CLI from a normal checkout.
+
+**Where it actually persists is `resources/tracker/`, *not* beside the exe** — this said "next to the exe" for a while and that was simply wrong. `DATA_ROOT` defaults to `ROOT` (`lib/config.js`), and in a packaged build `ROOT` is the folder the tracker's code was copied into, so a distributed build with no `local.config.json` writes `resources/tracker/config.json` and `resources/tracker/data/steam.db`. Verified by importing the *packaged* `lib/config.js` and printing `CONFIG_PATH`, which is the only way to settle it — reading the source alone is what produced the wrong claim.
+
+The consequence is load-bearing and belongs next to any future updater: **user data is interleaved with program files.** Overwriting a build in place is safe only because extraction never deletes — `config.json`/`data/`/`guides/` aren't in the zip, so they survive. Anything that "cleans" the app folder before extracting would delete the user's database. Delete by a shipped manifest of what the previous build installed, never by a keep-list of what to spare: a wrong manifest leaves a junk file, a wrong keep-list destroys data.
 
 To hand this to someone: send them `dist/SteamAchievementTracker-<version>-win.zip`. They unzip it somewhere permanent (not a temp/Downloads folder they'll clear out) and run the `.exe` inside. First launch shows the setup form; after that it opens straight to the Dashboard. The zip is built *before* `postbuild.js` runs, so it never contains your `local.config.json` — verified, but worth re-checking if you change the build order.
 
@@ -92,7 +96,7 @@ Whichever matches is passed to the child process as `TRACKER_DATA_DIR`. `lib/con
 
 **Why exe-adjacent is first, not `userData`:** `userData` lives under the user profile, which sandboxed or virtualized processes can silently redirect — the same absolute path resolving to different content depending on which process asks. That cost a long debugging session here: a file created by one tool was invisible to the real desktop session while every check insisted it existed. The exe-adjacent copy travels with the app and has exactly one interpretation.
 
-None of this exists on a friend's machine — no file in any of the three locations, so `TRACKER_DATA_DIR` never gets set and data lands beside their exe, same as if the feature weren't there.
+None of this exists on a friend's machine — no file in any of the three locations, so `TRACKER_DATA_DIR` never gets set and `DATA_ROOT` falls back to `ROOT`, i.e. `resources/tracker/`, same as if the feature weren't there. (This paragraph also used to say "beside their exe". It isn't — see the note under "Why `zip`" above, and mind it before writing anything that deletes files in the app folder.)
 
 ## Known scope limitations (deliberate, not oversights)
 
