@@ -166,10 +166,37 @@
       position: sticky;
       top: 0;
       z-index: 100;
-      background: var(--bg);
-      border-bottom: 1px solid var(--line-3);
+      /* 底色**必须不透明**,否则滚动的表格会从下面透出来。渐变叠在纯色 var(--bg)
+         上面,所以它仍然是不透明的 —— 顺序反了(渐变在下)就会露。
+         这一层是「让上面丰富一点」的全部:一点从上往下散掉的蓝、左上角一团很淡的光。
+         **刻意不用图片、不做玻璃、不加纹理** —— 顶栏是常驻的,任何有花纹的东西
+         在它上面看三次就烦了,而这一页真正要看的是下面那张表 */
+      background:
+        radial-gradient(60% 140% at 12% -20%, rgba(102, 192, 244, 0.13), transparent 70%),
+        linear-gradient(180deg, rgba(102, 192, 244, 0.045), transparent 62%),
+        var(--bg);
       margin: calc(var(--page-pad) * -1) calc(var(--page-pad) * -1) var(--s5);
-      padding: var(--s4) var(--page-pad) var(--s3);
+      padding: var(--s5) var(--page-pad) var(--s4);
+    }
+
+    /* 顶栏底边:**原来是一条 1px 的静态分隔线,现在是整个库的完成度**。
+       想让顶部更丰富,先用已经占着位置的东西 —— 这条线一个像素都没多占,
+       却从「一条边框」变成了这一页最想说的那个数。
+       它压在顶栏的下沿,同步扫线(.topbar::after)画在它上面,两者不抢位置 */
+    .topbar-progress {
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      background: var(--line-2);
+    }
+    .topbar-progress span {
+      display: block;
+      height: 100%;
+      width: 0;                /* JS 填进来,数据没到之前是空的,不是满的 */
+      background: linear-gradient(90deg, rgba(102, 192, 244, 0.55), var(--accent));
+      transition: width 600ms var(--ease);
     }
     /* 标题行:标题在左,读数带贴右。整行可换行 —— 窄屏上读数带整条掉到标题下面 */
     .title-row {
@@ -221,8 +248,9 @@
     .topbar::after {
       content: '';
       position: absolute;
-      bottom: -1px;          /* 压在顶栏那条 1px 边框上 */
+      bottom: 0;             /* 压在下沿那条完成度线上,同高,盖得住 */
       left: 0;
+      z-index: 1;            /* .topbar-progress 是普通子元素,扫线要在它上面 */
       width: 35%;
       height: 2px;
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
@@ -1136,6 +1164,7 @@
       /* 不动的话状态仍然看得见,只是不扫、不转、不放大 */
       .topbar.syncing::after { animation: none; width: 100%; opacity: 0.6; }
       .icon-btn.spinning .icon-glyph { animation: none; }
+      .topbar-progress span { transition: none; }
       .g-card, .g-card:hover, .g-card img, .g-card:hover img {
         transition: none;
         transform: none;
@@ -1281,6 +1310,17 @@
         </span>
       </div>
     </div>
+    <!--
+      顶栏底边那条线,现在是**整个库的完成度**。
+
+      它原来是一条 1px 的静态边框,纯粹分隔用。做成进度条之后这块地方开始说一件事,
+      而且**不多占一个像素的高度** —— 想让上面更丰富,先用已经在那儿的东西。
+      画的是 readout 里「平均完成率」那个数,所以它不是新信息,是那个数字的形状;
+      数字回答"多少",这条线回答"离满还有多远",看一眼就懂,不用读。
+
+      `aria-hidden`:同一个值旁边已经有文字版了,读屏再念一遍是噪音。
+    -->
+    <div class="topbar-progress" aria-hidden="true"><span id="libProgress"></span></div>
   </div>
 
   <div id="gen-bar" role="status">
@@ -2328,6 +2368,11 @@
         allGames = data.games;
         // cardTotal 由 render() 独占 —— 它才知道筛选结果
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
+        // 顶栏下沿那条完成度线。**用 data.avg 这个原始比值,不要去 parse avgRounded** ——
+        // 那是给人读的字符串,拿它当数据源等于把这条线的正确性押在显示格式上。
+        // 值缺席时画 0 而不是不动:上一次的宽度留在那儿,看起来像一个还活着的读数
+        const avg = typeof data.avg === 'number' ? data.avg : 0;
+        document.getElementById('libProgress').style.width = (avg * 100).toFixed(2) + '%';
         document.getElementById('cardPerfect').textContent = data.perfectCount;
         document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
         renderBell();
