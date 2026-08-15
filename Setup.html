@@ -16,6 +16,14 @@
     --border: #2a3f5a;
   }
   * { box-sizing: border-box; }
+  /* **`hidden` 属性必须真的隐藏。** 浏览器自带的 `[hidden] { display: none }` 来自
+     user-agent 样式表,而作者样式表里**任何**一条 `display:` 都比它优先 —— 所以
+     `.steps { display: flex }` 和 `.step-actions { display: flex }` 各自悄悄让自己
+     那个元素的 `hidden` 变成了装饰。三处中招(这里两处,Dashboard 的 #gallery 一处),
+     而且都不出声:JS 照常设 `.hidden = true`,元素照常显示。
+     逐个补 `.x[hidden]` 是打地鼠 —— 下一条带 display 的规则又会开一个新洞。
+     一条全局规则让这一类从构造上消失,`!important` 就是为了压住后来任何一条 display。 */
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     min-height: 100vh;
@@ -135,7 +143,6 @@
   .steps li.current { color: var(--accent); border-bottom-color: var(--accent); }
   .steps li.clickable { cursor: pointer; }
   .steps li.clickable:hover { color: var(--text); }
-  .step[hidden] { display: none; }
   .step-title { font-size: 14px; font-weight: 600; color: #fff; margin: 0 0 6px; }
   .step-title .tag { font-size: 11px; font-weight: 400; margin-left: 6px; }
   .step-title .tag.req { color: var(--low); }
@@ -343,7 +350,16 @@
     let loadedNotionDb = '';
 
     (async function load() {
-      const s = await call('getSettings', []);
+      // **`call` 会抛,不只是返回 `{error}`。** 下面那条 `if (s.error)` 只挡住"服务器
+      // 回了个错误";服务器还没起来时 `fetch` 是直接 reject 的,那条兜底根本轮不到。
+      // 而 `initSteps()` 没跑 = 一个按钮都没收起来,页面上同时摆着「下一步」和
+      // 「保存并验证」—— 打包版里 Electron 先开窗口再等子进程,正好撞这个窗口期。
+      let s;
+      try {
+        s = await call('getSettings', []);
+      } catch {
+        s = { error: 'unreachable' };
+      }
       // 读设置失败也要把分步装起来 —— 否则导航条不出现、四节里只有第一节可见,
       // 页面看着像坏了。降级成"首次设置"那套是安全的默认
       if (s.error) { initSteps(); return; }

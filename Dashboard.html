@@ -16,6 +16,13 @@
       --border: #2a3f5a;
     }
     * { box-sizing: border-box; }
+    /* **`hidden` 属性必须真的隐藏。** 浏览器自带的 `[hidden] { display: none }` 来自
+       user-agent 样式表,作者样式表里**任何**一条 `display:` 都比它优先。这里中招的是
+       `.gallery { display: grid }`:切回表格视图时 `renderGallery` 不会被调用(见
+       `render` 里那个 early return),所以网格内容原样留着,而 `.hidden = true` 又是
+       个装饰 —— 逛过一次网格再切回表格,网格就挂在表格下面不走了。
+       逐个补 `.x[hidden]` 是打地鼠,一条全局规则让这一类从构造上消失。 */
+    [hidden] { display: none !important; }
     body {
       margin: 0;
       font-family: "Segoe UI", -apple-system, sans-serif;

@@ -234,3 +234,81 @@ describe('踩过的坑,钉住', () => {
       + '转圈/状态样式从此挂不上去。状态改走 class 和 title');
   });
 });
+
+/**
+ * `hidden` 属性必须真的隐藏 —— 两页都要有那条全局规则
+ * ------------------------------------------------
+ * 浏览器自带的 `[hidden] { display: none }` 来自 **user-agent 样式表**,而作者样式表里
+ * 任何一条 `display:` 都比它优先。于是一条无关的布局规则就能悄悄让某个元素的 `hidden`
+ * 变成装饰:JS 照常 `.hidden = true`,元素照常显示,**没有任何东西报错**。
+ *
+ * 这不是假想。2026-08-14 一次扫描在两页里查出三处已经中招:
+ *   · `.gallery { display: grid }`  → Dashboard 切回表格视图后,网格内容留在表格下面
+ *     (`render` 在表格模式下 early return,压根不重绘 #gallery,所以旧内容原样挂着)
+ *   · `.steps { display: flex }`         → 设置页的步骤条
+ *   · `.step-actions { display: flex }`  → 设置页的按钮行,三个按钮一起露出来
+ *
+ * 当时页面里**已经**有一条 `.step[hidden] { display: none }` —— 说明这个坑是知道的,
+ * 只是逐个补是打地鼠:下一条带 `display` 的规则又开一个新洞,而且照样不出声。
+ * 所以改成一条全局规则,让这一类从构造上不成立。`!important` 是必须的,它要压住的
+ * 正是「后来某个人写的某条 display」。
+ *
+ * 这里钉的是**那条规则本身**,不是某几个元素 —— 元素会来会走,规则在,这一类就不会回来。
+ */
+describe('hidden 属性不能被 display 规则架空', () => {
+  for (const page of PAGES) {
+    test(`${page} 有全局 [hidden] { display: none !important }`, () => {
+      const css = styleBlocks(read(page)).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+      const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)];
+      const guard = rules.find(
+        (m) =>
+          m[1].split(',').some((s) => s.trim() === '[hidden]') &&
+          /display\s*:\s*none\s*!important/.test(m[2])
+      );
+      assert.ok(
+        guard,
+        `${page} 缺少全局 [hidden] 规则 —— 任何一条 display: 都会让某个元素的 hidden 静默失效`
+      );
+    });
+
+    test(`${page} 里带 hidden 的元素没有被别的 display 规则单独架空`, () => {
+      // 全局规则在的话这条恒过;它的价值是在**全局规则被删掉时**把具体是哪几个元素中招报出来,
+      // 这样修的人知道自己在保护什么,而不是只看到一条抽象的规则不见了
+      const html = read(page);
+      const css = styleBlocks(html).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+      const rules = [...css.matchAll(/([^{}]+)\{([^{}]*display\s*:[^{}]*)\}/g)].map((m) => ({
+        sels: m[1].split(',').map((s) => s.trim()),
+        decl: m[2],
+      }));
+      if (rules.some((r) => r.sels.includes('[hidden]') && /none\s*!important/.test(r.decl))) return;
+
+      const hiddenTags = [...html.matchAll(/<(\w+)([^>]*\shidden(?=[\s/>])[^>]*)>/g)].map((m) => ({
+        id: m[2].match(/\sid="([^"]+)"/)?.[1] ?? '',
+        cls: (m[2].match(/\sclass="([^"]+)"/)?.[1] ?? '').split(/\s+/).filter(Boolean),
+      }));
+      const broken = hiddenTags.filter((t) =>
+        rules.some(
+          (r) =>
+            !r.sels.some((s) => s.includes('[hidden]')) &&
+            r.sels.some((s) => t.cls.some((c) => s === '.' + c) || (t.id && s === '#' + t.id))
+        )
+      );
+      assert.deepEqual(broken.map((t) => t.id || t.cls.join('.')), [], '这些元素的 hidden 是装饰');
+    });
+  }
+});
+
+describe('设置页:服务器还没起来时也要把界面装起来', () => {
+  test('getSettings 的调用包在 try/catch 里', () => {
+    // `call` 在服务器没起来时是**抛出**,不是返回 {error} —— 下面那条 `if (s.error)` 兜底
+    // 根本轮不到。漏了 catch 的后果是 initSteps() 不跑:步骤条不出现、四节只剩第一节、
+    // 按钮一个都没收起来(「下一步」和「保存并验证」并排摆着)。打包版里 Electron
+    // 先开窗口再等子进程,正好撞这个窗口期。
+    const js = inlineScripts(read('Setup.html')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+    const i = js.indexOf("call('getSettings'");
+    assert.ok(i > 0, '找不到 getSettings 的调用');
+    const around = js.slice(Math.max(0, i - 300), i + 200);
+    assert.match(around, /try\s*\{/, 'getSettings 的调用没有包在 try 里');
+    assert.match(around, /catch/, '没有 catch —— fetch 失败会让整个 load() 中断');
+  });
+});
