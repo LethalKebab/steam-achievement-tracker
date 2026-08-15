@@ -298,6 +298,62 @@ describe('hidden 属性不能被 display 规则架空', () => {
   }
 });
 
+/**
+ * 两页的设计令牌必须是同一份
+ * ------------------------------------------------
+ * 配色、间距、字号、圆角全部收敛到 `:root` 的一块变量里,而**零依赖不允许有共享
+ * 样式表**(CLAUDE.md 的 Stack constraints:没有构建步骤,页面就是一大团字符串),
+ * 所以这一块在 Dashboard.html 和 Setup.html 里各存了一份。
+ *
+ * 两份手抄的东西一定会分叉,而分叉的表现是**没有任何东西报错**:设置页的蓝和主界面
+ * 的蓝差一点点,或者改主界面时新加的 `--danger` 在设置页是未定义的 —— 未定义的
+ * CSS 变量不会报错,它让那条声明整个失效,颜色悄悄掉回继承值。
+ *
+ * 所以这里逐条比对。**比的是声明,不是字节** —— 两页缩进不同(4 格 / 2 格),
+ * 注释也各自解释各自的上下文,拿原文比会天天误报。
+ */
+describe('两页的 :root 设计令牌是同一份', () => {
+  /** 取出 :root 里的声明,规范化成 `名字:值` 的有序数组 */
+  const rootDecls = (html) => {
+    const css = styleBlocks(html).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+    const m = css.match(/:root\s*\{([^{}]*)\}/);
+    assert.ok(m, '找不到 :root —— 这条检查失去了目标,不是通过了');
+    return m[1]
+      .split(';')
+      .map((d) => d.trim().replace(/\s+/g, ' '))
+      .filter(Boolean);
+  };
+
+  test('Dashboard.html 和 Setup.html 的令牌逐条相同', () => {
+    const a = rootDecls(read('Dashboard.html'));
+    const b = rootDecls(read('Setup.html'));
+    assert.ok(a.length > 30, `只抓到 ${a.length} 条声明,提取逻辑可能坏了`);
+
+    const only = (x, y) => x.filter((d) => !y.includes(d));
+    assert.deepEqual(
+      { 只在Dashboard: only(a, b), 只在Setup: only(b, a) },
+      { 只在Dashboard: [], 只在Setup: [] },
+      '两页的设计令牌分叉了 —— 改了一页忘了另一页。未定义的变量不会报错,'
+      + '它只会让那条声明失效,颜色/间距悄悄掉回继承值'
+    );
+  });
+
+  /**
+   * 运行时测量值不属于令牌块。
+   *
+   * `--topbar-h` 是 Dashboard 用 ResizeObserver 量出来的顶栏高度(表头靠它吸附),
+   * 不是设计系统的一部分。把它写进 :root 的话,上面那条 parity 断言就永远红着,
+   * 而"修"它的最省事办法是往 Setup 里也塞一个用不上的 --topbar-h —— 于是令牌块里
+   * 开始混进和设计无关的东西,这条纪律就烂了。所以单独钉住。
+   */
+  test('--topbar-h 不在 :root 里,它是运行时测量值不是令牌', () => {
+    const css = styleBlocks(read('Dashboard.html')).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+    const root = css.match(/:root\s*\{([^{}]*)\}/)[1];
+    assert.ok(!/--topbar-h/.test(root), '--topbar-h 不该出现在 :root 里');
+    assert.match(css, /--topbar-h\s*:/, '但它得在别处有个默认值 —— JS 还没跑到的那一帧要用');
+  });
+});
+
 describe('设置页:服务器还没起来时也要把界面装起来', () => {
   test('getSettings 的调用包在 try/catch 里', () => {
     // `call` 在服务器没起来时是**抛出**,不是返回 {error} —— 下面那条 `if (s.error)` 兜底

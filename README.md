@@ -52,7 +52,7 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 
 **Coming from a spreadsheet?** Import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on the setup form, which also offers blank CSV templates in the right column order. Favorites, spotlights and hand-edited rows cannot be recovered from Steam, so keep the spreadsheet until the import has run; importing is repeatable, so a missed first attempt is not fatal. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
 
-**Guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked. The setup form covers Notion (step 3) and stays reachable afterwards from the **⚙️** button on the Dashboard. From source:
+**Guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked. The setup form covers Notion (step 3) and stays reachable afterwards from the gear button in the Dashboard's top-right corner. From source:
 
 ```bash
 node tracker.js init --notion --create   # builds the Notion database for you and saves its ID

@@ -3,19 +3,119 @@
 <head>
   <base target="_top">
   <style>
+    /* ========================================================================
+       设计令牌
+       ------------------------------------------------------------------------
+       这一段是整套界面唯一的取值来源。改颜色、改间距、改圆角都只动这里,
+       下面的规则一律引用令牌,不写字面量 —— 除了两处刻意的例外,都在原地注明。
+
+       **和 Setup.html 的 :root 必须逐字相同。** 零依赖不允许有共享样式表,
+       所以两页各存一份;html-smoke.test.js 会比对它们,防止改一页忘一页。
+       ======================================================================== */
     :root {
-      --bg: #171a21;
-      --panel: #1b2838;
-      --panel-alt: #2a3f5a;
-      --text: #c7d5e0;
-      --text-dim: #8f98a0;
-      --accent: #66c0f4;
-      --good: #a4d007;
-      --mid: #d4a017;
-      --low: #c15b5b;
-      --border: #2a3f5a;
+      /* ---- 表面:四级同色相阶梯 ------------------------------------------
+         原来只有 --panel(#1b2838)和 --panel-alt(#2a3f5a)两级,中间跨了一大步,
+         而且 **--border 和 --panel-alt 是同一个值** —— 于是画在 hover 面上的边框
+         直接消失。层级不够用时只能靠borders 硬分,那正是这一页看着「格子多」的根因。
+         四级之后,悬停、表头、浮层各有自己的面,分隔可以交给面差而不是线。 */
+      --bg:        #10151d;   /* 页面底 */
+      --surface:   #18212f;   /* 表格、卡片、输入框 */
+      --surface-2: #212c3d;   /* 表头、行悬停、次级按钮 */
+      --surface-3: #2a3749;   /* 菜单、浮层 */
+
+      /* ---- 线:三级,一律半透明白 ----------------------------------------
+         **必须是 alpha,不能是定值 hex。** 定值只在某一个面上是对的,换个面
+         要么消失要么刺眼 —— 上面那个 border == panel-alt 的 bug 就是这么来的。
+         带一点蓝是为了留在 Steam 的色系里,纯白会读成灰。
+
+         三级各有各的活:
+           1 表内行分隔 —— 167 行叠起来,再重一点整页就变方格纸
+           2 控件外沿   —— 输入框、按钮、卡片
+           3 区块边界   —— 顶栏底边、浮层外沿,是「这里换了一块区域」 */
+      --line-1: rgba(150, 180, 216, 0.085);
+      --line-2: rgba(150, 180, 216, 0.16);
+      --line-3: rgba(150, 180, 216, 0.28);
+
+      /* ---- 文字:三级 ---------------------------------------------------- */
+      --text:   #dce6f2;   /* 正文 */
+      --text-2: #98a9be;   /* 次要:标签、说明、表头 */
+      --text-3: #6d7f95;   /* 三级:占位、禁用、时间戳 */
+      --text-hi: #ffffff;  /* 标题和强调行 */
+
+      /* ---- 强调色:Steam 蓝,保留 ---------------------------------------- */
+      --accent:     #66c0f4;
+      --accent-hi:  #8ed4ff;
+      --accent-ink: #08111b;                    /* 蓝底上的字 */
+      --accent-soft: rgba(102, 192, 244, 0.14); /* 蓝底的淡版,用于选中态 */
+
+      /* ---- 进度色阶 ------------------------------------------------------
+         原来是 good/mid/low 三档红黄绿,读起来像红绿灯 —— 而「完成率 30%」
+         并不是一个警告。改成一条**递进**的四档,并且把「打满」交给强调蓝而不是绿:
+         100% 在这个工具里是成就本身,不是「安全」。 */
+      --prog-low:  #d9695f;
+      --prog-mid:  #e0a63f;
+      --prog-high: #8cc63f;
+      --prog-done: #66c0f4;
+      --prog-none: #3a4759;   /* 没有数据 */
+
+      /* ---- 语义色 -------------------------------------------------------- */
+      --ok:     #8cc63f;
+      --warn:   #e0a63f;
+      --danger: #e0685e;
+
+      /* ---- 字号:六级 ----------------------------------------------------
+         原来有 11/12/13/15/17/18/22/28 八个值,彼此没有比例关系。 */
+      --fs-display: 26px;
+      --fs-xl: 19px;
+      --fs-lg: 15px;
+      --fs-md: 13px;   /* 正文和表格 */
+      --fs-sm: 12px;
+      --fs-xs: 11px;
+
+      /* ---- 间距:4px 一格 ------------------------------------------------
+         原来散落着 4/6/8/9/10/11/12/14/16/20/22/24/28/34 十四个值。 */
+      --s1: 4px;
+      --s2: 8px;
+      --s3: 12px;
+      --s4: 16px;
+      --s5: 24px;
+      --s6: 32px;
+
+      /* 页面内边距。**顶栏的负外边距要用它算**,见 .topbar —— 两个值必须永远相等,
+         所以它们现在出自同一个令牌,而不是两处各写一个 24px */
+      --page-pad: var(--s5);
+
+      /* ---- 圆角:四级(原来有 2/3/4/5/6/8 六个) -------------------------- */
+      --r-sm: 4px;
+      --r-md: 7px;
+      --r-lg: 12px;
+      --r-full: 999px;
+
+      /* ---- 投影:三级 ---------------------------------------------------- */
+      --sh-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --sh-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+      --sh-3: 0 16px 48px rgba(0, 0, 0, 0.6);
+
+      /* ---- 动效 ---------------------------------------------------------- */
+      --dur-1: 120ms;
+      --dur-2: 200ms;
+      --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+      /* 原生控件(checkbox 等)的勾选色。不设的话是操作系统的蓝,
+         和这一页的蓝不是一个 —— 同一类问题的另一个化身,见下面图标那段 */
+      accent-color: var(--accent);
+      color-scheme: dark;
     }
+
+    /* 顶栏的实测高度,由 JS 写进来(见脚本里的 trackTopbarHeight)。表头要吸附在
+       顶栏**下面**,而顶栏会随窗口宽度换行变高,写死必然错位。
+       **它不在 :root 那一块里**,因为那一块是和 Setup.html 逐字相同的设计令牌;
+       这个是本页的运行时测量值,不是设计系统的一部分。下面这个默认值只在 JS
+       还没跑到的那一帧用一下 */
+    html { --topbar-h: 88px; }
+
     * { box-sizing: border-box; }
+
     /* **`hidden` 属性必须真的隐藏。** 浏览器自带的 `[hidden] { display: none }` 来自
        user-agent 样式表,作者样式表里**任何**一条 `display:` 都比它优先。这里中招的是
        `.gallery { display: grid }`:切回表格视图时 `renderGallery` 不会被调用(见
@@ -23,85 +123,94 @@
        个装饰 —— 逛过一次网格再切回表格,网格就挂在表格下面不走了。
        逐个补 `.x[hidden]` 是打地鼠,一条全局规则让这一类从构造上消失。 */
     [hidden] { display: none !important; }
+
     body {
       margin: 0;
-      font-family: "Segoe UI", -apple-system, sans-serif;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif;
+      font-size: var(--fs-md);
       background: var(--bg);
       color: var(--text);
-      padding: 24px;
+      padding: var(--page-pad);
+      /* 数字等宽是这一页的基线要求,不是某几个格子的特例:表格里所有列都是数字,
+         比例数字会让上下两行的位数对不齐,扫一列的时候尤其难受 */
+      font-variant-numeric: tabular-nums;
+      -webkit-font-smoothing: antialiased;
     }
-    h1 {
-      /* 顶栏冻结、卡片数字提到 42px 之后,20px 的标题在同一屏里显得像个副标题。
-         页面标题得撑得住它下面那三个数字 */
-      font-size: 28px;
-      font-weight: 600;
-      margin: 0 0 4px 0;
-      color: #fff;
-    }
-    .subtitle {
-      color: var(--text-dim);
-      font-size: 13px;
-      margin-bottom: 24px;
-    }
-    .subtitle-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-wrap: wrap;
-      margin-bottom: 24px;
-    }
-    .subtitle-row .subtitle { margin-bottom: 0; }
 
-    /* 冻结的顶栏。
-       **负外边距是为了满宽**:body 有 24px 内边距,不抵消掉的话左右两侧会留出缝,
-       表格从缝里滚过去,看着像背景漏了。
+    /* 全局焦点环。原来只有两个组件写了 :focus-visible,其余的键盘用户看不见落点。
+       统一挂在这里,后面的组件只在需要偏移时覆盖 */
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+      border-radius: var(--r-sm);
+    }
+
+    h1 {
+      font-size: var(--fs-display);
+      font-weight: 650;
+      letter-spacing: -0.015em;   /* 大字号收一点字距,否则在深色底上显散 */
+      margin: 0;
+      color: var(--text-hi);
+    }
+
+    /* ========================================================================
+       顶栏
+       ------------------------------------------------------------------------
+       **负外边距是为了满宽**:body 有 --page-pad 的内边距,不抵消掉的话左右两侧
+       会留出缝,表格从缝里滚过去,看着像背景漏了。两个值出自同一个令牌,不会再各改各的。
        z-index 100 —— 要压住表格,但必须让开两个浮层:#gen-bar(9990)和
        lib/rpc.js 的同步状态条(9999)。它们钉在屏幕底部,顶栏跟它们抢层级没有意义。
-       背景必须是**不透明**的 var(--bg),否则滚动的表格会从下面透出来。 */
+       背景必须是**不透明**的 var(--bg),否则滚动的表格会从下面透出来。
+       ======================================================================== */
     .topbar {
       position: sticky;
       top: 0;
       z-index: 100;
       background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      margin: -24px -24px 20px;
-      padding: 14px 24px 12px;
+      border-bottom: 1px solid var(--line-3);
+      margin: calc(var(--page-pad) * -1) calc(var(--page-pad) * -1) var(--s5);
+      padding: var(--s4) var(--page-pad) var(--s3);
     }
-    .topbar .title-row { margin-bottom: 10px; }
-    .topbar h1 { margin: 0; }
-    .topbar .subtitle-row { margin-bottom: 0; }
-
-    /* 图标按钮。「设置」是 <a>、「同步」和铃铛是 <button>,共用这一套,
-       所以链接的默认下划线和 inline 布局要压掉 */
-    .icon-btn {
-      background: var(--panel-alt);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      width: 30px;
-      height: 30px;
-      padding: 0;
-      display: inline-flex;
+    /* 标题行:标题在左,读数带贴右。整行可换行 —— 窄屏上读数带整条掉到标题下面 */
+    .title-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: var(--s3) var(--s6);
+      flex-wrap: wrap;
+      margin-bottom: var(--s3);
+    }
+    /* 第二行同样两端对齐:左边是状态文字,右边是那组图标按钮。
+       原来图标紧跟在「上次同步」后面,读成了一串来历不明的东西挤在句子右边;
+       靠到右上角之后,「这一栏右边是操作」变成一条一眼能认的规律 */
+    .subtitle-row {
+      display: flex;
       align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      line-height: 1;
-      cursor: pointer;
-      flex-shrink: 0;
-      text-decoration: none;
-      font-family: inherit;
+      justify-content: space-between;
+      gap: var(--s3);
+      flex-wrap: wrap;
     }
-    .icon-btn:hover:not(:disabled) { background: var(--accent); border-color: var(--accent); }
-    .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    .icon-btn:disabled { opacity: 0.5; cursor: default; }
-    .icon-glyph { display: inline-block; }
+    .subtitle {
+      color: var(--text-3);
+      font-size: var(--fs-sm);
+    }
+    .topbar-status {
+      display: flex;
+      align-items: center;
+      gap: var(--s3);
+      min-width: 0;
+      flex-wrap: wrap;
+    }
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--s1);
+      flex-shrink: 0;
+    }
 
     /* 同步中的提示:顶栏底边那条来回扫的线。
-       **图标不再转。** 🔄 在 Windows 上是「蓝色圆角方块 + 白箭头」的一整个字形,
-       转它转的是那块底板而不是箭头,看着很蠢;而单独转箭头 CSS 够不着 ——
-       那是字形内部的像素,除非换成内联 SVG,但那样它就和 ⚙️ 🔔 两个彩色 emoji 不是
-       一套东西了。挪到顶栏底边反而更好:顶栏是冻结的,所以滚到哪儿都看得见,
-       而按钮那一小格只有盯着它才注意得到。
+       顶栏是冻结的,所以滚到哪儿都看得见,而按钮那一小格只有盯着它才注意得到 ——
+       两处都报状态,一处给余光,一处给确认。
        **不能给 .topbar 加 overflow: hidden** —— 铃铛面板是它的绝对定位子元素,
        会被裁掉。所以让这条线在 0%~65% 之间来回,自己不越界。 */
     @keyframes sync-sweep {
@@ -116,96 +225,34 @@
       left: 0;
       width: 35%;
       height: 2px;
-      background: var(--accent);
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
       opacity: 0;
       pointer-events: none;
-      transition: opacity 0.2s;
+      transition: opacity var(--dur-2);
     }
     .topbar.syncing::after {
       opacity: 1;
       animation: sync-sweep 1.6s ease-in-out infinite;
     }
-    @media (prefers-reduced-motion: reduce) {
-      /* 不动的话就整条亮着 —— 状态仍然看得见,只是不扫 */
-      .topbar.syncing::after { animation: none; width: 100%; opacity: 0.6; }
-    }
 
-    /* 铃铛 */
-    .bell-wrap { position: relative; display: inline-flex; }
-    .bell-dot {
-      position: absolute;
-      top: -3px;
-      right: -3px;
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--low);
-      /* 描边用页面底色,红点压在按钮边框上时才分得开 */
-      border: 1.5px solid var(--bg);
-      pointer-events: none;
-    }
-    .bell-panel {
-      position: absolute;
-      top: calc(100% + 8px);
-      right: 0;
-      width: 360px;
-      max-width: calc(100vw - 48px);
-      max-height: 60vh;
-      overflow-y: auto;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 6px;
-      z-index: 200;
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
-      text-align: left;
-    }
-    .bell-group {
-      font-size: 11px;
-      color: var(--text-dim);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      padding: 8px 8px 4px;
-    }
-    .bell-item {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 7px 8px;
-      border-radius: 4px;
-    }
-    .bell-item:hover { background: var(--panel-alt); }
-    .bell-item img { width: 40px; height: 19px; object-fit: cover; border-radius: 2px; flex-shrink: 0; }
-    .bell-item .bell-name { font-size: 13px; color: var(--text); flex: 1; min-width: 0; }
-    .bell-item .bell-when { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
-    .bell-empty { font-size: 12px; color: var(--text-dim); padding: 14px 8px; text-align: center; }
-    /* 「设置」是个 <a>,和「立即同步」这个 <button> 共用这套样式,
-       所以要把链接的默认下划线和 inline 布局压掉 */
-    .sync-msg { font-size: 12px; color: var(--text-dim); }
-    .sync-msg.error { color: var(--low); }
-    /* 标题行:标题在左,读数带贴右。整行可换行 —— 窄屏上读数带整条掉到标题下面 */
-    .title-row {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 16px 28px;
-      flex-wrap: wrap;
-    }
-
-    /* **这不是三张卡片,是一条仪表读数。**
+    /* ========================================================================
+       读数带
+       ------------------------------------------------------------------------
+       **这不是三张卡片,是一条仪表读数。**
        盒子 + 标签在上 + 大数字,是 dashboard 的模板答案 —— 而这一页真正的内容是
        下面那张表,这三个数字只是给它做的注脚。所以去掉盒子和边框,数值在前、
-       说明跟在后面,整条贴在标题右边:读数属于机箱边框,不该自己占一整行。 */
+       说明跟在后面,整条贴在标题右边:读数属于机箱边框,不该自己占一整行。
+       ======================================================================== */
     .readout {
       display: flex;
       align-items: baseline;
-      gap: 24px;
+      gap: var(--s5);
       flex-wrap: wrap;
     }
     .reading {
       display: flex;
       align-items: baseline;
-      gap: 7px;
+      gap: var(--s1) 7px;
       white-space: nowrap;
     }
     .reading .value {
@@ -213,70 +260,657 @@
       font-weight: 700;
       color: var(--accent);
       line-height: 1;
-      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
     }
     .reading .label {
-      font-size: 12px;
-      color: var(--text-dim);
+      font-size: var(--fs-sm);
+      color: var(--text-3);
       letter-spacing: 0.03em;
     }
 
-    /* 表格上方那一行:左边切视图,右边报数量。两者说的都是下面这张列表 */
+    /* ========================================================================
+       图标
+       ------------------------------------------------------------------------
+       **整套图标是内联 SVG,不是 emoji。** 这不是审美偏好,是 emoji 有三件事做不到:
+       颜色由字形自带(CSS 的 color 管不着,所以 ✏️ 压再低的透明度还是一支亮黄铅笔)、
+       各操作系统画得不一样、以及无法和文字对齐到同一条基线。
+       旧代码里为此留下过两处妥协 —— 行尾的「更多」只能退回文本符号 ⋮,
+       同步图标不能转(🔄 在 Windows 上是「蓝底圆角方块 + 白箭头」的一整个字形,
+       转它转的是那块底板)。两条限制在全部换成 SVG 之后同时消失。
+
+       统一 24 格、1.75 描边、fill: none、currentColor,所以它们吃 color、吃 opacity,
+       并且和旁边的文字一起变暗变亮。
+       ======================================================================== */
+    .ic {
+      width: 1em;
+      height: 1em;
+      /* **inline-block,不是 block。** 图标既要当 flex 子项(按钮里),也要夹在
+         一句话中间(生成进度条那些提示)。flex 容器会把 inline-block 当块处理,
+         所以这个值两种场合都成立,而 block 会让句子中的图标自己占一行 */
+      display: inline-block;
+      vertical-align: -0.14em;   /* 压到和汉字的中线对齐 */
+      flex-shrink: 0;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.75;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      /* 实心图标(收藏的心、置顶的星)靠自己覆盖 fill,描边留着当轮廓 */
+    }
+    .ic.filled { fill: currentColor; stroke: currentColor; }
+    /* 图标精灵本体:只提供 <symbol>,自己不占位 */
+    #icon-sprite { display: none; }
+
+    /* ---- 顶栏那三个图标按钮 ----------------------------------------------
+       **它和表格行里的图标按钮是两个组件,不能共用一个类名。** 这里原来都叫
+       `.icon-btn`,两段规则一前一后写在同一张表里,后面那段(行内的)整段盖掉了
+       前面这段:说好的「底色 + 描边的方块按钮」在页面上从来没出现过,一直是三个
+       裸字形 —— 而且没有任何东西报错。行内的那套现在叫 `.row-icon`。 */
+    .icon-btn {
+      background: var(--surface-2);
+      color: var(--text-2);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;         /* .ic 的 1em 跟着它 */
+      line-height: 1;
+      cursor: pointer;
+      flex-shrink: 0;
+      text-decoration: none;   /* 「设置」是 <a> */
+      font-family: inherit;
+      transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
+    }
+    .icon-btn:hover:not(:disabled) {
+      background: var(--surface-3);
+      border-color: var(--line-3);
+      color: var(--text-hi);
+    }
+    .icon-btn:disabled { opacity: 0.45; cursor: default; }
+    .icon-glyph { display: inline-flex; }
+
+    /* 同步中,图标自己转。换成 SVG 之后转的是箭头本身,不再是 emoji 那块底板 */
+    @keyframes icon-spin { to { transform: rotate(360deg); } }
+    .icon-btn.spinning .icon-glyph { animation: icon-spin 1.1s linear infinite; }
+
+    /* ---- 铃铛 ------------------------------------------------------------ */
+    .bell-wrap { position: relative; display: inline-flex; }
+    .bell-dot {
+      position: absolute;
+      top: -2px;
+      right: -2px;
+      width: 9px;
+      height: 9px;
+      border-radius: var(--r-full);
+      background: var(--danger);
+      /* 描边用页面底色,红点压在按钮边框上时才分得开 */
+      border: 2px solid var(--bg);
+      pointer-events: none;
+    }
+    .bell-panel {
+      position: absolute;
+      top: calc(100% + var(--s2));
+      right: 0;
+      width: 360px;
+      max-width: calc(100vw - var(--s6) - var(--s4));
+      max-height: 60vh;
+      overflow-y: auto;
+      background: var(--surface-3);
+      border: 1px solid var(--line-3);
+      border-radius: var(--r-lg);
+      padding: var(--s1);
+      z-index: 200;
+      box-shadow: var(--sh-3);
+      text-align: left;
+    }
+    .bell-group {
+      font-size: var(--fs-xs);
+      color: var(--text-3);
+      letter-spacing: 0.06em;
+      padding: var(--s2) var(--s2) var(--s1);
+    }
+    .bell-item {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      padding: 7px var(--s2);
+      border-radius: var(--r-sm);
+    }
+    .bell-item:hover { background: rgba(255, 255, 255, 0.05); }
+    .bell-item img {
+      width: 44px;
+      height: 21px;
+      object-fit: cover;
+      border-radius: var(--r-sm);
+      flex-shrink: 0;
+      background: var(--bg);
+    }
+    .bell-item .bell-name { font-size: var(--fs-md); color: var(--text); flex: 1; min-width: 0; }
+    .bell-item .bell-when { font-size: var(--fs-xs); color: var(--text-3); flex-shrink: 0; }
+    .bell-empty { font-size: var(--fs-sm); color: var(--text-3); padding: var(--s4) var(--s2); text-align: center; }
+
+    .sync-msg { font-size: var(--fs-sm); color: var(--text-3); }
+    .sync-msg.error { color: var(--danger); }
+
+    /* ========================================================================
+       工具条:搜索 + 筛选 + 添加
+       ======================================================================== */
+    .controls {
+      display: flex;
+      gap: var(--s2);
+      margin-bottom: var(--s3);
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    /* 筛选项从「原生 checkbox + 文字」改成**开关芯片**。
+       两个原因,一个是外观(原生勾选框在深色底上是操作系统画的一块浅色方块,
+       和这一页没有关系),一个是可读性:四个并排的裸勾选框,开没开要盯着看。
+       芯片亮起来是一眼的事。
+       **标记一个字没改** —— input 还在原处,id 还是那几个,`.checked` 照常读得到,
+       所以 render() 里那些 getElementById(...).checked 全部不用动。 */
+    label.checkbox {
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      display: inline-flex;
+      align-items: center;
+      gap: var(--s1);
+      padding: 6px var(--s3);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-full);
+      background: var(--surface);
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
+    }
+    label.checkbox:hover { border-color: var(--line-3); color: var(--text); }
+    /* 勾选框本身不显示,但**必须留在无障碍树里** —— 所以是 0 尺寸 + opacity,
+       不是 display:none(那会让它不可聚焦,键盘就选不到了) */
+    label.checkbox input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      margin: 0;
+      pointer-events: none;
+    }
+    label.checkbox::before {
+      content: '';
+      width: 6px;
+      height: 6px;
+      border-radius: var(--r-full);
+      background: var(--line-3);
+      transition: background var(--dur-1), box-shadow var(--dur-1);
+    }
+    label.checkbox:has(input:checked) {
+      background: var(--accent-soft);
+      border-color: rgba(102, 192, 244, 0.45);
+      color: var(--accent-hi);
+    }
+    label.checkbox:has(input:checked)::before {
+      background: var(--accent);
+      box-shadow: 0 0 0 3px rgba(102, 192, 244, 0.2);
+    }
+    label.checkbox:has(input:focus-visible) {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    input[type="text"] {
+      background: var(--surface);
+      border: 1px solid var(--line-2);
+      color: var(--text);
+      padding: 7px var(--s3);
+      border-radius: var(--r-md);
+      font-size: var(--fs-md);
+      font-family: inherit;
+      width: 220px;
+      transition: border-color var(--dur-1), background var(--dur-1);
+    }
+    input[type="text"]::placeholder { color: var(--text-3); }
+    input[type="text"]:hover { border-color: var(--line-3); }
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--accent);
+      background: var(--bg);
+    }
+    #searchBox { width: 240px; }
+    #gameSearchBox { width: 260px; }
+
+    .add-game-row {
+      display: flex;
+      gap: var(--s2);
+      margin-bottom: var(--s4);
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .add-game-btn {
+      background: var(--accent);
+      color: var(--accent-ink);
+      border: none;
+      border-radius: var(--r-md);
+      padding: 8px var(--s4);
+      font-size: var(--fs-md);
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background var(--dur-1);
+    }
+    .add-game-btn:hover:not(:disabled) { background: var(--accent-hi); }
+    .add-game-btn:disabled { opacity: 0.45; cursor: default; }
+    .add-game-msg { font-size: var(--fs-sm); }
+    .add-game-msg.error { color: var(--danger); }
+    .add-game-msg.success { color: var(--ok); }
+
+    .game-search-results {
+      display: flex;
+      flex-direction: column;
+      gap: var(--s1);
+      margin: -6px 0 var(--s4) 0;
+      max-width: 480px;
+    }
+    .game-search-result {
+      display: flex;
+      align-items: center;
+      gap: var(--s3);
+      padding: var(--s2) var(--s3);
+      background: var(--surface);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+      cursor: pointer;
+      transition: border-color var(--dur-1), background var(--dur-1);
+    }
+    .game-search-result:hover { border-color: var(--accent); background: var(--surface-2); }
+    .game-search-result img {
+      width: 48px;
+      height: 23px;
+      object-fit: cover;
+      border-radius: var(--r-sm);
+      background: var(--bg);
+      flex-shrink: 0;
+    }
+    .game-search-result span { font-size: var(--fs-md); }
+    .game-search-result .appid-hint { color: var(--text-3); font-size: var(--fs-sm); }
+
+    /* ========================================================================
+       表格上方那一行:左边切视图,右边报数量
+       ======================================================================== */
     .table-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 8px;
+      gap: var(--s3);
+      margin-bottom: var(--s2);
     }
     /* 结果计数**贴着表格**,因为它说的是这张表;顶栏那个读数说的是整个库。
        两个数字含义不同,放在一处会被读成同一个 */
     .row-count {
-      font-size: 12px;
-      color: var(--text-dim);
-      font-variant-numeric: tabular-nums;
+      font-size: var(--fs-sm);
+      color: var(--text-3);
     }
-    .view-toggle { display: flex; gap: 2px; }
+    /* 分段控件:两个按钮共处一个凹槽,选中的那个浮起来。
+       原来是两个各自独立的按钮,选中态只靠底色深浅,读不出「二选一」 */
+    .view-toggle {
+      display: inline-flex;
+      gap: 2px;
+      padding: 2px;
+      background: var(--surface);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+    }
     .view-toggle button {
       background: none;
-      border: 1px solid transparent;
-      border-radius: 4px;
-      color: var(--text-dim);
+      border: none;
+      border-radius: var(--r-sm);
+      color: var(--text-3);
       font-family: inherit;
-      font-size: 12px;
-      padding: 4px 11px;
+      font-size: var(--fs-sm);
+      padding: 4px var(--s3);
       cursor: pointer;
+      transition: color var(--dur-1), background var(--dur-1);
     }
     .view-toggle button:hover { color: var(--text); }
-    .view-toggle button.on { color: #fff; background: var(--panel-alt); border-color: var(--border); }
-    .view-toggle button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .view-toggle button.on {
+      color: var(--text-hi);
+      background: var(--surface-3);
+      box-shadow: var(--sh-1);
+    }
 
-    /* 图库视图。**整页唯一让视觉说话的地方。**
+    /* ========================================================================
+       表格
+       ------------------------------------------------------------------------
+       **`border-collapse` 是 separate,不是 collapse。** 表头要吸附
+       (`position: sticky`),而原来为了圆角给 table 加的 `overflow: hidden`
+       会把 sticky 的参照系限制在表格自己身上,吸附直接失效。所以圆角改挂到
+       首末单元格上,分隔线由每个 td 自己的下边框画。
+       ======================================================================== */
+    table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      background: var(--surface);
+      border-radius: var(--r-lg);
+      font-size: var(--fs-md);
+    }
+    th, td {
+      padding: var(--s2) var(--s3);
+      text-align: left;
+      vertical-align: middle;
+      border-bottom: 1px solid var(--line-1);
+    }
+    tbody tr:last-child td { border-bottom: none; }
+    th {
+      position: sticky;
+      /* 顶栏是冻结的,表头要停在它下面。这个高度由 JS 量出来写进 --topbar-h ——
+         顶栏会随窗口宽度换行变高,写死必然错位 */
+      top: var(--topbar-h);
+      z-index: 5;
+      /* 吸附的行必须是**不透明**底,否则滚动的行会从下面透出来 */
+      background: var(--surface-2);
+      color: var(--text-3);
+      font-weight: 600;
+      font-size: var(--fs-sm);
+      letter-spacing: 0.03em;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      border-bottom: 1px solid var(--line-2);
+      transition: color var(--dur-1);
+    }
+    th:first-child { border-top-left-radius: var(--r-lg); }
+    th:last-child  { border-top-right-radius: var(--r-lg); }
+    th:hover { color: var(--text-hi); }
+    tbody tr:last-child td:first-child { border-bottom-left-radius: var(--r-lg); }
+    tbody tr:last-child td:last-child  { border-bottom-right-radius: var(--r-lg); }
+
+    /* 排序标记。**这里原来有两件事是不可见的**:按哪一列排、正序还是倒序,以及
+       「表头能点」这件事本身 —— 鼠标不划过去根本看不出来。所以每个可排序的表头
+       常驻一个淡的 ↕(告诉你能点),当前排序的那一列换成 ▲/▼ 并点亮。
+       用文本符号不用 emoji:emoji 自带颜色,吃不到 color,淡不下去也点不亮 */
+    th[data-key]::after {
+      content: '↕';
+      margin-left: var(--s1);
+      font-size: 10px;
+      opacity: 0.3;
+    }
+    th[data-key]:hover::after { opacity: 0.6; }
+    th[data-key].sort-asc::after { content: '▲'; opacity: 1; color: var(--accent); }
+    th[data-key].sort-desc::after { content: '▼'; opacity: 1; color: var(--accent); }
+    th[data-key].sort-asc, th[data-key].sort-desc { color: var(--text-hi); }
+
+    tr.game-row.expandable { cursor: pointer; }
+    /* 悬停整行提亮。用面而不是线:167 行里再加一条线就是方格纸 */
+    tr.game-row:hover td { background: var(--surface-2); }
+
+    /* ---- 行内容 ----------------------------------------------------------
+       一行里其实有三组东西:**标记**(星、心)、**身份**(封面、名字、状态徽章)、
+       **操作**(攻略、重写、更多)。原来它们是一串等距的兄弟节点,gap 一律 10px,
+       眼睛分不出组;而且只有最后那个 ⋮ 带 margin-left:auto,于是攻略按钮浮在名字
+       右边不上不下。现在三组各自成块,组内紧、组间松,操作整组靠右。 */
+    .game-cell {
+      display: flex;
+      align-items: center;
+      gap: var(--s3);
+    }
+    .row-marks { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+    .row-actions {
+      display: flex;
+      align-items: center;
+      gap: var(--s1);
+      margin-left: auto;   /* 整组靠右,不再只推 ⋮ 一个 */
+      flex-shrink: 0;
+    }
+
+    /* 行内图标按钮。**和顶栏的 .icon-btn 是两个组件** —— 见上面那段。
+       这里要的是「贴着内容的一个字形」,不是按钮方块 */
+    .row-icon {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: var(--s1);
+      color: var(--text-3);
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      border-radius: var(--r-sm);
+      transition: color var(--dur-1), background var(--dur-1);
+    }
+    .row-icon:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+    .row-icon.active-heart { color: var(--danger); }
+    .row-icon.active-star { color: var(--warn); }
+
+    /* 行尾的「更多」入口。现在是 SVG 的三个点,和别处一样吃 color ——
+       原来只能用文本符号 ⋮,因为 emoji 的 ✏️ 压不暗(颜色是字形自带的) */
+    .delete-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      color: var(--text-3);
+      opacity: 0.5;
+      flex-shrink: 0;
+      padding: var(--s1);
+      border-radius: var(--r-sm);
+      display: inline-flex;
+      align-items: center;
+      transition: opacity var(--dur-1), color var(--dur-1), background var(--dur-1);
+    }
+    /* 悬停不变红:它已经不是删除按钮,红色会把「打开菜单」暗示成危险动作 */
+    .delete-btn:hover { opacity: 1; color: var(--text); background: rgba(255, 255, 255, 0.06); }
+
+    .game-thumb {
+      width: 68px;
+      height: 32px;
+      object-fit: cover;
+      border-radius: var(--r-sm);
+      flex-shrink: 0;
+      background: var(--bg);
+      /* 封面亮度参差,给一圈内描边压住边缘,免得浅色封面直接糊进表格底 */
+      box-shadow: inset 0 0 0 1px var(--line-2);
+    }
+    /* 名字块:名字和徽章之间要能换行,长中文名不该把徽章挤出可视区 */
+    .game-name-main {
+      font-weight: 500;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: var(--s1) 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+
+    /* ---- 进度条 ----------------------------------------------------------
+       整页唯一的数据图形,所以它值得比「一条实心色块」多做一点:填充带一层
+       从暗到亮的推进感,打满时给一圈很浅的辉光 —— 100% 是这个工具的目的地,
+       它应该看起来到了。 */
+    .bar-wrap {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      min-width: 148px;
+    }
+    .bar-track {
+      flex: 1;
+      height: 6px;
+      background: rgba(0, 0, 0, 0.35);
+      border-radius: var(--r-full);
+      overflow: hidden;
+      box-shadow: inset 0 0 0 1px var(--line-1);
+    }
+    .bar-fill {
+      height: 100%;
+      border-radius: var(--r-full);
+      transition: width var(--dur-2) var(--ease);
+    }
+    .bar-fill.done { box-shadow: 0 0 8px rgba(102, 192, 244, 0.55); }
+    .rate-text { width: 46px; text-align: right; color: var(--text-2); font-size: var(--fs-sm); }
+
+    /* ---- 徽章 ------------------------------------------------------------
+       原来有 .badge / .badge-new / .badge-played / .badge-btn 四套 + 三种边框写法
+       (实线、虚线、无),尺寸也各不相同。现在共用一个基座,变体只改颜色。 */
+    .badge, .badge-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--s1);
+      font-size: var(--fs-xs);
+      line-height: 1.5;
+      padding: 1px 7px;
+      border-radius: var(--r-full);
+      border: 1px solid transparent;
+      white-space: nowrap;
+      font-family: inherit;
+    }
+    .badge { background: rgba(224, 166, 63, 0.14); color: var(--warn); }
+    .badge-new { background: rgba(140, 198, 63, 0.14); color: var(--ok); }
+    .badge-played { background: var(--accent-soft); color: var(--accent); }
+    .badge .ic, .badge-btn .ic { font-size: var(--fs-sm); }
+
+    .badge-btn { cursor: pointer; background: none; transition: all var(--dur-1); }
+    .badge-btn:hover { opacity: 0.85; }
+    .badge-btn-on { background: rgba(224, 166, 63, 0.14); color: var(--warn); }
+    .badge-btn-off { border-color: var(--line-2); color: var(--text-3); }
+    .badge-btn-off:hover { border-color: var(--line-3); color: var(--text-2); }
+    .badge-btn-family-on { background: var(--accent-soft); color: var(--accent); }
+
+    .manual-input {
+      width: 60px;
+      background: var(--bg);
+      border: 1px solid var(--line-2);
+      color: var(--text);
+      padding: var(--s1) 6px;
+      border-radius: var(--r-sm);
+      font-size: var(--fs-md);
+      font-family: inherit;
+    }
+    .manual-input:focus { outline: none; border-color: var(--accent); }
+
+    .na { color: var(--text-3); font-size: var(--fs-sm); }
+    .loading, .empty {
+      color: var(--text-3);
+      padding: var(--s6) var(--s5);
+      text-align: center;
+    }
+
+    /* ---- 展开的「还差哪些成就」 ------------------------------------------ */
+    .missing-row td {
+      background: rgba(0, 0, 0, 0.22);
+      padding: var(--s4) var(--s5);
+    }
+    .missing-header { font-size: var(--fs-sm); color: var(--text-3); margin-bottom: var(--s3); }
+    .ach-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+      gap: var(--s2);
+    }
+    .ach-item {
+      display: flex;
+      gap: var(--s2);
+      align-items: flex-start;
+      background: var(--surface);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+      padding: var(--s2);
+    }
+    .ach-icon { width: 32px; height: 32px; border-radius: var(--r-sm); flex-shrink: 0; background: var(--bg); }
+    .ach-name { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+    .ach-desc { font-size: var(--fs-xs); color: var(--text-3); margin-top: 2px; line-height: 1.5; }
+    .ach-guide-link {
+      font-size: var(--fs-xs);
+      color: var(--accent);
+      text-decoration: none;
+      margin-top: var(--s1);
+      display: inline-block;
+    }
+    .ach-guide-link:hover { text-decoration: underline; }
+
+    /* ---- 行尾的攻略按钮组 ------------------------------------------------ */
+    .guide-btn {
+      background: none;
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+      cursor: pointer;
+      font-size: var(--fs-xs);
+      font-family: inherit;
+      padding: var(--s1) var(--s2);
+      color: var(--text-3);
+      flex-shrink: 0;
+      white-space: nowrap;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: var(--s1);
+      transition: color var(--dur-1), border-color var(--dur-1), background var(--dur-1);
+    }
+    .guide-btn .ic { font-size: var(--fs-sm); }
+    .guide-btn.has-guide { color: var(--accent); border-color: rgba(102, 192, 244, 0.4); }
+    .guide-btn.has-guide:hover { background: var(--accent-soft); }
+    /* 没攻略又生成不了的那一档:留着位置,但不可点。用 opacity 而不是换色,
+       免得又多一档需要记住的颜色 */
+    .guide-btn.no-guide {
+      opacity: 0.3;
+      cursor: default;
+      pointer-events: none;
+    }
+    /* 配了 AI 之后,没攻略的行变成「可以生成一份」 */
+    .guide-btn.can-gen {
+      opacity: 1;
+      cursor: pointer;
+      pointer-events: auto;
+      color: var(--ok);
+      border-color: rgba(140, 198, 63, 0.4);
+    }
+    .guide-btn.can-gen:hover:not(:disabled) { background: rgba(140, 198, 63, 0.12); }
+    .guide-btn.can-gen:disabled { opacity: 0.4; cursor: default; }
+    .guide-btn.to-notion:hover:not(:disabled) { color: var(--text); border-color: var(--line-3); }
+    .guide-btn.to-notion:disabled { opacity: 0.4; cursor: default; }
+    /* 重写会覆盖已有攻略,是这一行上唯一不可逆的动作 —— 平时低调,
+       悬停时才显出警示色,免得一排 ♻ 把表格弄得像满屏警告 */
+    .guide-btn.rewrite:hover:not(:disabled) { color: var(--warn); border-color: var(--warn); }
+    .guide-btn.rewrite:disabled { opacity: 0.4; cursor: default; }
+
+    /* ========================================================================
+       图库视图
+       ------------------------------------------------------------------------
+       **整页唯一让视觉说话的地方。**
        胶囊图是 Steam 自己的语言,所以它铺满整张卡;名字压在底部渐变上,而不是
-       缩成缩略图配一行说明 —— 那是表格已经在做的事。卡片最下沿那条 3px 的进度线
-       是这个工具唯一要说的事,所以它是卡上唯一的图形元素。 */
-    /* **一排四个,竖版。** 横版卡一排只放得下两个,一屏看不了几款;竖版是 Steam
+       缩成缩略图配一行说明 —— 那是表格已经在做的事。卡片最下沿那条进度线
+       是这个工具唯一要说的事,所以它是卡上唯一的图形元素。
+
+       **一排四个,竖版。** 横版卡一排只放得下两个,一屏看不了几款;竖版是 Steam
        库里本来的形状,同样高度能多塞一倍,而且不用把横图裁成竖的。
        固定四列而不是 auto-fill:auto-fill 会随宽度在 3~5 列之间跳,
-       而「一排四个」是这个视图的形状本身,不该跟着窗口漂 */
+       而「一排四个」是这个视图的形状本身,不该跟着窗口漂
+       ======================================================================== */
     .gallery {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
+      gap: var(--s4);
     }
-    /* 断点压得比较低,是为了让「一排四个」尽量守住 —— 800px 宽时每张约 183px,
-       竖版封面在这个尺寸上还完全读得出来。第一版定在 900px,结果常用窗口下就掉成三列了 */
-    @media (max-width: 760px) { .gallery { grid-template-columns: repeat(3, 1fr); } }
-    @media (max-width: 520px) { .gallery { grid-template-columns: repeat(2, 1fr); } }
     .g-card {
       position: relative;
       aspect-ratio: 600 / 900;
-      border-radius: 6px;
+      border-radius: var(--r-lg);
       overflow: hidden;
-      background: #0e141b;
-      border: 1px solid var(--border);
+      background: var(--bg);
+      border: 1px solid var(--line-2);
+      transition: transform var(--dur-2) var(--ease), box-shadow var(--dur-2), border-color var(--dur-2);
     }
     .g-card.has-guide { cursor: pointer; }
+    /* 悬停把整张卡抬起来,而不只是把图放大 —— 抬起来才是「这张可以点」 */
+    .g-card:hover {
+      transform: translateY(-3px);
+      border-color: rgba(102, 192, 244, 0.5);
+      box-shadow: var(--sh-2);
+    }
     .g-card img {
       position: absolute;
       inset: 0;
@@ -284,22 +918,22 @@
       height: 100%;
       object-fit: cover;
       display: block;
-      transition: transform 0.25s ease, filter 0.25s ease;
+      transition: transform var(--dur-2) var(--ease);
     }
-    .g-card:hover img { transform: scale(1.04); filter: brightness(1.1); }
+    .g-card:hover img { transform: scale(1.04); }
     /* 竖版卡窄,名字和进度**上下叠**而不是左右排 —— 并排的话中文名两三个字就换行了 */
     .g-scrim {
       position: absolute;
       left: 0; right: 0; bottom: 0;
-      padding: 34px 11px 12px;
+      padding: var(--s6) var(--s3) var(--s3);
       display: flex;
       flex-direction: column;
       gap: 3px;
       /* 渐变兜住文字 —— 封面底部亮暗不一,没有它名字会在浅色封面上读不出来 */
-      background: linear-gradient(to top, rgba(0,0,0,0.92) 30%, rgba(0,0,0,0));
+      background: linear-gradient(to top, rgba(0,0,0,0.94) 26%, rgba(0,0,0,0.55) 62%, rgba(0,0,0,0));
     }
     .g-name {
-      font-size: 13px;
+      font-size: var(--fs-md);
       font-weight: 600;
       color: #fff;
       line-height: 1.35;
@@ -309,324 +943,23 @@
       -webkit-box-orient: vertical;
       overflow: hidden;
     }
-    .g-rate {
-      font-size: 11px;
-      color: rgba(255,255,255,0.78);
-      font-variant-numeric: tabular-nums;
-    }
-    .g-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.14); }
+    .g-rate { font-size: var(--fs-xs); color: rgba(255, 255, 255, 0.8); }
+    .g-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255,255,255,0.16); }
     .g-bar span { display: block; height: 100%; }
-    .g-heart { position: absolute; top: 8px; right: 8px; z-index: 2; }
-    @media (prefers-reduced-motion: reduce) {
-      .g-card img, .g-card:hover img { transition: none; transform: none; }
+    .g-heart {
+      position: absolute;
+      top: var(--s2);
+      right: var(--s2);
+      z-index: 2;
+      color: rgba(255, 255, 255, 0.85);
+      /* 封面什么颜色都有,给图标一层暗投影保底 */
+      filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.8));
     }
-    .controls {
-      display: flex;
-      gap: 10px;
-      margin-bottom: 12px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .add-game-row {
-      display: flex;
-      gap: 8px;
-      margin-bottom: 14px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-    .add-game-btn {
-      background: var(--accent);
-      color: #0e141b;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 14px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-      flex-shrink: 0;
-    }
-    .add-game-btn:hover { opacity: 0.9; }
-    .add-game-btn:disabled { opacity: 0.5; cursor: default; }
-    .add-game-msg { font-size: 12px; }
-    .add-game-msg.error { color: var(--low); }
-    .add-game-msg.success { color: var(--good); }
-    #gameSearchBox { width: 260px; }
-    .game-search-results {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      margin: -6px 0 14px 0;
-      max-width: 480px;
-    }
-    .game-search-result {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 10px;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    .game-search-result:hover { border-color: var(--accent); }
-    .game-search-result img {
-      width: 46px;
-      height: 22px;
-      object-fit: cover;
-      border-radius: 2px;
-      background: #0e141b;
-      flex-shrink: 0;
-    }
-    .game-search-result span { font-size: 13px; }
-    .game-search-result .appid-hint { color: var(--text-dim); font-size: 12px; }
-    input[type="text"] {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 8px 12px;
-      border-radius: 4px;
-      font-size: 13px;
-      width: 220px;
-    }
-    label.checkbox {
-      font-size: 13px;
-      color: var(--text-dim);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-      background: var(--panel);
-      border-radius: 6px;
-      overflow: hidden;
-      font-size: 13px;
-    }
-    th, td {
-      padding: 9px 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-    th {
-      background: var(--panel-alt);
-      color: var(--text-dim);
-      font-weight: 600;
-      cursor: pointer;
-      user-select: none;
-      white-space: nowrap;
-    }
-    th:hover { color: #fff; }
+    .g-heart:hover { background: none; color: #fff; }
 
-    /* 排序标记。**这里原来有两件事是不可见的**:按哪一列排、正序还是倒序,以及
-       「表头能点」这件事本身 —— 鼠标不划过去根本看不出来。所以每个可排序的表头
-       常驻一个淡的 ↕(告诉你能点),当前排序的那一列换成 ▲/▼ 并点亮。
-       用文本符号不用 emoji:emoji 自带颜色,吃不到 color,淡不下去也点不亮 */
-    th[data-key]::after {
-      content: '↕';
-      margin-left: 5px;
-      font-size: 10px;
-      opacity: 0.3;
-    }
-    th[data-key]:hover::after { opacity: 0.6; }
-    th[data-key].sort-asc::after { content: '▲'; opacity: 1; color: var(--accent); }
-    th[data-key].sort-desc::after { content: '▼'; opacity: 1; color: var(--accent); }
-    th[data-key].sort-asc, th[data-key].sort-desc { color: #fff; }
-    tr.game-row.expandable { cursor: pointer; }
-    tr.game-row:hover td { background: rgba(255,255,255,0.03); }
-    .game-cell { display: flex; align-items: center; gap: 10px; }
-    .icon-btn {
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 18px;
-      line-height: 1;
-      padding: 0 4px;
-      color: var(--text-dim);
-      flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-    }
-    .icon-btn svg { width: 16px; height: 16px; display: block; }
-    .icon-btn.active-heart { color: var(--low); }
-    .icon-btn.active-star { color: var(--mid); }
-    .icon-btn:hover { opacity: 0.8; }
-    /* 行尾的「更多」入口。字形必须是**单色文本符号**(⋮),不能用 emoji ——
-       emoji 的颜色是字形自带的,CSS 的 color 管不着,所以 ✏️ 再怎么压透明度
-       都还是一支扎眼的黄铅笔。⋮ 吃 color,能真的淡下去,而且它本来就是
-       「这里有个菜单」的通用符号 */
-    .delete-btn {
-      background: none;
-      border: none;
-      cursor: pointer;
-      font-size: 17px;
-      line-height: 1;
-      color: var(--text-dim);
-      opacity: 0.45;
-      flex-shrink: 0;
-      padding: 0 6px;
-      margin-left: auto;
-    }
-    /* 悬停不再变红:它已经不是删除按钮,红色会把「打开菜单」暗示成危险动作 */
-    .delete-btn:hover { opacity: 1; color: var(--text); }
-    .game-thumb {
-      width: 64px;
-      height: 30px;
-      object-fit: cover;
-      border-radius: 3px;
-      flex-shrink: 0;
-      background: #0e141b;
-    }
-    .game-name-main { font-weight: 500; }
-    .bar-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 140px;
-    }
-    .bar-track {
-      flex: 1;
-      height: 6px;
-      background: #0e141b;
-      border-radius: 3px;
-      overflow: hidden;
-    }
-    .bar-fill { height: 100%; border-radius: 3px; }
-    .rate-text { width: 44px; text-align: right; color: var(--text-dim); font-size: 12px; }
-    .badge {
-      display: inline-block;
-      font-size: 11px;
-      padding: 2px 7px;
-      border-radius: 3px;
-      background: rgba(212,160,23,0.15);
-      color: var(--mid);
-      margin-left: 6px;
-    }
-    .badge-new {
-      background: rgba(164,208,7,0.15);
-      color: var(--good);
-    }
-    .badge-played {
-      background: rgba(102,192,244,0.15);
-      color: var(--accent);
-    }
-    .badge-btn {
-      display: inline-block;
-      font-size: 11px;
-      padding: 2px 7px;
-      border-radius: 3px;
-      margin-left: 6px;
-      cursor: pointer;
-      font-family: inherit;
-      background: none;
-    }
-    .badge-btn:hover { opacity: 0.85; }
-    .badge-btn-on {
-      border: 1px solid transparent;
-      background: rgba(212,160,23,0.15);
-      color: var(--mid);
-    }
-    .badge-btn-off {
-      border: 1px dashed var(--border);
-      color: var(--text-dim);
-      opacity: 0.55;
-    }
-    .badge-btn-family-on {
-      border: 1px solid transparent;
-      background: rgba(102,192,244,0.15);
-      color: var(--accent);
-    }
-    .manual-input {
-      width: 56px;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 3px 6px;
-      border-radius: 3px;
-      font-size: 13px;
-    }
-    .manual-input:focus { outline: none; border-color: var(--accent); }
-    .na { color: var(--text-dim); font-size: 12px; }
-    .loading, .empty {
-      color: var(--text-dim);
-      padding: 40px;
-      text-align: center;
-    }
-    .missing-row td {
-      background: rgba(0,0,0,0.15);
-      padding: 14px 20px;
-    }
-    .missing-header { font-size: 12px; color: var(--text-dim); margin-bottom: 10px; }
-    .ach-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-      gap: 10px;
-    }
-    .ach-item {
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 8px;
-    }
-    .ach-icon { width: 32px; height: 32px; border-radius: 4px; flex-shrink: 0; background: #0e141b; }
-    .ach-name { font-size: 12px; font-weight: 600; color: var(--text); }
-    .ach-desc { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
-    .guide-btn {
-      background: none;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      cursor: pointer;
-      font-size: 11px;
-      padding: 3px 8px;
-      color: var(--text-dim);
-      flex-shrink: 0;
-      white-space: nowrap;
-      text-decoration: none;
-      display: inline-block;
-    }
-    .guide-btn.has-guide {
-      color: var(--accent);
-      border-color: var(--accent);
-      cursor: pointer;
-    }
-    .guide-btn.no-guide {
-      opacity: 0.35;
-      cursor: default;
-      pointer-events: none;
-    }
-    /* 配了 AI 之后,没攻略的行变成"可以生成一份" */
-    .guide-btn.to-notion {
-      background: none;
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      cursor: pointer;
-      margin-left: 4px;
-    }
-    .guide-btn.to-notion:hover:not(:disabled) { color: var(--text); border-color: var(--text-dim); }
-    .guide-btn.to-notion:disabled { opacity: 0.4; cursor: default; }
-    /* 重写会覆盖已有攻略,是这一行上唯一不可逆的动作 —— 平时低调,
-       悬停时才显出警示色,免得一排 ♻ 把表格弄得像满屏警告 */
-    .guide-btn.rewrite {
-      background: none;
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      cursor: pointer;
-      margin-left: 4px;
-    }
-    .guide-btn.rewrite:hover:not(:disabled) { color: #e0a030; border-color: #e0a030; }
-    .guide-btn.rewrite:disabled { opacity: 0.4; cursor: default; }
-    .guide-btn.can-gen {
-      opacity: 1;
-      cursor: pointer;
-      pointer-events: auto;
-      color: var(--good);
-      border-color: var(--good);
-    }
-    .guide-btn.can-gen:disabled { opacity: 0.4; cursor: default; }
+    /* ========================================================================
+       浮层:生成进度条、确认框、行菜单
+       ======================================================================== */
     /*
       悬浮,不跟着页面滚走。一次生成要两到四分钟,而这段时间里人多半在往下翻表格 ——
       进度条钉在文档流最上面等于"想看就得先滚回去"。
@@ -638,79 +971,77 @@
     #gen-bar {
       display: none;
       position: fixed;
-      left: 16px;
-      bottom: 16px;
+      left: var(--s4);
+      bottom: var(--s4);
       z-index: 9990;
-      max-width: min(420px, calc(100vw - 32px));
+      max-width: min(420px, calc(100vw - var(--s6)));
       max-height: 60vh;
       overflow-y: auto;
       /* 右边留出关闭按钮的位置 */
-      padding: 10px 30px 10px 12px;
-      border: 1px solid var(--good);
-      border-radius: 6px;
+      padding: var(--s3) var(--s6) var(--s3) var(--s4);
+      border: 1px solid rgba(140, 198, 63, 0.5);
+      border-left: 3px solid var(--ok);
+      border-radius: var(--r-md);
       /* 浮起来就必须有不透明背景,否则和下面的表格文字叠在一起没法读 */
-      background: var(--panel);
-      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
-      font-size: 12px;
+      background: var(--surface-3);
+      box-shadow: var(--sh-3);
+      font-size: var(--fs-sm);
       line-height: 1.6;
       color: var(--text);
     }
-    #gen-bar .warn { color: var(--text-dim); }
+    #gen-bar .warn { color: var(--text-3); }
     #gen-bar .gen-close {
       position: absolute;
-      top: 3px;
-      right: 6px;
+      top: var(--s1);
+      right: var(--s1);
       background: none;
       border: none;
-      padding: 2px 4px;
+      padding: var(--s1);
       cursor: pointer;
-      color: var(--text-dim);
-      font-size: 15px;
+      color: var(--text-3);
+      font-size: var(--fs-lg);
       line-height: 1;
+      border-radius: var(--r-sm);
+      display: inline-flex;
     }
-    #gen-bar .gen-close:hover { color: var(--text); }
+    #gen-bar .gen-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
     /* 窄屏上两个角会挤到一起,改成横跨一行并让开下面的同步状态条 */
     @media (max-width: 720px) {
-      #gen-bar { left: 12px; right: 12px; bottom: 76px; max-width: none; }
+      #gen-bar { left: var(--s3); right: var(--s3); bottom: 76px; max-width: none; }
     }
-    .ach-guide-link {
-      font-size: 11px;
-      color: var(--accent);
-      text-decoration: none;
-      margin-top: 4px;
-      display: inline-block;
-    }
-    .ach-guide-link:hover { text-decoration: underline; }
+
     .modal-overlay {
       display: none;
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
-      background: rgba(0,0,0,0.6);
+      background: rgba(4, 7, 11, 0.68);
+      backdrop-filter: blur(3px);
       z-index: 100;
       justify-content: center;
       align-items: center;
     }
     .modal-overlay.show { display: flex; }
     .modal-box {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px 28px;
+      background: var(--surface-3);
+      border: 1px solid var(--line-3);
+      border-radius: var(--r-lg);
+      padding: var(--s5) var(--s6);
       text-align: center;
       max-width: 400px;
+      box-shadow: var(--sh-3);
     }
-    .modal-box .game-name { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 4px; }
-    .modal-box .appid-hint { margin-bottom: 20px; }
+    .modal-box .game-name { font-size: var(--fs-lg); font-weight: 600; color: var(--text-hi); margin-bottom: var(--s1); }
+    .modal-box .appid-hint { margin-bottom: var(--s5); }
     /* **间距挂在按钮行上,不挂在标题或正文上。** 标题的 margin-bottom 只有 4px,
        那是给「下面还有正文」准备的;没有正文的框(比如生成攻略那个只有一句问话的)
        问句和按钮就贴到了一起,看着挤 */
     .modal-box .modal-btns {
       display: flex;
-      gap: 10px;
+      gap: var(--s3);
       justify-content: center;
-      margin-top: 22px;
+      margin-top: var(--s5);
     }
-    .modal-box .modal-btns button { min-width: 92px; padding: 9px 16px; }
+    .modal-box .modal-btns button { min-width: 96px; padding: 9px var(--s4); }
     /* 次级按钮:**透明底 + 正常字色 + 描边**。
        原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
        态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
@@ -718,37 +1049,37 @@
     .modal-box .btn-secondary {
       background: transparent;
       color: var(--text);
-      border: 1px solid var(--border);
+      border: 1px solid var(--line-2);
     }
-    .modal-box .btn-secondary:hover { background: var(--panel-alt); border-color: var(--panel-alt); }
+    .modal-box .btn-secondary:hover { background: var(--surface-2); border-color: var(--line-3); }
     .modal-check {
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 7px;
-      font-size: 13px;
+      font-size: var(--fs-md);
       color: var(--text);
       /* 上边距挂在这儿,不去动 .game-name 的 4px —— 那个值在确认框里是标题的下边距,
          改大了会把另一个框撑开。同一条 4px 已经造成过两次「挤」了,但两次的解法都是
          在**后面那个元素**上补间距,而不是改共用的那一条 */
-      margin-top: 14px;
+      margin-top: var(--s3);
       margin-bottom: 0;
       cursor: pointer;
       user-select: none;
     }
-    .modal-check input { cursor: pointer; }
+    .modal-check input { cursor: pointer; width: 15px; height: 15px; }
 
     /* 行的 Edit 菜单。**整页共用一个元素**,按点击位置移过去 —— 每行各挂一个
        意味着几百个隐藏节点,而同一时刻只可能开着一个 */
     .row-menu {
       position: absolute;
       z-index: 200;
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 4px;
-      min-width: 148px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      background: var(--surface-3);
+      border: 1px solid var(--line-3);
+      border-radius: var(--r-md);
+      padding: var(--s1);
+      min-width: 152px;
+      box-shadow: var(--sh-3);
     }
     .row-menu button {
       display: block;
@@ -758,16 +1089,135 @@
       border: none;
       color: var(--text);
       font-family: inherit;
-      font-size: 13px;
-      padding: 8px 10px;
-      border-radius: 4px;
+      font-size: var(--fs-md);
+      padding: var(--s2) var(--s3);
+      border-radius: var(--r-sm);
       cursor: pointer;
     }
-    .row-menu button:hover { background: var(--panel-alt); }
-    .row-menu button.danger { color: var(--low); }
+    .row-menu button:hover { background: rgba(255, 255, 255, 0.07); }
+    .row-menu button.danger { color: var(--danger); }
+    .row-menu button.danger:hover { background: rgba(224, 104, 94, 0.14); }
+
+    /* ========================================================================
+       响应式与动效偏好
+       ======================================================================== */
+    /* 断点压得比较低,是为了让「一排四个」尽量守住 —— 800px 宽时每张约 183px,
+       竖版封面在这个尺寸上还完全读得出来。第一版定在 900px,结果常用窗口下就掉成三列了 */
+    @media (max-width: 760px) { .gallery { grid-template-columns: repeat(3, 1fr); } }
+    @media (max-width: 520px) { .gallery { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 640px) {
+      :root { --page-pad: var(--s3); }
+      h1 { font-size: 21px; }
+      .game-thumb { display: none; }   /* 窄屏优先保住名字 */
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      /* 不动的话状态仍然看得见,只是不扫、不转、不放大 */
+      .topbar.syncing::after { animation: none; width: 100%; opacity: 0.6; }
+      .icon-btn.spinning .icon-glyph { animation: none; }
+      .g-card, .g-card:hover, .g-card img, .g-card:hover img {
+        transition: none;
+        transform: none;
+      }
+      .bar-fill { transition: none; }
+    }
   </style>
 </head>
 <body>
+  <!--
+    图标精灵。**整套界面的图标都从这里 <use>,页面上不再有 emoji。**
+
+    换掉 emoji 不是为了好看,是因为 emoji 有三件事做不到:
+      · 颜色由字形自带 —— CSS 的 `color` 管不着它,所以 ✏️ 无论压到多低的透明度
+        都还是一支亮黄铅笔(这条在行尾那个「更多」按钮上已经吃过一次亏,当时的
+        解法是退回文本符号 ⋮);
+      · 各操作系统画得不一样 —— 🔄 在 Windows 上是「蓝底圆角方块 + 白箭头」的
+        一整个字形,想让箭头转起来,转的却是那块底板,所以同步图标一直不能转;
+      · 和文字对不齐 —— 它们不落在同一条基线上。
+
+    全部换成单色 SVG 之后这三条一起消失:图标吃 color、吃 opacity、跟着字号走,
+    上面那两处妥协(⋮ 和不转的同步图标)也就不必再保留了。
+
+    统一 24 格、fill 由 .ic 控制、stroke-width 1.75 —— 加新图标请照这个网格画,
+    混进一个别的粗细,整排图标就会看出深浅不一。
+  -->
+  <svg id="icon-sprite" aria-hidden="true">
+    <symbol id="i-sync" viewBox="0 0 24 24">
+      <path d="M21 12a9 9 0 0 1-9 9 9 9 0 0 1-7.6-4.2M3 12a9 9 0 0 1 9-9 9 9 0 0 1 7.6 4.2"/>
+      <path d="M20.5 3.5v4h-4M3.5 20.5v-4h4"/>
+    </symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3.2"/>
+      <path d="M19.4 14.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.1A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.1A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9.1a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9.1a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1.37z"/>
+    </symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24">
+      <path d="M18 8.5a6 6 0 1 0-12 0c0 6-2.5 7.5-2.5 7.5h17S18 14.5 18 8.5"/>
+      <path d="M13.7 20a2 2 0 0 1-3.4 0"/>
+    </symbol>
+    <symbol id="i-book" viewBox="0 0 24 24">
+      <path d="M4 4.5A1.5 1.5 0 0 1 5.5 3H19v16.5H5.5A1.5 1.5 0 0 0 4 21z"/>
+      <path d="M4 19.5A1.5 1.5 0 0 1 5.5 18H19"/>
+    </symbol>
+    <symbol id="i-sparkle" viewBox="0 0 24 24">
+      <path d="M12 2.5 14 9l6.5 2-6.5 2-2 6.5-2-6.5L3.5 11 10 9z"/>
+    </symbol>
+    <symbol id="i-rewrite" viewBox="0 0 24 24">
+      <path d="M20 11a8 8 0 1 0-.6 4"/>
+      <path d="M20.5 5v5h-5"/>
+    </symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24">
+      <path d="M12 16V4"/>
+      <path d="M7.5 8.5 12 4l4.5 4.5"/>
+      <path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>
+    </symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24">
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2"/>
+      <path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/>
+    </symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24">
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2"/>
+      <path d="M8 10.5V7a4 4 0 0 1 7.7-1.5"/>
+    </symbol>
+    <symbol id="i-gamepad" viewBox="0 0 24 24">
+      <path d="M7 8.5h10a4.5 4.5 0 0 1 4.4 3.6l.5 3.2A2.6 2.6 0 0 1 19.3 18c-.9 0-1.7-.5-2.1-1.3L16.4 15H7.6l-.8 1.7c-.4.8-1.2 1.3-2.1 1.3a2.6 2.6 0 0 1-2.6-2.7l.5-3.2A4.5 4.5 0 0 1 7 8.5"/>
+      <path d="M7 11v2.5M5.75 12.25h2.5M15.5 11.5h.01M17.5 13.5h.01"/>
+    </symbol>
+    <symbol id="i-plus-circle" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 8v8M8 12h8"/>
+    </symbol>
+    <symbol id="i-star" viewBox="0 0 24 24">
+      <path d="m12 3.2 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>
+    </symbol>
+    <symbol id="i-heart" viewBox="0 0 24 24">
+      <path d="M12 20.9 10.7 19.7C5.6 15.1 2.4 12.2 2.4 8.6 2.4 5.7 4.7 3.4 7.6 3.4c1.7 0 3.3.8 4.4 2.1 1.1-1.3 2.7-2.1 4.4-2.1 2.9 0 5.2 2.3 5.2 5.2 0 3.6-3.2 6.5-8.3 11.1z"/>
+    </symbol>
+    <symbol id="i-more" viewBox="0 0 24 24">
+      <circle cx="12" cy="5" r="1.4"/>
+      <circle cx="12" cy="12" r="1.4"/>
+      <circle cx="12" cy="19" r="1.4"/>
+    </symbol>
+    <symbol id="i-close" viewBox="0 0 24 24">
+      <path d="M6 6l12 12M18 6L6 18"/>
+    </symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24">
+      <path d="M12 3.8 21.2 20H2.8z"/>
+      <path d="M12 10v4.2M12 17.4h.01"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="m8 12.3 2.8 2.8L16.2 9.7"/>
+    </symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M12 7v5.3l3.3 2"/>
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="10.8" cy="10.8" r="6.8"/>
+      <path d="m15.8 15.8 4.4 4.4"/>
+    </symbol>
+  </svg>
+
   <div class="topbar">
     <div class="title-row">
       <h1>Steam Achievement Tracker</h1>
@@ -786,27 +1236,34 @@
         </span>
       </div>
     </div>
+    <!-- 左边报状态,右边是操作。**两组各占一端**,原来是「上次同步」后面直接跟着
+         三个图标再跟着一条消息 —— 一串来历不同的东西挤在一句话右边,读不出分组。
+         靠到右上角之后,「这一栏右边是能点的」变成一条一眼能认的规律 -->
     <div class="subtitle-row">
-      <div class="subtitle" id="lastUpdated">加载中...</div>
-      <button class="icon-btn" id="syncNowBtn"
-              title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。"
-              aria-label="立即同步"><span class="icon-glyph">🔄</span></button>
-      <!-- 打包版没有地址栏,不给入口的话设置页在首次设置之后就再也打不开了 -->
-      <a class="icon-btn" href="/setup" id="settingsLink"
-         title="改 Steam 凭据、配置 Notion 攻略同步、从表格导入"
-         aria-label="设置"><span class="icon-glyph">⚙️</span></a>
-      <span class="bell-wrap">
-        <button class="icon-btn" id="bellBtn" type="button"
-                title="提醒" aria-label="提醒" aria-expanded="false"><span class="icon-glyph">🔔</span></button>
-        <span class="bell-dot" id="bellDot" hidden></span>
-        <div class="bell-panel" id="bellPanel" hidden role="dialog" aria-label="提醒"></div>
-      </span>
-      <span class="sync-msg" id="syncMsg"></span>
+      <div class="topbar-status">
+        <div class="subtitle" id="lastUpdated">加载中...</div>
+        <span class="sync-msg" id="syncMsg"></span>
+      </div>
+      <div class="topbar-actions">
+        <button class="icon-btn" id="syncNowBtn"
+                title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。"
+                aria-label="立即同步"><span class="icon-glyph"><svg class="ic"><use href="#i-sync"/></svg></span></button>
+        <!-- 打包版没有地址栏,不给入口的话设置页在首次设置之后就再也打不开了 -->
+        <a class="icon-btn" href="/setup" id="settingsLink"
+           title="改 Steam 凭据、配置 Notion 攻略同步、从表格导入"
+           aria-label="设置"><span class="icon-glyph"><svg class="ic"><use href="#i-settings"/></svg></span></a>
+        <span class="bell-wrap">
+          <button class="icon-btn" id="bellBtn" type="button"
+                  title="提醒" aria-label="提醒" aria-expanded="false"><span class="icon-glyph"><svg class="ic"><use href="#i-bell"/></svg></span></button>
+          <span class="bell-dot" id="bellDot" hidden></span>
+          <div class="bell-panel" id="bellPanel" hidden role="dialog" aria-label="提醒"></div>
+        </span>
+      </div>
     </div>
   </div>
 
   <div id="gen-bar" role="status">
-    <button type="button" class="gen-close" id="genClose" title="收起">×</button>
+    <button type="button" class="gen-close" id="genClose" title="收起" aria-label="收起"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
   </div>
 
@@ -840,7 +1297,7 @@
 
   <div class="modal-overlay" id="addConfirmModal">
     <div class="modal-box">
-      <div style="font-size:13px; color:var(--text-dim); margin-bottom:8px;">确认将这款游戏添加到列表？</div>
+      <div style="font-size:13px; color:var(--text-3); margin-bottom:8px;">确认将这款游戏添加到列表？</div>
       <div class="game-name" id="confirmGameName"></div>
       <!-- 默认勾上:手动添加的绝大多数就是家庭共享/赠送的游戏 —— 自购的早就在
            GetOwnedGames 里了,根本不需要手动加 -->
@@ -864,7 +1321,7 @@
   <div class="modal-overlay" id="askModal">
     <div class="modal-box" style="max-width:520px;">
       <div class="game-name" id="askTitle"></div>
-      <div id="askBody" style="font-size:13px; color:var(--text-dim); text-align:left; white-space:pre-wrap; margin:12px 0 0;"></div>
+      <div id="askBody" style="font-size:13px; color:var(--text-3); text-align:left; white-space:pre-wrap; margin:12px 0 0;"></div>
       <div class="modal-btns">
         <button class="add-game-btn" id="askOkBtn">确认</button>
         <button class="add-game-btn btn-secondary" id="askCancelBtn">取消</button>
@@ -951,24 +1408,65 @@
       return (rate * 100).toFixed(1) + '%';
     }
 
+    /**
+     * 图标。**页面上不再出现 emoji** —— 理由写在 body 顶上那个精灵表的注释里,
+     * 一句话:emoji 吃不到 CSS 的 color。
+     *
+     * `filled` 给心和星用:同一个字形,描边是「没选」,填充是「选了」。
+     * 两个状态共用一条轮廓,所以切换时形状不跳。
+     */
+    function icon(name, filled) {
+      return '<svg class="ic' + (filled ? ' filled' : '') + '"><use href="#i-' + name + '"/></svg>';
+    }
+
+    /* 提示语里的状态图标。这几条会被拼进 #gen-bar 的 innerHTML,夹在句子中间 ——
+       所以 .ic 是 inline-block 而不是 block,见样式表里那条注释。
+       提出来当常量,是因为同一个 ⚠ 在下面出现了十几次,而它们必须是同一个 */
+    const GEN_WARN = icon('warn');
+    const GEN_OK = icon('check');
+    const GEN_QUEUE = icon('clock');
+    const GEN_SEARCH = icon('search');
+
+    /**
+     * 进度条的颜色。
+     *
+     * 原来是三档红黄绿,读起来像红绿灯 —— 而「完成率 30%」并不是一个警告,
+     * 它只是还早。现在是一条**递进**的四档,而且「打满」用的是强调蓝不是绿:
+     * 100% 在这个工具里是目的地本身,不是「安全」。取值都在 :root 的进度色阶里。
+     */
     function barColor(rate) {
-      if (rate === null) return '#555';
-      if (rate >= 1) return 'var(--good)';
-      if (rate >= 0.5) return 'var(--mid)';
-      return 'var(--low)';
+      if (rate === null) return 'var(--prog-none)';
+      if (rate >= 1) return 'var(--prog-done)';
+      if (rate >= 0.75) return 'var(--prog-high)';
+      if (rate >= 0.4) return 'var(--prog-mid)';
+      return 'var(--prog-low)';
+    }
+
+    /**
+     * 一整格进度条。**这段标记原来有三份**(render 的两个分支 + updateRateCell),
+     * 旁边写着「改一处要改两处」—— 那句注释是对的,但它把一个可以消掉的隐患
+     * 记成了一条要人记住的纪律。三份合成一份之后就不必记了。
+     *
+     * 打满的那条额外挂 .done,给一圈辉光:100% 是这个工具的目的地,应该看起来到了。
+     */
+    function barCell(rate) {
+      // **null 要原样传进来,不能在调用处折成 0。** 宽度用 0 画没问题,但
+      // 「还没算出完成率」和「完成率是 0%」是两件事:前者的文字必须是空的
+      // (fmtPct 对 null 返回 ''),后者是 "0.0%"。折在调用处的话这个区别就没了
+      const pct = ((typeof rate === 'number' ? rate : 0) * 100).toFixed(1);
+      return '<div class="bar-wrap"><div class="bar-track">'
+        + '<div class="bar-fill' + (rate >= 1 ? ' done' : '') + '" style="width:' + pct + '%; background:' + barColor(rate) + '"></div>'
+        + '</div><span class="rate-text">' + fmtPct(rate) + '</span></div>';
     }
 
     /**
      * 就地改写某一行的进度条格。**编辑期间用它代替整页 render()** ——
      * render 会重建 innerHTML,焦点跟着没了,而编辑时焦点正是要守住的东西。
-     * 这段标记必须和 render 里那份保持一致,改一处要改两处。
      */
     function updateRateCell(tr, rate) {
       const cell = tr.lastElementChild;
       if (!cell) return;
-      cell.innerHTML = '<div class="bar-wrap"><div class="bar-track"><div class="bar-fill" style="width:'
-        + (rate * 100).toFixed(1) + '%; background:' + barColor(rate) + '"></div></div>'
-        + '<span class="rate-text">' + fmtPct(rate) + '</span></div>';
+      cell.innerHTML = barCell(rate);
     }
 
     function thumbUrl(appid) {
@@ -986,12 +1484,10 @@
       return 'https://cdn.akamai.steamstatic.com/steam/apps/' + appid + '/library_600x900.jpg';
     }
 
+    /* 心形以前在这儿自带一份 path,是整页唯一的 SVG。现在所有图标都在精灵表里,
+       它没有理由再单开一份 —— 留个转发,免得两处心形慢慢长得不一样 */
     function heartSvg(filled) {
-      const path = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
-      if (filled) {
-        return '<svg viewBox="0 0 24 24"><path fill="currentColor" d="' + path + '"/></svg>';
-      }
-      return '<svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" d="' + path + '"/></svg>';
+      return icon('heart', filled);
     }
 
     // ---- 🔔 提醒 --------------------------------------------------------------
@@ -1092,6 +1588,26 @@
     })();
 
     /**
+     * 把顶栏的实际高度写进 --topbar-h,供表头吸附用(见 CSS 里的 `th { top: … }`)。
+     *
+     * **不能写死。** 顶栏里那条读数带是 flex-wrap 的,窄窗口下会整条掉到标题下面,
+     * 顶栏就高了一截;写死的话表头要么悬空要么被压住一半,而且**只在窄窗口出现**,
+     * 正是最容易漏测的那一档。ResizeObserver 让这个值自己跟着走。
+     *
+     * 浏览器不支持时什么都不做:CSS 里那个默认值还在,表头照常吸附,只是位置可能
+     * 差几个像素 —— 比抛异常把后面的初始化全带停了好。
+     */
+    (function trackTopbarHeight() {
+      const bar = document.querySelector('.topbar');
+      if (!bar || typeof ResizeObserver === 'undefined') return;
+      const apply = function() {
+        document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
+      };
+      new ResizeObserver(apply).observe(bar);
+      apply();
+    })();
+
+    /**
      * ♥ 切换。**表格和图库共用这一份** —— 两处各写一遍的话,乐观更新、失败回滚、
      * 服务端纠正这三件事迟早在一边被改、另一边没跟上
      */
@@ -1140,7 +1656,7 @@
           // 否则退回的那张也加载失败时会再次触发,变成死循环
           + '<img src="' + portraitUrl(g.appid) + '" loading="lazy"'
           + ' onerror="this.onerror=null; this.src=\'' + thumbUrl(g.appid) + '\'">'
-          + '<button class="icon-btn g-heart' + (g.favorite ? ' active-heart' : '') + '"'
+          + '<button class="row-icon g-heart' + (g.favorite ? ' active-heart' : '') + '"'
           + ' data-fav-appid="' + g.appid + '">' + heartSvg(g.favorite) + '</button>'
           + '<div class="g-scrim">'
           + '<span class="g-name">' + escapeHtml(g.name) + '</span>'
@@ -1231,48 +1747,60 @@
         const manualBadgeClass = 'badge-btn ' + (g.manual ? 'badge-btn-on' : 'badge-btn-off');
         const manualBadge = '<button class="' + manualBadgeClass + '" data-manual-appid="' + g.appid + '" title="'
           + (g.manual ? '已锁定:不参与自动同步,数字由你自己填。点一下解锁' : '锁定这一行:停止自动同步')
-          + '">' + (g.manual ? '🔒' : '🔓') + '</button>';
+          + '" aria-label="' + (g.manual ? '已锁定' : '未锁定') + '">'
+          + icon(g.manual ? 'lock' : 'unlock') + '</button>';
         const familyBadgeClass = 'badge-btn ' + (g.family ? 'badge-btn-family-on' : 'badge-btn-off');
         const familyBadge = '<button class="' + familyBadgeClass + '" data-family-appid="' + g.appid + '" title="'
           + (g.family ? '取消家庭共享标记' : '标记为家庭共享(非自购,纯信息用途)') + '">家庭</button>';
         const newAchBadge = (g.newAchDaysAgo !== null && g.newAchDaysAgo <= 30)
-          ? '<span class="badge badge-new">🆕 ' + g.newAchDaysAgo + '天前新增成就</span>'
+          ? '<span class="badge badge-new">' + icon('sparkle') + g.newAchDaysAgo + '天前新增成就</span>'
           : '';
         const playedBadge = isRecentlyPlayed(g)
-          ? '<span class="badge badge-played">🎮 ' + (g.playedDaysAgo === 0 ? '今天在玩' : g.playedDaysAgo + '天前玩过') + '</span>'
+          ? '<span class="badge badge-played">' + icon('gamepad')
+            + (g.playedDaysAgo === 0 ? '今天在玩' : g.playedDaysAgo + '天前玩过') + '</span>'
           : '';
-        const heartClass = 'icon-btn' + (g.favorite ? ' active-heart' : '');
-        const starChar = g.priority ? '★' : '☆';
-        const starClass = 'icon-btn' + (g.priority ? ' active-star' : '');
+        // **行内的图标按钮是 .row-icon,不是 .icon-btn。** 后者是顶栏那种带底色描边的
+        // 方块;两者原来共用一个类名,而 CSS 里行内那段写在后面,把顶栏那段整个盖掉了 ——
+        // 顶栏按钮说好的底色和描边从来没画出来过,还不报错。分成两个名字之后不会再撞
+        const heartClass = 'row-icon' + (g.favorite ? ' active-heart' : '');
+        const starClass = 'row-icon' + (g.priority ? ' active-star' : '');
         const guideBtnClass = 'guide-btn ' + (g.guideUrl ? 'has-guide' : 'no-guide');
         const canGen = !g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0;
         const guideBtn = g.guideUrl
-          ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">📖 攻略</a>'
+          ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + icon('book') + '攻略</a>'
           : canGen
             ? '<button class="' + guideBtnClass + ' can-gen" data-gen="' + g.appid + '" data-name="'
-              + escapeHtml(g.name) + '" onclick="event.stopPropagation();window.genGuide(this)">✨ 生成</button>'
-            : '<span class="' + guideBtnClass + '">📖 攻略</span>';
+              + escapeHtml(g.name) + '" onclick="event.stopPropagation();window.genGuide(this)">' + icon('sparkle') + '生成</button>'
+            : '<span class="' + guideBtnClass + '">' + icon('book') + '攻略</span>';
+        // 一行里其实是三组东西:**标记**(星、心)、**身份**(封面、名字、状态徽章)、
+        // **操作**(攻略、重写、更多)。它们原来是一串等距的兄弟节点,眼睛分不出组;
+        // 而且只有最后那个「更多」带 margin-left:auto,于是攻略按钮浮在名字右边不上不下。
+        // 现在标记和操作各自成块,操作整组靠右(margin 挂在 .row-actions 上)
         const gameCell = '<div class="game-cell">'
-          + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '">' + starChar + '</button>'
-          + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '">' + heartSvg(g.favorite) + '</button>'
+          + '<div class="row-marks">'
+          + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '" aria-label="重点关注">' + icon('star', g.priority) + '</button>'
+          + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '" aria-label="喜爱">' + heartSvg(g.favorite) + '</button>'
+          + '</div>'
           + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
+          + '<div class="row-actions">'
           + guideBtn
-          // 已经有攻略的行原来只有「📖 攻略」,没有任何入口能重写它 —— 覆盖只能敲命令行。
+          // 已经有攻略的行原来只有「攻略」,没有任何入口能重写它 —— 覆盖只能敲命令行。
           // 闸门不在这个按钮上,在它弹出的确认框里(会先算清楚要失去什么),所以露出来是安全的
           + (g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0
               ? '<button class="guide-btn rewrite" data-rewrite="' + g.appid + '" data-name="'
                 + escapeHtml(g.name) + '" title="让 AI 重新写一份,覆盖现在这份(会先备份原文)"'
-                + ' onclick="event.stopPropagation();window.rewriteGuide(this)">♻ 重写</button>'
+                + ' onclick="event.stopPropagation();window.rewriteGuide(this)">' + icon('rewrite') + '重写</button>'
               : '')
           + (g.guideKind === 'local' && notionReady
               ? '<button class="guide-btn to-notion" data-migrate="' + g.appid + '" data-name="'
                 + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
-                + ' onclick="event.stopPropagation();window.migrateGuide(this)">⬆ Notion</button>'
+                + ' onclick="event.stopPropagation();window.migrateGuide(this)">' + icon('upload') + 'Notion</button>'
               : '')
           // 改数字和删除**合到一个入口**。它们原来是行上并排的两个按钮,而删除不可撤销 ——
           // 挨着一个日常会点的按钮,迟早点错。现在都藏在菜单第二层
-          + '<button class="delete-btn" data-edit-appid="' + g.appid + '" title="更多操作">⋮</button>'
+          + '<button class="delete-btn" data-edit-appid="' + g.appid + '" title="更多操作" aria-label="更多操作">' + icon('more') + '</button>'
+          + '</div>'
           + '</div>';
 
         // 展开看的是「还差哪些成就」,判据是**这一行确实没打完**,不是标签页选了哪个。
@@ -1291,7 +1819,7 @@
             + '<td>' + gameCell + '</td>'
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="achieved" data-manual-row-appid="' + g.appid + '" value="' + achievedVal + '" onclick="event.stopPropagation()"></td>'
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="total" data-manual-row-appid="' + g.appid + '" value="' + totalVal + '" onclick="event.stopPropagation()"></td>'
-            + '<td><div class="bar-wrap"><div class="bar-track"><div class="bar-fill" style="width:' + (manualRate*100).toFixed(1) + '%; background:' + barColor(manualRate) + '"></div></div><span class="rate-text">' + fmtPct(manualRate) + '</span></div></td>'
+            + '<td>' + barCell(manualRate) + '</td>'
             + '</tr>';
         } else if (g.total === 'N/A') {
           html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">无成就系统</td></tr>';
@@ -1301,12 +1829,11 @@
         } else if (g.total === null) {
           html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中...</td></tr>';
         } else {
-          const rate = g.rate !== null ? g.rate : 0;
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '">'
             + '<td>' + gameCell + '</td>'
             + '<td>' + g.achieved + '</td>'
             + '<td>' + g.total + '</td>'
-            + '<td><div class="bar-wrap"><div class="bar-track"><div class="bar-fill" style="width:' + (rate*100).toFixed(1) + '%; background:' + barColor(rate) + '"></div></div><span class="rate-text">' + fmtPct(g.rate) + '</span></div></td>'
+            + '<td>' + barCell(g.rate) + '</td>'
             + '</tr>';
         }
 
@@ -1469,7 +1996,7 @@
             return '<div class="ach-item">'
               + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
               + '<div><div class="ach-name">' + escapeHtml(a.name) + '</div><div class="ach-desc">' + escapeHtml(a.description) + '</div>'
-              + '<a class="ach-guide-link" href="' + guideUrl + '" target="_blank" rel="noopener">🔍 搜攻略</a></div>'
+              + '<a class="ach-guide-link" href="' + guideUrl + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' 搜攻略</a></div>'
               + '</div>';
           }).join('') + '</div>';
       }
@@ -1838,6 +2365,11 @@
       // 不是关闭 —— 状态对象一旦缺了 running(轮询拿到异常响应就会这样),这条线
       // 会每 3 秒亮灭一次,永远停不下来。写死成布尔,最坏情况是"不亮",不是"乱闪"
       document.querySelector('.topbar').classList.toggle('syncing', Boolean(s.running));
+      // 图标自己也转一圈。**这在 emoji 时代做不到** —— 🔄 在 Windows 上是「蓝底方块 +
+      // 白箭头」的一整个字形,转它转的是那块底板,看着很蠢;换成内联 SVG 之后转的
+      // 就是箭头本身。顶栏底边那条扫线仍然留着:那条是给余光的(滚到哪儿都看得见),
+      // 按钮上这个是给「我刚点了它,它动了吗」的确认。同样要 Boolean(),理由同上
+      syncBtn.classList.toggle('spinning', Boolean(s.running));
       syncBtn.title = s.running
         ? '正在同步…'
         : '立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。';
@@ -1925,7 +2457,7 @@
       });
       if (!p || p.error) {
         btn.disabled = false;
-        return showGen('⚠️ ' + ((p && p.error) || '预检失败'), true);
+        return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true);
       }
 
       // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
@@ -1950,14 +2482,14 @@
         .withSuccessHandler(function (r) {
           if (r && r.error) {
             btn.disabled = false;
-            return showGen('⚠️ ' + r.error, true);
+            return showGen(GEN_WARN + ' ' + r.error, true);
           }
           showGen('⏳ 重写《' + name + '》…');
           pollGen();
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen('⚠️ ' + err, true);
+          showGen(GEN_WARN + ' ' + err, true);
         })
         .startGuideGen(appid, true);
     };
@@ -1972,7 +2504,7 @@
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             btn.disabled = false;
-            return showGen('⚠️ ' + ((p && p.error) || '预览失败'), true);
+            return showGen(GEN_WARN + ' ' + ((p && p.error) || '预览失败'), true);
           }
           // 逐条核对、对不上就不动本地文件、页面带图标 —— 都是"我们怎么保证不出事",
           // 不是他要决定的事。真正要他知道的只有两件:搬什么、原文去哪
@@ -1981,7 +2513,7 @@
             '本地文件挪进 guides/.migrated/,不会删。',
           ];
           if (p.unconverted && p.unconverted.length) {
-            lines.push('⚠️ ' + p.unconverted.length + ' 行排版会降级成普通段落,文字不丢。');
+            lines.push(GEN_WARN + ' ' + p.unconverted.length + ' 行排版会降级成普通段落,文字不丢。');
           }
           const goMigrate = await askConfirm({
             title: '把《' + p.game + '》的攻略搬到 Notion?',
@@ -1998,10 +2530,10 @@
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
                 btn.disabled = false;
-                return showGen('⚠️ ' + ((r && r.error) || '搬运失败'), true);
+                return showGen(GEN_WARN + ' ' + ((r && r.error) || '搬运失败'), true);
               }
               showGen(
-                '✅ 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
+                GEN_OK + ' 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
                   '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开 Notion 页面</a>' +
                   (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : '')
               );
@@ -2009,13 +2541,13 @@
             })
             .withFailureHandler(function (err) {
               btn.disabled = false;
-              showGen('⚠️ ' + err, true);
+              showGen(GEN_WARN + ' ' + err, true);
             })
             .migrateGuideToNotion(appid);
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen('⚠️ ' + err, true);
+          showGen(GEN_WARN + ' ' + err, true);
         })
         .previewGuideToNotion(appid);
     };
@@ -2039,20 +2571,20 @@
         .withSuccessHandler(function (r) {
           if (r && r.error) {
             btn.disabled = false;
-            showGen('⚠️ ' + r.error, true);
+            showGen(GEN_WARN + ' ' + r.error, true);
             return;
           }
           // 排队和开跑要说得不一样。**这条尤其重要**:一次生成 2–4 分钟,
           // 排上队之后进度条显示的是**别人**的游戏名 —— 不明说的话,用户会以为
           // 自己那一下点丢了
           showGen(r && r.queued
-            ? '🕒 《' + name + '》已排队(前面还有 ' + r.position + ' 个)'
+            ? GEN_QUEUE + ' 《' + name + '》已排队(前面还有 ' + r.position + ' 个)'
             : '⏳ 生成《' + name + '》…');
           pollGen();
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen('⚠️ ' + err, true);
+          showGen(GEN_WARN + ' ' + err, true);
         })
         .startGuideGen(appid);
     };
@@ -2096,13 +2628,13 @@
             clearInterval(genTimer);
             genTimer = null;
           }
-          if (s.error) return showGen('⚠️ 生成失败:' + s.error + waiting, true);
+          if (s.error) return showGen(GEN_WARN + ' 生成失败:' + s.error + waiting, true);
           const r = s.result;
           if (!r) return (genBar.style.display = 'none');
 
           if (!r.ok) {
             showGen(
-              '⚠️ 《' + s.game + '》校验没过,已存草稿,没写进攻略。' +
+              GEN_WARN + ' 《' + s.game + '》校验没过,已存草稿,没写进攻略。' +
                 (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
               true
             );
@@ -2112,9 +2644,9 @@
           // 没搜才单独警告(那是真会影响内容质量的一件事)
           const searches = r.searchQueries ? r.searchQueries.length : 0;
           const noResearch = !r.researched
-            ? '<br><span class="warn">⚠️ 没联网,内容是模型凭已有知识写的。</span>'
+            ? '<br><span class="warn">' + GEN_WARN + ' 没联网,内容是模型凭已有知识写的。</span>'
             : searches === 0
-              ? '<br><span class="warn">⚠️ 一次都没搜,内容等同于凭记忆写的。</span>'
+              ? '<br><span class="warn">' + GEN_WARN + ' 一次都没搜,内容等同于凭记忆写的。</span>'
               : '';
           // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
           const where = r.target === 'notion'
@@ -2130,7 +2662,7 @@
             Math.round((r.tokens || 0) / 100) / 10 + 'k token',
           ].join(' · ');
           showGen(
-            '✅ 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
+            GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
               noResearch +
               '<br><span class="warn">内容需要你自己过一遍。</span>'
           );
