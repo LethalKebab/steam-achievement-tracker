@@ -179,6 +179,69 @@
       padding: var(--s5) var(--page-pad) var(--s4);
     }
 
+    /* ---- 横幅:库里的封面拼成的一条带子 --------------------------------
+       **不能给 .topbar 加 overflow: hidden**(铃铛面板是它的绝对定位子元素,会被裁掉),
+       所以裁切归这一层自己管。inset: 0 撑满顶栏,z-index 0 压在所有内容下面。
+       图片加载完才淡入 —— 否则一排灰框先闪一下,比没有还难看 */
+    .topbar-art {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+      display: flex;
+      overflow: hidden;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 450ms var(--ease);
+    }
+    .topbar-art.ready { opacity: 1; }
+    /* flex: 1 1 0 —— 每张平分宽度。某张加载失败时它把自己 remove 掉,
+       剩下的自动把空位分掉,不会留一个洞 */
+    .topbar-art img {
+      flex: 1 1 0;
+      min-width: 0;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    /*
+      压在封面上的遮罩。**左重右轻**:标题、读数、状态文字全在左边,那一侧必须压到
+      几乎纯色才读得清;右边留出来让封面真的看得见 —— 整条压匀了就等于没放图。
+      再叠一层上下向的暗角,兜住底部那行小字。
+      色值走 color-mix 而不是写死 rgba:--bg 改了这里要跟着改,写死就会脱节。
+    */
+    .topbar-art::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(100deg,
+          var(--bg) 15%,
+          color-mix(in srgb, var(--bg) 90%, transparent) 38%,
+          color-mix(in srgb, var(--bg) 66%, transparent) 72%,
+          color-mix(in srgb, var(--bg) 54%, transparent)),
+        linear-gradient(180deg,
+          color-mix(in srgb, var(--bg) 30%, transparent),
+          color-mix(in srgb, var(--bg) 72%, transparent));
+    }
+    /* 窄屏少放几张 —— 八张平分 600px 等于八条 75px 的碎片,谁也认不出来 */
+    @media (max-width: 1200px) { .topbar-art img:nth-child(n+7) { display: none; } }
+    @media (max-width: 900px)  { .topbar-art img:nth-child(n+5) { display: none; } }
+    @media (max-width: 600px)  { .topbar-art img:nth-child(n+4) { display: none; } }
+
+    /* 顶栏内容要浮在横幅上面。层序:横幅 0 → 内容 1 → 完成度线 2 → 同步扫线 3 */
+    .topbar .title-row,
+    .topbar .subtitle-row {
+      position: relative;
+      z-index: 1;
+      /* **文字压在封面上,必须自带一层描边阴影。** 遮罩在右侧只剩五成多不透明,
+         而读数带正好落在那一段(实测占横幅的 68%~98%)—— 底下换一张亮色封面就糊了。
+         阴影比「把遮罩加浓」好:加浓等于把图盖掉,那就白放了 */
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
+    }
+    /* 读数带的说明文字原来是三级灰(--text-3)。它是整条顶栏里最暗的字,又恰好坐在
+       封面透出来最多的那一段上 —— 提一级,配合上面的阴影才站得住 */
+    .topbar .reading .label { color: var(--text-2); }
+
     /* 顶栏底边:**原来是一条 1px 的静态分隔线,现在是整个库的完成度**。
        想让顶部更丰富,先用已经占着位置的东西 —— 这条线一个像素都没多占,
        却从「一条边框」变成了这一页最想说的那个数。
@@ -189,6 +252,7 @@
       right: 0;
       bottom: 0;
       height: 2px;
+      z-index: 2;
       background: var(--line-2);
     }
     .topbar-progress span {
@@ -250,7 +314,7 @@
       position: absolute;
       bottom: 0;             /* 压在下沿那条完成度线上,同高,盖得住 */
       left: 0;
-      z-index: 1;            /* .topbar-progress 是普通子元素,扫线要在它上面 */
+      z-index: 3;            /* 层序:横幅 0 → 内容 1 → 完成度线 2 → 扫线 3 */
       width: 35%;
       height: 2px;
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
@@ -1269,6 +1333,18 @@
   </svg>
 
   <div class="topbar">
+    <!--
+      横幅:**用你自己库里的封面拼的,不是一张装饰图。**
+
+      挑图的顺序是「最近在玩 → 喜爱 → 其余」,所以它会跟着你玩的东西变 —— 一张随机
+      素材图只是好看,这一条带子是这个库此刻的样子。图是 Steam 的 header.jpg,和表格里
+      那些缩略图同一个源,浏览器缓存共用。
+
+      空着也没关系:一张都加载不出来(离线、家庭共享的老游戏没图)时每个 <img> 自己
+      `remove()`,剩下的 flex 项把宽度分掉;全没了就退回顶栏本来那两层渐变,
+      不会留下一排破图框。
+    -->
+    <div class="topbar-art" id="topbarArt" aria-hidden="true"></div>
     <div class="title-row">
       <h1>Steam Achievement Tracker</h1>
       <!-- 精确值和口径放在 title 里(悬停可读),不占屏幕 -->
@@ -1528,6 +1604,45 @@
       const cell = tr.lastElementChild;
       if (!cell) return;
       cell.innerHTML = barCell(rate);
+    }
+
+    /**
+     * 顶栏横幅里放哪几张封面。
+     *
+     * 顺序是**最近在玩 → 喜爱 → 其余**,和表格的置顶规则同源:这条带子应该是
+     * 「你最近在打的东西」,不是一张随机装饰图。全打满的游戏排在最后 —— 横幅是给
+     * 「还在进行中」留的,一条全是已完成游戏的带子对这一页没有意义。
+     *
+     * 最多取 8 张,CSS 在窄屏上再藏掉几张(见 .topbar-art 的媒体查询)。
+     */
+    const BANNER_MAX = 8;
+    function bannerGames() {
+      const pool = allGames.filter(function(g){ return g.appid; });
+      const done = function(g){ return g.rate === 1; };
+      const played = pool.filter(function(g){ return isRecentlyPlayed(g) && !done(g); })
+        .sort(function(a, b){ return a.playedDaysAgo - b.playedDaysAgo; });
+      const picked = played.slice();
+      const add = function(list) {
+        list.forEach(function(g) {
+          if (picked.length < BANNER_MAX && picked.indexOf(g) === -1) picked.push(g);
+        });
+      };
+      add(pool.filter(function(g){ return (g.favorite || g.priority) && !done(g); }));
+      add(pool.filter(function(g){ return !done(g); }));
+      add(pool);   // 整个库都打满了也该有图,总比空着强
+      return picked.slice(0, BANNER_MAX);
+    }
+
+    function renderTopbarArt() {
+      const el = document.getElementById('topbarArt');
+      const games = bannerGames();
+      if (!games.length) return;
+      // onerror 里 remove 自己:家庭共享和下架的老游戏常常没有 header 图,
+      // 留着就是一个破图框;删掉之后剩下的 flex 项把宽度分掉,看不出少了一张
+      el.innerHTML = games.map(function(g) {
+        return '<img src="' + thumbUrl(g.appid) + '" alt="" onerror="this.remove()">';
+      }).join('');
+      el.classList.add('ready');
     }
 
     function thumbUrl(appid) {
@@ -2376,6 +2491,7 @@
         document.getElementById('cardPerfect').textContent = data.perfectCount;
         document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
         renderBell();
+        renderTopbarArt();
         render();
       }).withFailureHandler(function(err) {
         document.getElementById('gameTableBody').innerHTML =
