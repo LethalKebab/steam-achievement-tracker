@@ -122,6 +122,7 @@ Refreshing the browser does none of it — that re-reads the local database only
 
 | | |
 |---|---|
+| [docs/notion-setup.md](docs/notion-setup.md) | 连接 Notion 攻略库 —— 分步图解,含最容易漏的授权步骤和数据库 ID 的取法 |
 | [docs/configuration.md](docs/configuration.md) | every `config.json` option, environment variables, changing the port |
 | [docs/data.md](docs/data.md) | what's in the database, importing/exporting CSV, what Steam can't tell us |
 | [docs/guides.md](docs/guides.md) | guide checkbox sync, Notion setup, how matching works |
