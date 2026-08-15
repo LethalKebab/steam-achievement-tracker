@@ -9,9 +9,9 @@
 
 ```mermaid
 flowchart LR
-    A["① 建 integration<br/><small>在 Notion 网站上</small>"] --> B["② 授权页面<br/><small>最容易漏的一步</small>"]
-    B --> C["③ 填进程序<br/><small>设置 → Notion</small>"]
-    C --> D["④ 保存并验证<br/><small>当场告诉你结果</small>"]
+    A["① 建 integration<br/>在 Notion 网站上"] --> B["② 授权页面<br/>最容易漏的一步"]
+    B --> C["③ 填进程序<br/>设置 → Notion"]
+    C --> D["④ 保存并验证<br/>当场告诉你结果"]
     style B stroke-width:3px
 ```
 
@@ -62,8 +62,8 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    S["贴好 Integration Secret"] --> L["<b>没有现成的库</b><br/>点「＋ 新建一个攻略数据库」<br/>选父页面 → 起名字 → 建立<br/><small>ID 自动填好,属性也配好了</small>"]
-    S --> R["<b>已经有攻略数据库</b><br/>手动填「攻略数据库 ID」<br/><small>要从网址里抠 32 位,见下</small>"]
+    S["贴好 Integration Secret"] --> L["没有现成的库<br/>▸ 点「＋ 新建一个攻略数据库」<br/>▸ 选父页面 → 起名字 → 建立<br/>ID 自动填好,属性也配好了"]
+    S --> R["已经有攻略数据库<br/>▸ 手动填「攻略数据库 ID」<br/>要从网址里抠 32 位,见下"]
     style L stroke-width:3px
 ```
 
