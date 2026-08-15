@@ -312,3 +312,57 @@ describe('设置页:服务器还没起来时也要把界面装起来', () => {
     assert.match(around, /catch/, '没有 catch —— fetch 失败会让整个 load() 中断');
   });
 });
+
+/**
+ * `aiReady` 落地之后只能重绘,不能重取
+ * ------------------------------------------------
+ * `aiReady` / `notionReady` 只影响**怎么画**,不影响**画什么**。写成 `loadDashboard()`
+ * 就是为了翻一个布尔值把整个库重新拉一遍 —— 而那恰好让一个已经存在的竞态变得看得见:
+ *
+ * `aiReady` 初值 false,页面加载那次 `loadDashboard()` 立刻就跑了,所以「✨ 生成」在不在,
+ * 取决于 `getSettings`(内存里读个对象)和 `getDashboardData`(读整个库)谁先回来。
+ * 平时前者稳赢,所以平时看不出问题。**第一次设置完的那一下服务器正忙** —— startupJobs
+ * 的全量同步、攻略发现、勾选都在跑,Node 单线程,顺序会翻:先画出一张没有按钮的表,
+ * 然后要等第二次完整拉取排到队才补上。真实用户报过:刚连完 Notion 打开没有生成按钮,
+ * 刷新一下就有了。改回 `loadDashboard()` 会把这条恢复路径重新变成最贵的那一条,
+ * 而且贵在服务器最忙的时候。
+ *
+ * 源码断言:这段逻辑住在一个 IIFE 的异步回调里,零依赖没有 DOM,单测够不着 ——
+ * 和 `onSyncState` 那条同源。
+ */
+describe('loadAiState 落地后只重绘', () => {
+  test('那次补画调的是 render(),不是 loadDashboard()', () => {
+    // **两种注释都要去。** 只去 `/* */` 的话,下面那条 `doesNotMatch` 会被这段逻辑
+    // 自己的 `//` 解释性注释满足 —— 那段注释里正写着 `loadDashboard()`。
+    // 和 tray.test.js 里那条同源;区别是这次它当场红了,不是空跑
+    const js = inlineScripts(read('Dashboard.html'))
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const i = js.indexOf('notionReady = Boolean(');
+    assert.ok(i > 0, '找不到 loadAiState 里设 notionReady 的那一行');
+    // 切到这一块再匹配,别让文件别处的 loadDashboard() 把断言喂饱
+    const block = js.slice(i, js.indexOf('})();', i));
+    assert.match(block, /\brender\(\)/, '补画必须调 render()');
+    assert.doesNotMatch(
+      block,
+      /\bloadDashboard\(\)/,
+      '这里调 loadDashboard() 等于为了一个布尔值重拉整个库,而且正好在服务器最忙时'
+    );
+  });
+
+  test('补画前要确认 allGames 已经有数据', () => {
+    // 反过来的顺序也要对:getSettings 先回来时 allGames 还是空的,
+    // 这时 render() 会画出一张空表,然后被 loadDashboard 的结果覆盖 —— 闪一下"没有游戏"
+    // **两种注释都要去。** 只去 `/* */` 的话,下面那条 `doesNotMatch` 会被这段逻辑
+    // 自己的 `//` 解释性注释满足 —— 那段注释里正写着 `loadDashboard()`。
+    // 和 tray.test.js 里那条同源;区别是这次它当场红了,不是空跑
+    const js = inlineScripts(read('Dashboard.html'))
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const i = js.indexOf('notionReady = Boolean(');
+    const block = js.slice(i, js.indexOf('})();', i));
+    assert.match(block, /allGames\.length/, '没有 allGames.length 守卫,先到的 getSettings 会画出一张空表');
+  });
+});

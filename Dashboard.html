@@ -1881,7 +1881,22 @@
       aiReady = Boolean(s && s.hasAiKey);
       // 搬去 Notion 要两样都有:token(能写)和数据库 ID(知道写去哪)
       notionReady = Boolean(s && s.hasNotionToken && s.notionDbId);
-      if (aiReady || notionReady) loadDashboard();  // 重画一次,把那两个按钮放出来
+
+      // **只重绘,不重取。** `aiReady` / `notionReady` 只影响怎么画,不影响画什么,
+      // 而 `allGames` 这时已经在内存里了 —— 以前这里调的是 `loadDashboard()`,
+      // 为了翻一个布尔值把整个 dashboard 重新拉一遍。
+      //
+      // 那让一个竞态变得看得见:`aiReady` 初值是 false,页面加载时那次
+      // `loadDashboard()`(下面那行)就已经在跑了,所以按钮在不在,取决于
+      // `getSettings`(内存里读个对象)和 `getDashboardData`(读整个库)谁先回来。
+      // 平时前者稳赢。但**第一次设置完的那一下服务器正忙** —— startupJobs 的
+      // 全量同步、攻略发现、勾选都在跑,Node 又是单线程,顺序会翻:先画出一张
+      // 没有按钮的表,然后要等第二次完整拉取排到队才补上。真实用户报过这个,
+      // 现象是"刚连完 Notion 打开没有生成按钮,刷新一下就有了"。
+      //
+      // 两种到达顺序都对:`allGames` 还空着说明那次 loadDashboard 还在路上,
+      // 它落地时读到的 aiReady 已经是 true 了,不需要这里补一刀。
+      if ((aiReady || notionReady) && allGames.length) render();
     })();
 
     /**
