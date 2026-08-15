@@ -1099,7 +1099,8 @@
       border: 1px solid var(--line-3);
       border-radius: var(--r-md);
       padding: var(--s1);
-      min-width: 152px;
+      /* 标签收成两个字之后,152px 的菜单里大半是空的 —— 宽度要跟着内容走 */
+      min-width: 108px;
       box-shadow: var(--sh-3);
     }
     .row-menu button {
@@ -1417,7 +1418,7 @@
     /**
      * 正在改数字的那一行。**编辑是一个要主动进入、会自己退出的模式**,不是锁定行的
      * 常驻状态 —— 以前只要行锁着,两个输入框就一直摆在那儿,滚动时一次误触就能改掉
-     * 一个数字,而且没有任何提示。现在只有从菜单里选「编辑成就数量」才进,焦点一离开
+     * 一个数字,而且没有任何提示。现在只有从菜单里选「编辑」才进,焦点一离开
      * 这一行就退出;锁还在,数字变回普通文本。
      */
     let editingAppid = null;
@@ -2089,7 +2090,7 @@
     }
 
     /**
-     * 「编辑成就数量」。**必然连带上锁。**
+     * 菜单里的「编辑」。**必然连带上锁。**
      *
      * 后端的 setManualAchievements 只接受锁定的行,而那个守卫是对的:没锁的话
      * 下一次同步会拿 Steam 的数字把你手填的直接覆盖掉,而且不会有任何提示。
@@ -2140,11 +2141,12 @@
         b.addEventListener('click', function(e) { e.stopPropagation(); closeRowMenu(); fn(); });
         rowMenu.appendChild(b);
       };
-      // 「会连带上锁」放在 title 里而不是标签上:锁图标当场亮起来已经说明了这件事,
-      // 标签里再写一遍就是在屏幕上堆解释
-      item('编辑成就数量', '', game.manual ? '' : '会同时锁定这一行(停止自动同步)',
+      // **标签只写动作,不写宾语。** 菜单是从某一行的按钮弹出来的,「这一行」和
+      // 「成就数量」都是当场看得见的上下文,写进标签就是把已经知道的事又说一遍。
+      // 「会连带上锁」同理留在 title 里:锁图标当场亮起来已经说明了这件事
+      item('编辑', '', game.manual ? '' : '会同时锁定这一行(停止自动同步)',
         function(){ startManualEdit(appid); });
-      item('删除这一行', 'danger', '', function(){ deleteGameFlow(appid); });
+      item('删除', 'danger', '', function(){ deleteGameFlow(appid); });
 
       rowMenu.hidden = false;
       const r = btn.getBoundingClientRect();
