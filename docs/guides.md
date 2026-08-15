@@ -10,7 +10,7 @@ A guide is any page whose body starts with a line like `appid: 3117820`. That's 
 
 Those pages live in a Notion **database**, not a plain page. The tool reads it with `GET /databases/{id}` and `POST /databases/{id}/query`, so handing it a page ID — or a view ID, or a pasted URL — fails with a 404 that looks exactly like a permissions problem.
 
-**One-time setup:**
+**One-time setup** — there is an illustrated Chinese walkthrough in [notion-setup.md](notion-setup.md), written for someone doing this from the app's settings page rather than the CLI. The short version:
 
 1. Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations) and copy its secret.
 2. In Notion, open the page that will hold your guides → `•••` → **Connections** → add your integration. Child pages and databases inherit it. Without this every call returns 404.
