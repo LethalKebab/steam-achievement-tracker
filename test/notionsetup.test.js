@@ -21,7 +21,15 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { NotionClient, newGuideStatus, GUIDE_STATUS_OPTIONS } from '../lib/notion.js';
+import {
+  NotionClient,
+  newGuideStatus,
+  GUIDE_STATUS_OPTIONS,
+  inspectGuideDb,
+  repairGuideDb,
+  probeGuideDbWrite,
+  DB_PROBLEM,
+} from '../lib/notion.js';
 import { GUIDE_STATUS_DONE, GUIDE_STATUS_STAGED } from '../lib/guides.js';
 import { createApi } from '../lib/api.js';
 
@@ -192,5 +200,245 @@ describe('searchPages', () => {
     const c = stubSearch([[{ id: 'p1', parent: { type: 'workspace' }, url: 'u', properties: {} }]]);
     const { pages } = await c.searchPages();
     assert.equal(pages[0].title, '(无标题)');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 接库时的体检 + 修复
+// ---------------------------------------------------------------------------
+
+/**
+ * 这一段守的是**「配好了」这三个字必须说的是真话**。
+ *
+ * 在这之前 `saveNotionConfig` 只查 token 通不通、这个 ID 能不能查出行来,schema 一个字
+ * 不看 —— 属性、类型、选项全推迟到真写的时候才发现。而同一时期 `notion-check` 查得很全,
+ * 只是设置页从来没调过它。**两条路查的东西不一样,这才是那类 bug 的形状**;
+ * 缺一个选项只是症状。
+ *
+ * 修复那半边最危险的失败不是"改不了",是**"报告改好了、其实一个字没动"**。这不是假想:
+ * Notion 对 status 属性的 `groups` 就是无论建时传还是事后 PATCH 一律 200 + 原样不动。
+ * 所以下面每一条修复用例里,「PATCH 返回 200」都**不构成**成功的证据,回读才是。
+ */
+
+/** 一个能记账的假客户端。`patchDb` 决定 Notion 这次装成什么脾气 */
+function stubDb({
+  properties,
+  tokenFails = false,
+  dbFails = false,
+  patchDb = 'honors',
+  createFails = false,
+  archiveFails = false,
+} = {}) {
+  const c = new NotionClient({ notion: { token: 't', overviewDbId: 'db1' } });
+  c.log = [];
+  let current = properties;
+  c.request = async (method, path, payload) => {
+    c.log.push({ method, path, payload });
+    if (path === '/users/me') {
+      if (tokenFails) throw new Error('API token is invalid');
+      return { name: '我的工作区' };
+    }
+    if (method === 'get' && path.startsWith('/databases/')) {
+      if (dbFails) throw new Error('Could not find database');
+      return { id: 'db1', title: [{ plain_text: '攻略库' }], url: 'https://notion.so/db1', properties: current };
+    }
+    if (method === 'patch' && path.startsWith('/databases/')) {
+      const [prop, body] = Object.entries(payload.properties)[0];
+      const type = Object.keys(body)[0];
+      // 三种脾气。第二种是这个项目真撞过的那一种
+      if (patchDb === 'honors') current = { ...current, [prop]: { type, [type]: body[type] } };
+      else if (patchDb === 'clobbers')
+        current = { ...current, [prop]: { type, [type]: { options: [{ name: 'Staged' }] } } };
+      // 'silently-ignores':返回 200,current 一个字不动
+      return {};
+    }
+    if (method === 'post' && path === '/pages') {
+      if (createFails) throw new Error('API token does not have access to insert content');
+      return { id: 'pg1', url: 'https://notion.so/pg1' };
+    }
+    if (method === 'patch' && path.startsWith('/pages/')) {
+      if (archiveFails) throw new Error('conflict');
+      return {};
+    }
+    throw new Error(`意外的请求:${method} ${path}`);
+  };
+  return c;
+}
+
+const full = () => statusProps(GUIDE_STATUS_OPTIONS);
+const codes = (r) => r.problems.map((p) => p.code);
+const hitDb = (c) => c.log.filter((r) => r.path.startsWith('/databases/')).length;
+const pagesPosted = (c) => c.log.filter((x) => x.method === 'post' && x.path === '/pages');
+
+describe('inspectGuideDb —— 接库那一刻就把该问的问完', () => {
+  test('全绿的库:ok,一条毛病都没有', async () => {
+    const r = await inspectGuideDb(stubDb({ properties: full() }), 'db1');
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.workspace, '我的工作区');
+    assert.equal(r.database.title, '攻略库');
+  });
+
+  test('token 不通 → 就此打住,不再拿一个必然失败的 ID 去问库', async () => {
+    const c = stubDb({ properties: full(), tokenFails: true });
+    const r = await inspectGuideDb(c, 'db1');
+    assert.deepEqual(codes(r), [DB_PROBLEM.BAD_TOKEN]);
+    assert.equal(hitDb(c), 0, 'token 都不通了还去读库,只会多一条误导人的错误');
+  });
+
+  test('没填 ID → 单独一种毛病,不和「读不出库」混为一谈', async () => {
+    const c = stubDb({ properties: full() });
+    const r = await inspectGuideDb(c, '');
+    assert.deepEqual(codes(r), [DB_PROBLEM.NO_DB_ID]);
+    assert.equal(hitDb(c), 0);
+  });
+
+  test('库读不出来 → 两个修法不同的原因都要说出来', async () => {
+    const r = await inspectGuideDb(stubDb({ properties: full(), dbFails: true }), 'db1');
+    assert.deepEqual(codes(r), [DB_PROBLEM.DB_UNREADABLE]);
+    // 合成一句话的版本会把「填错 ID」的人赶去反复检查 Connections
+    assert.equal(r.problems[0].causes.length, 2);
+    assert.ok(r.problems[0].causes.some((s) => s.includes('不是数据库')));
+    assert.ok(r.problems[0].causes.some((s) => s.includes('Connections')));
+  });
+
+  test('缺选项 → error 级,报出缺哪些、还有哪些,并标成可修', async () => {
+    const c = stubDb({ properties: statusProps(['Not started', 'In progress', 'Done']) });
+    const r = await inspectGuideDb(c, 'db1');
+    assert.equal(r.ok, false);
+    assert.equal(r.fixable, true);
+    const p = r.problems.find((x) => x.code === DB_PROBLEM.MISSING_OPTIONS);
+    assert.deepEqual(p.missing, ['Staged']);
+    assert.deepEqual(p.have, ['Not started', 'In progress', 'Done']);
+    assert.equal(p.severity, 'error');
+  });
+
+  test('压根没有状态属性 → warn 而不是 error,ok 仍然是 true(这是合法配置)', async () => {
+    // 报成 error 会把一个能正常建攻略、能正常勾选的库说成坏的。
+    // 但也不能不吭声:默默关掉 guide-status,用户看到的是"状态永远不更新"
+    const c = stubDb({ properties: { Name: { type: 'title', title: {} } } });
+    const r = await inspectGuideDb(c, 'db1');
+    assert.equal(r.ok, true);
+    assert.equal(r.fixable, false, '没有属性不是补选项能解决的,标成可修等于按钮按下去什么都不发生');
+    const p = r.problems.find((x) => x.code === DB_PROBLEM.NO_STATUS_PROP);
+    assert.equal(p.severity, 'warn');
+    assert.deepEqual(p.wanted, GUIDE_STATUS_OPTIONS);
+  });
+
+  test('没有标题属性 → error(建页会被 400,而那个 400 看不出根因)', async () => {
+    const c = stubDb({ properties: { Status: { type: 'status', status: { options: [] } } } });
+    const r = await inspectGuideDb(c, 'db1');
+    assert.ok(codes(r).includes(DB_PROBLEM.NO_TITLE_PROP));
+    assert.equal(r.ok, false);
+  });
+});
+
+describe('inspectGuideDb 的试写 —— 只读体检看不出「只有读权限」', () => {
+  test('probeWrite 关着时一页都不建', async () => {
+    const c = stubDb({ properties: full() });
+    await inspectGuideDb(c, 'db1');
+    assert.equal(pagesPosted(c).length, 0);
+  });
+
+  test('试写通过 → 建一页、立刻归档,ok', async () => {
+    const c = stubDb({ properties: full() });
+    const r = await inspectGuideDb(c, 'db1', { probeWrite: true });
+    assert.equal(r.ok, true);
+    assert.equal(pagesPosted(c).length, 1);
+    const archive = c.log.find((x) => x.method === 'patch' && x.path.startsWith('/pages/'));
+    assert.equal(archive.payload.archived, true, '建了不归档就是在用户库里留垃圾');
+  });
+
+  test('只有读权限 → NO_WRITE,并指向 integration 的权限设置', async () => {
+    const c = stubDb({ properties: full(), createFails: true });
+    const r = await inspectGuideDb(c, 'db1', { probeWrite: true });
+    const p = r.problems.find((x) => x.code === DB_PROBLEM.NO_WRITE);
+    assert.ok(p, '这正是能一路绿灯、到建页才 403 的那类毛病');
+    assert.match(p.hint, /Insert content/);
+  });
+
+  test('归档失败 → 说出来并给出那一页的链接(留页面而不吭声更糟)', async () => {
+    const c = stubDb({ properties: full(), archiveFails: true });
+    const r = await inspectGuideDb(c, 'db1', { probeWrite: true });
+    const p = r.problems.find((x) => x.code === DB_PROBLEM.STRANDED_PROBE_PAGE);
+    assert.equal(p.severity, 'warn');
+    assert.equal(p.url, 'https://notion.so/pg1');
+  });
+
+  test('已经有 error 级毛病时不试写 —— 别往一个已知配错的库里塞页面', async () => {
+    const c = stubDb({ properties: statusProps(['Not started']) });
+    await inspectGuideDb(c, 'db1', { probeWrite: true });
+    assert.equal(pagesPosted(c).length, 0);
+  });
+
+  test('选项不齐时试写不带状态 —— 否则「没写权限」和「缺选项」会混成一条错误', async () => {
+    const c = stubDb({ properties: statusProps(['Not started']) });
+    const schema = {
+      titleProperty: 'Name',
+      status: { property: 'Status', type: 'status', options: ['Not started'] },
+    };
+    await probeGuideDbWrite(c, 'db1', schema);
+    assert.equal(pagesPosted(c)[0].payload.properties.Status, undefined);
+  });
+
+  test('选项齐全时试写会带上状态 —— 试写要走通下游真正那条路', async () => {
+    const c = stubDb({ properties: full() });
+    const schema = {
+      titleProperty: 'Name',
+      status: { property: 'Status', type: 'status', options: [...GUIDE_STATUS_OPTIONS] },
+    };
+    await probeGuideDbWrite(c, 'db1', schema);
+    assert.equal(pagesPosted(c)[0].payload.properties.Status.status.name, newGuideStatus(undefined));
+  });
+});
+
+describe('repairGuideDb —— 200 不是成功的证据,回读才是', () => {
+  const threeOfFour = () => statusProps(['Not started', 'In progress', 'Done']);
+
+  test('Notion 认账 → 报出补上了哪些,ok', async () => {
+    const r = await repairGuideDb(stubDb({ properties: threeOfFour() }), 'db1');
+    assert.equal(r.ok, true);
+    assert.equal(r.reason, 'repaired');
+    assert.deepEqual(r.added, ['Staged']);
+    assert.deepEqual(r.stillMissing, []);
+  });
+
+  test('PATCH 返回 200 但一个字没动 → 必须报失败', async () => {
+    // 这个仓库真撞过:status 的 groups 就是这么被静默吞掉的。信 200 的话,
+    // 用户按了按钮、看到成功、下次 guide-gen 照样被拦 —— 而且更难查了
+    const r = await repairGuideDb(stubDb({ properties: threeOfFour(), patchDb: 'silently-ignores' }), 'db1');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'silently-ignored');
+    assert.deepEqual(r.stillMissing, ['Staged']);
+  });
+
+  test('把已有选项冲掉了 → 报 clobbered,这比没修好严重得多', async () => {
+    const r = await repairGuideDb(stubDb({ properties: threeOfFour(), patchDb: 'clobbers' }), 'db1');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'clobbered');
+    assert.deepEqual(r.clobbered, ['Not started', 'In progress', 'Done']);
+  });
+
+  test('只增不减:发出去的载荷必须原样带着全部已有选项', async () => {
+    const c = stubDb({ properties: threeOfFour() });
+    await repairGuideDb(c, 'db1');
+    const patch = c.log.find((x) => x.method === 'patch' && x.path.startsWith('/databases/'));
+    const sent = patch.payload.properties.Status.status.options.map((o) => o.name);
+    assert.deepEqual(sent, ['Not started', 'In progress', 'Done', 'Staged']);
+  });
+
+  test('本来就齐 → 一个 PATCH 都不发', async () => {
+    const c = stubDb({ properties: full() });
+    const r = await repairGuideDb(c, 'db1');
+    assert.equal(r.reason, 'nothing-to-do');
+    assert.equal(c.log.filter((x) => x.method === 'patch').length, 0);
+  });
+
+  test('没有状态属性 → 不发 PATCH,如实说这不是补选项能解决的', async () => {
+    const c = stubDb({ properties: { Name: { type: 'title', title: {} } } });
+    const r = await repairGuideDb(c, 'db1');
+    assert.equal(r.ok, false);
+    assert.equal(r.reason, 'no-status-prop');
+    assert.equal(c.log.filter((x) => x.method === 'patch').length, 0);
   });
 });

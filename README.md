@@ -30,7 +30,11 @@ Either way, you'll need two things from Steam, both one-time:
 
 The build is unsigned, so the first launch shows *"Windows protected your PC"*. Click **More info → Run anyway**; it doesn't appear on later launches.
 
-**Updating:** close the app, then unzip the new release into the same folder and replace files when asked. The zip contains program files only — your `config.json` and `data/` are not in it and are left alone. To keep a copy first, those two are the whole of your data.
+**Updating:** from 1.1.4 the app does it itself — it checks for a new version shortly after launch and then once a day, and offers to download, replace and restart. The prompt has a "don't remind me about this version" checkbox; to turn checking off entirely, put `"autoUpdate": false` in `local.config.json` next to the exe.
+
+Updating by hand still works and is the only way to make the jump *to* 1.1.4, since older builds have no updater in them: **quit from the tray icon** (closing the window only hides it, and Windows won't replace a running program), then unzip the new release into the same folder and replace files when asked.
+
+Either way your data is untouched — the zip contains program files only, and `config.json` and `data/` are not in it. Those two are the whole of your data if you want a copy first.
 
 Until credentials are saved, a form is served in place of the Dashboard: the same two fields above, checked against Steam before anything is written. Save it and the Dashboard opens, with the first sync running in the background. Every later launch goes straight to the Dashboard.
 
@@ -88,7 +92,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `checkbox-sync` | Ticks them | Steam + Notion |
 | `guide-status` | Aligns guide page status with completion | Notion |
 | `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
-| `notion-check` | Checks the Notion side: token, database, status options, page count. Writes nothing | Notion |
+| `notion-check` | Checks the Notion side: token, database, title property, status options, page count. Writes nothing unless you pass `--fix` (append missing options) or `--probe-write` (create + archive one page to prove write access) | Notion |
 | `ai-check` | Checks the AI provider and that its web search really works | AI provider |
 | `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
 | `guide-gen <appid> --overwrite` | Regenerates over an existing guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |

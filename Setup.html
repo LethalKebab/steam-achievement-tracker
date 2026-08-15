@@ -16,6 +16,14 @@
     --border: #2a3f5a;
   }
   * { box-sizing: border-box; }
+  /* **`hidden` 属性必须真的隐藏。** 浏览器自带的 `[hidden] { display: none }` 来自
+     user-agent 样式表,而作者样式表里**任何**一条 `display:` 都比它优先 —— 所以
+     `.steps { display: flex }` 和 `.step-actions { display: flex }` 各自悄悄让自己
+     那个元素的 `hidden` 变成了装饰。三处中招(这里两处,Dashboard 的 #gallery 一处),
+     而且都不出声:JS 照常设 `.hidden = true`,元素照常显示。
+     逐个补 `.x[hidden]` 是打地鼠 —— 下一条带 display 的规则又会开一个新洞。
+     一条全局规则让这一类从构造上消失,`!important` 就是为了压住后来任何一条 display。 */
+  [hidden] { display: none !important; }
   body {
     margin: 0;
     min-height: 100vh;
@@ -135,7 +143,6 @@
   .steps li.current { color: var(--accent); border-bottom-color: var(--accent); }
   .steps li.clickable { cursor: pointer; }
   .steps li.clickable:hover { color: var(--text); }
-  .step[hidden] { display: none; }
   .step-title { font-size: 14px; font-weight: 600; color: #fff; margin: 0 0 6px; }
   .step-title .tag { font-size: 11px; font-weight: 400; margin-left: 6px; }
   .step-title .tag.req { color: var(--low); }
@@ -237,6 +244,91 @@
     const form = document.getElementById('setup-form');
     const btn = document.getElementById('submit-btn');
     const msg = document.getElementById('msg');
+
+    /**
+     * 把体检结果就地摊开,**并且不跳转**。
+     *
+     * 能自动补的只有「缺状态选项」一种,所以只有一个修复按钮 —— 摆一排看起来差不多的
+     * 控件,等于让人在不懂的事情上做选择。另一个按钮不是它的近义词:一个是修,
+     * 一个是"知道了,先用着"。
+     *
+     * 补完不直接显示成功,而是**重跑一遍体检**:这次修复到底有没有落地,只能由回读回答
+     * (Notion 对 status 属性有收下请求却一个字不动的先例),按钮自己说了不算。
+     *
+     * 用 DOM 拼不用 innerHTML —— 这里的文字里混着 Notion 回来的错误内容和数据库标题。
+     */
+    function showNotionProblems(problems, fixable, done) {
+      const worst = problems.some((p) => p.severity === 'error') ? 'error' : 'ok';
+      msg.className = 'msg ' + worst;
+      msg.textContent = '';
+
+      const head = document.createElement('div');
+      head.textContent =
+        (done && done.length ? done.join(';') + '。' : '') + '配置已保存,但这个库还有问题:';
+      msg.appendChild(head);
+
+      const list = document.createElement('ul');
+      for (const p of problems) {
+        const li = document.createElement('li');
+        li.textContent = (p.severity === 'error' ? '❌ ' : '⚠️ ') + p.message;
+        for (const c of p.causes || []) {
+          const sub = document.createElement('div');
+          sub.textContent = '· ' + c;
+          li.appendChild(sub);
+        }
+        if (p.hint) {
+          const sub = document.createElement('div');
+          sub.textContent = p.hint;
+          li.appendChild(sub);
+        }
+        if (p.url) {
+          const a = document.createElement('a');
+          a.href = p.url;
+          a.target = '_blank';
+          a.rel = 'noreferrer';
+          a.textContent = p.url;
+          li.appendChild(a);
+        }
+        list.appendChild(li);
+      }
+      msg.appendChild(list);
+
+      const bar = document.createElement('div');
+      if (fixable) {
+        const fix = document.createElement('button');
+        fix.type = 'button';
+        fix.textContent = '帮我补上';
+        fix.onclick = async () => {
+          fix.disabled = true;
+          fix.textContent = '补…';
+          const r = await call('repairNotionGuideDb', []);
+          if (r.error) {
+            fix.disabled = false;
+            fix.textContent = '帮我补上';
+            const why = document.createElement('div');
+            why.textContent = '❌ ' + r.error;
+            bar.appendChild(why);
+            return;
+          }
+          // 重跑体检,让"补好了"这句话由回读来说
+          const again = await call('saveNotionConfig', ['', $('notion-db').value.trim()]);
+          if ((again.problems || []).length) {
+            showNotionProblems(again.problems, again.fixable, []);
+          } else {
+            msg.className = 'msg ok';
+            msg.textContent = '✅ 补上了 ' + (r.added || []).join(' / ') + ',这个库现在可用了。';
+            setTimeout(() => { window.location.href = '/'; }, 1500);
+          }
+        };
+        bar.appendChild(fix);
+      }
+      const skip = document.createElement('button');
+      skip.type = 'button';
+      skip.textContent = '先这样,进 Dashboard';
+      skip.onclick = () => { window.location.href = '/'; };
+      bar.appendChild(skip);
+      msg.appendChild(bar);
+    }
     const $ = (id) => document.getElementById(id);
 
     const call = async (method, args) => {
@@ -258,7 +350,16 @@
     let loadedNotionDb = '';
 
     (async function load() {
-      const s = await call('getSettings', []);
+      // **`call` 会抛,不只是返回 `{error}`。** 下面那条 `if (s.error)` 只挡住"服务器
+      // 回了个错误";服务器还没起来时 `fetch` 是直接 reject 的,那条兜底根本轮不到。
+      // 而 `initSteps()` 没跑 = 一个按钮都没收起来,页面上同时摆着「下一步」和
+      // 「保存并验证」—— 打包版里 Electron 先开窗口再等子进程,正好撞这个窗口期。
+      let s;
+      try {
+        s = await call('getSettings', []);
+      } catch {
+        s = { error: 'unreachable' };
+      }
       // 读设置失败也要把分步装起来 —— 否则导航条不出现、四节里只有第一节可见,
       // 页面看着像坏了。降级成"首次设置"那套是安全的默认
       if (s.error) { initSteps(); return; }
@@ -513,6 +614,13 @@
               ? 'Notion token 可用'
               : `Notion 可用(数据库里 ${r.pageCount} 个页面)`
           );
+          // 体检有话说就**停在这一页**。配置已经存下来了(ID 本身是对的),但直接跳走
+          // 等于把「这个库还不能用」藏进一条 4 秒后消失的绿条,而那条毛病下一次露面
+          // 就是几天后 guide-gen 被拦的时候 —— 正是这次要消灭的那个时间差
+          if ((r.problems || []).length) {
+            showNotionProblems(r.problems, r.fixable, done);
+            return;
+          }
         }
 
         msg.className = 'msg ok';
