@@ -248,26 +248,17 @@
         var(--bg);
       margin: calc(var(--page-pad) * -1) calc(var(--page-pad) * -1) var(--s5);
       padding: var(--s5) var(--page-pad) var(--s4);
-    }
-
-    /* 顶栏底边:**原来是一条 1px 的静态分隔线,现在是整个库的完成度**。
-       想让顶部更丰富,先用已经占着位置的东西 —— 这条线一个像素都没多占,
-       却从「一条边框」变成了这一页最想说的那个数。
-       它压在顶栏的下沿,同步扫线(.topbar::after)画在它上面,两者不抢位置 */
-    .topbar-progress {
-      position: absolute;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      height: 2px;
-      background: var(--line-2);
-    }
-    .topbar-progress span {
-      display: block;
-      height: 100%;
-      width: 0;                /* JS 填进来,数据没到之前是空的,不是满的 */
-      background: linear-gradient(90deg, rgba(102, 192, 244, 0.55), var(--accent));
-      transition: width 600ms var(--ease);
+      /* 底边就是一条分隔线,不再是读数。**这里曾经是整库完成率(AGCR)的进度条**,
+         2026-08-16 拆掉:那个数在一个几百款游戏的库里一天动不了零点几个百分点,
+         所以它永远是一条填了三分之一的槽 —— 一个不会变的进度条只会一直在说
+         「还没做完」,而它想表达的其实是「你已经打到这儿了」。读数没丢,
+         「平均完成率」在上面的 readout 里照常有数字版;
+         去掉的是那个把它画成"离满还差多远"的形状。**不要再把它做回进度条**。
+         边框而不是绝对定位的子元素:分隔线是顶栏的一部分,不是叠在它上面的东西,
+         而且 offsetHeight 会算上边框,--topbar-h 因此自动跟着对。
+         **令牌是 --line-3 而不是进度条那会儿的 --line-2**:三级线各有各的活,
+         进度槽是个控件面(2),而这里回到了「换了一块区域」的区块边界(3) */
+      border-bottom: 1px solid var(--line-3);
     }
     /* 标题行:标题在左,读数带贴右。整行可换行 —— 窄屏上读数带整条掉到标题下面 */
     .title-row {
@@ -319,9 +310,13 @@
     .topbar::after {
       content: '';
       position: absolute;
-      bottom: 0;             /* 压在下沿那条完成度线上,同高,盖得住 */
+      /* **-1px 不是微调**:绝对定位的 bottom 是对着*内边距盒*算的,而 1px 的
+         border-bottom 画在它外面。差这一像素,扫线就悬在分隔线上方,同步时
+         下沿变成"两条线",而不是原来那条线自己亮起来。往下挪一像素,2px 的
+         扫线正好把 1px 的分隔线整个盖住 —— 顶栏底边始终只有一条 */
+      bottom: -1px;
       left: 0;
-      z-index: 1;            /* .topbar-progress 是普通子元素,扫线要在它上面 */
+      z-index: 1;            /* 边框画在父元素自己那层,定位子元素才压得住它 */
       width: 35%;
       height: 2px;
       background: linear-gradient(90deg, transparent, var(--accent), transparent);
@@ -1238,7 +1233,6 @@
       /* 不动的话状态仍然看得见,只是不扫、不转、不放大 */
       .topbar.syncing::after { animation: none; width: 100%; opacity: 0.6; }
       .icon-btn.spinning .icon-glyph { animation: none; }
-      .topbar-progress span { transition: none; }
       .g-card, .g-card:hover, .g-card img, .g-card:hover img {
         transition: none;
         transform: none;
@@ -1388,17 +1382,6 @@
         </span>
       </div>
     </div>
-    <!--
-      顶栏底边那条线,现在是**整个库的完成度**。
-
-      它原来是一条 1px 的静态边框,纯粹分隔用。做成进度条之后这块地方开始说一件事,
-      而且**不多占一个像素的高度** —— 想让上面更丰富,先用已经在那儿的东西。
-      画的是 readout 里「平均完成率」那个数,所以它不是新信息,是那个数字的形状;
-      数字回答"多少",这条线回答"离满还有多远",看一眼就懂,不用读。
-
-      `aria-hidden`:同一个值旁边已经有文字版了,读屏再念一遍是噪音。
-    -->
-    <div class="topbar-progress" aria-hidden="true"><span id="libProgress"></span></div>
   </div>
 
   <div id="gen-bar" role="status">
@@ -2446,11 +2429,6 @@
         allGames = data.games;
         // cardTotal 由 render() 独占 —— 它才知道筛选结果
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
-        // 顶栏下沿那条完成度线。**用 data.avg 这个原始比值,不要去 parse avgRounded** ——
-        // 那是给人读的字符串,拿它当数据源等于把这条线的正确性押在显示格式上。
-        // 值缺席时画 0 而不是不动:上一次的宽度留在那儿,看起来像一个还活着的读数
-        const avg = typeof data.avg === 'number' ? data.avg : 0;
-        document.getElementById('libProgress').style.width = (avg * 100).toFixed(2) + '%';
         document.getElementById('cardPerfect').textContent = data.perfectCount;
         document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
         renderBell();
