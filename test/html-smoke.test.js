@@ -26,7 +26,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { Script } from 'node:vm';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -420,5 +420,60 @@ describe('loadAiState 落地后只重绘', () => {
     const i = js.indexOf('notionReady = Boolean(');
     const block = js.slice(i, js.indexOf('})();', i));
     assert.match(block, /allGames\.length/, '没有 allGames.length 守卫,先到的 getSettings 会画出一张空表');
+  });
+});
+
+/**
+ * 自托管字体
+ * ------------------------------------------------
+ * 这一组守的是**静默降级**:字体链接写错、文件没跟着走、打包过滤器漏了 assets ——
+ * 四种情况没有一种会报错。页面照常渲染,只是悄悄退回系统字体,而那正是自带字体
+ * 要解决的问题本身(换台机器就变样,且 600/650/700 在中文里塌成一档)。
+ *
+ * 打包那一条尤其值得钉:它**只在打包版失效**,`npm start` 永远看着是好的 ——
+ * 和 CLAUDE.md 里 `icon.ico`、`updater.js` 踩过的是同一个坑。
+ */
+describe('自托管字体', () => {
+  const FONT_CSS = 'assets/fonts/noto-sans-sc.css';
+
+  for (const page of ['Dashboard.html', 'Setup.html']) {
+    test(`${page} 链接了字体样式表`, () => {
+      assert.match(
+        read(page),
+        /<link[^>]+href="\/fonts\/noto-sans-sc\.css"/,
+        `${page} 没有链接 /fonts/noto-sans-sc.css —— 页面会静默退回系统字体`
+      );
+    });
+
+    test(`${page} 的 --font-ui 排在自带字体第一位`, () => {
+      // 兜底栈留着是对的,但自带的那个必须在最前面,否则装了 Segoe UI 的机器
+      // 依旧走系统字体,自托管等于白做
+      const m = read(page).match(/--font-ui:\s*([^;]+);/);
+      assert.ok(m, `${page} 的 :root 里没有 --font-ui`);
+      assert.match(m[1].trim(), /^"Noto Sans SC Variable"/,
+        `${page} 的 --font-ui 没把自带字体排在第一位:${m[1].trim()}`);
+    });
+  }
+
+  test('字体样式表存在,且每个 woff2 分片都在', () => {
+    const css = read(FONT_CSS);
+    const urls = [...css.matchAll(/url\(\.\/([^)]+\.woff2)\)/g)].map((m) => m[1]);
+    assert.ok(urls.length > 50, `分片数看着不对(${urls.length}),Noto Sans SC 应该有 100 上下`);
+    const missing = urls.filter((u) => !existsSync(join(ROOT, 'assets', 'fonts', u)));
+    assert.deepEqual(missing, [],
+      `这些 @font-face 指向的文件不存在,对应字符会静默掉回系统字体:${missing.slice(0, 5).join(', ')}`);
+  });
+
+  test('OFL 要求随附协议文件', () => {
+    assert.ok(existsSync(join(ROOT, 'assets', 'fonts', 'LICENSE')),
+      'Noto Sans SC 是 OFL-1.1,协议要求分发时随附 LICENSE,而这个仓库是公开的');
+  });
+
+  test('打包过滤器带上了 assets/(漏了只有打包版会出问题)', () => {
+    const pkg = JSON.parse(read('launcher/package.json'));
+    const filter = pkg.build.extraResources[0].filter;
+    assert.ok(filter.includes('assets/**/*'),
+      'launcher/package.json 的 extraResources 过滤器没有 assets/**/*,'
+      + '打包版会没有字体 —— 而 npm start 一切正常,所以这个漏掉不会被发现');
   });
 });

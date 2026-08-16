@@ -7,6 +7,11 @@
        Electron 里页面的 <title> 会盖掉窗口的初始 title,写成两个不同的名字
        会让打包版的窗口标题在页面加载完的瞬间跳一下 -->
   <title>Steam 成就追踪器</title>
+  <!-- 自托管的 Noto Sans SC Variable(见 :root 的 --font-ui)。**外链而不是内嵌**:
+       这是唯一一份两页共用的样式表,而设计令牌那套仍然各存一份 —— 区别在于字体
+       是 101 个 @font-face、近 100KB,复制两份既无意义又是第二个会漂移的地方,
+       而令牌必须内联(零依赖时代留下的规矩,html-smoke 的比对就是为它写的)。 -->
+  <link rel="stylesheet" href="/fonts/noto-sans-sc.css">
   <style>
     /* ========================================================================
        设计令牌
@@ -42,9 +47,24 @@
       --line-3: rgba(150, 180, 216, 0.28);
 
       /* ---- 文字:三级 ---------------------------------------------------- */
-      --text:   #dce6f2;   /* 正文 */
-      --text-2: #98a9be;   /* 次要:标签、说明、表头 */
-      --text-3: #6d7f95;   /* 三级:占位、禁用、时间戳 */
+      /* 三级都必须在**四个表面上**都过 WCAG AA(4.5:1)。这不是可选的润色:
+         上一版的 --text-3 (#6d7f95) 在 --bg 上 4.46、--surface 上 3.95、
+         --surface-2 上 3.43、--surface-3 上只有 2.94 —— 而它承载的不是
+         「占位、禁用、时间戳」,是表头、「无成就系统」这个数据值、攻略/重写
+         按钮的标签、以及 #gen-bar 的警告文字。**警告文字曾经是全页最不可读的一处。**
+
+         取值是在 OKLCH 里算的(色相 253.6),不是手调的十六进制:
+         --surface-3 (L=0.333) 上要够 4.5:1,文字的 L 至少 0.698,而 --text 在
+         L=0.921 —— **三级文字总共只有 0.223 的亮度余量**。旧阶梯的步长是
+         0.192 / 0.139(本来就不匀),挤进 0.223 之后只能等分:0.110 / 0.111。
+         写进这里的仍是十六进制,OKLCH 只用来算,不构成任何运行时依赖。
+
+         **只调三级、不动二级是不行的**(那是评审时的方案 A):三级被顶到 AA 下限
+         之后会贴到二级身上,感知差从 0.139 掉到 0.028,两档并成一档。
+         要么三级一起重排,要么就别改。 */
+      --text:   #dce6f2;   /* 正文 —— 未变;它离表面最远,本来就够 */
+      --text-2: #b4c3d5;   /* 次要:标签、说明、表头。原 #98a9be */
+      --text-3: #8ea0b6;   /* 三级:占位、禁用、时间戳。原 #6d7f95,最低 4.51 */
       --text-hi: #ffffff;  /* 标题和强调行 */
 
       /* ---- 强调色:Steam 蓝,保留 ---------------------------------------- */
@@ -67,6 +87,26 @@
       --ok:     #8cc63f;
       --warn:   #e0a63f;
       --danger: #e0685e;
+
+      /* ---- 字体 ----------------------------------------------------------
+         **自带字体,不再靠系统兜底。** 之前是 "Segoe UI" 打头再让系统接中文,
+         结果有两个,都是实测出来的:
+
+           1. 中文到底用了哪个字体,说不准。这台机器上它既不是微软雅黑
+              (墨量曲线对不上),也不是栈里明写的 Noto Sans SC —— 换台机器就是
+              另一副样子,而整页的字号、字距、行高都是照着其中一副调的。
+           2. **600 / 650 / 700 在中文里是同一档。** 用 canvas 量「成」字的墨量:
+              300→2116、400→3120、500→3776,然后 600/650/700 全部 4517。
+              而 .wordmark 是 700、h1 是 650、.ach-name/.badge 是 600 ——
+              设计系统里声明了三档,中文里只渲染出一档。
+
+         Noto Sans SC Variable 两条都解决:自己带着走,而且是 100–900 的可变轴,
+         三档是真三档。按 unicode-range 切成 101 片,浏览器只取用得上的那几片。
+         后面的旧字体栈留着当兜底 —— 万一 /fonts/ 没伺服起来,页面仍然可读。
+
+         **这一条必须在两个页面里一致**,所以它是令牌;html-smoke.test.js 的
+         :root 比对会盯着它,免得哪天只改了一页。 */
+      --font-ui: "Noto Sans SC Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif;
 
       /* ---- 字号:六级 ----------------------------------------------------
          原来有 11/12/13/15/17/18/22/28 八个值,彼此没有比例关系。 */
@@ -131,7 +171,7 @@
 
     body {
       margin: 0;
-      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif;
+      font-family: var(--font-ui);
       font-size: var(--fs-md);
       background: var(--bg);
       color: var(--text);
@@ -150,6 +190,22 @@
       border-radius: var(--r-sm);
     }
 
+    /* 全局按下反馈。**整个文件里原来一个 `:active` 都没有** —— 每个按钮都写了
+       hover,却没有一个在按下时给回应,而这是个每天要点几十次锁定/收藏/攻略的工具。
+       和焦点环一样挂在全局:按下位移是所有可点元素的共同语言,逐个组件写只会漏。
+
+       用 translate 而不是改 padding/margin:前者只走合成器,不触发重排 ——
+       几百行的表格里,按一下就重排整页是看得出来的。
+       `.g-card` 不在此列,它的 hover 已经是 translateY(-3px),再叠一层会打架。 */
+    button:active:not(:disabled),
+    .icon-btn:active,
+    .guide-btn:active:not(:disabled),
+    .badge-btn:active,
+    .row-icon:active,
+    .add-game-btn:active:not(:disabled) {
+      transform: translateY(1px);
+    }
+
     h1 {
       font-size: var(--fs-display);
       font-weight: 650;
@@ -161,11 +217,23 @@
     }
 
     /* ========================================================================
-       标题的配色和下划线
+       标题
        ------------------------------------------------------------------------
-       **这里保留的是配色和那道线,不是之前那整套字标。** 手写体、手绘徽记、墨迹滤镜
-       三次尝试都撤掉了(原因见 CLAUDE.md 里那一行),剩下的这两样不依赖任何特殊字体、
-       不做任何图形近似 —— 只是把一句话分成三个角色,再在底下画一道线。
+       **层级由字重扛,颜色只标关键词。** 一句话分三个角色:平台名(STEAM,细、
+       拉开、暗)、关键词(成就,强调色)、其余(追踪器)。
+
+       字重差是 2026-08-16 换自托管字体之后才成立的 —— 在那之前中文的
+       600/650/700 渲染出来是同一档(见 :root 的 --font-ui),想让 STEAM 退下去
+       只有「调暗」一条路,而调暗就撞对比度下限。现在 800 对 500 是真的三档差。
+
+       **没有下划线,也不要再加回来。** 那道两笔 SVG 手绘线 2026-08-16 撤掉了:
+       字重差已经把主次说清楚了,再加一道装饰线就是同一件事说两遍,而且它是整个
+       顶栏唯一一处手绘图形 —— 旁边的图标全是 24 格规整描边,它跟谁都不像。
+       撤线之后 `.wm-text` 不再需要 position: relative(它只为那条绝对定位的线存在)。
+
+       **不要再尝试「画」这个字标。** 手写体字体、手绘 SVG 字形、位图描边三次都失败过,
+       原因和教训见 CLAUDE.md —— 一句话:字形的正确性属于字体,任何重画 CJK 笔画的
+       做法都是在重跑那三次。
 
        字号写在 `.wordmark` 上而**不动 `--fs-display`**:那个令牌和 Setup.html 逐字
        共用,跟着变会把设置页那个普通标题平白撑大一圈。
@@ -174,20 +242,29 @@
       display: flex;
       align-items: center;
       font-size: 27px;
-      font-weight: 700;
-      /* 短标题的中文稍微放一点字距更稳;负字距是给紧排拉丁大字用的,汉字不适用 */
-      letter-spacing: 0.03em;
+      /* 800 而不是 900:这个字标只在 27px 出现,900 的汉字在这个尺寸上开始并笔,
+         放大了好看不算数 */
+      font-weight: 800;
+      /* 短标题的中文稍微放一点字距更稳;负字距是给紧排拉丁大字用的,汉字不适用。
+         字重加到 800 之后笔画更满,字距比原来(0.03em)收一点才不显拥挤 */
+      letter-spacing: 0.02em;
       font-family: inherit;   /* 就是 body 那一栈,和表格里的中文同源 */
     }
-    /* 「Steam」是平台名,不是产品名 —— 压小、拉开、变暗,让中文当主角。
-       **但不能按字号直觉去压。** 汉字几乎填满整个字身框,拉丁大写只到 cap-height
-       (约 0.7 个 em),所以同样 px 下拉丁看着就小一截。原来写 0.56em,STEAM 的
-       大写高度只有约 10.6px,而汉字有约 24px —— 差了一倍还多,读起来像个说明文字
-       而不是标题的一部分。0.74em 是逐档比出来的:再大(0.82)就开始和中文抢主角 */
+    /* 「Steam」是平台名,不是产品名 —— 压小、拉开、**变细**,让中文当主角。
+
+       「变细」是这里唯一改过的手段,而且改得有理由:原来是 600(比主体只轻一档),
+       靠 --text-3 的暗色往后退。那个令牌为了过 AA 调亮之后,STEAM 就比设计意图
+       抢戏了 —— 而**再调暗回去就是走回对比度失败**。500 让它靠字重后退,颜色不必
+       再兼职做层级,两件事各归各的。
+
+       **字号 0.74em 不要动。** 汉字几乎填满整个字身框,拉丁大写只到 cap-height,
+       所以同样 px 下拉丁看着小一截;0.74em 是当年逐档比出来的。换成自托管字体之后
+       复测过:拉丁大写高度与汉字墨高之比是 0.593,换之前约 0.58,差不到两个百分点 ——
+       **它扛过了换字体,不需要重新校准。** */
     .wm-latin {
       font-size: 0.74em;
-      font-weight: 600;
-      letter-spacing: 0.14em;
+      font-weight: 500;
+      letter-spacing: 0.15em;
       text-transform: uppercase;
       color: var(--text-3);
       margin-right: 0.42em;
@@ -195,34 +272,8 @@
     }
     /* 「成就」是这个工具的关键词,给它强调色。整句全白太平,全上色又太吵 */
     .wm-key { color: var(--accent); }
-    .wm-text { position: relative; display: inline-block; white-space: nowrap; }
-    /*
-      名字底下那道线。**两笔,不是一笔** —— 一条实的加一条更淡、更短、错开一点的,
-      看起来才像马克笔来回描了两遍;单独一条无论画得多歪都还是"一条下划线"。
-
-      preserveAspectRatio="none" 让它横向拉伸到和文字一样宽(文字多长都贴合),
-      而 vector-effect="non-scaling-stroke" 保证被拉伸时**笔画不跟着变粗** ——
-      少了它,这道线在长标题下会粗得像一条色带。
-    */
-    .wm-rule {
-      position: absolute;
-      left: 0.1em;
-      bottom: -0.16em;
-      /* **宽度必须写死成百分比,不能靠 left + right 撑。** <svg> 是替换元素,
-         `width: auto` 会去用 viewBox 的固有比例(240:9)乘高度算宽,把 left/right
-         的约束整个忽略掉 —— 实测在 376px 的标题下只画到 248px,线停在词中间,
-         看着像 bug 不像笔法 */
-      width: calc(100% - 0.2em);
-      height: 0.3em;
-      overflow: visible;
-      fill: none;
-      stroke: var(--accent);
-      stroke-width: 2;
-      stroke-linecap: round;
-      pointer-events: none;
-    }
-
-
+    /* 不再需要 position: relative —— 它当初只是给那条绝对定位的下划线当锚点 */
+    .wm-text { display: inline-block; white-space: nowrap; }
 
     /* ========================================================================
        顶栏
@@ -868,12 +919,24 @@
     .badge-played { background: var(--accent-soft); color: var(--accent); }
     .badge .ic, .badge-btn .ic { font-size: var(--fs-sm); }
 
-    .badge-btn { cursor: pointer; background: none; transition: all var(--dur-1); }
-    .badge-btn:hover { opacity: 0.85; }
+    /* **悬停不能让它变暗。** 这里原来是一条 `.badge-btn:hover { opacity: 0.85 }`,
+       对「已开启」的两档来说,唯一的 hover 效果就是**淡下去** —— 指到一个能点的
+       东西上,它反而更难看清了,方向是反的。(`-off` 那档还算凑合,因为另一条规则
+       把字提到了 --text-2,但仍要再乘 0.85。)
+       现在每档各给一个**加深底色**的 hover,一律往「更清楚」的方向走。
+       transition 也从 `all` 收敛成三个具体属性 —— `all` 会把后来加的任何属性
+       都卷进过渡,包括上面那条 :active 的 transform,按下去就会拖一下才落位。 */
+    .badge-btn {
+      cursor: pointer;
+      background: none;
+      transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
+    }
     .badge-btn-on { background: rgba(224, 166, 63, 0.14); color: var(--warn); }
+    .badge-btn-on:hover { background: rgba(224, 166, 63, 0.26); }
     .badge-btn-off { border-color: var(--line-2); color: var(--text-3); }
-    .badge-btn-off:hover { border-color: var(--line-3); color: var(--text-2); }
+    .badge-btn-off:hover { border-color: var(--line-3); color: var(--text); background: rgba(255, 255, 255, 0.05); }
     .badge-btn-family-on { background: var(--accent-soft); color: var(--accent); }
+    .badge-btn-family-on:hover { background: rgba(102, 192, 244, 0.26); }
 
     .manual-input {
       width: 60px;
@@ -1340,9 +1403,9 @@
 
   <div class="topbar">
     <div class="title-row">
-      <!-- 「Steam」是平台、「成就」是关键词、「追踪器」是名词,三个角色三种处理。
-           下面那道线是两笔 SVG,不是 text-decoration —— 后者只能画一条等粗的直线 -->
-      <h1 class="wordmark"><span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key">成就</span>追踪器<svg class="wm-rule" viewBox="0 0 240 9" preserveAspectRatio="none" aria-hidden="true"><path d="M2 5.4c33-2.9 66-3.8 99-2.6 27 1 54 2.4 79 .5" vector-effect="non-scaling-stroke"/><path d="M11 7.8c38-2.1 76-2.5 114-1.3" vector-effect="non-scaling-stroke" opacity=".42"/></svg></span></h1>
+      <!-- 「Steam」是平台、「成就」是关键词、「追踪器」是名词,三个角色三种处理:
+           字重、强调色、常规。**没有下划线**,理由见样式表里 .wordmark 那一段 -->
+      <h1 class="wordmark"><span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key">成就</span>追踪器</span></h1>
       <!-- 精确值和口径放在 title 里(悬停可读),不占屏幕 -->
       <div class="readout">
         <!-- **恒定是库里的总数,不跟筛选走。** 筛选后的数量属于那张表,

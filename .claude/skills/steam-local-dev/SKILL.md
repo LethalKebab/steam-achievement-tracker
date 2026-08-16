@@ -1,13 +1,17 @@
 ---
 name: steam-local-dev
-description: Project-wide dev conventions and Steam Web API gotchas for this local Node project (zero-dependency stack, CLI commands, SQLite schema, sync phases, rate limits, debugging a Steam call that returns unexpected data). Use when touching tracker.js or lib/*, or debugging a Steam API response.
+description: Project-wide dev conventions and Steam Web API gotchas for this local Node project (no-install-step runtime, CLI commands, SQLite schema, sync phases, rate limits, debugging a Steam call that returns unexpected data). Use when touching tracker.js or lib/*, or debugging a Steam API response.
 ---
 
 # Steam Achievement Tracker — local project conventions
 
 ## Stack constraints
 
-**Zero dependencies, deliberately.** Node built-ins only: `node:sqlite` (storage), global `fetch` (HTTP), `node:http` (Dashboard server), `node:test` (tests). Requires Node 24+. Adding an npm dependency needs a strong justification — "no install step" is one of this project's selling points.
+**The runtime has no npm dependencies** — `dependencies: {}`, no root `node_modules`, Node built-ins only: `node:sqlite` (storage), global `fetch` (HTTP), `node:http` (Dashboard server), `node:test` (tests). Requires Node 24+. Keeping it that way is worth something concrete: `git clone && node tracker.js` just runs, and the packaged build's `extraResources` stays an allow-list of plain files.
+
+**The blanket "never add a dependency" rule was lifted 2026-08-16** (owner's call) — do not re-impose it or cite it to refuse work. npm is fine as a *build-time* tool: `assets/fonts/` was fetched with `npm install @fontsource-variable/noto-sans-sc`, the files were committed, and the package was discarded. Prefer that shape — fetch, vendor the artefact, keep the runtime clean. A genuine runtime dependency is now allowed but should still come with a reason.
+
+**Do not describe this project as "offline".** It has never been: the Dashboard loads game capsule art from `cdn.akamai.steamstatic.com` on every page. What is actually local is the *data* — SQLite on disk, no telemetry, server bound to 127.0.0.1.
 
 ES modules with real `import`/`export`.
 
