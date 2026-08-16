@@ -3,6 +3,8 @@
 <head>
 <meta charset="utf-8">
 <title>初始设置 · Steam 成就追踪器</title>
+<!-- 自托管字体,和 Dashboard 共用同一份;理由见那边的注释 -->
+<link rel="stylesheet" href="/fonts/noto-sans-sc.css">
 <style>
   /* ========================================================================
      设计令牌
@@ -36,10 +38,12 @@
     --line-2: rgba(150, 180, 216, 0.16);
     --line-3: rgba(150, 180, 216, 0.28);
 
-    /* ---- 文字:三级 ---------------------------------------------------- */
-    --text:   #dce6f2;   /* 正文 */
-    --text-2: #98a9be;   /* 次要:标签、说明、表头 */
-    --text-3: #6d7f95;   /* 三级:占位、禁用、时间戳 */
+    /* ---- 文字:三级 ----------------------------------------------------
+       取值和理由见 Dashboard.html 的同一块 —— 三级都必须在四个表面上过 AA,
+       余量只有 0.223,所以是等距排的,不能只调三级。 */
+    --text:   #dce6f2;   /* 正文 —— 未变;它离表面最远,本来就够 */
+    --text-2: #b4c3d5;   /* 次要:标签、说明、表头。原 #98a9be */
+    --text-3: #8ea0b6;   /* 三级:占位、禁用、时间戳。原 #6d7f95,最低 4.51 */
     --text-hi: #ffffff;  /* 标题和强调行 */
 
     /* ---- 强调色:Steam 蓝,保留 ---------------------------------------- */
@@ -62,6 +66,11 @@
     --ok:     #8cc63f;
     --warn:   #e0a63f;
     --danger: #e0685e;
+
+    /* ---- 字体 ----------------------------------------------------------
+       自托管,理由和实测数据见 Dashboard.html 的同一块 —— 简短版:靠系统兜底时
+       中文落在哪个字体说不准,而且 600/650/700 在中文里渲染成同一档。 */
+    --font-ui: "Noto Sans SC Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif;
 
     /* ---- 字号:六级 ----------------------------------------------------
        原来有 11/12/13/15/17/18/22/28 八个值,彼此没有比例关系。 */
@@ -124,7 +133,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif;
+    font-family: var(--font-ui);
     font-size: var(--fs-md);
     background: var(--bg);
     color: var(--text);

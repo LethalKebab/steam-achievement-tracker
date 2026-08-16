@@ -32,7 +32,8 @@
           "tracker.js",
           "package.json",
           "*.html",
-          "lib/**/*"
+          "lib/**/*",
+          "assets/**/*"
         ]
       }
     ],
