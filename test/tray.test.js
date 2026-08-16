@@ -1,13 +1,15 @@
 /**
  * 托盘常驻 + 窗口显示时的新鲜度同步
  * ------------------------------------------------
- * 这个文件保的是三件**坏掉不出声**的事:
+ * 这个文件保的是四件**坏掉不出声**的事:
  *
  * 1. 关窗口又变回退出 —— 功能整个白做,而且看起来"正常"(以前就是这个行为)。
  * 2. 退不掉 —— close 里 preventDefault 没给退出让路,托盘的「退出」按了没反应,
  *    用户只能去任务管理器。
  * 3. 每次切回窗口都全量同步一遍 —— `maybeSync` 要是退化成 `startSync` 的别名,
  *    新鲜度闸门就没了。这个不会报错,只会让 Steam 请求量悄悄翻几十倍。
+ * 4. 双击第二次 exe 弹一个假的「后台服务意外退出」—— 这一条是前三条的直接后果:
+ *    程序常驻在托盘里,所以"再点一次图标"从稀有事件变成了日常动作。
  *
  * `launcher/main.js` 要 Electron 才能加载,单测够不着,所以那部分是**源码断言**,
  * 和 `guidequeue.test.js` 里 drainNext 那条同源。
@@ -107,6 +109,52 @@ describe('托盘 —— 关窗口之后唯一的出口', () => {
     const win = ready.indexOf('createWindow');
     assert.ok(tray > 0 && win > 0, 'whenReady 里少了 createTray 或 createWindow');
     assert.ok(tray < win, 'createTray 必须排在 createWindow 前面');
+  });
+});
+
+describe('单实例 —— 第二次双击 exe 不能变成一个错误框', () => {
+  test('拿不到锁的那一支只许退出,不许起任何东西', () => {
+    // 起了就白防了:那份子进程照样撞 EADDRINUSE 秒退,假的「意外退出」框原样回来
+    const body = blockFrom(mainSrc, 'if (!app.requestSingleInstanceLock())');
+    assert.match(body, /app\.quit\(\)/, '第二个实例没有退出 —— 它会一直挂在那儿');
+    for (const forbidden of ['startServer', 'createTray', 'createWindow']) {
+      assert.doesNotMatch(body, new RegExp(forbidden),
+        `第二个实例还在调 ${forbidden} —— 单实例锁形同虚设`);
+    }
+  });
+
+  test('锁必须挡在 whenReady 的注册之前', () => {
+    // ready 之前调 app.quit() 只是排了个队,ready 回调照样会先跑一遍 startServer。
+    // 所以判断要包住**注册**,不能挪进回调里
+    const lock = mainSrc.indexOf('requestSingleInstanceLock');
+    const ready = mainSrc.indexOf('app.whenReady()');
+    assert.ok(lock > 0, '没有单实例锁 —— 第二次双击 exe 会弹「后台服务意外退出(代码 1)」');
+    assert.ok(ready > 0, 'whenReady 没了');
+    assert.ok(lock < ready, 'whenReady 注册在锁之前 —— 第二个实例仍然会先起一遍子进程');
+  });
+
+  test('第一个实例要把面板拿出来,不能装作没看见', () => {
+    assert.match(mainSrc, /app\.on\('second-instance',\s*showWindow\)/,
+      'second-instance 没接 showWindow —— 双击 exe 变成「什么都没发生」,比报错更让人以为程序坏了');
+  });
+
+  test('子进程的 stderr 要留着,错误框才说得出原因', () => {
+    // 回到 stdio: 'inherit' 只在**打包版**出问题:那里没有控制台,子进程死前说的
+    // 那句话直接蒸发,错误框退化成一个连搜都没得搜的「代码 1」。dev 模式一切正常
+    const body = blockFrom(mainSrc, 'function startServer');
+    assert.match(body, /stdio:\s*\['inherit',\s*'inherit',\s*'pipe'\]/,
+      'stderr 不再走管子 —— 打包版里子进程的错误信息会丢掉');
+    assert.match(body, /lastErrorLine\(/, '错误框没有复述子进程说的原因');
+  });
+
+  test('启动期的 error 监听要在 listen 成功之后摘掉', () => {
+    // 留着的话,listen 之后真出的 error 会 reject 到一个已经 settle 的 promise 上 ——
+    // 既不崩也不报,一个错误就这么没了
+    // 针对的是 listen 回调本身 —— `new Promise((resolve, reject)` 这个写法在
+    // 这个文件里不止一处(readBody 也是),拿它当锚会截到别人的代码块上
+    const block = blockFrom(serverSrc, 'server.listen(config.port');
+    assert.match(block, /removeListener\('error'/,
+      'listen 成功后没摘掉启动期监听 —— 之后的服务器错误会被静默吞掉');
   });
 });
 
