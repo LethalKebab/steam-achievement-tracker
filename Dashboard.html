@@ -153,98 +153,14 @@
     h1 {
       font-size: var(--fs-display);
       font-weight: 650;
-      letter-spacing: -0.015em;   /* 大字号收一点字距,否则在深色底上显散 */
+      /* 负字距是给紧排的拉丁大字用的;标题现在是中文,汉字本来就方正,
+         收字距只会让它挤在一起 */
+      letter-spacing: 0.02em;
       margin: 0;
       color: var(--text-hi);
     }
 
-    /* ========================================================================
-       字标
-       ------------------------------------------------------------------------
-       **手绘的部分全部是 SVG,一个特殊字体都不依赖。**
 
-       上一版用了 Ink Free(Windows 自带的手写体),那是错的,两条都致命:它是
-       Latin-only 的,**根本没有中文字形**;而且只有 Windows 有,别人的机器上打开
-       就悄悄退回默认字,标题当场变样 —— 一个"在我这儿好看"的设计。
-
-       所以现在:文字用**和整页其余中文完全相同的字体栈**(最终落到系统自带的 CJK
-       字体),没有引入任何新依赖 —— 表格里那三百个游戏名早就靠它渲染了;
-       而"手绘感"整个交给画出来的东西:左边那枚歪徽记、名字底下两笔马克笔线。
-       SVG 到哪台机器上都长一样,这是它相对字体唯一但决定性的好处。
-
-       中文字标**不做成图片路径**:汉字十几笔,画错一笔就成了错字,而这一版没法
-       亲眼验收。字形交给系统字体保证正确,风格交给旁边的画,各干各擅长的。
-       ======================================================================== */
-    .wordmark {
-      display: flex;
-      align-items: center;
-      gap: 11px;
-      /* 中文字面比拉丁大,同样 px 看着更满,所以比上一版的 31px 收一点。
-         **不动 --fs-display 那个令牌** —— 它和 Setup.html 逐字共用 */
-      font-size: 27px;
-      font-weight: 700;
-      /* 短标题的中文稍微放一点字距更稳;负字距是给紧排拉丁大字用的,汉字不适用 */
-      letter-spacing: 0.03em;
-      font-family: inherit;   /* 就是 body 那一栈,和表格里的中文同源 */
-      /* 墨迹滤镜,见 #wm-ink 的注释。**只有这一处用它** —— 表格里的字必须锐利。
-         滤镜是静态的(不动画),所以 prefers-reduced-motion 不需要为它关什么。
-         will-change 是给 sticky 顶栏用的:滚动时这一层可以直接复用,
-         不必每帧重算那张噪声图 */
-      filter: url(#wm-ink);
-      will-change: filter;
-    }
-    /* 「Steam」是平台名,不是产品名 —— 压小、拉开、变暗,让中文当主角 */
-    .wm-latin {
-      font-size: 0.56em;
-      font-weight: 600;
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-      color: var(--text-3);
-      margin-right: 0.42em;
-      vertical-align: 0.16em;
-    }
-    /* 「成就」是这个工具的关键词,给它强调色。整句全白太平,全上色又太吵 */
-    .wm-key { color: var(--accent); }
-    /* 歪徽记:一枚不对称的奖杯,外面套一圈没收住的钢笔圈 */
-    .wm-mark {
-      width: 1.32em;
-      height: 1.32em;
-      flex-shrink: 0;
-      fill: none;
-      stroke: var(--accent);
-      stroke-width: 1.9;
-      stroke-linecap: round;
-      stroke-linejoin: round;
-    }
-    /* 外圈画得比杯身细、比杯身淡 —— 一支笔画的两遍,力道本来就不一样,
-       全等粗反而像机器画的 */
-    .wm-mark .em-ring { stroke-width: 1.4; opacity: 0.55; }
-    .wm-text { position: relative; display: inline-block; white-space: nowrap; }
-    /*
-      名字底下那道线。**两笔,不是一笔** —— 一条实的加一条更淡、更短、错开一点的,
-      看起来才像马克笔来回描了两遍;单独一条无论画得多歪都还是"一条下划线"。
-
-      preserveAspectRatio="none" 让它横向拉伸到和文字一样宽(文字多长都贴合),
-      而 vector-effect="non-scaling-stroke" 保证被拉伸时**笔画不跟着变粗** ——
-      少了它,这道线在长标题下会粗得像一条色带。
-    */
-    .wm-rule {
-      position: absolute;
-      left: 0.1em;
-      bottom: -0.16em;
-      /* **宽度必须写死成百分比,不能靠 left + right 撑。** <svg> 是替换元素,
-         `width: auto` 会去用 viewBox 的固有比例(240:9)乘高度算宽,把 left/right
-         的约束整个忽略掉 —— 实测在 376px 的标题下只画到 248px,线停在
-         「Trac|ker」中间,看着像 bug 不像笔法 */
-      width: calc(100% - 0.2em);
-      height: 0.3em;
-      overflow: visible;
-      fill: none;
-      stroke: var(--accent);
-      stroke-width: 2;
-      stroke-linecap: round;
-      pointer-events: none;
-    }
 
     /* ========================================================================
        顶栏
@@ -1249,10 +1165,7 @@
        它们只会在某个宽度上**强行少放一列**,和这个视图现在的目的正好相反 */
     @media (max-width: 640px) {
       :root { --page-pad: var(--s3); }
-      /* **`.wordmark` 必须一起点名。** 它的选择器权重(0,1,0)压过光秃秃的 h1(0,0,1),
-         媒体查询不改变权重 —— 只写 h1 的话这条规则在字标上根本不生效,窄屏标题
-         还是 31px,把右边的读数带挤下去。改一处忘一处的经典形状 */
-      h1, .wordmark { font-size: 23px; }
+      h1 { font-size: 21px; }
       .game-thumb { display: none; }   /* 窄屏优先保住名字 */
     }
 
@@ -1362,63 +1275,13 @@
       <circle cx="10.8" cy="10.8" r="6.8"/>
       <path d="m15.8 15.8 4.4 4.4"/>
     </symbol>
-    <!--
-      字标的"手写墨迹"滤镜。**这是标题不再是一行普通系统字的全部机关。**
 
-      做法:用 feTurbulence 生成一张噪声图,再用 feDisplacementMap 拿它去推字的**边缘** ——
-      笔画因此有了起伏,像用笔写出来而不是排出来的。字形本身分毫未动,推的只是轮廓。
 
-      为什么是这个方案,而不是把汉字画成 SVG 路径:那条路试过,两次都失败。手写坐标
-      画出来的「成就」少笔画、结构错,是**错字**不是丑字;改用描摹字体轮廓 + 抖动,
-      轮廓串环的算法又出 bug,填出来是一地碎片(两次都截图看过)。而汉字十几笔,
-      字形正确恰恰是系统字体白送的东西。所以:**字形交给字体,笔触交给滤镜。**
-
-      三条好处一次拿到:文字仍然是真文字(可选中、可 Ctrl+F、读屏能念)、不依赖任何
-      特殊字体(系统 CJK 字体到处都有,整页中文本来就靠它)、而且到哪台机器上都长一样
-      (feTurbulence 给定 seed 是确定性的)。
-
-      滤镜挂在**整个字标**上而不是只挂中文:徽记、STEAM、下划线跟着一起抖,才像同一支笔
-      画的。只滤中文的话,旁边几何标准的圆圈会把它衬得很假 —— 试过,对比很明显。
-      参数是在真实字号下逐档比出来的:scale 再大字就开始"融化",再小就看不出来了。
-    -->
-    <filter id="wm-ink" x="-20%" y="-20%" width="140%" height="140%">
-      <feTurbulence type="fractalNoise" baseFrequency="0.075" numOctaves="3" seed="11" result="noise"/>
-      <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.2"
-                         xChannelSelector="R" yChannelSelector="G"/>
-    </filter>
-    <!--
-      字标徽记。**和上面那些界面图标不是一套,是故意的。**
-      上面那些要规整、等粗、一眼认出功能;这个只给标题用,是字标的一部分,所以到处
-      画歪:杯口不平、两只耳朵不对称、外面那圈是一笔没收住的钢笔圈,起收笔错开一截。
-
-      **它是画出来的,不是任何字体。** 标题的"手绘感"整个由它承担,而不是靠一个
-      需要用户机器上碰巧装着的字体 —— 那正是上一版 Ink Free 的毛病:Latin-only,
-      连中文字形都没有,而且只有 Windows 有。SVG 到哪儿都长一样。
-    -->
-    <symbol id="i-emblem" viewBox="0 0 32 32">
-      <path class="em-ring" d="M22.8 4.2C18.6 2.1 12.4 2.6 8.6 6.1 4.6 9.8 3.1 15.9 5.4 20.8c2.2 4.8 7.8 7.8 13.2 6.9 5.6-.9 10-5.9 9.8-11.6-.1-3.7-1.8-7.1-4.8-9.3"/>
-      <path d="M11.4 9.4c3-.4 6.6-.4 9.5 0 .3 3.8-.1 6.5-1.4 8.1-.9 1.1-2 1.7-3.4 1.7s-2.5-.6-3.4-1.7c-1.3-1.6-1.6-4.3-1.3-8.1Z"/>
-      <path d="M11.5 11.3c-1 0-1.8 0-2.4.1-.2 2.2.8 3.7 3 4.4"/>
-      <path d="M20.7 11.3c1 0 1.7.1 2.3.2.1 2.1-.9 3.6-3.1 4.2"/>
-      <path d="M16 19.2c.1 1.2.1 2.3 0 3.4"/>
-      <path d="M12.9 25.9c-.1-1.5 1.1-2.3 3.1-2.3 2 0 3.1.7 3.1 2.2-2 .4-4.1.4-6.2.1Z"/>
-    </symbol>
   </svg>
 
   <div class="topbar">
     <div class="title-row">
-      <!--
-        字标。**标题是整页唯一该有点脾气的地方** —— 表格、徽章、图标都在克制,
-        而这一行不承担任何功能,它只回答"这是什么东西"。
-
-        三个部分:歪一点的奖杯、手写体的名字、名字下面那道像马克笔划过两遍的线。
-        文字仍然是 <h1> 里的真文字 —— 没有做成图片,所以能选中、能被读屏念、
-        能被 Ctrl+F 找到,换了字体也只是换个样子,不会变成一团看不懂的东西。
-      -->
-      <h1 class="wordmark">
-        <svg class="wm-mark" aria-hidden="true"><use href="#i-emblem"/></svg>
-        <span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key">成就</span>追踪器<svg class="wm-rule" viewBox="0 0 240 9" preserveAspectRatio="none" aria-hidden="true"><path d="M2 5.4c33-2.9 66-3.8 99-2.6 27 1 54 2.4 79 .5" vector-effect="non-scaling-stroke"/><path d="M11 7.8c38-2.1 76-2.5 114-1.3" vector-effect="non-scaling-stroke" opacity=".42"/></svg></span>
-      </h1>
+      <h1>Steam 成就追踪器</h1>
       <!-- 精确值和口径放在 title 里(悬停可读),不占屏幕 -->
       <div class="readout">
         <!-- **恒定是库里的总数,不跟筛选走。** 筛选后的数量属于那张表,
