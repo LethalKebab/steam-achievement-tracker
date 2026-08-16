@@ -179,9 +179,13 @@
       letter-spacing: 0.03em;
       font-family: inherit;   /* 就是 body 那一栈,和表格里的中文同源 */
     }
-    /* 「Steam」是平台名,不是产品名 —— 压小、拉开、变暗,让中文当主角 */
+    /* 「Steam」是平台名,不是产品名 —— 压小、拉开、变暗,让中文当主角。
+       **但不能按字号直觉去压。** 汉字几乎填满整个字身框,拉丁大写只到 cap-height
+       (约 0.7 个 em),所以同样 px 下拉丁看着就小一截。原来写 0.56em,STEAM 的
+       大写高度只有约 10.6px,而汉字有约 24px —— 差了一倍还多,读起来像个说明文字
+       而不是标题的一部分。0.74em 是逐档比出来的:再大(0.82)就开始和中文抢主角 */
     .wm-latin {
-      font-size: 0.56em;
+      font-size: 0.74em;
       font-weight: 600;
       letter-spacing: 0.14em;
       text-transform: uppercase;
