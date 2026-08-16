@@ -130,20 +130,60 @@ function startServer() {
         ELECTRON_RUN_AS_NODE: '1',
         ...(dataDir ? { TRACKER_DATA_DIR: dataDir } : {}),
       },
-      stdio: 'inherit',
+      /**
+       * stderr 走管子而不是 inherit。**打包版根本没有控制台** —— 子进程死之前
+       * 打的那句话原样落进一个不存在的终端,于是启动器手里只剩一个退出码,
+       * 错误框也就只能说「代码 1」,而那句话本来是唯一说得清原因的东西。
+       * 收下来只为了在框里复述它;stdout 仍然 inherit,dev 模式的日志照旧。
+       */
+      stdio: ['inherit', 'inherit', 'pipe'],
     }
   );
+
+  // setEncoding 不是顺手写的:中文报错在字节边界上被切开时,拼字符串会拼出乱码
+  serverProcess.stderr.setEncoding('utf8');
+  let stderrTail = '';
+  serverProcess.stderr.on('data', (chunk) => {
+    process.stderr.write(chunk); // dev 模式下 `npm start` 的终端照样看得见
+    stderrTail = (stderrTail + chunk).slice(-2000); // 只留尾巴,要的是最后那句话
+  });
 
   serverProcess.on('exit', (code) => {
     // 主动关闭时 app.isQuitting 已经置位,这里只处理"子进程自己意外挂了"的情况——
     // 没有服务器就没有 Dashboard 可看,留着空窗口不如直接退出并说明原因
     if (app.isQuitting) return;
+    const reason = lastErrorLine(stderrTail);
     dialog.showErrorBox(
       'Steam 成就追踪器',
-      `后台服务意外退出(代码 ${code})。请重新打开程序;如果反复出现,请联系开发者。`
+      reason
+        ? `后台服务意外退出(代码 ${code}):\n\n${reason}\n\n看不懂或者反复出现,请联系开发者。`
+        : `后台服务意外退出(代码 ${code})。请重新打开程序;如果反复出现,请联系开发者。`
     );
     app.quit();
   });
+}
+
+/**
+ * 从子进程 stderr 里挑出**一句能给人看的话**。
+ *
+ * `tracker.js` 的顶层 catch 打的是 `❌ <message>`(端口被占、配置读不了、
+ * 数据库打不开都走这条),所以有 ❌ 就取最后一条 ❌。
+ *
+ * 没有 ❌ 的是 Node 自己崩了那种,这时候要的是堆栈的**头一行**(`Error: …`)。
+ * 「取最后一行非空」在这里恰恰是最差的选择,实测过:堆栈的末尾是 `at Module._load`
+ * 或者一个光秃秃的 `}`,说的是崩在哪儿,不是崩了什么 —— 拿它当错误框的正文,
+ * 等于把唯一那句人话跳过去。两条都落空才退回最后一行:**宁可给一行看不懂的东西,
+ * 也好过只给一个「代码 1」**,前者能搜、能贴给开发者,后者连搜都没得搜。
+ */
+function lastErrorLine(text) {
+  const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return '';
+  const marked = lines.filter((l) => l.startsWith('❌'));
+  const thrown = lines.find((l) => /^[\w.$]*Error\b/.test(l));
+  // 挑完就把 ❌ 去掉:它是 CLI 用来在一屏日志里标出这行的,而错误框自带一个红叉,
+  // 留着就是同一句话说两遍
+  const line = (marked.at(-1) ?? thrown ?? lines.at(-1)).replace(/^❌\s*/, '');
+  return line.length > 300 ? `${line.slice(0, 300)}…` : line;
 }
 
 /** 轮询直到服务器有响应(不关心状态码,能连上就算活着) */
@@ -622,13 +662,36 @@ function createTray() {
   tray.on('double-click', showWindow);
 }
 
-app.whenReady().then(() => {
-  startServer();
-  createTray(); // 必须在窗口之前:关窗口会去读 tray 发气泡提示
-  createWindow();
-  // dev 模式没有可替换的目录,连定时器都不用起
-  if (app.isPackaged && autoUpdateEnabled()) scheduleUpdateCheck(UPDATE_CHECK_DELAY_MS);
-});
+/**
+ * 只允许一个实例。**这不是洁癖,是 8777 写死带来的硬约束**(见 README 的
+ * 「已知取舍」):第二个实例照样会去 spawn 一份 `serve`,那份必然撞 EADDRINUSE
+ * 秒退,而 `serverProcess.on('exit')` 分不清「端口被自己的另一份占着」和
+ * 「服务真的崩了」—— 于是双击第二次 exe 得到的是一个
+ * 「后台服务意外退出(代码 1)」的错误框。那条信息哪一半都不成立:它没说原因,
+ * 而照它说的「请重新打开程序」做,只会一模一样地再来一次。更难看的是弹框之前
+ * `waitForServer` 会**连上第一个实例的服务器**并且真把窗口开出来,所以用户看到的
+ * 是"窗口闪一下,然后一个报错" —— 程序看起来是坏的,其实它好好地在托盘里跑着。
+ *
+ * 判断必须包住 `whenReady` 的**注册**,不能挪进回调里去判:ready 之前调
+ * `app.quit()` 只是排了个队,ready 回调照样会先跑一遍 `startServer`,那就白防了。
+ *
+ * 双击 exe 的人想要的是「把面板拿出来」,不是「再开一个」,所以第一个实例收到
+ * `second-instance` 就走托盘那条 `showWindow` —— restore/show/focus 只此一份,
+ * 两个入口共用,不会有一天走岔。
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', showWindow);
+
+  app.whenReady().then(() => {
+    startServer();
+    createTray(); // 必须在窗口之前:关窗口会去读 tray 发气泡提示
+    createWindow();
+    // dev 模式没有可替换的目录,连定时器都不用起
+    if (app.isPackaged && autoUpdateEnabled()) scheduleUpdateCheck(UPDATE_CHECK_DELAY_MS);
+  });
+}
 
 /**
  * 窗口全关了不再等于退出 —— 那只是收进了托盘。留成空实现是有意的:
