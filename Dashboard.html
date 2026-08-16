@@ -154,6 +154,76 @@
     }
 
     /* ========================================================================
+       字标
+       ------------------------------------------------------------------------
+       **手写体只用在这一处。** 它不进正文、不进表格、不进按钮 —— 那些地方要的是
+       一眼扫过去认字,手写体在 13px 的表格里只会拖慢阅读。标题不承担功能,
+       所以脾气全放这儿。
+
+       字体是 **Ink Free**,Windows 10 起随系统装,所以不用下载、离线可用 ——
+       这个项目零依赖也没有构建步骤,外链 webfont 断网就退回默认字,标题会当场变样。
+       后面几档都是真的存在于常见系统的手写体,最后落回 cursive 和正文字体:
+       退到最后仍然是一行读得懂的字,只是没了脾气。
+
+       **font-weight 必须是 400。** Ink Free 只有一个字重,给它 650 会让浏览器
+       合成假粗 —— 手写体被拉粗之后笔画糊在一起,比不加粗难看得多。
+       字距也从 h1 的 -0.015em 放回去:负字距是给紧排的无衬线大字用的,
+       手写体本来就连笔,再收就粘上了。
+       ======================================================================== */
+    .wordmark {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      /* 手写体的字面比无衬线小一圈,同样的 px 看着矮半头,所以单独放大;
+         **不动 --fs-display 那个令牌** —— 它是和 Setup.html 共用的,
+         那边的 h1 是普通无衬线,跟着变会平白大一圈 */
+      font-size: 31px;
+      font-weight: 400;
+      letter-spacing: 0;
+      font-family: "Ink Free", "Segoe Script", "Bradley Hand", "Segoe Print", cursive,
+                   "Segoe UI", -apple-system, sans-serif;
+    }
+    /* 歪奖杯。比文字略小,和大写字母顶端齐平 */
+    .wm-mark {
+      width: 0.95em;
+      height: 0.95em;
+      flex-shrink: 0;
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      /* 手写体的重心偏低,图标不压一点会浮在字上面 */
+      transform: translateY(1px);
+    }
+    .wm-text { position: relative; display: inline-block; white-space: nowrap; }
+    /*
+      名字底下那道线。**两笔,不是一笔** —— 一条实的加一条更淡、更短、错开一点的,
+      看起来才像马克笔来回描了两遍;单独一条无论画得多歪都还是"一条下划线"。
+
+      preserveAspectRatio="none" 让它横向拉伸到和文字一样宽(文字多长都贴合),
+      而 vector-effect="non-scaling-stroke" 保证被拉伸时**笔画不跟着变粗** ——
+      少了它,这道线在长标题下会粗得像一条色带。
+    */
+    .wm-rule {
+      position: absolute;
+      left: 0.1em;
+      bottom: -0.16em;
+      /* **宽度必须写死成百分比,不能靠 left + right 撑。** <svg> 是替换元素,
+         `width: auto` 会去用 viewBox 的固有比例(240:9)乘高度算宽,把 left/right
+         的约束整个忽略掉 —— 实测在 376px 的标题下只画到 248px,线停在
+         「Trac|ker」中间,看着像 bug 不像笔法 */
+      width: calc(100% - 0.2em);
+      height: 0.3em;
+      overflow: visible;
+      fill: none;
+      stroke: var(--accent);
+      stroke-width: 2;
+      stroke-linecap: round;
+      pointer-events: none;
+    }
+
+    /* ========================================================================
        顶栏
        ------------------------------------------------------------------------
        **负外边距是为了满宽**:body 有 --page-pad 的内边距,不抵消掉的话左右两侧
@@ -1156,7 +1226,10 @@
        它们只会在某个宽度上**强行少放一列**,和这个视图现在的目的正好相反 */
     @media (max-width: 640px) {
       :root { --page-pad: var(--s3); }
-      h1 { font-size: 21px; }
+      /* **`.wordmark` 必须一起点名。** 它的选择器权重(0,1,0)压过光秃秃的 h1(0,0,1),
+         媒体查询不改变权重 —— 只写 h1 的话这条规则在字标上根本不生效,窄屏标题
+         还是 31px,把右边的读数带挤下去。改一处忘一处的经典形状 */
+      h1, .wordmark { font-size: 23px; }
       .game-thumb { display: none; }   /* 窄屏优先保住名字 */
     }
 
@@ -1266,11 +1339,35 @@
       <circle cx="10.8" cy="10.8" r="6.8"/>
       <path d="m15.8 15.8 4.4 4.4"/>
     </symbol>
+    <!--
+      奖杯。**这一个和上面那些不是一套,是故意的。**
+      上面是界面图标 —— 规整、等粗、一眼认得出功能。这个只给标题用,属于字标的一部分,
+      所以画得歪一点:杯口不水平、两只耳朵不对称、底座是一笔带过的弧。
+      字标可以有自己的调子,界面图标不行。
+    -->
+    <symbol id="i-trophy" viewBox="0 0 24 24">
+      <path d="M7.4 3.2c3-.4 6.1-.4 9.2 0 .3 3.7-.1 6.3-1.3 7.9-.8 1.1-1.9 1.6-3.3 1.6s-2.4-.5-3.2-1.6C7.6 9.5 7.2 6.9 7.4 3.2Z"/>
+      <path d="M7.5 5.1c-1 0-1.8 0-2.4.1-.2 2.2.8 3.6 2.9 4.3"/>
+      <path d="M16.6 5.1c1 0 1.7.1 2.3.2.1 2.1-.9 3.5-3 4.1"/>
+      <path d="M12 12.9c.1 1.2.1 2.3 0 3.4"/>
+      <path d="M8.9 20c-.1-1.5 1-2.3 3.1-2.3 2 0 3.1.7 3.1 2.2-2 .4-4.1.4-6.2.1Z"/>
+    </symbol>
   </svg>
 
   <div class="topbar">
     <div class="title-row">
-      <h1>Steam Achievement Tracker</h1>
+      <!--
+        字标。**标题是整页唯一该有点脾气的地方** —— 表格、徽章、图标都在克制,
+        而这一行不承担任何功能,它只回答"这是什么东西"。
+
+        三个部分:歪一点的奖杯、手写体的名字、名字下面那道像马克笔划过两遍的线。
+        文字仍然是 <h1> 里的真文字 —— 没有做成图片,所以能选中、能被读屏念、
+        能被 Ctrl+F 找到,换了字体也只是换个样子,不会变成一团看不懂的东西。
+      -->
+      <h1 class="wordmark">
+        <svg class="wm-mark" aria-hidden="true"><use href="#i-trophy"/></svg>
+        <span class="wm-text">Steam Achievement Tracker<svg class="wm-rule" viewBox="0 0 240 9" preserveAspectRatio="none" aria-hidden="true"><path d="M2 5.4c33-2.9 66-3.8 99-2.6 27 1 54 2.4 79 .5" vector-effect="non-scaling-stroke"/><path d="M11 7.8c38-2.1 76-2.5 114-1.3" vector-effect="non-scaling-stroke" opacity=".42"/></svg></span>
+      </h1>
       <!-- 精确值和口径放在 title 里(悬停可读),不占屏幕 -->
       <div class="readout">
         <!-- **恒定是库里的总数,不跟筛选走。** 筛选后的数量属于那张表,
