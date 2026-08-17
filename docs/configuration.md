@@ -35,7 +35,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "effort": "high",         // low | medium | high | xhigh | max
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 500,   // refuse to generate above this
-    "chunkSize": 50,          // achievements per writing pass; more than this is written in several
+    "chunkSize": 50,          // max achievements per writing pass; passes are evenly sized
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
 
     "maxSearches": 8,         // web_search calls per request
@@ -102,7 +102,9 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 `maxAchievements` (500) is a refusal threshold, not a truncation: a game above it is rejected with an explanation rather than given a worse guide. A game with more achievements than `chunkSize` (50) is written in several passes rather than refused — the passes share one conversation, so the model can see what it already wrote and won't repeat a section or an achievement, and validation always runs over the assembled guide. What the limit protects now is your time and spend, not feasibility: a 400-achievement game is nine passes. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
 
-`maxTokens` caps thinking **and** prose together, not prose alone — set it too low and a guide gets truncated mid-way, which is worse than a run that fails outright, because nothing downstream can tell the difference. `effort` is the depth knob; there is no temperature or token-budget setting, because the models this targets reject both outright.
+**`chunkSize` is a ceiling, not a pass length.** The number of passes is computed from it and the achievements are then spread evenly, so 55 achievements at the default become two passes of 28 and 27 — not 50 and 5. Lowering it therefore shortens every pass and adds passes only as needed; it can never make a pass longer.
+
+`maxTokens` caps thinking **and** prose together, not prose alone. A pass that runs out mid-way is not silently accepted — the generator halves that pass and re-asks the two halves, repeating until the writing fits or the pass is down to five achievements. **So a truncation is usually not something you need to act on**, and reaching for a bigger `maxTokens` is usually the wrong reflex: the budget is shared with thinking, and raising it has been measured to buy thinking rather than prose (16000 → 32000 moved output tokens +79% and guide text +7%). If a five-achievement pass still won't fit, the message says so, and the thing to change is the endpoint or model — thinking can only be capped where the provider accepts the parameter, which compatibility endpoints do not. `effort` is the depth knob; there is no temperature setting, because the models this targets reject it outright.
 
 `allowedDomains` defaults to empty, meaning no restriction. Filling it in **hard-restricts** search to those domains — the API offers no way to merely prefer one. It's tempting to lock search onto Chinese guide sites (3DM, 游民星空, NGA, B站), but how well those are actually indexed hasn't been measured yet, so the default doesn't trade measured quality for an unmeasured assumption.
 
