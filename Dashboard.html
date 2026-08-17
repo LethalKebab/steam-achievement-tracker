@@ -967,7 +967,17 @@
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
       gap: var(--s2);
+      /* **等高由卡片承担,不由攻略窗口承担**(默认的 stretch,写出来是为了别再被改掉)。
+         卡片有底色和边框,是个**容器** —— 里面多出来的余白读作 padding。而攻略左边
+         那条 accent 竖线是**量度**:它沿着内容画,画多长就被读成有多少内容。之前把
+         固定高度加在窗口上,等于让量度去承担对齐,于是短攻略的线一路拖到卡片底部,
+         看起来像话没说完。让容器去对齐,量度只管说实话 */
+      align-items: stretch;
     }
+    /* 有卡片展开时,整行退回自然高度。grid 的行高等于本行最高的那张,展开那张一长,
+       stretch 就把旁边几张也拉成大空盒子 —— 正是 stretch 本来要避免的那种空白。
+       静止时对齐、展开时各归各的,两种状态各取所需 */
+    .ach-grid.has-expanded .ach-item { align-self: start; }
     .ach-item {
       display: flex;
       gap: var(--s2);
@@ -977,8 +987,22 @@
       border-radius: var(--r-md);
       padding: var(--s2);
     }
+    /* flex 子项默认 min-width: auto,不会缩到比内容还窄 —— 攻略正文里一个长词
+       就能把这一列顶宽,把整个 grid 挤变形。必须显式放开 */
+    .ach-body { min-width: 0; flex: 1; }
     .ach-icon { width: 32px; height: 32px; border-radius: var(--r-sm); flex-shrink: 0; background: var(--bg); }
-    .ach-name { font-size: var(--fs-sm); font-weight: 600; color: var(--text); }
+    .ach-head { display: flex; align-items: flex-start; gap: var(--s2); }
+    .ach-name { font-size: var(--fs-sm); font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+    /* 只有图标。它紧挨着成就名,一句「在攻略中打开」会把名字挤没,而 title 已经把话
+       说清楚了 —— 屏幕上的字越少越好,长解释归 docs/ */
+    .ach-jump {
+      flex-shrink: 0;
+      color: var(--text-3);
+      line-height: 1;
+      margin-top: 2px;
+      text-decoration: none;
+    }
+    .ach-jump:hover { color: var(--accent); }
     .ach-desc { font-size: var(--fs-xs); color: var(--text-3); margin-top: 2px; line-height: 1.5; }
     .ach-guide-link {
       font-size: var(--fs-xs);
@@ -988,6 +1012,77 @@
       display: inline-block;
     }
     .ach-guide-link:hover { text-decoration: underline; }
+
+    /* ---- 卡片里那段「你自己攻略里怎么写的」 ------------------------------- */
+    /* 上面的名字和描述是 Steam 给的,这一段是你写的,两种来源不该看起来是一回事 ——
+       左边那条 accent 竖线就是干这个的,不是装饰 */
+    /* **固定高度的预览窗口,而且窗口是 .ach-guide 而不是里面的正文。** 子步骤是
+       正文的兄弟节点,把高度钉在正文上的话,带子步骤的卡片会在窗口**外面**多出一截
+       ——一行四张卡片,只有有子步骤的那张高出一头,正是这条规则要防的。
+       用 height 而不是 max-height:后者让每条各缩各的,一行里两行的和八行的挨在
+       一起高低参差。短的下面留白,换来同一行的卡片一样高 */
+    .ach-guide {
+      margin-top: var(--s2);
+      padding-left: var(--s2);
+      border-left: 2px solid var(--accent);
+      /* **max-height,不是 height。** 短攻略就短,竖线跟着在正文结束的地方收住 ——
+         固定高度会让线一路拖到底,读起来像还有下文(ui-ux-pro-max 的
+         「Text Reflow and Spacing」把"在固定高度盒子里裁文字"列为 Critical 反模式,
+         「Essential Text Truncation」则专门点名"只为了让卡片等高而裁内容")。
+         封顶 6 行只对**真的很长**的攻略生效,而且配着渐变和点击展开,也就是那两条
+         规则要求的"可见的看全文路径"。
+         **不能写 em** —— .ach-guide 自己没有字号,em 会跟着表格的字号解析,调一下
+         表格字号就顺带改了这里。按正文自己的 --fs-xs 和行高算,封顶才和"能看见
+         几行攻略"绑在一起 */
+      max-height: calc(var(--fs-xs) * 1.6 * 6);
+      overflow: hidden;
+      position: relative;
+    }
+    .ach-guide.expanded { max-height: none; }
+    /* .clamped = 内容确实超出了预览窗口,由 JS 量出来后打上。渐变和手势都挂在它上面,
+       而不是挂在 :not(.expanded) 上 —— 否则短攻略(没超出)也会顶着一层假的渐变,
+       点上去还什么都不会发生 */
+    .ach-guide.clamped { cursor: pointer; }
+    .ach-guide-text {
+      font-size: var(--fs-xs);
+      line-height: 1.6;
+      color: var(--text-2);
+      /* Notion 的一个 to_do 块里,成就名 / 官方描述 / 你的打法是换行分隔的同一段文本
+         (notionblocks.js 专门保证不把它拆成三个块),pre-wrap 才能把那个结构显示出来 */
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    /* 截断处压一层渐变。没有它,文字齐刷刷断在半路,看起来像攻略本身就写到这儿为止 */
+    .ach-guide.clamped:not(.expanded)::after {
+      content: '';
+      position: absolute;
+      left: 0; right: 0; bottom: 0;
+      height: calc(var(--fs-xs) * 1.6 * 2);   /* 两行正文,同样别用 em */
+      background: linear-gradient(transparent, var(--surface));
+      pointer-events: none;
+    }
+    .ach-substep {
+      display: flex;
+      gap: 6px;
+      margin-top: 3px;
+      font-size: var(--fs-xs);
+      line-height: 1.5;
+      color: var(--text-3);
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    /* 勾选态用 CSS 画,不用字符 —— 见图标那一节:emoji 自带颜色,color 管不着它 */
+    .ach-substep::before {
+      content: '';
+      flex-shrink: 0;
+      width: 9px; height: 9px;
+      margin-top: 0.3em;
+      border: 1px solid var(--line-3);
+      border-radius: 2px;
+    }
+    .ach-substep.done::before { background: var(--accent); border-color: var(--accent); }
+    /* 「攻略里还没写这条」。刻意不用警告色:这不是错误,是一条待办 */
+    .ach-gap { font-size: var(--fs-xs); color: var(--text-3); margin-top: var(--s2); }
 
     /* ---- 行尾的攻略按钮组 ------------------------------------------------ */
     .guide-btn {
@@ -1611,6 +1706,7 @@
     const GEN_OK = icon('check');
     const GEN_QUEUE = icon('clock');
     const GEN_SEARCH = icon('search');
+    const GEN_BOOK = icon('book');
 
     /**
      * 进度条的颜色。
@@ -2160,6 +2256,24 @@
           render();
         });
       });
+
+      // 高度全交给 CSS 的 max-height,这里只判断"有没有真的被裁到"。
+      // **先全部量完再统一改 class** —— 在同一个循环里读 scrollHeight 又写 class,
+      // 每张卡片都强制一次重排,一个四百成就的游戏能卡住肉眼可见的一拍
+      const wins = Array.prototype.slice.call(body.querySelectorAll('.ach-guide'));
+      const overflowing = wins.map(function(el) { return el.scrollHeight > el.clientHeight + 1; });
+      wins.forEach(function(el, i) {
+        // 没被裁的什么都不做:它已经是完整的,不给渐变也不给手势
+        if (!overflowing[i]) return;
+        el.classList.add('clamped');
+        // toggle 而不是 add —— 展开之后要能再点一下收回去。单参数的翻转是有意的
+        el.addEventListener('click', function() {
+          el.classList.toggle('expanded');
+          const grid = el.closest('.ach-grid');
+          // 第二个参数必须布尔化:传 undefined 的话 toggle 会**翻转**而不是关闭
+          grid.classList.toggle('has-expanded', Boolean(grid.querySelector('.ach-guide.expanded')));
+        });
+      });
     }
 
     function renderMissingRow(appid) {
@@ -2174,14 +2288,51 @@
       } else if (data.missingCount === 0) {
         inner = '<div class="missing-header">所有成就都已解锁</div>';
       } else {
-        inner = '<div class="missing-header">还差 ' + data.missingCount + ' / ' + data.total + ' 个成就</div>'
+        // 有登记攻略、而且这次真读到了,才谈得上"写了几条"。读失败就如实说读失败,
+        // 别让 0 条看起来像"攻略一条都没写"
+        const hasGuide = Boolean(data.guide) && !data.guide.error;
+        let head = '还差 ' + data.missingCount + ' / ' + data.total + ' 个成就';
+        if (hasGuide) {
+          const written = data.missing.filter(function(a) { return a.guide; }).length;
+          head += ' · 攻略里已写 ' + written + ' / ' + data.missingCount + ' 条';
+        } else if (data.guide && data.guide.error) {
+          head += ' · ' + data.guide.error;
+        }
+        inner = '<div class="missing-header">' + escapeHtml(head) + '</div>'
           + '<div class="ach-grid">' + data.missing.map(function(a) {
             const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
-            const guideUrl = 'https://www.google.com/search?q=' + query;
+            const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
+              + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' 搜攻略</a>';
+            let tail;
+            if (a.guide) {
+              // 削掉对官方名字/描述的复述之后可能什么都不剩(攻略里只抄了官方文案、
+              // 没写打法)。那就干脆不画窗口 —— 名字、描述、跳转按钮都还在上面,
+              // 画一个空框只是告诉你"这里本该有东西"
+              const substeps = a.guide.subSteps.map(function(s) {
+                return '<div class="ach-substep' + (s.checked ? ' done' : '') + '"'
+                  + ' style="margin-left:' + (s.depth * 12) + 'px">' + escapeHtml(s.text) + '</div>';
+              }).join('');
+              tail = (a.guide.text || substeps)
+                ? '<div class="ach-guide">'
+                  + (a.guide.text ? '<div class="ach-guide-text">' + escapeHtml(a.guide.text) + '</div>' : '')
+                  + substeps + '</div>'
+                : '';
+            } else if (hasGuide) {
+              tail = '<div class="ach-gap">攻略里还没写这条</div>' + search;
+            } else {
+              tail = search;
+            }
+            // 跳转按钮挂在成就名旁边,不在攻略窗口里 —— 窗口是会被裁的,而这是这张
+            // 卡片唯一的动作;放上面还顺带让它的位置不随攻略长短飘
+            const jump = (a.guide && a.guide.url)
+              ? '<a class="ach-jump" href="' + escapeHtml(a.guide.url)
+                + '" target="_blank" rel="noopener" title="在攻略中打开">' + GEN_BOOK + '</a>'
+              : '';
             return '<div class="ach-item">'
               + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-              + '<div><div class="ach-name">' + escapeHtml(a.name) + '</div><div class="ach-desc">' + escapeHtml(a.description) + '</div>'
-              + '<a class="ach-guide-link" href="' + guideUrl + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' 搜攻略</a></div>'
+              + '<div class="ach-body">'
+              + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name) + '</div>' + jump + '</div>'
+              + '<div class="ach-desc">' + escapeHtml(a.description) + '</div>' + tail + '</div>'
               + '</div>';
           }).join('') + '</div>';
       }
