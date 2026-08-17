@@ -3342,11 +3342,17 @@
           // 而排队中把进度条关掉,后面那几个的进度就再也不会露面了 —— 那正是
           // 这次要修的毛病,只是换了个入口
           const live = Boolean(s.running) || Boolean(waiting);
+          // 跑到一半就已经知道出了岔子的事(某一段没写出来)。**和 note 分开显示** ——
+          // note 是"现在在干什么",三秒后就被下一个事件盖掉了,而这几句要一直留着
+          // 到结果出来为止,否则用户全程不知道这份攻略缺了一块
+          const warns = (s.warnings || [])
+            .map(function (w) { return '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(w) + '</span>'; })
+            .join('');
           if (s.running) {
             // 只有真在重写(第 2 轮起)才显示轮数 —— 一次过的时候写"第 1/3 轮"
             // 反而像出了什么事要重来三次
             const round = s.rounds && s.round > 1 ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
-            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting, false, true);
+            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting + warns, false, true);
             return;
           }
           // **队列没空就别停轮询。** 一个跑完到下一个真正开跑之间有一个空档
@@ -3362,8 +3368,17 @@
           if (!r) { genLive = live; return (genBar.style.display = 'none'); }
 
           if (!r.ok) {
+            // **病因写在症状前面。** 少一段的表象是几十条"缺 checkbox",而这里只放得下
+            // 五条 —— 全被同一句话占满的话,真正的原因("第 3 段没拿到结果")一个字
+            // 都露不出来,用户会以为模型忘了写
+            const failed = (r.chunkFailures || [])
+              .map(function (c) {
+                return '<br><span class="warn">第 ' + c.chunk + '/' + c.of + ' 段(' + c.count +
+                  ' 个成就)没写出来:' + escapeHtml(String(c.reason).split('\n')[0]) + '</span>';
+              })
+              .join('');
             showGen(
-              GEN_WARN + ' 《' + s.game + '》校验没过,已存草稿,没写进攻略。' +
+              GEN_WARN + ' 《' + s.game + '》校验没过,已存草稿,没写进攻略。' + failed +
                 (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
               true, live
             );

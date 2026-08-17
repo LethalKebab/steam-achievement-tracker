@@ -118,7 +118,16 @@ describe('取下一个的接线', () => {
     const src = readFileSync(new URL('../lib/server.js', import.meta.url), 'utf8');
     const start = src.indexOf('const drainNext');
     assert.ok(start > 0, '找不到 drainNext —— 这条检查失去了目标,不是通过了');
-    const body = src.slice(start, start + 2600);
+    // **切到「我要看的那一段」,而不是往后数 2600 个字符。**
+    //
+    // 原来就是那个字节数,而 2026-08-17 给 onProgress 多接了三个进度相之后,
+    // `.then` 被推到了窗口外面 —— 报的是"找不到 then/catch",而 then/catch 明明在。
+    // 一条按字节数取范围的源码断言,会随着它守的那个函数长大而慢慢瞄不准:
+    // 往大调只是把同一个雷挪远一点,而危险的方向是反过来 —— 窗口恰好还罩得住
+    // 两个标记、中间的代码却已经变了。锚点用真实存在的代码,少了就当场报错
+    const end = src.indexOf('return { started: true', start);
+    assert.ok(end > start, '找不到 runGuideGen 的收尾 —— 锚点没了,这条检查该重写而不是放宽');
+    const body = src.slice(start, end);
     const thenIdx = body.indexOf('.then((r) =>');
     const catchIdx = body.indexOf('.catch((err) =>');
     assert.ok(thenIdx > 0 && catchIdx > thenIdx, '找不到 generateGuide 的 then/catch');

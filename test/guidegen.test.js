@@ -826,6 +826,9 @@ describe('分段撰写', () => {
           this.asked.push(messages.at(-1).content);
           const step = script[this.asked.length - 1];
           if (!step) throw new Error('scriptedProvider 的脚本用完了');
+          // 传输层的故障(401、网络断了)—— 和 checkResult 判出来的「这一段不可用」
+          // 是两类东西,而它们从同一个 await 里出来。见 CHUNK_LOCAL
+          if (step.throws) throw step.throws;
           const text = step.text ?? '';
           return {
             content: [{ type: 'text', text }],
@@ -917,7 +920,10 @@ describe('分段撰写', () => {
           // **这句话会原样进 Dashboard 的浮窗。** 该动哪个旋钮是终端才给得出、
           // 也才有意义的建议(tracker.js 接住 chunk-too-small 之后自己补)
           assert.equal(err.code, 'chunk-too-small');
-          assert.deepEqual(err.detail, { size: 5, min: 5 });
+          // `was` 记的是**改写之前**那个码。切不动之后 code 一律变成 chunk-too-small,
+          // 于是"到底是被截断还是根本没输出正文"就只剩这一个字段说得清 ——
+          // 而那两种情况下"换个模型"这条建议的分量完全不同
+          assert.deepEqual(err.detail, { size: 5, min: 5, was: 'max_tokens' });
           assert.doesNotMatch(err.message, /ai\.maxTokens|anthropicExtras|config\.json/,
             'Dashboard 用户没有终端,也不该被要求去编辑配置文件');
           return true;
@@ -940,6 +946,246 @@ describe('分段撰写', () => {
         );
         assert.equal(provider.asked.length, 1, `${stop} 不该重试`);
       }
+    });
+
+    // -----------------------------------------------------------------------
+    // 空回复:先原样重问,还空再切小
+    // -----------------------------------------------------------------------
+    // 「一个 text 块都没有」是这条路上唯一真正的**瞬时**失败:请求没问题、段长没问题、
+    // 资料也搜到了,就是这一次没吐出正文。它此前一次都不重试,整份当场作废 ——
+    // 实测撞到过(KINGDOM HEARTS,197 个成就第 3/4 段)。
+    describe('空回复', () => {
+      test('原样再问一次就好了 —— 不该为此把整份作废', async () => {
+        const { db, config } = manyEnv(N);
+        const provider = scriptedProvider([
+          { text: '' },              // 空回复
+          { text: seg(MANY) },       // 再问一次就有了
+        ]);
+        const events = [];
+        const r = await generateGuide(db, {
+          db, config, provider, steam: manySteam(), appid: '1',
+          onProgress: (e) => events.push(e),
+        });
+
+        assert.equal(r.ok, true, '重问一次就该正常写完');
+        assert.equal(provider.asked.length, 2);
+        assert.deepEqual(r.chunkFailures, [], '补上了就不该还挂着失败记录');
+        const ev = events.find((e) => e.phase === 'retry');
+        assert.ok(ev, '重问要发进度事件 —— 界面上不能是「卡了三分钟」');
+        assert.deepEqual([ev.attempt, ev.of], [1, 1]);
+      });
+
+      test('重问时那条空 assistant 必须先从历史里摘掉', async () => {
+        // 不摘的话历史里就有一轮「问了这一段 / 什么都没答」,而重问的是**同一句话** ——
+        // 模型完全可能当成"你已经问过了",于是再答一次空。这跟被截断那一轮必须摘掉
+        // 是同一条理由,只是废稿的形状不同(那边是半份,这边是空的)
+        const { db, config } = manyEnv(N);
+        const provider = scriptedProvider([{ text: '' }, { text: seg(MANY) }]);
+        await generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' });
+
+        const second = JSON.parse(provider.seen[1]);
+        assert.equal(second.length, 1, '重问时历史里只该有新问的那一句 user');
+        assert.equal(second[0].role, 'user');
+      });
+
+      test('重问还是空 ⇒ 按长度问题处理,切成两半', async () => {
+        // 第二次还空就不是抽风了。兼容端点上既发不出压 thinking 的参数,也不能假定
+        // 它会把「额度被思考吃光」如实报成 max_tokens —— 所以"空回复"里混着一部分
+        // 实质上就是截断的情况,而切小正是那部分的解
+        const { db, config } = manyEnv(N);
+        const provider = scriptedProvider([
+          { text: '' },                    // 空
+          { text: '' },                    // 重问还是空 → 切
+          { text: seg(MANY.slice(0, 6)) },
+          { text: seg(MANY.slice(6)) },
+        ]);
+        const events = [];
+        const r = await generateGuide(db, {
+          db, config, provider, steam: manySteam(), appid: '1',
+          onProgress: (e) => events.push(e),
+        });
+
+        assert.equal(r.ok, true);
+        assert.equal(provider.asked.length, 4, '空 + 重问 + 两半 = 四次');
+        const re = events.find((e) => e.phase === 'resplit');
+        assert.ok(re, '切小要发进度事件');
+        assert.deepEqual([re.from, re.to], [12, 6]);
+        assert.equal(re.reason, 'empty', '要说清是因为空回复才切的,不是因为截断');
+      });
+
+      test('切完的两半各自还能再重问一次 —— 重试次数跟着段走', async () => {
+        // 切小换的是**一段更小的内容**,前面那两次空回复是上一段的历史,不该记在它头上。
+        // 计数不归零的话,切完的第一半只要抽风一次就直接判死,而它其实一次都没试过
+        const { db, config } = manyEnv(N);
+        const provider = scriptedProvider([
+          { text: '' }, { text: '' },       // 整段:空 + 重问还空 → 切
+          { text: '' },                     // 前一半:空
+          { text: seg(MANY.slice(0, 6)) },  // 前一半:重问就有了
+          { text: seg(MANY.slice(6)) },
+        ]);
+        const r = await generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' });
+        assert.equal(r.ok, true, '切完的那一半也该有自己的一次重问机会');
+        assert.equal(provider.asked.length, 5);
+      });
+    });
+
+    // -----------------------------------------------------------------------
+    // 一段失败,整份不作废
+    // -----------------------------------------------------------------------
+    describe('一段写不出来时不拖垮整份', () => {
+      /** 24 个成就分 4 段,每段 6 个 —— 和线上那次(197 个分 4 段)同形状 */
+      const M = 24;
+      const LOTS = Array.from({ length: M }, (_, i) => def(`K${i}`, `成就${i + 1}`, `完成第${i + 1}关。`));
+      const lotsSteam = () => ({
+        async fetchPlayerAchievements() {
+          return { achievements: LOTS.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+        },
+        async fetchGlobalAchievementPercentages() { return null; },
+      });
+      const lotsEnv = () => {
+        const e = freshEnv({ defs: LOTS });
+        e.config.ai = { maxAchievements: 500, chunkSize: 6 };
+        return e;
+      };
+      const quarter = (n) => LOTS.slice(n * 6, n * 6 + 6);
+
+      test('第 3 段作废也接着写第 4 段,前几段的成果不丢', async () => {
+        const { db, config } = lotsEnv();
+        // 第 3 段拒答(不可重试、不可切),前后两段正常
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { text: '', stop: 'refusal' },
+          { text: seg(quarter(3)) },
+          // 第二轮补第 3 段
+          { text: seg(quarter(2)) },
+        ]);
+        const events = [];
+        const r = await generateGuide(db, {
+          db, config, provider, steam: lotsSteam(), appid: '1',
+          onProgress: (e) => events.push(e),
+        });
+
+        // **这条是这次改动的核心。** 原来第 3 段一失败就直接抛出去,前两段几分钟的
+        // 联网研究连同第 4 段一起作废 —— 而少的那一段有现成的补救路径:
+        // 它的成就全被报成 missing-checkbox,chunksNeedingRewrite 精确挑出这一段,
+        // 下一轮只重问它。那套机器本来就在
+        assert.equal(r.ok, true, '第二轮补上了就该顺利落地');
+        assert.equal(provider.asked.length, 5, '第一轮 4 次(含失败那次)+ 第二轮补 1 次');
+        const text = readFileSync(r.path, 'utf8');
+        for (const d of LOTS) {
+          assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} 丢了`);
+        }
+        const ev = events.find((e) => e.phase === 'chunk-failed');
+        assert.ok(ev, '放弃一段必须发进度事件 —— 悄悄少一块是最糟的失败方式');
+        assert.deepEqual([ev.chunk, ev.count], [3, 6]);
+      });
+
+      test('补第 3 段时问的是「写这一段」,不是甩过去六条「缺 checkbox」', async () => {
+        const { db, config } = lotsEnv();
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { text: '', stop: 'refusal' },
+          { text: seg(quarter(3)) },
+          { text: seg(quarter(2)) },
+        ]);
+        await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
+
+        // 一段从没写出来,缺的不是修正意见,是这一段本身。拿打回清单去问,等于
+        // 递给模型六条「XX 没有 checkbox」,而它压根没见过这一段的内容
+        const refill = provider.asked[4];
+        assert.match(refill, /只写第 13–18 个成就/, '该用原来那句「写这一段」');
+        assert.doesNotMatch(refill, /校验没过/, '这一段没写过,谈不上校验没过');
+      });
+
+      test('供应商坏了要原样抛出去,不能当成「这一段没成」接着问', async () => {
+        const { db, config } = lotsEnv();
+        const boom = Object.assign(new Error('deepseek API HTTP 401:key 不对'), { code: 'bad-api-key' });
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { throws: boom },
+        ]);
+        await assert.rejects(
+          () => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }),
+          (err) => {
+            // **code 必须原样传出去。** 它是 tracker.js 顶层 catch 用来挂终端建议的钥匙
+            // (bad-api-key 那条要说「环境变量会盖掉 config.json」,而清环境变量只能在
+            // 终端做)。当成一段的失败记下来,这条建议就永远走不到那儿了
+            assert.equal(err.code, 'bad-api-key');
+            return true;
+          }
+        );
+        assert.equal(provider.asked.length, 3, '整体故障不该再去问第 4 段 —— 那是同一堵墙');
+      });
+
+      test('整体故障抛出去时,已经写好的几段仍然留在草稿里', async () => {
+        // **这一条才真正钉住「每写完一段就落盘」。** 轮末那次 writeDraft 在这条路上
+        // 根本走不到(异常直接穿出 generateGuide),所以草稿里有没有东西,全靠逐段那次写。
+        // 线上那次失败后 .drafts/ 是空的,就是因为草稿只在整个分段循环跑完之后才写
+        const { db, config } = lotsEnv();
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { throws: Object.assign(new Error('网络断了'), { code: 'bad-api-key' }) },
+        ]);
+        const draft = join(config.guidesDir, DRAFTS_DIR, guideFileName('测试游戏', '1'));
+        await assert.rejects(() => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }));
+
+        assert.ok(existsSync(draft), '前两段的成果必须已经在盘上 —— 那是用户已经付过钱的东西');
+        const text = readFileSync(draft, 'utf8');
+        for (const d of [...quarter(0), ...quarter(1)]) {
+          assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} 应该留在草稿里`);
+        }
+      });
+
+      test('每写完一段就落盘 —— 一段失败不该把前面几段的钱一起丢掉', async () => {
+        const { db, config } = lotsEnv();
+        // 前两段成功,第 3 段起全部拒答:三轮都补不上,最后 ok=false
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { text: '', stop: 'refusal' },
+          { text: seg(quarter(3)) },
+          { text: '', stop: 'refusal' },  // 第 2 轮
+          { text: '', stop: 'refusal' },  // 第 3 轮
+        ]);
+        const r = await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
+
+        assert.equal(r.ok, false);
+        assert.equal(r.path, null, '知道缺一段就绝不能落地');
+        // **草稿原来是整个分段循环跑完之后才写的**,所以任何一段中途抛异常都会把
+        // 前面几段连同它们的联网研究一起丢掉。实测:线上那次失败后 .drafts/ 是空的
+        assert.ok(existsSync(r.draftPath), '草稿必须在');
+        const draft = readFileSync(r.draftPath, 'utf8');
+        for (const d of [...quarter(0), ...quarter(1), ...quarter(3)]) {
+          assert.ok(draft.includes(`**${d.name_cn}**`), `写成功的 ${d.name_cn} 应该留在草稿里`);
+        }
+        // 病因要交出去。少一段的症状是六条 missing-checkbox,而那是症状不是病因
+        assert.equal(r.chunkFailures.length, 1);
+        assert.deepEqual(
+          [r.chunkFailures[0].chunk, r.chunkFailures[0].of, r.chunkFailures[0].count],
+          [3, 4, 6]
+        );
+        assert.match(r.chunkFailures[0].reason, /拒答/);
+      });
+
+      test('全部段都写不出来 ⇒ 抛第一个真原因,不是一堆「缺 checkbox」', async () => {
+        const { db, config } = lotsEnv();
+        const provider = scriptedProvider(Array.from({ length: 4 }, () => ({ text: '', stop: 'refusal' })));
+        await assert.rejects(
+          () => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }),
+          (err) => {
+            // 一段都没写出来时继续往下走,会拿一份空草稿去校验、报出"每个成就都缺
+            // checkbox",然后再花两轮重问 —— 症状盖住病因,还多花两轮的钱
+            assert.equal(err.code, 'refusal');
+            assert.doesNotMatch(err.message, /checkbox/);
+            return true;
+          }
+        );
+        assert.equal(provider.asked.length, 4, '第一轮走完就该停,不该再开第二轮');
+      });
     });
   });
 
