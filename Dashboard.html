@@ -1750,9 +1750,60 @@
       cell.innerHTML = barCell(rate);
     }
 
+    /**
+     * 横版头图的**猜测**地址。库里 97% 的游戏在这条老路径上。
+     *
+     * 剩下那些猜不中 —— Steam 把新游戏的商店素材搬去了带内容哈希的路径,那段哈希
+     * 猜不出来(理由写在 lib/steam.js 的 fetchStoreHeaderImage)。所以这个函数
+     * **只是第一次尝试**,失败由 coverFailed 接手去问服务端要真地址。
+     *
+     * 先猜后问的顺序是有理由的:猜中的时候一次多余的请求都不用发,而商店接口
+     * 限流很严,三百多款游戏挨个去问是纯粹的浪费。
+     */
     function thumbUrl(appid) {
       return 'https://cdn.akamai.steamstatic.com/steam/apps/' + appid + '/header.jpg';
     }
+
+    /** 这一行/这张卡该先试哪个地址:问到过真地址就直接用,没有就先猜 */
+    function coverSrc(g) {
+      return g.coverUrl || thumbUrl(g.appid);
+    }
+
+    /**
+     * 头图加载失败 —— 问服务端要真地址换上。
+     *
+     * **先把 onerror 断掉**:换上去的那个万一也加载不出来,不断的话就是无限重来。
+     * 拿到之后顺手写回 allGames,这样重绘(收藏、锁定、筛选都会触发)不会把这一轮
+     * 发现的结果丢掉、再问一遍。服务端那边也落了库,所以下次开页面根本走不到这里。
+     *
+     * appid 直接拼进 onerror 属性里没有转义问题:它在库里恒为纯数字(addGame 用
+     * `^\d+$` 拦过,同步进来的是 Steam 给的 appid)。
+     */
+    window.coverFailed = function (img, appid) {
+      img.onerror = null;
+      rpc
+        .withSuccessHandler(function (r) {
+          if (!r || !r.url) { img.style.visibility = 'hidden'; return; }
+          const g = allGames.find(function (x) { return String(x.appid) === String(appid); });
+          if (g) g.coverUrl = r.url;
+          img.src = r.url;
+        })
+        .withFailureHandler(function () { img.style.visibility = 'hidden'; })
+        .resolveCover(appid);
+    };
+
+    /**
+     * 竖版封面加载失败 —— 退回横版,横版再失败才去问。
+     *
+     * 竖版缺失是常态(老游戏、部分家庭共享的),**不值得为它去问服务端**:
+     * appdetails 根本不返回 library_600x900,问了也没有。而横版是问得到的,
+     * 所以这里只负责换到横版,后面那一棒交给 coverFailed。
+     */
+    window.portraitFailed = function (img, appid) {
+      const g = allGames.find(function (x) { return String(x.appid) === String(appid); });
+      img.onerror = function () { window.coverFailed(img, appid); };
+      img.src = (g && g.coverUrl) || thumbUrl(appid);
+    };
 
     /**
      * 竖版封面。**Steam 自己就有这张图**(库里的竖版格),所以竖排的卡片用它,
@@ -1933,10 +1984,11 @@
         return '<div class="g-card' + (g.guideUrl ? ' has-guide' : '') + '"'
           + (g.guideUrl ? ' data-guide="' + g.guideUrl + '"' : '')
           + ' title="' + escapeHtml(g.name) + (g.guideUrl ? '(点开攻略)' : '') + '">'
-          // 竖版封面优先,没有就退回横版 header。**onerror 里先把自己清掉** ——
-          // 否则退回的那张也加载失败时会再次触发,变成死循环
+          // 竖版封面优先,没有就退回横版 header;横版也拿不到才去问服务端要真地址。
+          // **每一棒都要先把 onerror 换掉或清掉**(见 portraitFailed / coverFailed)——
+          // 否则退回的那张也失败时会再次触发,变成死循环
           + '<img src="' + portraitUrl(g.appid) + '" loading="lazy"'
-          + ' onerror="this.onerror=null; this.src=\'' + thumbUrl(g.appid) + '\'">'
+          + ' onerror="window.portraitFailed(this, \'' + g.appid + '\')">'
           + '<button class="row-icon g-heart' + (g.favorite ? ' active-heart' : '') + '"'
           + ' data-fav-appid="' + g.appid + '">' + heartSvg(g.favorite) + '</button>'
           + '<div class="g-scrim">'
@@ -2062,7 +2114,8 @@
           + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '" aria-label="重点关注">' + icon('star', g.priority) + '</button>'
           + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '" aria-label="喜爱">' + heartSvg(g.favorite) + '</button>'
           + '</div>'
-          + '<img class="game-thumb" src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+          + '<img class="game-thumb" src="' + coverSrc(g) + '" loading="lazy"'
+          + ' onerror="window.coverFailed(this, \'' + g.appid + '\')">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
           + '<div class="row-actions">'
           + guideBtn
