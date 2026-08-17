@@ -115,7 +115,7 @@ A forced tag skips the is-it-newer check, so the whole path runs without cutting
 
 Done once on 2026-08-14 (1.1.4 → v1.1.2): 101 files deleted by manifest, extract, restart, and every planted user file intact. Compare against the two logs in `%TEMP%\steam-tracker-update\` — `updater.log` is the app's half, `apply-update.log` is the helper's. **Which of the two is missing tells you which half failed**, which is the whole reason both exist.
 
-Deleting by manifest is exercised by this rehearsal, because deletion reads the manifest **already on disk**. What it does *not* reach is the branch where the incoming release ships a manifest and the helper installs it — v1.1.2 has none, so the run takes the "clear the stale manifest" path instead. Covering that needs two releases that both carry one.
+Deleting by manifest is exercised by this rehearsal, because deletion reads the manifest **already on disk**. What it does *not* reach is the branch where the incoming release ships a manifest and the helper installs it — v1.1.2 has none, so the run takes the "clear the stale manifest" path instead. **Covered on 2026-08-17**: v1.1.7 and v1.1.8 were the first pair to both ship one, and a real user on a different machine took that update successfully. Note what that does and does not prove — installing the new manifest is the *last* step, so it can fail without the update looking failed, and the damage would only surface one release later as deletion against a stale manifest. Confirming it properly means looking for `resources/tracker/update-manifest.json` on that machine and checking it reads 1.1.8.
 
 ## Dev mode
 
