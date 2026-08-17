@@ -37,6 +37,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxAchievements": 500,   // refuse to generate above this
     "chunkSize": 50,          // max achievements per writing pass; passes are evenly sized
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
+    "concurrency": 3,         // how many passes are written at once; 1 = one at a time
 
     "maxSearches": 8,         // web_search calls per request
     "maxFetches": 10,         // web_fetch calls per request
@@ -100,7 +101,11 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 **`ai.*`** — settings for AI guide generation ([design and status](ai-guide-writing.md)); nothing reads them unless you run `node tracker.js ai-check` or `node tracker.js guide-gen`. It is the one part of this project that spends money, so a few of the defaults are deliberately conservative and `guide-gen` asks for confirmation before it starts.
 
-`maxAchievements` (500) is a refusal threshold, not a truncation: a game above it is rejected with an explanation rather than given a worse guide. A game with more achievements than `chunkSize` (50) is written in several passes rather than refused — the passes share one conversation, so the model can see what it already wrote and won't repeat a section or an achievement, and validation always runs over the assembled guide. What the limit protects now is your time and spend, not feasibility: a 400-achievement game is nine passes. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
+`maxAchievements` (500) is a refusal threshold, not a truncation: a game above it is rejected with an explanation rather than given a worse guide. A game with more achievements than `chunkSize` (50) is written in several passes rather than refused, and validation always runs over the assembled guide. What the limit protects now is your time and spend, not feasibility: a 400-achievement game is nine passes.
+
+**`concurrency` (3) is how many of those passes are written at the same time.** Each pass covers a different set of achievements and none depends on another, so the first round takes about as long as its slowest pass instead of the sum of all of them — the difference on a large game is most of the total time. Set it to `1` to go back to one pass at a time, which is worth doing if you are trying to reproduce a problem. Raising it mostly spends your provider's rate limit; being throttled is retried automatically and doesn't lose a pass. Only the first round runs in parallel: later rounds re-ask just the passes that failed validation, usually one or two, where there is nothing to gain.
+
+One visible consequence: because several passes are being written at once, progress reports **how many passes are finished** rather than which one is in progress. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
 
 **`chunkSize` is a ceiling, not a pass length.** The number of passes is computed from it and the achievements are then spread evenly, so 55 achievements at the default become two passes of 28 and 27 — not 50 and 5. Lowering it therefore shortens every pass and adds passes only as needed; it can never make a pass longer.
 
