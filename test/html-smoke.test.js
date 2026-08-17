@@ -457,18 +457,46 @@ describe('搜索框一个人干两件事', () => {
     assert.match(searchBranch, /return/, '有搜索词时必须当场返回,不能继续过勾选框');
   });
 
-  test('只有库里一条都没匹配上才去打 Steam 的接口', () => {
-    // 本地筛选免费且瞬时,Steam 那个是有限流的网络调用,而绝大多数搜索是在找
-    // 自己已经有的游戏。去掉这道判断不会报错,只是每敲一个字母都往外发一次请求
+  test('库里有没有,不能决定要不要去 Steam 搜', () => {
+    // **这一条钉的正好是上一版的反面,而上一版是个 bug。**
+    // 原来写的是「库里有就到此为止,不去 Steam 找」,那条规则把两件事混成一件:
+    // 「找到了东西」不等于「找到了你要的那个东西」。想加 Silksong 的人打 silk、
+    // 库里刚好有个 Silkroad —— 添加这条路就凭空消失,而且**看不出它消失了**。
+    // 判断保留,但它只决定怎么显示(摊开还是折成一行)
     const src = js();
     const i = src.indexOf('function onSearchInput');
     assert.ok(i > 0, '找不到 onSearchInput');
     const block = src.slice(i, src.indexOf('\n    }', i));
     assert.match(block, /allGames\.some/, '要拿整个库判「有没有」,不是拿筛选后的行');
-    assert.match(block, /if \(hit\)/, '库里有就该到此为止');
-    const hitAt = block.indexOf('if (hit)');
+    assert.match(block, /setTimeout/, '搜索必须照发');
+    // 「库里有」和「发请求」之间不能有 return —— 有的话就又变回那条挡路的规则了
+    const hitAt = block.indexOf('libHit =');
     const timerAt = block.indexOf('setTimeout');
-    assert.ok(hitAt > 0 && timerAt > hitAt, 'Steam 那次请求必须排在「库里有没有」之后');
+    assert.ok(hitAt > 0 && timerAt > hitAt, '判断在前、请求在后');
+    // **从赋值那一行的行尾切起,不是从行首。** `libHit = allGames.some(function(g){ return … })`
+    // 自己就带着一个 return,从行首切会被那个回调喂饱 —— 第一版就是这么假红的。
+    // 要看的是「那一行之后到发请求之间」有没有控制流的 return
+    const afterAssign = block.indexOf('\n', hitAt);
+    assert.ok(afterAssign > 0 && afterAssign < timerAt, 'libHit 那行的行尾没找到');
+    assert.doesNotMatch(
+      block.slice(afterAssign, timerAt),
+      /\breturn\b/,
+      '判完库里有没有就 return,等于把添加这条路重新藏起来'
+    );
+  });
+
+  test('库里已经有结果时,Steam 那份折成一行', () => {
+    // 展开十行约 370px,而这一块住在冻结区里 —— 每次筛自己的库都顶掉十行表格,
+    // 换来一份用户多半没在找的补充结果。折起来那一行的作用是**让「还能加」看得见**
+    const src = js();
+    const i = src.indexOf('function renderSearchResults');
+    assert.ok(i > 0, '找不到 renderSearchResults');
+    const block = src.slice(i, src.indexOf('\n    function ', i + 10));
+    assert.match(block, /libHit && !steamExpanded/, '折叠的条件是「库里有」且「还没点开」');
+    assert.match(block, /steam-more/, '要有那个可点的一行');
+    // 展开时**不能再发一次请求** —— 结果已经在手上了
+    assert.match(block, /renderSearchResults\(steamItems\)/, '展开是重画缓存,不是重新搜');
+    assert.doesNotMatch(block, /searchSteamGames/, '展开那一步不该碰 rpc');
   });
 
   test('Steam 结果是 button,不是挂了 click 的 div', () => {

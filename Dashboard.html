@@ -682,6 +682,21 @@
       color: var(--text-3);
       letter-spacing: 0.04em;
     }
+    /* 折起来那一行。**做成 chip 而不是链接**:它和上面那排筛选是同一类东西 ——
+       「还能往下看什么」,不是「跳去别处」。安静地待着,悬停才亮起来 */
+    .steam-more {
+      align-self: flex-start;
+      font: inherit;
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+      background: var(--surface);
+      border: 1px dashed var(--line-2);
+      border-radius: var(--r-full);
+      padding: 5px var(--s3);
+      cursor: pointer;
+      transition: color var(--dur-1), border-color var(--dur-1);
+    }
+    .steam-more:hover { color: var(--text); border-color: var(--accent); border-style: solid; }
     /* 等 Steam 回话时画几条占位行。**用形状说话,不用句子** ——
        它同时说了两件事:在忙、以及等下出来的东西长这样。原来这里是一句
        「库里没有,正在 Steam 上找…」,盯着一句不动的话两秒,分不出是在跑还是卡了 */
@@ -3000,7 +3015,31 @@
 
     function renderSearchResults(items) {
       const box = document.getElementById('gameSearchResults');
-      document.getElementById('steamLabel').hidden = !(items && items.length);
+      const label = document.getElementById('steamLabel');
+      const extra = document.getElementById('searchExtra');
+      steamItems = items || [];
+
+      // **库里已经答完的时候,Steam 那份收成一行。**
+      //
+      // 展开十行是 ~370px,而这一块住在冻结区里 —— 每次筛自己的库都被顶掉十行表格,
+      // 换来的是一份用户多半没在找的补充结果。所以:库里没有 ⇒ 结果就是答案,摊开;
+      // 库里有 ⇒ 折成一行,点开才展开。**那一行的作用是让「还能加」看得见** ——
+      // 上一版把这条路整个藏起来了,而藏起来的路和不存在的路没有区别
+      if (steamItems.length && libHit && !steamExpanded) {
+        extra.hidden = false;
+        label.hidden = true;
+        box.style.display = 'flex';
+        box.innerHTML = '<button type="button" class="steam-more" id="steamMore">'
+          + 'Steam 商店 · ' + steamItems.length + ' 个</button>';
+        document.getElementById('steamMore').addEventListener('click', function() {
+          steamExpanded = true;
+          renderSearchResults(steamItems);
+        });
+        measureTopbar();
+        return;
+      }
+
+      label.hidden = !steamItems.length;
       if (!items || items.length === 0) {
         box.style.display = 'none';
         box.innerHTML = '';
@@ -3045,15 +3084,18 @@
      * 要是还按筛选后的结果判,一半以上的搜索都会跑到这里来。
      */
     function runGameSearch(query) {
-      // 在忙 = 画几条占位行,不是写一句话。见 .game-search-result.skeleton
-      renderSkeleton();
+      // 在忙 = 画几条占位行,不是写一句话。见 .game-search-result.skeleton。
+      // **库里已经有结果时不画** —— 那种情况下表格已经答完了,再为一个用户没要的
+      // 补充结果闪三条占位行,是拿噪音换一个多半用不上的东西
+      if (!libHit) renderSkeleton();
       rpc.withSuccessHandler(function(items) {
         // 请求回来时用户可能已经接着打字了。**用当时那个词对一下**,不然慢的那个响应
         // 会盖掉快的那个,列表和输入框对不上(经典的竞态,这里debounce 挡不住)
         if (document.getElementById('searchBox').value.trim() !== query) return;
         if (!items || items.length === 0) {
-          // 真正的死胡同,这一种才需要用词
-          setAddMsg('没有找到「' + query + '」');
+          // 库里也没有、Steam 也没有 —— 真正的死胡同,这一种才需要用词。
+          // 库里有的话就什么都不说:用户要找的东西表格里已经给了
+          if (!libHit) setAddMsg('没有找到「' + query + '」');
           renderSearchResults([]);
           return;
         }
@@ -3084,6 +3126,14 @@
      * 解决的搜索闪一下。
      */
     let searchTimeout = null;
+    /**
+     * 库里这个词有没有匹配到东西。**只影响怎么显示,不影响要不要搜** —— 见 onSearchInput。
+     * steamExpanded:折起来那一行被点开了没有,换个搜索词就复位。
+     * steamItems:已经拿回来的结果,展开时直接重画,不再发一次请求。
+     */
+    let libHit = false;
+    let steamExpanded = false;
+    let steamItems = [];
     function onSearchInput() {
       const query = document.getElementById('searchBox').value.trim();
       const extra = document.getElementById('searchExtra');
@@ -3094,19 +3144,21 @@
       renderSearchResults([]);
       setAddMsg('');
 
+      steamExpanded = false;  // 换了个词,上一次展开的状态不该跟过来
       if (!query) {
         extra.hidden = true;
         measureTopbar();
         return;
       }
-      // 库里有就到此为止:表格已经把它们显示出来了,不需要再多说一句
-      const hit = allGames.some(function(g) { return g.name.toLowerCase().indexOf(query.toLowerCase()) !== -1; });
-      if (hit) {
-        extra.hidden = true;
-        measureTopbar();
-        return;
-      }
-      extra.hidden = false;
+      // **库里有没有,只决定怎么显示,不再决定要不要搜。**
+      //
+      // 原来是「库里有就不去 Steam 找了」,而那条规则把两件事混成了一件:
+      // 「找到了东西」不等于「找到了你要的那个东西」。想加 Silksong 的人打了 silk,
+      // 库里刚好有个 Silkroad —— 添加这条路就凭空消失了,而且**看不出它消失了**。
+      libHit = allGames.some(function(g) { return g.name.toLowerCase().indexOf(query.toLowerCase()) !== -1; });
+      // 库里没有 ⇒ Steam 那边就是答案,先把位置腾出来画占位行;
+      // 库里有  ⇒ 先安静着,等结果回来再决定露不露面(多半只露一行)
+      extra.hidden = libHit;
       measureTopbar();
       searchTimeout = setTimeout(function() { runGameSearch(query); }, 300);
     }
