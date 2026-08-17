@@ -1263,6 +1263,18 @@
       color: var(--text);
     }
     #gen-bar .warn { color: var(--text-3); }
+    /* 有任务在跑 = 只能收起;跑完了 = 才能关掉。两个按钮永远只露一个 */
+    #gen-bar.live #genClose,
+    #gen-bar:not(.live) #genToggle { display: none; }
+    /* 收起 = 只留一行。**用 max-height 卡高度,不是给文字加 nowrap** ——
+       进度是用 <br> 拼起来的多行,nowrap 拦不住 <br>,照样撑开 */
+    #gen-bar.collapsed {
+      max-height: calc(1.6em + var(--s3) * 2);
+      overflow: hidden;
+      cursor: pointer;
+    }
+    /* 收起时整条都可以点回来。箭头翻个面表示"再点是展开" */
+    #gen-bar.collapsed #genToggle .ic { transform: rotate(180deg); }
     #gen-bar .gen-close {
       position: absolute;
       top: var(--s1);
@@ -1476,6 +1488,10 @@
     <symbol id="i-close" viewBox="0 0 24 24">
       <path d="M6 6l12 12M18 6L6 18"/>
     </symbol>
+    <!-- 收起/展开。同一个字形转 180° 当展开用 —— 上下两版画两遍,迟早只改一边 -->
+    <symbol id="i-chevron" viewBox="0 0 24 24">
+      <path d="m6 9.5 6 6 6-6"/>
+    </symbol>
     <symbol id="i-warn" viewBox="0 0 24 24">
       <path d="M12 3.8 21.2 20H2.8z"/>
       <path d="M12 10v4.2M12 17.4h.01"/>
@@ -1542,8 +1558,14 @@
     </div>
   </div>
 
+  <!--
+    两个按钮而不是一个会变身的按钮:**「收起」和「关掉」不是同一件事**,
+    能做哪一件由任务跑没跑完决定(见 JS 里的 genLive)。让一个按钮按状态换图标
+    换行为,读代码的人得先知道它现在是哪一副面孔;两个各干一件事,CSS 决定露哪个。
+  -->
   <div id="gen-bar" role="status">
-    <button type="button" class="gen-close" id="genClose" title="收起" aria-label="收起"><svg class="ic"><use href="#i-close"/></svg></button>
+    <button type="button" class="gen-close" id="genToggle" title="收起(任务还在跑)" aria-label="收起"><svg class="ic"><use href="#i-chevron"/></svg></button>
+    <button type="button" class="gen-close" id="genClose" title="关闭" aria-label="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
   </div>
 
@@ -2731,13 +2753,48 @@
     // "会发生什么、机器验不了什么"说清楚 —— 用户看不到 CLI 那些提示。
     const genBar = document.getElementById('gen-bar');
     const genMsg = document.getElementById('gen-msg');
-    // 关掉 = "这一轮不想看了"。轮询每 3 秒还会再调一次 showGen,不把这个意图记下来的话,
-    // 关掉三秒之后它自己又回来了。下一次**主动**发起生成/搬运时才重新打开 ——
-    // 那时候是用户自己要看进度的
-    let genDismissed = false;
-    document.getElementById('genClose').addEventListener('click', function () {
-      genDismissed = true;
+
+    /**
+     * **收起不等于关掉,而且任务还在跑的时候只能收起。**
+     *
+     * 这块原来只有一个 `genDismissed`:按下那个按钮就把它置真,`showGen` 直接
+     * return。按钮的 title 写着「收起」,行为却是永久丢弃 —— 一次生成要 2–4 分钟,
+     * 按下去之后这一次的进度**再也拿不回来**,唯一的复原办法是再发起一次生成
+     * (那三个入口是仅有的会把标志清掉的地方)。标签说的和做的是两件事。
+     *
+     * 现在按状态分开:
+     *   跑着  → 只给「收起」。剩一行,点一下整条回来。看不见进度这件事不该发生
+     *   跑完  → 给「关闭」。结果已经读过了,让它一直占着屏幕才是打扰
+     *
+     * 轮询每 3 秒调一次 showGen,收起状态由 class 表达而不是靠拦住 showGen ——
+     * 拦住它就等于让进度停在按下那一刻,展开回来看到的是旧消息
+     */
+    let genCollapsed = false;
+    let genLive = false;
+
+    function syncGenChrome() {
+      // **Boolean() 不能省**,理由和同步按钮那两处一样:classList.toggle 的第二个
+      // 参数是 undefined 时会**翻转**而不是关闭。这里更阴 —— 轮询每 3 秒来一次,
+      // 一旦某次拿到的状态缺字段,进度条就会每 3 秒收起、展开、收起
+      genBar.classList.toggle('collapsed', Boolean(genCollapsed));
+      genBar.classList.toggle('live', Boolean(genLive));
+    }
+
+    document.getElementById('genToggle').addEventListener('click', function (e) {
+      e.stopPropagation();
+      genCollapsed = !genCollapsed;
+      syncGenChrome();
+    });
+    document.getElementById('genClose').addEventListener('click', function (e) {
+      e.stopPropagation();
       genBar.style.display = 'none';
+    });
+    // 收起之后整条都是"点我展开"。**只在收起时生效** —— 展开状态下这里面有链接
+    // (打开攻略),整条可点会把点链接也吞成一次折叠
+    genBar.addEventListener('click', function () {
+      if (!genCollapsed) return;
+      genCollapsed = false;
+      syncGenChrome();
     });
 
     let aiReady = false;
@@ -2783,9 +2840,9 @@
     window.rewriteGuide = async function (btn) {
       const appid = btn.getAttribute('data-rewrite');
       const name = btn.getAttribute('data-name') || appid;
-      genDismissed = false;
+      genCollapsed = false;
       btn.disabled = true;
-      showGen('⏳ 检查《' + name + '》…');
+      showGen('⏳ 检查《' + name + '》…', false, true);
 
       const p = await new Promise((resolve) => {
         rpc.withSuccessHandler(resolve)
@@ -2794,7 +2851,7 @@
       });
       if (!p || p.error) {
         btn.disabled = false;
-        return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true);
+        return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true, false);
       }
 
       // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
@@ -2819,14 +2876,14 @@
         .withSuccessHandler(function (r) {
           if (r && r.error) {
             btn.disabled = false;
-            return showGen(GEN_WARN + ' ' + r.error, true);
+            return showGen(GEN_WARN + ' ' + r.error, true, false);
           }
-          showGen('⏳ 重写《' + name + '》…');
+          showGen('⏳ 重写《' + name + '》…', false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen(GEN_WARN + ' ' + err, true);
+          showGen(GEN_WARN + ' ' + err, true, false);
         })
         .startGuideGen(appid, true);
     };
@@ -2834,14 +2891,14 @@
     window.migrateGuide = function (btn) {
       const appid = btn.getAttribute('data-migrate');
       const name = btn.getAttribute('data-name') || appid;
-      genDismissed = false; // 自己点的搬运,进度条要露出来
+      genCollapsed = false; // 自己点的搬运,进度条要露出来
       btn.disabled = true;
-      showGen('⏳ 检查《' + name + '》…');
+      showGen('⏳ 检查《' + name + '》…', false, true);
       rpc
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             btn.disabled = false;
-            return showGen(GEN_WARN + ' ' + ((p && p.error) || '预览失败'), true);
+            return showGen(GEN_WARN + ' ' + ((p && p.error) || '预览失败'), true, false);
           }
           // 逐条核对、对不上就不动本地文件、页面带图标 —— 都是"我们怎么保证不出事",
           // 不是他要决定的事。真正要他知道的只有两件:搬什么、原文去哪
@@ -2862,29 +2919,30 @@
             genBar.style.display = 'none';
             return;
           }
-          showGen('⏳ 搬运《' + p.game + '》…');
+          showGen('⏳ 搬运《' + p.game + '》…', false, true);
           rpc
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
                 btn.disabled = false;
-                return showGen(GEN_WARN + ' ' + ((r && r.error) || '搬运失败'), true);
+                return showGen(GEN_WARN + ' ' + ((r && r.error) || '搬运失败'), true, false);
               }
               showGen(
                 GEN_OK + ' 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
                   '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开 Notion 页面</a>' +
-                  (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : '')
+                  (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : ''),
+                false, false
               );
               loadDashboard();
             })
             .withFailureHandler(function (err) {
               btn.disabled = false;
-              showGen(GEN_WARN + ' ' + err, true);
+              showGen(GEN_WARN + ' ' + err, true, false);
             })
             .migrateGuideToNotion(appid);
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen(GEN_WARN + ' ' + err, true);
+          showGen(GEN_WARN + ' ' + err, true, false);
         })
         .previewGuideToNotion(appid);
     };
@@ -2902,13 +2960,13 @@
       // 带损失的那几个框(重写、删除)不适用这条,它们的正文是必须的
       const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成' });
       if (!ok) return;
-      genDismissed = false; // 自己点的生成,进度条要露出来
+      genCollapsed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;
       rpc
         .withSuccessHandler(function (r) {
           if (r && r.error) {
             btn.disabled = false;
-            showGen(GEN_WARN + ' ' + r.error, true);
+            showGen(GEN_WARN + ' ' + r.error, true, false);
             return;
           }
           // 排队和开跑要说得不一样。**这条尤其重要**:一次生成 2–4 分钟,
@@ -2916,22 +2974,34 @@
           // 自己那一下点丢了
           showGen(r && r.queued
             ? GEN_QUEUE + ' 《' + name + '》已排队(前面还有 ' + r.position + ' 个)'
-            : '⏳ 生成《' + name + '》…');
+            : '⏳ 生成《' + name + '》…', false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen(GEN_WARN + ' ' + err, true);
+          showGen(GEN_WARN + ' ' + err, true, false);
         })
         .startGuideGen(appid);
     };
 
-    function showGen(html, dim) {
-      if (genDismissed) return;
+    /**
+     * @param {string}  html
+     * @param {boolean} [dim]  暗色(警告/失败)
+     * @param {boolean} [live] 这条说的是"还在跑"吗。**跑完的那一条要显式传 false**,
+     *                         否则关不掉:关闭按钮只在非 live 时才露出来
+     */
+    function showGen(html, dim, live) {
       genBar.style.display = 'block';
-      // 写进内层 span,不要覆盖 genBar 本身 —— 关闭按钮是它的兄弟节点,
+      if (live !== undefined) {
+        // 从"在跑"变成"跑完了"就自动展开一次。收起的理由是那一长串进度太占地方,
+        // 而结果只有一行 —— 而且它带着攻略落在哪儿,恰恰是这几分钟等的东西
+        if (genLive && !live) genCollapsed = false;
+        genLive = live;
+      }
+      // 写进内层 span,不要覆盖 genBar 本身 —— 两个按钮是它的兄弟节点,
       // 覆盖 innerHTML 会把按钮一起冲掉
       genMsg.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
+      syncGenChrome();
     }
 
     // 只在有任务在跑的时候轮询 —— 平时不给这个本地服务加一份常驻请求。
@@ -2950,11 +3020,15 @@
           const waiting = (s.queue && s.queue.length)
             ? ' · 还有 ' + s.queue.length + ' 个排队'
             : '';
+          // **队列没空也算"还在跑"。** 这个值决定右上角给的是「收起」还是「关闭」,
+          // 而排队中把进度条关掉,后面那几个的进度就再也不会露面了 —— 那正是
+          // 这次要修的毛病,只是换了个入口
+          const live = Boolean(s.running) || Boolean(waiting);
           if (s.running) {
             // 只有真在重写(第 2 轮起)才显示轮数 —— 一次过的时候写"第 1/3 轮"
             // 反而像出了什么事要重来三次
             const round = s.rounds && s.round > 1 ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
-            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting);
+            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting, false, true);
             return;
           }
           // **队列没空就别停轮询。** 一个跑完到下一个真正开跑之间有一个空档
@@ -2965,15 +3039,15 @@
             clearInterval(genTimer);
             genTimer = null;
           }
-          if (s.error) return showGen(GEN_WARN + ' 生成失败:' + s.error + waiting, true);
+          if (s.error) return showGen(GEN_WARN + ' 生成失败:' + s.error + waiting, true, live);
           const r = s.result;
-          if (!r) return (genBar.style.display = 'none');
+          if (!r) { genLive = live; return (genBar.style.display = 'none'); }
 
           if (!r.ok) {
             showGen(
               GEN_WARN + ' 《' + s.game + '》校验没过,已存草稿,没写进攻略。' +
                 (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
-              true
+              true, live
             );
             return;
           }
@@ -3001,7 +3075,8 @@
           showGen(
             GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
               noResearch +
-              '<br><span class="warn">内容需要你自己过一遍。</span>'
+              '<br><span class="warn">内容需要你自己过一遍。</span>',
+            false, live
           );
           loadDashboard();  // 攻略已登记,刷新一下让「📖 攻略」链接出来
         })
