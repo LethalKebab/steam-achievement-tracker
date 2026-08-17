@@ -507,7 +507,20 @@ test('配了 baseUrl 就不查模型名和供应商对不对得上', async () =>
   // provider=anthropic 指向 DeepSeek 的兼容端点时,模型就叫 deepseek-v4-flash。
   // 前缀检查在这种情况下只会误报
   const { assertModelMatchesProvider } = await import('../lib/ai.js');
-  assert.throws(() => assertModelMatchesProvider('anthropic', 'deepseek-v4-flash'), /只改了一半/);
+  assert.throws(
+    () => assertModelMatchesProvider('anthropic', 'deepseek-v4-flash'),
+    (err) => {
+      assert.match(err.message, /只改了其中一项/);
+      // 正文会原样出现在 Dashboard 的浮窗上,那边的用户没有终端 —— 「加 --provider X」
+      // 这类终端专属建议挂在 code 上,由 tracker.js 的 CLI_HINTS 补
+      assert.equal(err.code, 'provider-model-mismatch');
+      assert.deepEqual(err.detail, {
+        provider: 'anthropic', model: 'deepseek-v4-flash', belongsTo: 'deepseek',
+      });
+      assert.doesNotMatch(err.message, /--provider|--model|config\.json|Remove-Item/);
+      return true;
+    }
+  );
   assert.doesNotThrow(() =>
     assertModelMatchesProvider('anthropic', 'deepseek-v4-flash', { baseUrl: 'https://api.deepseek.com/anthropic' })
   );
