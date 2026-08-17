@@ -248,18 +248,64 @@ test('成就清单给模型标出同名的那几条', () => {
 // ---------------------------------------------------------------------------
 
 describe('planGuide 的闸门', () => {
-  test('没有成就详情 → 拒绝', async () => {
+  test('库里没有这个 appid → 拒绝', async () => {
     const { db, config } = freshEnv();
     await assert.rejects(
       planGuide(db, { config, steam: fakeSteam(), appid: '999' }),
-      /成就详情/
+      /不在列表里/
     );
   });
 
-  test('成就太多 → 拒绝(分片编排不在 v1)', async () => {
+  /**
+   * **缺成就详情不再是拒绝理由,而是当场去取。**
+   *
+   * 原来这里拒绝并附一句"先跑 `node tracker.js sync --schema`",而 Dashboard
+   * (尤其打包版)的用户根本没有终端 —— 那句话对他们是死胡同。而且这不是罕见情况:
+   * 刚添加的游戏还没轮到批量同步,已打满的游戏则被 syncAchievementSchema 有意跳过
+   * (`rate === 1`),对后者那堵墙是**永久**的,按多少次同步都没用。
+   */
+  test('没有成就详情 → 当场去 Steam 取一次,不再要求先跑命令行', async () => {
+    const { db, config } = freshEnv({ defs: [] });
+    let asked = 0;
+    const steam = {
+      ...fakeSteam(),
+      async fetchAchievementSchema(appid, lang) {
+        asked++;
+        return [{ name: 'A', displayName: lang === 'schinese' ? '第一步' : 'First', description: '完成第一关。', hidden: 0, icon: '' }];
+      },
+    };
+    const plan = await planGuide(db, { config, steam, appid: '1' });
+    assert.equal(plan.defs.length, 1, '取回来的成就要能直接用');
+    assert.ok(asked >= 1, '应该真的去问了 Steam');
+  });
+
+  test('Steam 那边也没有成就清单 → 才拒绝,而且不提命令行', async () => {
+    const { db, config } = freshEnv({ defs: [] });
+    const steam = { ...fakeSteam(), async fetchAchievementSchema() { return null; } };
+    await assert.rejects(
+      planGuide(db, { config, steam, appid: '1' }),
+      (err) => {
+        assert.equal(err.code, 'no-schema');
+        assert.doesNotMatch(err.message, /tracker\.js|config\.json|sync --schema/,
+          '这句话会原样出现在 Dashboard 上,不能让没有终端的人去敲命令');
+        return true;
+      }
+    );
+  });
+
+  test('成就太多 → 拒绝,但把「该改哪个配置」留给 CLI 自己说', async () => {
     const { db, config } = freshEnv();
     config.ai.maxAchievements = 1;
-    await assert.rejects(planGuide(db, { config, steam: fakeSteam(), appid: '1' }), /上限/);
+    await assert.rejects(
+      planGuide(db, { config, steam: fakeSteam(), appid: '1' }),
+      (err) => {
+        assert.match(err.message, /上限/);
+        assert.equal(err.code, 'too-many-achievements');
+        assert.deepEqual(err.detail, { count: 2, max: 1 }, '数字要带出去,CLI 才拼得出建议');
+        assert.doesNotMatch(err.message, /config\.json/, 'Dashboard 用户改不了配置文件');
+        return true;
+      }
+    );
   });
 
   test('已经有 Notion 攻略页 → 拒绝(一个 appid 一个后端)', async () => {
@@ -271,7 +317,14 @@ describe('planGuide 的闸门', () => {
   test('目标文件已存在 → 拒绝覆盖(备份/diff/确认是第 8 步)', async () => {
     const { db, config } = freshEnv();
     writeFileSync(join(config.guidesDir, guideFileName('测试游戏', '1')), '旧的攻略');
-    await assert.rejects(planGuide(db, { config, steam: fakeSteam(), appid: '1' }), /已经存在/);
+    await assert.rejects(
+      planGuide(db, { config, steam: fakeSteam(), appid: '1' }),
+      (err) => {
+        assert.match(err.message, /已经有一个同名文件/);
+        assert.equal(err.code, 'file-exists');
+        return true;
+      }
+    );
   });
 
   test('Steam 给不出解锁状态 → 拒绝生成', async () => {
@@ -860,8 +913,13 @@ describe('分段撰写', () => {
         }),
         (err) => {
           assert.match(err.message, /已经切到 5 个成就/);
-          assert.match(err.message, /先别急着调大 ai\.maxTokens/, '错的建议不能再给一遍');
           assert.match(err.message, /这是用量不是上限/, '那个数字是用量,得说明白');
+          // **这句话会原样进 Dashboard 的浮窗。** 该动哪个旋钮是终端才给得出、
+          // 也才有意义的建议(tracker.js 接住 chunk-too-small 之后自己补)
+          assert.equal(err.code, 'chunk-too-small');
+          assert.deepEqual(err.detail, { size: 5, min: 5 });
+          assert.doesNotMatch(err.message, /ai\.maxTokens|anthropicExtras|config\.json/,
+            'Dashboard 用户没有终端,也不该被要求去编辑配置文件');
           return true;
         }
       );

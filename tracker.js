@@ -1009,6 +1009,11 @@ async function cmdGuideGen() {
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
+  // **拒绝理由的措辞归界面自己管。** planGuide 只说发生了什么(外加一个 code),
+  // 具体"那你该改哪个配置项"是终端才给得出、也才有意义的建议 —— Dashboard 的用户
+  // (尤其打包版)根本没有终端,同一句话服务两个界面,两边都会写歪
+  // 拒绝理由的措辞归界面自己管:planGuide 只说发生了什么(外加一个 code),
+  // 「那你该改哪个配置项」由底部那张 CLI_HINTS 表在终端这一侧补
   const plan = await planGuide(db, { config, steam, appid, fileName, notion, local, overwrite });
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
@@ -1104,6 +1109,9 @@ async function cmdGuideGen() {
       } else if (ev.phase === 'backup') p.update('  备份原文…');
       else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
       else if (ev.phase === 'notion-clear') p.update(`  清掉页面上原来的 ${ev.blocks} 个块…`);
+      else if (ev.phase === 'resplit') {
+        p.done(`  第 ${ev.chunk} 段写不完(${ev.from} 个成就),切成两半重问(${ev.to} 个)`);
+      }
     },
   });
   p.done();
@@ -1374,10 +1382,38 @@ if (!fn) {
   process.exit(1);
 }
 
+/**
+ * 终端专属的补充说明,按错误的 `code` 挂。
+ *
+ * **这是"一句话服务两个界面"的替代方案。** 库里的错误消息只说发生了什么,因为
+ * 同一句话会原样出现在 Dashboard 的浮窗上,而那边(尤其打包版)的用户没有终端、
+ * 也不该被要求去编辑 config.json。反过来,"加 --provider X""改 ai.model"这类建议
+ * 对终端用户是最有用的东西,不该为了迁就另一个界面而丢掉。
+ *
+ * 挂在这里而不是各个命令里:所有命令的错误都从下面那个 catch 出去,一处就够。
+ */
+const CLI_HINTS = {
+  'provider-model-mismatch': (d) =>
+    `  要用这个模型:加 --provider ${d.belongsTo}\n` +
+    `  要用 ${d.provider}:换成它自己的模型(--model <名字>,或改 config.json 的 ai.model)\n` +
+    '  注意环境变量会盖掉 config.json,清掉:\n' +
+    '    Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue',
+  'too-many-achievements': (d) =>
+    `  真要写就调大 config.json 的 ai.maxAchievements(当前 ${d.max},这款要 ${d.count})。`,
+  'guide-exists': () => '  要覆盖它加 --overwrite(会先备份,并给出新旧对照)。',
+  'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
+  'chunk-too-small': (d) =>
+    `  别急着调大 ai.maxTokens —— 它是 thinking + 正文的总额,而一段只剩 ${d.size} 个成就\n` +
+    '  还写不完,说明吃掉额度的是思考,调大只会让它想得更久(CLAUDE.md 有实测)。\n' +
+    '  能压住思考的只有官方端点(ai.anthropicExtras 那几个参数兼容端点不收)。',
+};
+
 try {
   await fn();
 } catch (err) {
   console.error('\n❌ ' + (err.message ?? err));
+  const hint = CLI_HINTS[err.code];
+  if (hint) console.error(hint(err.detail ?? {}));
   if (process.env.DEBUG) console.error(err.stack);
   // **不要用 process.exit()。** 强行退出会在 socket / 定时器还在拆除的时候打断 libuv,
   // Windows 上表现为 "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" ——

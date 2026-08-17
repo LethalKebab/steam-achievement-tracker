@@ -127,12 +127,25 @@ const fakeNotion = ({ blocks = null } = {}) => ({
 // ---------------------------------------------------------------------------
 
 describe('planGuide —— 覆盖这道闸门', () => {
-  test('已经有攻略、没加 --overwrite → 拒绝,而且要告诉人怎么做', async () => {
+  /**
+   * 「不只说不行,还要说怎么办」这条要求没变,变的是**谁来说**。
+   *
+   * 终端的下一步是加 `--overwrite`,Dashboard 上那一行有个「重写」按钮 —— 不是同一个
+   * 动作。把其中一个写进消息正文,对另一边就是一句做不到的建议。所以正文只陈述事实,
+   * 带上 code 和 detail,让两个界面各自说各自的下一步(终端那半由 cli-hints.test.js 钉)。
+   */
+  test('已经有攻略、没加 --overwrite → 拒绝,并且带上让界面自己接话的信息', async () => {
     const { db, config } = freshEnv();
     await assert.rejects(
       planGuide(db, { config, steam: fakeSteam(), appid: '1' }),
-      /--overwrite/,
-      '光说"已经有攻略了"不够,得说清楚下一步该敲什么'
+      (err) => {
+        assert.match(err.message, /已经有攻略了/);
+        assert.equal(err.code, 'guide-exists', '光说"已经有攻略了"不够,界面得知道这是哪一类拒绝');
+        assert.equal(err.detail.kind, 'local');
+        assert.ok(err.detail.url, '要能指出是哪一份');
+        assert.doesNotMatch(err.message, /--overwrite/, 'Dashboard 上没有命令行可敲');
+        return true;
+      }
     );
   });
 
@@ -171,13 +184,19 @@ describe('planGuide —— 覆盖这道闸门', () => {
     );
   });
 
-  test('文件在、但没登记进 guides 表 → 也算覆盖,同样要 --overwrite', async () => {
+  test('文件在、但没登记进 guides 表 → 也算覆盖,一样要先拦下来', async () => {
     const { db, config } = freshEnv({ register: false });
     // 中文游戏名削不出 ASCII slug,guideFileName 会退回 app_<appid>_achievements.md
     writeFileSync(join(config.guidesDir, 'app_1_achievements.md'), GUIDE);
     await assert.rejects(
       planGuide(db, { config, steam: fakeSteam(), appid: '1' }),
-      /--overwrite|已经存在/
+      (err) => {
+        assert.equal(err.code, 'file-exists');
+        // 「加 --overwrite」搬去终端那一侧了(见 cli-hints.test.js):同一句话
+        // 会原样出现在 Dashboard 上,而那边没有命令行可敲
+        assert.doesNotMatch(err.message, /--overwrite|--file/);
+        return true;
+      }
     );
   });
 });

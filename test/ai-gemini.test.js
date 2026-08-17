@@ -401,9 +401,13 @@ test('模型明确属于另一家时当场拦下,而不是让人去撞供应商�
   await assert.rejects(
     createProvider({ ai: { provider: 'gemini', model: 'deepseek-chat', apiKey: 'k' } }),
     (e) => {
-      assert.match(e.message, /只改了一半/);
-      assert.match(e.message, /--provider deepseek/, '要给出直接可用的修法');
-      assert.match(e.message, /环境变量会盖掉 config\.json/, '这是最容易看不见的那种来源');
+      assert.match(e.message, /只改了其中一项/);
+      // **「直接可用的修法」搬到终端那一侧了**,不再写在消息正文里:同一句话会原样
+      // 出现在 Dashboard 的浮窗上,而那边的用户没有终端。修法按 code 挂在
+      // tracker.js 的 CLI_HINTS 上,由 cli-hints.test.js 钉住
+      assert.equal(e.code, 'provider-model-mismatch');
+      assert.equal(e.detail.belongsTo, 'deepseek');
+      assert.doesNotMatch(e.message, /--provider|Remove-Item|config\.json/);
       return true;
     }
   );
