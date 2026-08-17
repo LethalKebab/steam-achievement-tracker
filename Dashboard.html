@@ -708,12 +708,21 @@
     /* ========================================================================
        表格上方那一行:左边切视图,右边报数量
        ======================================================================== */
+    /* 三样东西说的都是**下面这张表**:怎么看(视图)、看什么(筛选)、看到多少(计数)。
+       搜索不在这里 —— 它现在会绕开筛选,放在一起会让人以为两者还在互相影响 */
     .table-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: var(--s3);
       margin-bottom: var(--s2);
+      flex-wrap: wrap;
+    }
+    .filter-chips {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      flex-wrap: wrap;
     }
     /* 冻结区里的**最后一行不留下边距**:那块每高一像素,能看见的表格就少一像素,
        而顶栏自己的 padding-bottom 已经把间距给足了。
@@ -1683,6 +1692,34 @@
       <input type="text" id="searchBox" placeholder="搜索游戏名…"
              aria-label="搜索游戏。库里没有的会去 Steam 上找,可以直接添加"
              autocomplete="off">
+    </div>
+
+    <!-- 搜索框下面这一块**只在搜索时出现**,平时不占地方。它按顺序回答两个问题:
+         「库里有几个」→ 库里一个都没有的话「Steam 上有这些,点一个就能加」。
+         加完之后 #addGameMsg 会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
+         **不自动跳** —— 加完接着加下一个是很常见的用法,自动滚到几百行开外
+         会把搜索框一起带走。
+         整块留在冻结区里:它属于上面那个输入框。冻结区因此会临时变高,而
+         --topbar-h 会被 measureTopbar() 重新量,表头自己让开 -->
+    <div class="search-extra" id="searchExtra" hidden>
+      <span class="add-game-msg" id="addGameMsg"></span>
+      <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
+    </div>
+
+    <!-- 「怎么看」「看什么」「看到多少」放同一行:三者说的都是下面这张表。
+         **筛选是 2026-08-17 从搜索框那一行搬过来的。** 搜索现在会绕开全部筛选
+         (见 hidingFilter),两者并排会读成「搜索是在这几个筛选之内找」——
+         而那正好是反的。搬到计数旁边还顺带把因果放到了一起:改一个筛选,
+         右边那个数字当场变。 -->
+    <div class="table-bar">
+      <div class="view-toggle" role="group" aria-label="视图">
+        <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
+             前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
+             名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
+        <button type="button" class="on" data-view="table">列表</button>
+        <button type="button" data-view="gallery">网格</button>
+      </div>
+      <div class="filter-chips">
       <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
            打满的游戏对这个问题没有贡献 -->
       <label class="checkbox">
@@ -1702,28 +1739,6 @@
       <label class="checkbox">
         <input type="checkbox" id="hideNoAch" checked> 隐藏无成就系统的游戏
       </label>
-    </div>
-
-    <!-- 搜索框下面这一块**只在搜索时出现**,平时不占地方。它按顺序回答两个问题:
-         「库里有几个」→ 库里一个都没有的话「Steam 上有这些,点一个就能加」。
-         加完之后 #addGameMsg 会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
-         **不自动跳** —— 加完接着加下一个是很常见的用法,自动滚到几百行开外
-         会把搜索框一起带走。
-         整块留在冻结区里:它属于上面那个输入框。冻结区因此会临时变高,而
-         --topbar-h 会被 measureTopbar() 重新量,表头自己让开 -->
-    <div class="search-extra" id="searchExtra" hidden>
-      <span class="add-game-msg" id="addGameMsg"></span>
-      <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
-    </div>
-
-    <!-- 「多少」和「怎么看」放同一行:两者说的都是下面这张列表 -->
-    <div class="table-bar">
-      <div class="view-toggle" role="group" aria-label="视图">
-        <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
-             前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
-             名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
-        <button type="button" class="on" data-view="table">列表</button>
-        <button type="button" data-view="gallery">网格</button>
       </div>
       <div class="row-count" id="rowCount"></div>
     </div>
@@ -2987,7 +3002,12 @@
         renderSearchResults(items);
       }).withFailureHandler(function(err) {
         if (document.getElementById('searchBox').value.trim() !== query) return;
-        setAddMsg('搜索 Steam 失败:' + err.message, 'error');
+        // **别把本地的故障说成 Steam 的故障。** `Failed to fetch` 是这条 fetch 根本
+        // 没发出去 —— 后台服务没在跑 / 端口被占 / 刚被关掉,和 Steam 一点关系没有。
+        // 照直写「搜索 Steam 失败」会把人指去查网络和 Steam,而要修的是本地那个服务
+        // (实测撞到过:开着页面的时候服务进程停了,提示说的是 Steam 挂了)
+        const local = /Failed to fetch|NetworkError|load failed/i.test(String(err.message));
+        setAddMsg(local ? '连不上后台服务,刷新一下页面' : '搜索 Steam 失败:' + err.message, 'error');
         renderSearchResults([]);
       }).searchSteamGames(query);
     }
