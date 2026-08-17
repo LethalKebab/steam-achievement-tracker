@@ -162,6 +162,31 @@ What the machine checks is **format and data**: every achievement has its own ch
 
 **What it cannot check is whether the guide is right.** Whether the steps work, whether a difficulty rating is fair, whether "easy to miss" is actually true — that's the whole value of a guide and no machine verifies it. Read what it wrote.
 
+## Reading a guide from the Dashboard
+
+Clicking a game row expands the achievements you haven't unlocked yet. Each card carries **what your own guide says about that achievement**, plus a 📖 next to the achievement's name that opens the Notion page scrolled to that exact checkbox.
+
+The card already prints the name and the official description from Steam, so the guide text has its opening echo of those two stripped — what's left is your notes. Only exact echoes go, and only from the top: a description you paraphrased is your own wording and stays, which is what keeps a *hidden* achievement's condition on screen (Steam gives no description for those, so that line in your guide is the only place it appears). An entry that copied the official text and added nothing shows no guide block at all, rather than repeating what's already above it.
+
+Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement`): a verbatim quote of a description that is unique in the game, or a name that maps to exactly one achievement. **It refuses to guess.** An achievement it can't attribute shows 「攻略里还没写这条」 and keeps the search link. Do not loosen the matching to fill those blanks — the same function decides which boxes get ticked in your notes, so loosening it here loosens it there.
+
+That refusal is what makes the header worth reading:
+
+```
+还差 8 / 44 个成就 · 攻略里已写 8 / 8 条
+```
+
+So the panel doubles as a map of **which achievements your guide still doesn't cover** — a number that was previously only reachable by running `guide-lint` across the corpus.
+
+Details:
+
+- **Cards in a row line up; the guide text inside them doesn't have to.** The accent rule beside a guide traces the text, so it stops where the text stops — a rule that ran on into blank space would read as "there's more below". Evening out the row is the card's job instead. A guide longer than six lines (sub-steps included) is cut there with a fade and expands on click; clicking again collapses it. One that fits shows no fade and isn't clickable, because there's nothing more to show. While a card is open its row drops back to natural heights, so the others don't become tall empty boxes.
+- Sub-steps nested under an achievement come along, indented, with their ticked state.
+- One Notion read per game, on the first expand, cached for the rest of the page's life.
+- **Failure is soft.** An expired token leaves the achievement list exactly as it was and says why in the header — it does not take the panel down.
+- Local markdown guides show the text but no jump link: a line number is not an anchor.
+- A game with no registered guide is unchanged — search link only. Nothing claims 「攻略里还没写」 when there is no guide to have written it in.
+
 ## Running the sync
 
 ```bash

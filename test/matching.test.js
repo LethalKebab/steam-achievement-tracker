@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement, collectSubStepTicks } from '../lib/guides.js';
+import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement, collectSubStepTicks, mapAchievementGuides, stripGuideEcho } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
 import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
 import { openDb, getGame } from '../lib/db.js';
@@ -492,6 +492,147 @@ describe('审计:把 checkbox 反查到具体成就', () => {
 
   test('完全对不上的文字 → null', () => {
     assert.equal(resolveTodoToAchievement('这一行只是章节标题', TIERED), null);
+  });
+});
+
+/**
+ * Dashboard 展开一行时,每条还没解锁的成就下面要显示"你自己攻略里是怎么写的"。
+ *
+ * 这些用例守的都是**不会报错的**失败:贴错成就的打法、同一段文字在两张卡片上重复
+ * 出现、以及为了让卡片别空着而把匹配放松掉。最后一条尤其要钉住 —— 这里"只是显示",
+ * 松匹配的诱惑比写勾那条路径大得多,而两边共用同一个 resolveTodoToAchievement。
+ */
+describe('攻略反查:成就 → 攻略里那一条', () => {
+  const def = (api, cn, en, desc) => ({ api_name: api, name_cn: cn, name_en: en, description: desc });
+  const todo = (key, text, { checked = false, parent = null } = {}) => ({ key, text, checked, parent });
+
+  const DEFS = [
+    def('A', '隐秘大师', 'Sneaky', '在不被发现的情况下完成整个章节'),
+    def('B', '收藏家', 'Collector', '集齐全部藏品'),
+  ];
+
+  test('匹配上的框:正文原样带出来,那就是卡片上要显示的解法', () => {
+    const map = mapAchievementGuides(
+      [todo('k1', '隐秘大师\n在不被发现的情况下完成整个章节\n走右边水道，别开灯')],
+      DEFS
+    );
+    assert.equal(map.get('A').text, '隐秘大师\n在不被发现的情况下完成整个章节\n走右边水道，别开灯');
+    assert.equal(map.get('A').key, 'k1');
+  });
+
+  test('挂在成就下面的子步骤跟着一起走,嵌套深度保留下来', () => {
+    const map = mapAchievementGuides([
+      todo('k1', '收藏家 集齐全部藏品'),
+      todo('k2', '藏品一:钟楼顶', { parent: 'k1', checked: true }),
+      todo('k3', '藏品二:地窖', { parent: 'k1' }),
+      todo('k4', '地窖要先拿钥匙', { parent: 'k3' }),
+    ], DEFS);
+    assert.deepEqual(map.get('B').subSteps, [
+      { text: '藏品一:钟楼顶', checked: true, depth: 0 },
+      { text: '藏品二:地窖', checked: false, depth: 0 },
+      { text: '地窖要先拿钥匙', checked: false, depth: 1 },
+    ]);
+  });
+
+  test('子步骤自己就是另一个成就的框 → 不算上一条的子步骤', () => {
+    // 不排掉的话,同一段文字会在两张卡片上各出现一次,而且其中一次归错了成就
+    const map = mapAchievementGuides([
+      todo('k1', '收藏家 集齐全部藏品'),
+      todo('k2', '隐秘大师 在不被发现的情况下完成整个章节', { parent: 'k1' }),
+    ], DEFS);
+    assert.deepEqual(map.get('B').subSteps, []);
+    assert.equal(map.get('A').key, 'k2');
+  });
+
+  test('同名成就 → 这条成就没有条目,卡片留白,绝不挑一个贴上去', () => {
+    const dup = [
+      def('X', '妙手空空', 'Skilled Thief', '偷窃10次'),
+      def('Y', '妙手空空', 'Skilled Thief', '通关且偷窃100次'),
+    ];
+    const map = mapAchievementGuides([todo('k1', '妙手空空 随便写点什么')], dup);
+    assert.equal(map.size, 0);
+  });
+
+  test('一个成就在攻略里被提到两次 → 只认第一条', () => {
+    const first = todo('k1', '隐秘大师 在不被发现的情况下完成整个章节');
+    const again = todo('k9', '隐秘大师 — 另一处顺带提了一句');
+    // 先确认两条**都真的**反查得到 A —— 否则这个用例会在"第二条压根没匹配上"
+    // 的情况下自动通过,那就什么都没钉住(变异测试抓到过这个空转版本)
+    assert.equal(resolveTodoToAchievement(again.text, DEFS)?.def.api_name, 'A');
+    const map = mapAchievementGuides([first, again], DEFS);
+    assert.equal(map.get('A').key, 'k1');
+  });
+
+  test('整份攻略一个框都对不上 → 空 Map,不是抛错', () => {
+    const map = mapAchievementGuides([todo('k1', '第一章:开场'), todo('k2', '第二章:结局')], DEFS);
+    assert.equal(map.size, 0);
+  });
+});
+
+/**
+ * 卡片上方已经有成就名和描述,攻略正文开头的复述要削掉。
+ *
+ * 这一组里**大半是"必须不删"**:删掉一行用户自己写的东西是拿不回来的,而留一行
+ * 只是啰嗦。松紧的不对称就是这个判据的全部理由,所以反例比正例更值得钉住。
+ */
+describe('削掉攻略开头对成就名/描述的复述', () => {
+  const NAMES = ['隐秘大师', 'Sneaky'];
+  const DESC = '在不被发现的情况下完成整个章节';
+
+  test('名字 + 逐字描述 + 打法 → 只留打法', () => {
+    const out = stripGuideEcho('隐秘大师\n在不被发现的情况下完成整个章节\n走右边水道，别开灯',
+      { names: NAMES, description: DESC });
+    assert.equal(out, '走右边水道，别开灯');
+  });
+
+  test('`中文名(English)` 那种写法也认', () => {
+    const out = stripGuideEcho('隐秘大师(Sneaky)\n走右边水道', { names: NAMES, description: DESC });
+    assert.equal(out, '走右边水道');
+  });
+
+  test('`**加粗**` 的名字照样认(markdown 后端)', () => {
+    const out = stripGuideEcho('**隐秘大师**\n走右边水道', { names: NAMES, description: DESC });
+    assert.equal(out, '走右边水道');
+  });
+
+  test('描述被改写过 → 留着,那是用户自己的话', () => {
+    const text = '隐秘大师\n全程不能被任何人看到\n走右边水道';
+    assert.equal(stripGuideEcho(text, { names: NAMES, description: DESC }),
+      '全程不能被任何人看到\n走右边水道');
+  });
+
+  test('隐藏成就:Steam 没有描述 → 一行都不能多删', () => {
+    // 这行"处理酸奶丢失的情况"是全卡片唯一写着达成条件的地方,Steam 那边是空的
+    const out = stripGuideEcho('夏洛克家\n处理酸奶丢失的情况。',
+      { names: ['夏洛克家'], description: '' });
+    assert.equal(out, '处理酸奶丢失的情况。');
+  });
+
+  test('名字只是开头、后面还有正文 → 整行不动', () => {
+    // extractTitleCandidates 会从这行切出「知识」,照那个删就把整条打法删没了。
+    // **必须再挂一行正文**:只有这一行的话,删过头会让 rest 变空、兜底原样返回,
+    // 这条用例就永远是绿的——变异测试抓到过它的空转版本
+    const head = '知识(Rationality) — "知识让我们知道自己依旧不知道。" 集齐全部百科全书条目';
+    const text = head + '\n先去图书馆把三轮问答刷完';
+    assert.equal(stripGuideEcho(text, { names: ['知识', 'Rationality'], description: '知识让我们知道自己依旧不知道。' }),
+      text);
+  });
+
+  test('复述夹在中间而不是开头 → 不碰', () => {
+    const text = '先做支线\n隐秘大师\n再回主线';
+    assert.equal(stripGuideEcho(text, { names: NAMES, description: DESC }), text);
+  });
+
+  test('整条攻略只有名字和描述 → 空串,让调用方别画窗口', () => {
+    // 原样吐回来的话,这种"只抄了官方文案"的条目反而是重复得最彻底的一张卡片
+    const text = '隐秘大师\n在不被发现的情况下完成整个章节';
+    assert.equal(stripGuideEcho(text, { names: NAMES, description: DESC }), '');
+  });
+
+  test('结尾句读的差别不该挡住描述的匹配', () => {
+    const out = stripGuideEcho('隐秘大师\n在不被发现的情况下完成整个章节。\n走右边水道',
+      { names: NAMES, description: DESC });
+    assert.equal(out, '走右边水道');
   });
 });
 
