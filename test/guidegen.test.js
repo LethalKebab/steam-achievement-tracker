@@ -160,7 +160,7 @@ describe('splitFindings', () => {
     assert.equal(blocking.length, 1);
   });
 
-  test('豁免只对 checked-mismatch 生效,别的规则照拦', () => {
+  test('别的规则照拦 —— 豁免是逐条列出来的,不是一类', () => {
     const { blocking } = splitFindings(
       [{ level: 'error', code: 'missing-checkbox', apiName: 'A', message: 'x' }],
       new Set(['A'])
@@ -171,6 +171,41 @@ describe('splitFindings', () => {
   test('warn 不进 blocking', () => {
     const { blocking } = splitFindings([{ level: 'warn', code: 'paraphrased-description', message: 'x' }], new Set());
     assert.equal(blocking.length, 0);
+  });
+
+  // -------------------------------------------------------------------------
+  // 同名 + Steam 描述是空的:够不着,但不该拦
+  // -------------------------------------------------------------------------
+  const emptyDesc = (apiName, name = 'Proud Player') => ({
+    level: 'error', code: 'ambiguous-empty-description', apiName, name, message: '注定同步不上',
+  });
+
+  test('描述是空的同名成就算预期内,不拦', () => {
+    // 区分这两个成就的唯一凭据(描述原文)在 Steam 上就不存在,任何重写都满足不了。
+    // 拦下来的实际后果实测过:KINGDOM HEARTS 一份 197/197 全覆盖的攻略被 15 条
+    // 这种错误挡在门外,而它自己的消息就写着"不是攻略能修的"
+    const { blocking, expected } = splitFindings([emptyDesc('A')], new Set(['A']));
+    assert.equal(blocking.length, 0);
+    assert.equal(expected.length, 1);
+  });
+
+  test('不看 unnameable —— 这条的触发前提本身就含"名字撞车"', () => {
+    // 和 checked-mismatch 那条不同:那一条对任何成就都会报,所以需要 unnameable 这道闸;
+    // 这一条比 unnameable 更窄。传个空集合照样要豁免,否则在 lint 单独跑的路径上会不一致
+    const { blocking, expected } = splitFindings([emptyDesc('A')], new Set());
+    assert.equal(blocking.length, 0);
+    assert.equal(expected.length, 1);
+  });
+
+  test('描述**存在**只是没抄的那种必须继续拦 —— 那一种重写就能修', () => {
+    // 这是这次改动最容易做过头的地方:两种以前共用一个 code,一起放过等于
+    // 把"该抄没抄"也放过,而那正是同名成就唯一的救命绳
+    const { blocking, expected } = splitFindings(
+      [{ level: 'error', code: 'ambiguous-no-description', apiName: 'A', message: '没抄描述原文' }],
+      new Set(['A'])
+    );
+    assert.equal(blocking.length, 1, '有描述不抄是攻略的问题,不能豁免');
+    assert.equal(expected.length, 0);
   });
 });
 
@@ -424,6 +459,136 @@ describe('generateGuide', () => {
       generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1' }),
       /截断/
     );
+  });
+
+  // -------------------------------------------------------------------------
+  // 同名 + 描述为空:整份要能落地,而且要报出来
+  // -------------------------------------------------------------------------
+  // 复刻 KINGDOM HEARTS -HD 1.5+2.5 ReMIX- 的形状:四合一合集,每款子游戏各有一个
+  // 自己的「Proud Player」,而 Steam 对它们的描述返回空字符串。
+  // 改之前:197 条全写对的攻略被 15 条这种错误拦掉,先花三轮让模型抄不存在的描述,
+  // 最后什么都没落地。
+  describe('同名成就在 Steam 上没有描述', () => {
+    const TWINS = [
+      def('ACH_001', 'Proud Player', ''),      // 描述为空 —— 谁都修不了
+      def('ACH_104', 'Proud Player', ''),      // 同名,同样为空
+      def('ACH_007', '独一份', '完成第七关。'), // 正常的一条,当对照
+    ];
+    const twinsEnv = () => {
+      const dir = mkdtempSync(join(tmpdir(), 'guidegen-twins-'));
+      const db = openDb(':memory:');
+      insertGame(db, { appid: '1', name: '测试游戏' });
+      replaceAchievements(db, '1', TWINS.map(toRow));
+      return { db, config: { guidesDir: dir, ai: { maxAchievements: 100 } } };
+    };
+    const twinsSteam = () => ({
+      async fetchPlayerAchievements() {
+        return { achievements: TWINS.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+      },
+      async fetchGlobalAchievementPercentages() { return null; },
+    });
+    // 三条都写了,名字一字不差 —— 攻略这边没有任何毛病
+    const BODY =
+      '```markdown\n## 全部\n\n' +
+      '- [ ] **Proud Player**<br>隐藏成就:Proud 难度通关。<br>KH1 那一份。\n' +
+      '- [ ] **Proud Player**<br>隐藏成就:Proud 难度通关。<br>KH2 那一份。\n' +
+      '- [ ] **独一份**<br>完成第七关。<br>顺着主线走。\n```';
+
+    test('一轮就落地,不再拿它去重写', async () => {
+      const { db, config } = twinsEnv();
+      const provider = fakeProvider([BODY]);
+      const r = await generateGuide(db, { config, provider, steam: twinsSteam(), appid: '1' });
+
+      assert.equal(r.ok, true, '攻略写对了就该落地 —— 拦它的那条错误谁都改不动');
+      assert.ok(r.path, '要真的写进 guides/,不是留在草稿里');
+      assert.equal(provider.asked.length, 1, '一轮就够,不该再花两轮抄不存在的描述');
+      assert.equal(r.blocking.length, 0);
+    });
+
+    test('落地了也必须报出来 —— 这几个框自动勾选永远认不出', async () => {
+      const { db, config } = twinsEnv();
+      const r = await generateGuide(db, {
+        config, provider: fakeProvider([BODY]), steam: twinsSteam(), appid: '1',
+      });
+      // 不拦路 ≠ 不吭声。不报的话,用户要等到某天发现有两个框一直没动才会知道,
+      // 而那时候看起来更像是同步坏了
+      const named = r.expected.filter((f) => f.code === 'ambiguous-empty-description');
+      assert.equal(named.length, 2, '两个撞名的成就各报一条');
+      assert.deepEqual([...new Set(named.map((f) => f.name))], ['Proud Player'],
+        '要报 Steam 上那个写法,方便用户对得上');
+      // 正常那条不该被卷进来
+      assert.ok(!named.some((f) => f.apiName === 'ACH_007'));
+    });
+
+    test('同一轮里还有真问题时,打回清单里也不能出现它', async () => {
+      // **`MODEL_FIXABLE` 里不放它,是第二道防线,而且这一条测试是唯一能看见它的角度。**
+      //
+      // 平时 splitFindings 已经把它挪进 expected 了,重写轮压根碰不到 —— 所以把它加回
+      // MODEL_FIXABLE 也不会有任何测试变红(变异验证时实测如此)。只有同一轮里存在**另一条**
+      // 真该修的错误、重写轮真的跑起来的时候,这个成员资格才起作用:
+      // `buildFeedback` 是直接按 MODEL_FIXABLE 过 findings 的,没有先过 splitFindings
+      const MIXED = [
+        def('ACH_001', 'Proud Player', ''),
+        def('ACH_104', 'Proud Player', ''),
+        def('ACH_009', '漏掉的那条', '完成第九关。'),
+      ];
+      const dir = mkdtempSync(join(tmpdir(), 'guidegen-mixed-'));
+      const db = openDb(':memory:');
+      insertGame(db, { appid: '1', name: '测试游戏' });
+      replaceAchievements(db, '1', MIXED.map(toRow));
+      const config = { guidesDir: dir, ai: { maxAchievements: 100 } };
+      const steam = {
+        async fetchPlayerAchievements() {
+          return { achievements: MIXED.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+        },
+        async fetchGlobalAchievementPercentages() { return null; },
+      };
+      // 两份都写全,别用 replace 去拼 —— 第一个 ``` 是**开**围栏,替掉它等于交出去
+      // 一份没有围栏的正文,而 extractMarkdown 那条兜底又会让它看着像正常工作
+      const TWO_TWINS =
+        '- [ ] **Proud Player**<br>隐藏成就。<br>KH1。\n' +
+        '- [ ] **Proud Player**<br>隐藏成就。<br>KH2。\n';
+      const twinsOnly = '```markdown\n## 全部\n\n' + TWO_TWINS + '```';
+      const allThree = '```markdown\n## 全部\n\n' + TWO_TWINS +
+        '- [ ] **漏掉的那条**<br>完成第九关。<br>补上了。\n```';
+      const provider = fakeProvider([twinsOnly, allThree]);
+      const r = await generateGuide(db, { config, provider, steam, appid: '1' });
+
+      assert.equal(r.ok, true);
+      assert.equal(provider.asked.length, 2, '第一轮漏了一条,第二轮补上');
+      const feedback = provider.asked[1];
+      assert.match(feedback, /漏掉的那条/, '真该修的那条要在打回清单里');
+      assert.doesNotMatch(feedback, /注定同步不上/,
+        '描述是空的那条不能出现在打回清单里 —— 那是要求模型抄一个不存在的字符串');
+    });
+
+    test('描述**存在**只是没抄的时候,照旧打回重写', async () => {
+      // 反向那一半:别把"该抄没抄"也一起放过了
+      const WITH_DESC = [
+        def('ACH_001', 'Proud Player', 'Clear on Proud.'),
+        def('ACH_104', 'Proud Player', 'Clear on Critical.'),
+      ];
+      const dir = mkdtempSync(join(tmpdir(), 'guidegen-desc-'));
+      const db = openDb(':memory:');
+      insertGame(db, { appid: '1', name: '测试游戏' });
+      replaceAchievements(db, '1', WITH_DESC.map(toRow));
+      const config = { guidesDir: dir, ai: { maxAchievements: 100 } };
+      const steam = {
+        async fetchPlayerAchievements() {
+          return { achievements: WITH_DESC.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+        },
+        async fetchGlobalAchievementPercentages() { return null; },
+      };
+      // 两条都不抄描述 → 该打回
+      const noDesc = '```markdown\n## 全部\n\n- [ ] **Proud Player**<br>随便写的<br>心得\n' +
+        '- [ ] **Proud Player**<br>也是随便写的<br>心得\n```';
+      const provider = fakeProvider([noDesc, noDesc, noDesc]);
+      const r = await generateGuide(db, { config, provider, steam, appid: '1' });
+
+      assert.equal(r.ok, false, '有描述不抄是攻略的问题,必须拦');
+      assert.ok(provider.asked.length > 1, '这一种要回灌重写');
+      assert.ok(r.blocking.some((f) => f.code === 'ambiguous-no-description'));
+    });
   });
 
   test('rounds 不合法当场拦下(否则会被读成"过关了"再去复制不存在的草稿)', async () => {

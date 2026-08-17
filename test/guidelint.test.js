@@ -103,17 +103,39 @@ describe('同名成就', () => {
     });
     assert.equal(codesOf(r).includes('missing-checkbox'), false, '框存在,不该报缺失');
     assert.equal(r.findings.filter((f) => f.code === 'ambiguous-no-description').length, 2);
-    assert.equal(r.findings[0].fixable, true);
   });
 
-  test('Steam 上描述本身是空的 → 报出来但标成 fixable:false(不是攻略能修的)', () => {
+  test('Steam 上描述本身是空的 → 换一个 code,因为这一种谁都修不了', () => {
+    // 原来两种共用 `ambiguous-no-description`,区别只挂在一个 `fixable` 布尔字段上,
+    // 而那个字段**算出来了却没有任何生产代码读它** —— 这条测试当初就只断言它被设上了。
+    // 结果是一份 197/197 全覆盖的攻略被 15 条谁都改不动的错误拦掉,还先花三轮让模型
+    // 去抄不存在的描述(KINGDOM HEARTS -HD 1.5+2.5 ReMIX-,四合一合集)。
+    // 现在按 code 分,而 code 是这个项目里唯一用来分流"能不能补救"的东西
     const r = lintGuide({
       defs: [def('P1', 'Pilgrimage', ''), def('P2', 'Pilgrimage', '')],
       todos: [todo(1, '**Pilgrimage**'), todo(2, '**Pilgrimage**')],
     });
-    const amb = r.findings.filter((f) => f.code === 'ambiguous-no-description');
-    assert.equal(amb.length, 2);
-    assert.equal(amb[0].fixable, false);
+    assert.equal(r.findings.filter((f) => f.code === 'ambiguous-empty-description').length, 2);
+    assert.equal(
+      r.findings.filter((f) => f.code === 'ambiguous-no-description').length, 0,
+      '描述是空的不该再报成"没抄描述" —— 那句话在要求一件做不到的事'
+    );
+    // 消息里不能留一句"不是攻略的错"却又把人拦在门外。它现在只陈述后果
+    const f = r.findings.find((x) => x.code === 'ambiguous-empty-description');
+    assert.match(f.message, /注定同步不上/);
+    assert.match(f.message, /不是攻略能修的/);
+  });
+
+  test('报出来的名字用 Steam 上那个写法,不是归一化之后的索引键', () => {
+    // 索引键过了 normalizeText(小写、去标点),照着念是 `proud player`,而用户在 Steam 上
+    // 看到的是 `Proud Player`。实测在弹窗里就是小写的,读着像另一个成就
+    const r = lintGuide({
+      defs: [def('A1', 'Proud Player', ''), def('A2', 'Proud Player', '')],
+      todos: [todo(1, '**Proud Player**'), todo(2, '**Proud Player**')],
+    });
+    const f = r.findings.find((x) => x.code === 'ambiguous-empty-description');
+    assert.match(f.message, /Proud Player/);
+    assert.equal(f.name, 'Proud Player');
   });
 
   test('只有中文名撞名、英文名不同 → 英文名那侧照常能覆盖', () => {

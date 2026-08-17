@@ -3476,9 +3476,18 @@
             searches ? searches + ' 次搜索' : '没有联网搜索',
             Math.round((r.tokens || 0) / 100) / 10 + 'k token',
           ].join(' · ');
+          // 同名 + Steam 上描述是空的那几个:攻略写对了,但自动勾选**永远**认不出它们。
+          // 这不拦路(所以攻略已经落地了),可是不说出来的话,用户要等到某天注意到
+          // 有几个框一直没动才会发现 —— 那时候更像是同步坏了。名字列出来,才知道是哪几个
+          const unsyncable = (r.unsyncable || []).length
+            ? '<br><span class="warn">' + GEN_WARN + ' ' + r.unsyncable.length +
+              ' 个成就同名、Steam 上描述是空的,自动勾选认不出它们,要手动勾:' +
+              escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
+              (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
+            : '';
           showGen(
             GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
-              noResearch +
+              noResearch + unsyncable +
               '<br><span class="warn">内容需要你自己过一遍。</span>',
             false, live
           );
