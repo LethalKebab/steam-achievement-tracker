@@ -46,9 +46,12 @@ For "rewrite a guide's whole checklist from scratch" you want *all* achievements
 | register/update a guide link | `upsertGuide(db, {appid, name, url, kind})` in `lib/db.js` — **writes name and url together**; writing only the url leaves renamed games with stale names (this regressed once) |
 | discover new Notion guide pages | `node tracker.js guides --notion` |
 | remove a guide | `deleteGuide(db, appid)`, or `DELETE FROM guides WHERE appid = ?` |
-| add a hand-maintained game | Dashboard "添加游戏" box, or `insertGame(db, {appid, name, status: 'Manual', syncLocked: 1})` |
+| add a game Steam doesn't list | Dashboard "添加新游戏" box, or `insertGame(db, {appid, name, family: 1})` |
+| stop syncing a row (hand-maintained) | `setManualStatus` via the Dashboard's 🔒, or `insertGame(..., {status: 'Manual', syncLocked: 1})` — a **separate** decision from adding, see below |
 | change a row's label | `setGameField(db, appid, 'status', ...)` — remember `sync_locked` is a separate column |
 | reclassify as family-shared | `UPDATE games SET status = '', sync_locked = 0, family = 1 WHERE appid IN (...)` |
+
+**Adding a game does not lock it, and hasn't since 2026-08-13.** Added rows used to get `status: 'Manual', syncLocked: 1` automatically, on the reasoning that a hand-added game is one Steam has no data for. That reasoning is backwards for the common case: the games people add by hand are family-shared ones, which is precisely where Steam *does* return real progress — locking them freezes the numbers at whatever they were the moment the row was created. `addGame` now inserts with `family` set and sync left on; locking is a separate, explicit act (the 🔒 on the row) for when Steam turns out to have nothing.
 
 Before reclassifying a `Manual` row as family-shared, confirm the account can actually see real data: call `fetchPlayerAchievements` for that appid and check whether the `achieved` numbers are *your* progress (all zeros usually means a different family member plays it). See the `status` / `sync_locked` / `family` notes in `docs/data.md`.
 
