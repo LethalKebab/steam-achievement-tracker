@@ -652,6 +652,20 @@
     .add-game-msg { font-size: var(--fs-sm); }
     .add-game-msg.error { color: var(--danger); }
     .add-game-msg.success { color: var(--ok); }
+    /* 加完之后那句话是**可以点的**:点一下跳到那一行。
+       用 <button> 而不是给 <span> 挂 onclick —— 键盘要能 Tab 到它、回车要能触发,
+       而那是 button 免费给的。外观上抹掉按钮的底色边框,只留下划线暗示可点 */
+    button.add-game-msg {
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      text-decoration-color: var(--line-3);
+    }
+    button.add-game-msg:hover { text-decoration-color: currentColor; }
 
     .game-search-results {
       display: flex;
@@ -792,6 +806,27 @@
     tr.game-row.expandable { cursor: pointer; }
     /* 悬停整行提亮。用面而不是线:167 行里再加一条线就是方格纸 */
     tr.game-row:hover td { background: var(--surface-2); }
+
+    /* 跳过去之后闪一下,让眼睛找得到落点。
+       **一次性的,过后这一行和别的行完全一样** —— 「刚跳到的」是个瞬时事实,
+       不是这一行的属性。`both` 是必须的:没有它,动画结束的瞬间底色会弹回起始的
+       高亮值,要等 JS 摘类名才消失,于是「淡出」看起来像「闪完又亮回来」 */
+    @keyframes row-flash {
+      0%, 55% { background: rgba(102, 192, 244, 0.30); }
+      100%    { background: transparent; }
+    }
+    tr.game-row.just-added > td { animation: row-flash 2s ease-out both; }
+    /* 卡片被封面图铺满,底色透不出来,所以网格视图里用一圈内描边。
+       用 outline 不用 border/box-shadow:前者不占位,后两者已经被 .g-card 的 hover 占了 */
+    @keyframes card-flash {
+      0%, 55% { outline-color: var(--accent); }
+      100%    { outline-color: transparent; }
+    }
+    .g-card.just-added {
+      outline: 2px solid transparent;
+      outline-offset: -2px;
+      animation: card-flash 2s ease-out both;
+    }
 
     /* ---- 行内容 ----------------------------------------------------------
        一行里其实有三组东西:**标记**(星、心)、**身份**(封面、名字、状态徽章)、
@@ -1295,6 +1330,36 @@
       #gen-bar { left: var(--s3); right: var(--s3); bottom: 76px; max-width: none; }
     }
 
+    /* ---- 回到顶部 --------------------------------------------------------
+       筛选控件和「添加新游戏」都在表格**上面**、而且不在冻结的顶栏里(顶栏只装
+       标题和那排图标),所以翻到三百行开外之后,想改个筛选就得一路滚回去。
+
+       右下角这个位置和 lib/rpc.js 的同步状态条是同一个角(它写死 right/bottom 16px、
+       z-index 9999)。**让给它**:层级压在它下面,而且它一露面就往上让一格 ——
+       两个浮层同时出现是常态(同步跑着的时候人照样在翻表),挤在一起就是互相挡住。
+       左下角没用是因为那儿是 #gen-bar,生成一次占两到四分钟。 */
+    #toTop {
+      position: fixed;
+      right: var(--s4);
+      bottom: var(--s4);
+      z-index: 9998;
+      width: 40px;
+      height: 40px;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--line-2);
+      border-radius: 999px;
+      background: var(--surface-3);
+      color: var(--text-2);
+      box-shadow: var(--sh-2);
+      cursor: pointer;
+    }
+    #toTop.on { display: inline-flex; }
+    #toTop:hover { color: var(--text-hi); border-color: rgba(102, 192, 244, 0.5); }
+    /* 同步条露面时让开它。76px = 那条的高度加一点余量,和上面窄屏那条用的是同一个数 */
+    #toTop.clear-bar { bottom: 76px; }
+
     .modal-overlay {
       display: none;
       position: fixed;
@@ -1407,6 +1472,10 @@
         transition: none;
         transform: none;
       }
+      /* 高亮**不能跟着动画一起去掉** —— 它不是装饰,是「你要找的是这一行」这句话
+         本身;关掉动效只该关掉淡出的过程。改成静态底色,照样由 JS 到点摘掉 */
+      tr.game-row.just-added > td { animation: none; background: rgba(102, 192, 244, 0.24); }
+      .g-card.just-added { animation: none; outline-color: var(--accent); }
       .bar-fill { transition: none; }
     }
   </style>
@@ -1487,6 +1556,9 @@
     </symbol>
     <symbol id="i-close" viewBox="0 0 24 24">
       <path d="M6 6l12 12M18 6L6 18"/>
+    </symbol>
+    <symbol id="i-chevron-up" viewBox="0 0 24 24">
+      <path d="m6 14.5 6-6 6 6"/>
     </symbol>
     <!-- 收起/展开。同一个字形转 180° 当展开用 —— 上下两版画两遍,迟早只改一边 -->
     <symbol id="i-chevron" viewBox="0 0 24 24">
@@ -1591,11 +1663,16 @@
 
   <div class="add-game-row">
     <input type="text" id="gameSearchBox" placeholder="添加新游戏...">
+    <!-- 加完之后这里会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
+         **不自动跳** —— 添加完接着加下一个是很常见的用法,自动滚到几百行开外
+         会把「添加新游戏」那个输入框带走 -->
     <span class="add-game-msg" id="addGameMsg"></span>
   </div>
   <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
 
   <div class="row-menu" id="rowEditMenu" hidden></div>
+
+  <button type="button" id="toTop" title="回到顶部" aria-label="回到顶部"><svg class="ic"><use href="#i-chevron-up"/></svg></button>
 
   <div class="modal-overlay" id="addConfirmModal">
     <div class="modal-box">
@@ -1685,6 +1762,38 @@
     const pinsToTop = function(g) {
       return isRecentlyPlayed(g) && typeof g.total === 'number' && g.total > 0;
     };
+
+    /** 上面那排筛选控件当前的状态。读一次给整轮 render 用 —— 几百行里逐行问 DOM
+     *  是白花的钱,而搜索框每敲一个字符就重画一次 */
+    function currentFilters() {
+      return {
+        search: document.getElementById('searchBox').value.trim().toLowerCase(),
+        hideComplete: document.getElementById('hideComplete').checked,
+        hideUnvetted: document.getElementById('hideUnvetted').checked,
+        hideNoAch: document.getElementById('hideNoAch').checked,
+        favOnly: document.getElementById('favOnly').checked,
+      };
+    }
+
+    /**
+     * 挡住这一行的那个筛选,没挡住就返回 null。
+     *
+     * 返回的是**控件本身**而不是布尔,因为有两个调用方要的东西不一样:render 只问
+     * 「留不留」,而「跳到刚添加的那个游戏」还得能**当场把挡路的那个关掉** ——
+     * 用户点的是"带我去看",而不是"告诉我为什么看不到"。
+     *
+     * 两边共用这一个函数是硬要求:各写各的判断,迟早出现表里明明有这行却说被挡住了,
+     * 或者反过来 —— 说跳过去了,然后跳到一个不存在的地方。
+     */
+    function hidingFilter(g, f) {
+      const by = (id, label) => ({ el: document.getElementById(id), label });
+      if (f.search && g.name.toLowerCase().indexOf(f.search) === -1) return by('searchBox', '搜索框');
+      if (f.hideComplete && g.rate === 1) return by('hideComplete', '隐藏已完成');
+      if (f.hideUnvetted && g.unvetted) return by('hideUnvetted', '隐藏受限游戏');
+      if (f.hideNoAch && g.total === 'N/A') return by('hideNoAch', '隐藏无成就系统的游戏');
+      if (f.favOnly && !g.favorite) return by('favOnly', '只看喜爱');
+      return null;
+    }
 
     let allGames = [];
     let sortKey = 'rate';
@@ -1942,6 +2051,62 @@
     })();
 
     /**
+     * 回到顶部。
+     *
+     * **只在真的滚下去之后才出现** —— 一个永远挂在角上、按下去什么都不会发生的按钮
+     * 是纯噪音。阈值取一屏:再少就会在轻微滚动时闪进闪出。
+     *
+     * 滚动事件用 rAF 节流:这一页有几百行,滚动时每一帧都读 scrollY 再写 class
+     * 会把布局和绘制搅在一起。**读和写分开**是这一页反复踩过的同一件事。
+     */
+    (function backToTop() {
+      const btn = document.getElementById('toTop');
+      let ticking = false;
+      const sync = function() {
+        ticking = false;
+        btn.classList.toggle('on', window.scrollY > window.innerHeight);
+      };
+      window.addEventListener('scroll', function() {
+        if (ticking) return;
+        ticking = true;
+        requestAnimationFrame(sync);
+      }, { passive: true });
+      sync();
+
+      btn.addEventListener('click', function() {
+        const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        window.scrollTo({ top: 0, behavior: still ? 'auto' : 'smooth' });
+        // 回到顶部之后多半是要改筛选或者加游戏,把焦点交给搜索框 —— 但**不要
+        // 让浏览器为了这个焦点再滚一次**,那会和上面那次平滑滚动打架
+        document.getElementById('searchBox').focus({ preventScroll: true });
+      });
+
+      /**
+       * 同步状态条(lib/rpc.js)和这个按钮是同一个角。它一露面就往上让一格。
+       *
+       * 那条是 rpc.js 动态建的、靠内联 style 显示隐藏,所以只能观察 —— 而**同时出现
+       * 是常态**,不是边缘情况:同步跑着的时候人照样在翻表格,正是最想用这个按钮的时候。
+       * 观察不到(元素还没建出来)就保持默认位置,退化成"偶尔被挡一下"而不是报错。
+       */
+      const watchSyncBar = function() {
+        const bar = document.querySelector('.rpc-bar');
+        if (!bar) return false;
+        const apply = function() {
+          // 先算再传,而且照例包 Boolean()。这个值本来就是布尔,包一层是为了让
+          // html-smoke 那条检查**看得出来** —— 一条只能靠人推理才能确认满足的规则
+          // 等于没有规则。它挡的是 undefined 让类名每次轮询翻转一遍
+          const showing = getComputedStyle(bar).display !== 'none';
+          btn.classList.toggle('clear-bar', Boolean(showing));
+        };
+        new MutationObserver(apply).observe(bar, { attributes: true, attributeFilter: ['style'] });
+        apply();
+        return true;
+      };
+      // rpc.js 是另一个 <script>,建条的时机不保证在这之前
+      if (!watchSyncBar()) window.addEventListener('load', watchSyncBar, { once: true });
+    })();
+
+    /**
      * 把顶栏的实际高度写进 --topbar-h,供表头吸附用(见 CSS 里的 `th { top: … }`)。
      *
      * **不能写死。** 顶栏里那条读数带是 flex-wrap 的,窄窗口下会整条掉到标题下面,
@@ -2004,6 +2169,8 @@
         const rateText = (g.total === 'N/A') ? '无成就系统'
           : (g.total === null ? '同步中' : g.achieved + '/' + g.total + ' · ' + fmtPct(rate));
         return '<div class="g-card' + (g.guideUrl ? ' has-guide' : '') + '"'
+          // 和表格行同一个身份属性:「跳到这个游戏」在两个视图里走同一条路
+          + ' data-appid="' + g.appid + '"'
           + (g.guideUrl ? ' data-guide="' + g.guideUrl + '"' : '')
           + ' title="' + escapeHtml(g.name) + (g.guideUrl ? '(点开攻略)' : '') + '">'
           // 竖版封面优先,没有就退回横版 header;横版也拿不到才去问服务端要真地址。
@@ -2032,20 +2199,8 @@
 
 
     function render() {
-      const search = document.getElementById('searchBox').value.trim().toLowerCase();
-      const hideComplete = document.getElementById('hideComplete').checked;
-      const hideUnvetted = document.getElementById('hideUnvetted').checked;
-      const hideNoAch = document.getElementById('hideNoAch').checked;
-      const favOnly = document.getElementById('favOnly').checked;
-
-      let rows = allGames.filter(function(g) {
-        if (search && g.name.toLowerCase().indexOf(search) === -1) return false;
-        if (hideComplete && g.rate === 1) return false;
-        if (hideUnvetted && g.unvetted) return false;
-        if (hideNoAch && g.total === 'N/A') return false;
-        if (favOnly && !g.favorite) return false;
-        return true;
-      });
+      const filters = currentFilters();
+      let rows = allGames.filter(function(g) { return !hidingFilter(g, filters); });
 
       // 顶栏那个读数**恒定是库里的总数** —— 它回答「我一共有多少游戏」,不该被一次
       // 搜索改写。筛选后的数量是另一个问题(「这张表现在给我看多少」),贴着表格放
@@ -2177,13 +2332,17 @@
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="total" data-manual-row-appid="' + g.appid + '" value="' + totalVal + '" onclick="event.stopPropagation()"></td>'
             + '<td>' + barCell(manualRate) + '</td>'
             + '</tr>';
+        // **没有数字的三行也要带 data-appid。** 它原来只挂在「有数字」的两个分支上,
+        // 于是「按 appid 找到那一行」对**刚添加进来的游戏恰好做不到** —— 新游戏
+        // 十有八九就落在下面这三种长相里。data-appid 是这一行的身份,
+        // 不是「它有没有数字」的标记
         } else if (g.total === 'N/A') {
-          html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">无成就系统</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">无成就系统</td></tr>';
         } else if (g.total === null && g.manual) {
           // 锁着的行不会自动同步,所以「数据同步中」对它是句假话 —— 它在等你自己填
-          html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">还没填数字</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">还没填数字</td></tr>';
         } else if (g.total === null) {
-          html += '<tr class="' + rowClass + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中...</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中...</td></tr>';
         } else {
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '">'
             + '<td>' + gameCell + '</td>'
@@ -2562,24 +2721,100 @@
       if (e.key === 'Escape' && !rowMenu.hidden) closeRowMenu();
     });
 
+    /** 高亮停留多久。**CSS 里 row-flash / card-flash 的时长是同一个数**,改一个要一起改 */
+    const FLASH_MS = 2000;
+
+    /**
+     * 滚到某个游戏那一行(或那张卡)并让它闪一下。**只由用户点击触发。**
+     *
+     * 两个细节是有理由的,不是顺手写的:
+     *
+     * - **不用 `scrollIntoView`,自己算落点。** 顶栏和表头都是 sticky,它们盖住的
+     *   那一条不算"看得见",而 `scrollIntoView` 一个字都不知道这件事:`'start'` 把行
+     *   送到视口顶上,正好在冻结的表头**底下**;`'center'` 送到视口正中,窄屏上顶栏
+     *   读数换行变高之后同样是压着的。落点要算的是「盖不住的那块」的中间。
+     * - **只在当前视图里找。** 另一个视图的 DOM 还留着上一次渲染的内容(render 里
+     *   两个视图是分叉的,不显示的那个不会被清空),而搜索下拉和确认框上也各有一个
+     *   data-appid —— 满页找第一个匹配,大概率找到的是那个藏起来的旧节点。
+     */
+    function revealGame(appid) {
+      const view = document.getElementById(viewMode === 'gallery' ? 'gallery' : 'gameTableBody');
+      const el = view.querySelector('[data-appid="' + appid + '"]');
+      if (!el) return false;
+
+      // 表头只在表格视图里存在;网格视图下 #gameTable 带着 hidden,offsetHeight 就是 0
+      const bar = document.querySelector('.topbar');
+      const head = document.querySelector('#gameTable thead');
+      const covered = (bar ? bar.offsetHeight : 0) + (head ? head.offsetHeight : 0);
+
+      const r = el.getBoundingClientRect();
+      const top = window.scrollY + r.top - covered - (window.innerHeight - covered - r.height) / 2;
+      const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: Math.max(0, top), behavior: still ? 'auto' : 'smooth' });
+
+      el.classList.add('just-added');
+      setTimeout(function() { el.classList.remove('just-added'); }, FLASH_MS);
+      return true;
+    }
+
+    /**
+     * 「已添加」那句话 —— 做成可点的,点了跳过去。
+     *
+     * **不自动跳。** 加完接着加下一个是很常见的用法,而自动滚到几百行开外会把
+     * 「添加新游戏」那个输入框一起带走,等于逼人再滚回来。所以跳不跳交给用户,
+     * 那句本来就要显示的提示顺便当了按钮 —— 不额外占地方。
+     *
+     * 被筛选挡住时**点了就把那个筛选关掉再跳**:用户点的是"带我去看",
+     * 而"告诉你为什么看不到"是上一步的事,已经写在这句话里了。
+     */
+    function showAddedMsg(game) {
+      const old = document.getElementById('addGameMsg');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'addGameMsg';
+      btn.className = 'add-game-msg success';
+
+      const hidden = hidingFilter(game, currentFilters());
+      btn.textContent = hidden
+        ? '已添加: ' + game.name + '(被「' + hidden.label + '」挡住了,点这里查看)'
+        : '已添加: ' + game.name + ' —— 点这里查看';
+      btn.title = '跳到这一行';
+      btn.addEventListener('click', function() {
+        const blocking = hidingFilter(game, currentFilters());
+        if (blocking) {
+          // 搜索框是输入框,清空;其余四个是勾选框,取消勾选
+          if (blocking.el.type === 'checkbox') blocking.el.checked = false;
+          else blocking.el.value = '';
+          render();
+        }
+        revealGame(game.appid);
+      });
+      old.replaceWith(btn);
+    }
+
+    /** 提示复位成一个不可点的 span —— 上一次那个按钮点了会跳到别的游戏去 */
+    function setAddMsg(text, cls) {
+      const old = document.getElementById('addGameMsg');
+      const span = document.createElement('span');
+      span.id = 'addGameMsg';
+      span.className = 'add-game-msg' + (cls ? ' ' + cls : '');
+      span.textContent = text;
+      old.replaceWith(span);
+    }
+
     function addSelectedGame(appid, name, family) {
-      const msg = document.getElementById('addGameMsg');
-      msg.textContent = '添加中...';
-      msg.className = 'add-game-msg';
+      setAddMsg('添加中...');
 
       rpc.withSuccessHandler(function(result) {
         if (result && result.error) {
-          msg.textContent = result.error;
-          msg.className = 'add-game-msg error';
+          setAddMsg(result.error, 'error');
           return;
         }
         allGames.push(result);
-        msg.textContent = '已添加: ' + result.name;
-        msg.className = 'add-game-msg success';
         render();
+        showAddedMsg(result);
       }).withFailureHandler(function(err) {
-        msg.textContent = '添加失败: ' + err.message;
-        msg.className = 'add-game-msg error';
+        setAddMsg('添加失败: ' + err.message, 'error');
       }).addGame(appid, name, family);
     }
 
@@ -2613,18 +2848,16 @@
 
     function runGameSearch() {
       const query = document.getElementById('gameSearchBox').value.trim();
-      const msg = document.getElementById('addGameMsg');
-      if (!query) { renderSearchResults([]); msg.textContent = ''; return; }
+      // 一开始搜下一个游戏,上一条「已添加…点这里查看」就该退场 —— 那个按钮
+      // 指着的是上一款游戏,留在旁边只会让人点错
+      if (!query) { renderSearchResults([]); setAddMsg(''); return; }
 
-      msg.textContent = '搜索中...';
-      msg.className = 'add-game-msg';
+      setAddMsg('搜索中...');
       rpc.withSuccessHandler(function(items) {
-        msg.textContent = (items && items.length === 0) ? '没有找到匹配的游戏' : '';
-        msg.className = 'add-game-msg';
+        setAddMsg((items && items.length === 0) ? '没有找到匹配的游戏' : '');
         renderSearchResults(items);
       }).withFailureHandler(function(err) {
-        msg.textContent = '搜索失败: ' + err.message;
-        msg.className = 'add-game-msg error';
+        setAddMsg('搜索失败: ' + err.message, 'error');
       }).searchSteamGames(query);
     }
 
