@@ -275,16 +275,21 @@ describe('错误信息要能照着做', () => {
     const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(404, { error: { code: 404, message: msg, status: 'NOT_FOUND' } })]) });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
       assert.match(e.message, /已经停止提供/);
-      assert.match(e.message, /不一定能用/, '得说清楚 --models 列出来不等于能用');
       assert.doesNotMatch(e.message, /可能不对/, '别把停售报成名字写错');
+      // 「--models 列出来不等于能用」这句话搬去终端那一侧了(tracker.js 的 CLI_HINTS,
+      // 由 cli-hints.test.js 钉):同一句话会原样出现在 Dashboard 的浮窗上,
+      // 而那边没有命令行可敲。换模型的做法两个界面也不一样
+      assert.equal(e.code, 'gemini-model-retired');
+      assert.doesNotMatch(e.message, /--model|tracker\.js/);
       return true;
     });
   });
 
-  test('404 指向 --models,而不是让人去猜模型名', async () => {
+  test('404 是"名字不对或没权限",而且不可重试', async () => {
     const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(404, { error: { code: 404, message: 'models/x is not found', status: 'NOT_FOUND' } })]) });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
-      assert.match(e.message, /--models/);
+      assert.match(e.message, /可能不对|没权限/);
+      assert.equal(e.code, 'gemini-model-unknown', '"怎么查有哪些能用"由终端接话');
       assert.equal(e.retryable, false);
       return true;
     });
@@ -308,7 +313,8 @@ describe('错误信息要能照着做', () => {
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
       assert.equal(e.retryable, false, '等多久都不会恢复,重试没有意义');
       assert.match(e.message, /不是用完了/);
-      assert.match(e.message, /--models/, '得告诉人怎么找一个能用的模型');
+      assert.match(e.message, /换一个 flash 系列/, '得说清楚往哪个方向换');
+      assert.equal(e.code, 'gemini-no-allowance', '"怎么查有哪些能用"由终端接话');
       assert.doesNotMatch(e.message, /次日重置/, '说"等次日重置"会让人白等一天');
       return true;
     });
@@ -346,15 +352,23 @@ describe('错误信息要能照着做', () => {
     const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(429, { error: { status: 'RESOURCE_EXHAUSTED', message: 'quota' } })]) });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
       assert.match(e.message, /没有配额明细/);
-      assert.match(e.message, /gemini-2\.5-flash/, '要给一个具体能试的模型');
-      assert.match(e.message, /别名/, '别名可能解析到不在免费层的新模型,这点要说');
+      assert.match(e.message, /等一分钟再试/, '缩小范围的第一步两个界面都做得到');
+      assert.match(e.message, /ai\.dev\/rate-limit/, '查配额的地址是个链接,页面上也点得开');
+      // 「换个具体模型 + 别名可能解析到不在免费层的新模型」由终端接话 —— 那句话要
+      // 写成 AI_MODEL=... 才有用,而那是终端才有的东西
+      assert.equal(e.code, 'gemini-429-no-detail');
       return true;
     });
   });
 
-  test('工具相关的 400 指向 geminiTools 这个配置项', async () => {
+  test('工具相关的 400 说清楚是工具声明的问题,配置项名字由终端补', async () => {
     const p = new GeminiProvider(AI, { fetchImpl: fakeFetch([errResponse(400, { error: { message: 'Unknown tool: url_context', status: 'INVALID_ARGUMENT' } })]) });
-    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), /geminiTools/);
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+      assert.match(e.message, /联网工具的声明不被接受/);
+      assert.equal(e.code, 'gemini-tool-rejected');
+      assert.doesNotMatch(e.message, /geminiTools/, 'config 里的键名对页面用户没有意义');
+      return true;
+    });
   });
 
   test('错误信息里不会带上 API key', async () => {
