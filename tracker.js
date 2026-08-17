@@ -1392,6 +1392,11 @@ if (!fn) {
  *
  * 挂在这里而不是各个命令里:所有命令的错误都从下面那个 catch 出去,一处就够。
  */
+const GEMINI_MODEL_HINT =
+  '  换模型:--model <名字>,或者改 config.json 的 ai.model。\n' +
+  '  有哪些可用跑 `node tracker.js ai-check --models` —— 但注意列出来 ≠ 能用,\n' +
+  '  停售的模型照样出现在那个列表里。';
+
 const CLI_HINTS = {
   'provider-model-mismatch': (d) =>
     `  要用这个模型:加 --provider ${d.belongsTo}\n` +
@@ -1400,6 +1405,20 @@ const CLI_HINTS = {
     '    Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue',
   'too-many-achievements': (d) =>
     `  真要写就调大 config.json 的 ai.maxAchievements(当前 ${d.max},这款要 ${d.count})。`,
+  // Gemini 的模型名问题都归到同一条建议上:先问 API 要列表,再改 model
+  'gemini-model-retired': () => GEMINI_MODEL_HINT,
+  'gemini-model-unknown': () => GEMINI_MODEL_HINT,
+  'gemini-no-allowance': () => GEMINI_MODEL_HINT,
+  'gemini-429-no-detail': () =>
+    '  换个具体模型试:AI_MODEL=gemini-2.5-flash —— 别用 -latest 别名,\n' +
+    '  别名可能解析到一个不在免费层的新模型。',
+  'gemini-tool-rejected': () =>
+    '  改 config.json 的 ai.geminiTools,默认值是 ["google_search"];去掉 url_context 再试。',
+  'bad-api-key': (d) =>
+    `  注意环境变量 ${d.envVar} 会盖掉 config.json,清掉再试:\n` +
+    `    Remove-Item Env:${d.envVar} -ErrorAction SilentlyContinue`,
+  'deepseek-length': () =>
+    '  也可以把 config.json 的 ai.maxTokens 调小(DeepSeek 的上限比另外两家小)。',
   'guide-exists': () => '  要覆盖它加 --overwrite(会先备份,并给出新旧对照)。',
   'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
   'chunk-too-small': (d) =>
