@@ -346,7 +346,10 @@ describe('generateGuide', () => {
     assert.equal(allGuides(db).length, 0);
   });
 
-  test('模型返回被截断(max_tokens)→ 当场停,不拿半份攻略往下走', async () => {
+  // 这里只有两个成就,切不动(见 MIN_CHUNK),所以走的是"停下来"那条路。
+  // 成就够多时截断会先自己切小重问,见「截断之后自己切小重问」那一组 ——
+  // 两条路的共同点才是这条测试真正钉住的东西:**半份攻略绝不往下走**
+  test('模型返回被截断(max_tokens)且切不动 → 当场停,不拿半份攻略往下走', async () => {
     const { db, config } = freshEnv();
     const provider = {
       model: 'claude-opus-5',
@@ -735,6 +738,151 @@ describe('分段撰写', () => {
     assert.deepEqual(chunksNeedingRewrite(blocking, chunks), [2]);
     // 定位不到的(没带 apiName)不该乱指一段 —— 调用方会退回全部重写
     assert.deepEqual(chunksNeedingRewrite([{ code: 'merged-line', message: 'x' }], chunks), []);
+  });
+
+  // -------------------------------------------------------------------------
+  // 被 max_tokens 截断 → 切小重问
+  // -------------------------------------------------------------------------
+  // 装进单次请求的是 thinking + 正文,而 thinking 随游戏/模型/端点变,兼容端点上
+  // 连压它的参数都发不出去。所以不预测该切多大,而是**等截断真的发生**再切 ——
+  // 截断是量到的事实,它直接说明这一段越了界。
+  describe('截断之后自己切小重问', () => {
+    const N = 12;
+    const MANY = Array.from({ length: N }, (_, i) => def(`K${i}`, `成就${i + 1}`, `完成第${i + 1}关。`));
+    const manySteam = () => ({
+      async fetchPlayerAchievements() {
+        return { achievements: MANY.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+      },
+      async fetchGlobalAchievementPercentages() { return null; },
+    });
+    const manyEnv = (chunkSize, defs = MANY) => {
+      const e = freshEnv({ defs });
+      e.config.ai = { maxAchievements: 500, chunkSize };
+      return e;
+    };
+
+    /** 能指定每次的 stopReason,并且把**每次看到的完整历史**记下来 */
+    function scriptedProvider(script) {
+      return {
+        model: 'claude-opus-5',
+        asked: [],
+        seen: [],
+        webTools: () => [],
+        async send({ messages }) {
+          this.seen.push(JSON.stringify(messages));
+          this.asked.push(messages.at(-1).content);
+          const step = script[this.asked.length - 1];
+          if (!step) throw new Error('scriptedProvider 的脚本用完了');
+          const text = step.text ?? '';
+          return {
+            content: [{ type: 'text', text }],
+            text,
+            stopReason: step.stop ?? 'end_turn',
+            stopDetails: null,
+            usage: {
+              inputTokens: 10, outputTokens: step.out ?? 20, cacheCreationTokens: 0,
+              cacheReadTokens: 0, webSearches: 1, requests: 1,
+            },
+            model: 'claude-opus-5',
+            continuations: 0,
+            toolErrors: [],
+          };
+        },
+      };
+    }
+
+    const HALF_WRITTEN = '```markdown\n## 主线\n\n- [ ] **成就1**<br>完成第1关。<br>写到这里就被砍了\n```';
+
+    test('一段写不完就一分为二,两半都问一遍,成就一个不少', async () => {
+      const { db, config } = manyEnv(N); // 一整段,必然要切
+      const provider = scriptedProvider([
+        { text: HALF_WRITTEN, stop: 'max_tokens', out: 61445 },
+        { text: seg(MANY.slice(0, 6)) },
+        { text: seg(MANY.slice(6)) },
+      ]);
+      const events = [];
+      const r = await generateGuide(db, {
+        db, config, provider, steam: manySteam(), appid: '1',
+        onProgress: (e) => events.push(e),
+      });
+
+      assert.equal(r.ok, true, '切小之后应该顺利写完');
+      assert.equal(provider.asked.length, 3, '截断那次 + 两半 = 三次');
+      const text = readFileSync(r.path, 'utf8');
+      for (const d of MANY) {
+        assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} 丢了`);
+      }
+      const re = events.find((e) => e.phase === 'resplit');
+      assert.ok(re, '切小要发进度事件 —— 界面上不能是「卡住了」');
+      assert.deepEqual([re.from, re.to], [12, 6]);
+    });
+
+    test('重问之前必须把被截断的那一轮从历史里摘掉', async () => {
+      const { db, config } = manyEnv(N);
+      const provider = scriptedProvider([
+        { text: HALF_WRITTEN, stop: 'max_tokens' },
+        { text: seg(MANY.slice(0, 6)) },
+        { text: seg(MANY.slice(6)) },
+      ]);
+      await generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' });
+
+      // **这条是整件事最容易做错的地方。** 废稿留在上下文里,而重问的提示词写着
+      // 「不要重复前面已经写过的成就」—— 模型会跳过它写了一半的那几个,
+      // 产出看着完全正常,只是少了条目。失败会报出来,缺东西不会
+      assert.ok(
+        !provider.seen[1].includes('写到这里就被砍了'),
+        '第二次请求的历史里还留着被截断的废稿'
+      );
+      assert.ok(
+        !provider.seen[2].includes('写到这里就被砍了'),
+        '第三次请求的历史里还留着被截断的废稿'
+      );
+      // 摘掉的只是废稿那一轮,正常写完的那一段必须留着 —— 同一个 session 的意义
+      // 就在于模型看得见自己前面写了什么
+      assert.ok(provider.seen[2].includes('成就1'), '第一半的成果不该被一起摘掉');
+    });
+
+    test('切到下限还是写不完就停下来,并且说清楚为什么别去调大 maxTokens', async () => {
+      // 5 == MIN_CHUNK,不能再切
+      const FIVE = MANY.slice(0, 5);
+      const { db, config } = manyEnv(5, FIVE);
+      const provider = scriptedProvider([{ text: HALF_WRITTEN, stop: 'max_tokens' }]);
+      await assert.rejects(
+        () => generateGuide(db, {
+          db, config, provider,
+          steam: {
+            async fetchPlayerAchievements() {
+              return { achievements: FIVE.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+            },
+            async fetchGlobalAchievementPercentages() { return null; },
+          },
+          appid: '1',
+        }),
+        (err) => {
+          assert.match(err.message, /已经切到 5 个成就/);
+          assert.match(err.message, /先别急着调大 ai\.maxTokens/, '错的建议不能再给一遍');
+          assert.match(err.message, /这是用量不是上限/, '那个数字是用量,得说明白');
+          return true;
+        }
+      );
+      assert.equal(provider.asked.length, 1, '切不动了就不该再问一次');
+    });
+
+    test('只有截断才切小重问 —— 拒答、RECITATION 切小了照样撞', async () => {
+      for (const stop of ['refusal', 'recitation']) {
+        const { db, config } = manyEnv(N);
+        const provider = scriptedProvider([{ text: '', stop }]);
+        await assert.rejects(
+          () => generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' }),
+          (err) => {
+            assert.equal(err.code, stop);
+            assert.doesNotMatch(err.message, /已经切到/, '这不是长度问题,别按长度问题报');
+            return true;
+          }
+        );
+        assert.equal(provider.asked.length, 1, `${stop} 不该重试`);
+      }
+    });
   });
 
   test('五个成就分三段写完,拼起来五个 checkbox 一个不少', async () => {
