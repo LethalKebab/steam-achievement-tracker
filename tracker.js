@@ -1110,7 +1110,13 @@ async function cmdGuideGen() {
       else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
       else if (ev.phase === 'notion-clear') p.update(`  清掉页面上原来的 ${ev.blocks} 个块…`);
       else if (ev.phase === 'resplit') {
-        p.done(`  第 ${ev.chunk} 段写不完(${ev.from} 个成就),切成两半重问(${ev.to} 个)`);
+        p.done(`  第 ${ev.chunk} 段没写出来(${ev.from} 个成就),切成两半重问(${ev.to} 个)`);
+      } else if (ev.phase === 'retry') {
+        p.done(`  第 ${ev.chunk} 段没拿到正文,原样再问一次(第 ${ev.attempt}/${ev.of} 次)`);
+      } else if (ev.phase === 'chunk-failed') {
+        // **这条一定要 done 不能 update。** 它是整份攻略里唯一"跳过了一块"的记录,
+        // 而 update 写的那一行会被下一段的进度当场覆盖掉 —— 跑完就没人知道漏了什么
+        p.done(`  ⚠️  第 ${ev.chunk} 段(${ev.count} 个成就)放弃了,先接着写后面的`);
       }
     },
   });
@@ -1143,6 +1149,14 @@ async function cmdGuideGen() {
   } else {
     console.log(`❌ ${r.rounds} 轮之后仍有 ${r.blocking.length} 条没过,草稿留在 ${r.draftPath}`);
     console.log('  (草稿不会被发现逻辑扫到,不会拿去勾框)');
+    // **病因写在症状前面。** 少一段的症状是几十条"缺 checkbox",照着读会以为
+    // 模型忘了写;真相是那一段整个没回来。顺序反过来的话,真正的原因会被埋在
+    // 十五条同样的话下面
+    for (const c of r.chunkFailures ?? []) {
+      console.log(`\n  ⚠️  第 ${c.chunk}/${c.of} 段没写出来(${c.count} 个成就:${c.first} … ${c.last})`);
+      console.log(`      ${c.reason.replace(/\n/g, '\n      ')}`);
+      console.log('      下面那些"缺 checkbox"里,这一段的部分是这个原因,不是模型漏写');
+    }
     for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
     if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
   }

@@ -417,6 +417,54 @@ test('搜索失败照样枪毙整轮,哪怕同一轮里抓页也失败了', () =
   assert.ok(!v.reason.includes('url_not_accessible'), '拦路原因里不该混进不拦路的那条');
 });
 
+describe('「没有正文」必须带上「那到底回来了什么」', () => {
+  // 这是这条路上最难查的一种失败:HTTP 200、没有工具错误、停止原因也正常,就是一个
+  // text 块都没有。而回包的形状指向完全不同的处置 —— 光一句"没有输出任何正文",
+  // 下一次撞上还是只能猜,而每一次猜都要花掉用户几分钟和一笔 token 才能验一遍。
+  // 实测撞到过三次(最近一次 KINGDOM HEARTS,197 个成就第 3/4 段)
+  const empty = (over) => checkResult({
+    stopReason: 'end_turn', rawStopReason: 'end_turn', text: '   ',
+    usage: { ...emptyUsage(), outputTokens: 0 }, toolErrors: [], content: [], ...over,
+  });
+
+  test('额度被思考吃光:thinking 块 + 一大笔 output token', () => {
+    const v = empty({
+      usage: { ...emptyUsage(), outputTokens: 31980 },
+      content: [{ type: 'thinking', thinking: '想了很久' }],
+    });
+    assert.equal(v.code, 'empty');
+    // 这三个数字合起来就是诊断:有 thinking、没有 text、产出接近上限
+    // ⇒ 和截断是一回事,该切小,而不是"再问一次"
+    assert.match(v.reason, /thinking×1/);
+    assert.match(v.reason, /31980 token/);
+  });
+
+  test('单纯抽风:一个块都没有、0 token —— 和上面那种要能分得开', () => {
+    const v = empty();
+    assert.match(v.reason, /一个块都没有/);
+    assert.match(v.reason, /0 token/);
+  });
+
+  test('光搜没写:报得出 server_tool_use 的个数', () => {
+    const v = empty({
+      content: [
+        { type: 'server_tool_use', name: 'web_search' },
+        { type: 'web_search_tool_result', content: [] },
+        { type: 'server_tool_use', name: 'web_search' },
+      ],
+    });
+    assert.match(v.reason, /server_tool_use×2/);
+    assert.match(v.reason, /web_search_tool_result×1/);
+  });
+
+  test('原始停止原因要原样带上 —— 归一化之后那个词看不出是哪家说的什么', () => {
+    // STOP_MAP 把 tool_use / stop_sequence 都归到 end_turn,而兼容端点还可能给出
+    // 我们没见过的词。归一化后的值答不了"供应商到底说了什么"
+    assert.match(empty({ rawStopReason: 'COMPLETE' }).reason, /COMPLETE/);
+    assert.match(empty({ rawStopReason: undefined }).reason, /未知/);
+  });
+});
+
 test('认不出 tool 的工具错误按拦路处理', () => {
   const v = checkResult({
     stopReason: 'end_turn',
