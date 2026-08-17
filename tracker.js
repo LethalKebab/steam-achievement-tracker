@@ -1160,8 +1160,21 @@ async function cmdGuideGen() {
     for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
     if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
   }
-  if (r.expected.length) {
-    console.log(`  ${r.expected.length} 条"已解锁但没勾"是预期内的:成就名在本作里撞车,勾不上`);
+  // **`expected` 现在装着两种"够不着",各自的原因不一样,不能合起来报一句。**
+  // 原来这行写死了"已解锁但没勾" —— 那只对 checked-mismatch 成立。
+  // 描述为空那种是"这个框永远勾不上",和有没有解锁无关,混在一句里会把它说错
+  const emptyDesc = r.expected.filter((f) => f.code === 'ambiguous-empty-description');
+  const mismatch = r.expected.filter((f) => f.code === 'checked-mismatch');
+  if (mismatch.length) {
+    console.log(`  ${mismatch.length} 条"已解锁但没勾"是预期内的:成就名在本作里撞车,勾不上`);
+  }
+  if (emptyDesc.length) {
+    // 不拦路,但必须说出口:这几条**永远**不会被自动勾上,而用户有权在看到"写完了"
+    // 的同一屏里知道这件事,而不是过几个月发现有几个框一直没动
+    console.log(`  ⚠️  ${emptyDesc.length} 个成就同名、而 Steam 上的描述是空的,自动勾选永远认不出它们:`);
+    for (const f of emptyDesc.slice(0, 8)) console.log(`       ${f.name}`);
+    if (emptyDesc.length > 8) console.log(`       …… 另外 ${emptyDesc.length - 8} 个`);
+    console.log('     攻略本身没问题,这几个框要自己手动勾。');
   }
   if (r.lint?.stats) {
     console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
