@@ -433,6 +433,56 @@ describe('loadAiState 落地后只重绘', () => {
  * 打包那一条尤其值得钉:它**只在打包版失效**,`npm start` 永远看着是好的 ——
  * 和 CLAUDE.md 里 `icon.ico`、`updater.js` 踩过的是同一个坑。
  */
+describe('搜索框一个人干两件事', () => {
+  /** 去掉两种注释的内联脚本 —— 注释里正好也写着这些词,不去会把断言喂饱 */
+  const js = () => inlineScripts(read('Dashboard.html'))
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  test('有搜索词时,四个勾选框一律让路', () => {
+    // **这一条是「库里没有就去 Steam 加」那套的地基。** 不让路的话,「搜不到」有
+    // 一半以上的概率意思是「被自己的筛选挡住了」—— 实测三个默认勾选框挡着 316 款
+    // 里的 171 款 —— 于是搜一款已经打满的游戏,界面会建议你**再添加一次**。
+    // 破坏方式很隐蔽:把 return 改成继续往下走,表格看起来只是「少了几行」
+    const src = js();
+    const i = src.indexOf('function hidingFilter');
+    assert.ok(i > 0, '找不到 hidingFilter —— 这条检查失去了目标,不是通过了');
+    const block = src.slice(i, src.indexOf('\n    }', i));
+    const searchAt = block.indexOf('f.search');
+    const firstCheckbox = block.indexOf('f.hideComplete');
+    assert.ok(searchAt > 0 && firstCheckbox > searchAt, '搜索必须在勾选框之前判');
+    // 搜索那一段必须自己 return 掉,不能落到下面的勾选框判断上
+    const searchBranch = block.slice(searchAt, firstCheckbox);
+    assert.match(searchBranch, /return/, '有搜索词时必须当场返回,不能继续过勾选框');
+  });
+
+  test('只有库里一条都没匹配上才去打 Steam 的接口', () => {
+    // 本地筛选免费且瞬时,Steam 那个是有限流的网络调用,而绝大多数搜索是在找
+    // 自己已经有的游戏。去掉这道判断不会报错,只是每敲一个字母都往外发一次请求
+    const src = js();
+    const i = src.indexOf('function onSearchInput');
+    assert.ok(i > 0, '找不到 onSearchInput');
+    const block = src.slice(i, src.indexOf('\n    }', i));
+    assert.match(block, /allGames\.some/, '要拿整个库判「有没有」,不是拿筛选后的行');
+    assert.match(block, /if \(hit\)/, '库里有就该到此为止');
+    const hitAt = block.indexOf('if (hit)');
+    const timerAt = block.indexOf('setTimeout');
+    assert.ok(hitAt > 0 && timerAt > hitAt, 'Steam 那次请求必须排在「库里有没有」之后');
+  });
+
+  test('Steam 结果是 button,不是挂了 click 的 div', () => {
+    // 它是「添加一个游戏」唯一的入口。做成 div 的话鼠标能用、键盘完全够不着 ——
+    // tab 走不到、回车没反应,而这一点不会有任何东西报错
+    const src = js();
+    const i = src.indexOf('function renderSearchResults');
+    assert.ok(i > 0, '找不到 renderSearchResults');
+    const block = src.slice(i, src.indexOf('\n    }', i));
+    assert.match(block, /<button type="button" class="game-search-result"/,
+      '结果项必须是 button,而且要显式 type —— 默认的 submit 将来进了 form 会提交页面');
+  });
+});
+
 describe('自托管字体', () => {
   const FONT_CSS = 'assets/fonts/noto-sans-sc.css';
 

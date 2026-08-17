@@ -624,15 +624,17 @@
       border-color: var(--accent);
       background: var(--bg);
     }
-    #searchBox { width: 240px; }
-    #gameSearchBox { width: 260px; }
+    /* 一个框干两件事,给它比原来两个都宽一点 —— 游戏全名比一个筛选标签长得多 */
+    #searchBox { width: 280px; }
 
-    .add-game-row {
+    /* 只在搜索时出现,所以外边距也跟着它走:平时整块 hidden,不留空档。
+       （全局 `[hidden] { display:none !important }` 压得住这里的 display:flex —— 那条
+        规则存在的理由正是「作者写的 display 会悄悄把 hidden 属性降级成装饰」）*/
+    .search-extra {
       display: flex;
+      flex-direction: column;
       gap: var(--s2);
-      margin-bottom: var(--s4);
-      flex-wrap: wrap;
-      align-items: center;
+      margin-bottom: var(--s3);
     }
     .add-game-btn {
       background: var(--accent);
@@ -671,13 +673,41 @@
       display: flex;
       flex-direction: column;
       gap: var(--s1);
-      margin: -6px 0 var(--s4) 0;
       max-width: 480px;
     }
+    /* 「Steam 商店」那一小行。**是标签,不是说明** —— 结果出现在搜索框下面、
+       而上面那张表同时是空的,不说一声会被读成「这就是我库里的」。两个词说完 */
+    .steam-label {
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+      letter-spacing: 0.04em;
+    }
+    /* 等 Steam 回话时画几条占位行。**用形状说话,不用句子** ——
+       它同时说了两件事:在忙、以及等下出来的东西长这样。原来这里是一句
+       「库里没有,正在 Steam 上找…」,盯着一句不动的话两秒,分不出是在跑还是卡了 */
+    .game-search-result.skeleton {
+      cursor: default;
+      pointer-events: none;
+      animation: skel-pulse 1.1s ease-in-out infinite;
+    }
+    .skel-img, .skel-line {
+      background: var(--surface-3);
+      border-radius: var(--r-sm);
+    }
+    .skel-img { width: 48px; height: 23px; flex-shrink: 0; }
+    .skel-line { height: 10px; flex: 1; max-width: 220px; }
+    @keyframes skel-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+    /* **button 而不是 div。** 它原来是个挂了 click 的 div —— 鼠标能用,键盘完全够不着:
+       tab 走不到、回车没反应。改成 button 之后键盘可达和全局 :focus-visible 都是白送的,
+       代价只是几行复位 button 的默认样式 */
     .game-search-result {
       display: flex;
       align-items: center;
       gap: var(--s3);
+      width: 100%;
+      text-align: left;
+      font: inherit;
+      color: inherit;
       padding: var(--s2) var(--s3);
       background: var(--surface);
       border: 1px solid var(--line-2);
@@ -691,7 +721,14 @@
       height: 23px;
       object-fit: cover;
       border-radius: var(--r-sm);
-      background: var(--bg);
+      /* **`--surface-3` 而不是 `--bg`。** 封面地址是猜的(Steam 把商店图挪到了
+         内容哈希路径下,见 CLAUDE.md「cover art is guessed first」),而商店搜索
+         这条路上只有 appid,没有 `resolveCover` 那条问一次 appdetails 的退路 ——
+         实测搜 silk,十条里三条猜不中。配 `--bg` 时那一格比行底色还深,读起来像个洞、
+         像图挂了;配 --surface-3 就只是一个空位,和占位行同色。
+         (别照着「大多数都没图」改设计:那是第一次截图截在图还没加载完的时候
+          得出的数,重看是 7/10 有图。) */
+      background: var(--surface-3);
       flex-shrink: 0;
     }
     .game-search-result span { font-size: var(--fs-md); }
@@ -700,25 +737,43 @@
     /* ========================================================================
        表格上方那一行:左边切视图,右边报数量
        ======================================================================== */
+    /* 三样东西说的都是**下面这张表**:怎么看(视图)、看什么(筛选)、看到多少(计数)。
+       搜索不在这里 —— 它现在会绕开筛选,放在一起会让人以为两者还在互相影响。
+
+       **控件靠左连成一串,读数钉在右边。** 原来是 space-between 配三个孩子,
+       于是筛选被推到正中间浮着,两边各一段空白 —— 看着像没对齐,而不像分了组。
+       视图和筛选都是「你能拨的东西」,读数是「拨完的结果」,按这个分就只有两组 */
     .table-bar {
       display: flex;
       align-items: center;
-      justify-content: space-between;
       gap: var(--s3);
       margin-bottom: var(--s2);
+      flex-wrap: wrap;
     }
+    .filter-chips {
+      display: flex;
+      align-items: center;
+      gap: var(--s2);
+      flex-wrap: wrap;
+      /* 搜索会绕开筛选(见 hidingFilter)。**这件事用看的,不用读的** ——
+         原来在计数后面缀了一句「搜索时不看筛选」,那是拿文字去补一个本该一眼看出来
+         的状态。控件自己变灰就说完了:它们此刻确实不起作用 */
+      transition: opacity var(--dur-1);
+    }
+    .filter-chips.inert { opacity: 0.35; }
     /* 冻结区里的**最后一行不留下边距**:那块每高一像素,能看见的表格就少一像素,
        而顶栏自己的 padding-bottom 已经把间距给足了。
        同理,冻结区末尾那个 `margin-bottom: var(--s5)` 归顶栏管,不归里面这几行 */
     .topbar .table-bar { margin-bottom: 0; }
-    /* 搜索下拉在冻结区里是临时出现的,它自带的负上边距是为了贴住输入框 —— 留着,
-       但下边距去掉,不然一搜索整块就多顶开一截 */
-    .topbar .game-search-results { margin-bottom: 0; }
+    /* 搜索时才出现的那一块也一样:它是冻结区**临时**长出来的最后一段,
+       自带下边距的话每次搜索都会把表头多顶开一截 */
+    .topbar .search-extra { margin-bottom: 0; }
     /* 结果计数**贴着表格**,因为它说的是这张表;顶栏那个读数说的是整个库。
        两个数字含义不同,放在一处会被读成同一个 */
     .row-count {
       font-size: var(--fs-sm);
       color: var(--text-3);
+      margin-left: auto;   /* 读数钉右边,控件在左边连成一串 */
     }
     /* 分段控件:两个按钮共处一个凹槽,选中的那个浮起来。
        原来是两个各自独立的按钮,选中态只靠底色深浅,读不出「二选一」 */
@@ -1498,6 +1553,9 @@
       tr.game-row.just-added > td { animation: none; background: rgba(102, 192, 244, 0.24); }
       .g-card.just-added { animation: none; outline-color: var(--accent); }
       .bar-fill { transition: none; }
+      /* 占位行**不闪**,但要留着 —— 它不是装饰,是「在等 Steam 回话」这句话本身 */
+      .game-search-result.skeleton { animation: none; opacity: 0.6; }
+      .filter-chips { transition: none; }
     }
   </style>
 </head>
@@ -1666,7 +1724,48 @@
       后者是 fixed,进来只是白占一层嵌套。
       ==================================================================== -->
     <div class="controls">
-      <input type="text" id="searchBox" placeholder="搜索游戏名...">
+      <!-- **一个输入框。** 原来这里和下面各有一个:一个筛库存、一个搜 Steam 加新游戏,
+           两个框并排、长得一样、问的是用户脑子里的同一个问题(「X 这游戏在哪」)——
+           区别只是「你有没有」,而那件事**程序知道,用户不需要知道**。
+           所以合成一个:先在库里找,库里没有才去 Steam 找,找到就能加。
+           aria-label 比 placeholder 更能说清它现在干两件事;不放可见 label 是因为
+           这里在冻结区里,多一行标题正好抵掉这次合并省下来的高度(见 --topbar-h) -->
+      <input type="text" id="searchBox" placeholder="搜索游戏名…"
+             aria-label="搜索游戏。库里没有的会去 Steam 上找,可以直接添加"
+             autocomplete="off">
+    </div>
+
+    <!-- 搜索框下面这一块**只在搜索时出现**,平时不占地方。它按顺序回答两个问题:
+         「库里有几个」→ 库里一个都没有的话「Steam 上有这些,点一个就能加」。
+         加完之后 #addGameMsg 会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
+         **不自动跳** —— 加完接着加下一个是很常见的用法,自动滚到几百行开外
+         会把搜索框一起带走。
+         整块留在冻结区里:它属于上面那个输入框。冻结区因此会临时变高,而
+         --topbar-h 会被 measureTopbar() 重新量,表头自己让开 -->
+    <div class="search-extra" id="searchExtra" hidden>
+      <!-- 两个词的来源标签。结果出现在搜索框下面、而上面那张表同时是空的,
+           不标一句会被读成「这就是我库里的」 -->
+      <div class="steam-label" id="steamLabel" hidden>Steam 商店</div>
+      <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
+      <!-- **只在真的需要用词的时候才有字**:两边都没有、连不上服务、以及加完之后
+           那句可点的「已添加 X」。在忙由占位行表示,成功由结果本身表示 —— 都不写字 -->
+      <span class="add-game-msg" id="addGameMsg"></span>
+    </div>
+
+    <!-- 「怎么看」「看什么」「看到多少」放同一行:三者说的都是下面这张表。
+         **筛选是 2026-08-17 从搜索框那一行搬过来的。** 搜索现在会绕开全部筛选
+         (见 hidingFilter),两者并排会读成「搜索是在这几个筛选之内找」——
+         而那正好是反的。搬到计数旁边还顺带把因果放到了一起:改一个筛选,
+         右边那个数字当场变。 -->
+    <div class="table-bar">
+      <div class="view-toggle" role="group" aria-label="视图">
+        <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
+             前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
+             名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
+        <button type="button" class="on" data-view="table">列表</button>
+        <button type="button" data-view="gallery">网格</button>
+      </div>
+      <div class="filter-chips" id="filterChips">
       <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
            打满的游戏对这个问题没有贡献 -->
       <label class="checkbox">
@@ -1686,27 +1785,6 @@
       <label class="checkbox">
         <input type="checkbox" id="hideNoAch" checked> 隐藏无成就系统的游戏
       </label>
-    </div>
-
-    <div class="add-game-row">
-      <input type="text" id="gameSearchBox" placeholder="添加新游戏...">
-      <!-- 加完之后这里会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
-           **不自动跳** —— 添加完接着加下一个是很常见的用法,自动滚到几百行开外
-           会把「添加新游戏」那个输入框带走 -->
-      <span class="add-game-msg" id="addGameMsg"></span>
-    </div>
-    <!-- 搜索结果也在冻结区里:它属于上面那个输入框。冻结区因此会临时变高,
-         而 --topbar-h 是 ResizeObserver 量出来的,表头会自己让开 -->
-    <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
-
-    <!-- 「多少」和「怎么看」放同一行:两者说的都是下面这张列表 -->
-    <div class="table-bar">
-      <div class="view-toggle" role="group" aria-label="视图">
-        <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
-             前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
-             名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
-        <button type="button" class="on" data-view="table">列表</button>
-        <button type="button" data-view="gallery">网格</button>
       </div>
       <div class="row-count" id="rowCount"></div>
     </div>
@@ -1829,7 +1907,19 @@
      */
     function hidingFilter(g, f) {
       const by = (id, label) => ({ el: document.getElementById(id), label });
-      if (f.search && g.name.toLowerCase().indexOf(f.search) === -1) return by('searchBox', '搜索框');
+      // **有搜索词时,搜索是唯一的判据,四个勾选框一律让路。**
+      //
+      // 勾选框回答的是「平时默认给我看什么」,搜索回答的是「我现在要找这一个」。
+      // 后者是点名,不该被前者否决 —— 而且行上有完成率、受限徽章、无成就系统这些,
+      // 搜出来一眼就能判断,不需要靠筛选替你挡掉。
+      //
+      // 这不只是顺手:三个勾选框默认全开,实测挡着 316 款里的 171 款。不让路的话,
+      // 「搜不到」有一半以上的概率意思是「被自己的筛选挡住了」而不是「库里没有」——
+      // 而下面那套「库里没有就去 Steam 找」正是拿这个判断当开关的,判错就会建议你
+      // **再添加一次已经拥有的游戏**
+      if (f.search) {
+        return g.name.toLowerCase().indexOf(f.search) === -1 ? by('searchBox', '搜索框') : null;
+      }
       if (f.hideComplete && g.rate === 1) return by('hideComplete', '隐藏已完成');
       if (f.hideUnvetted && g.unvetted) return by('hideUnvetted', '隐藏受限游戏');
       if (f.hideNoAch && g.total === 'N/A') return by('hideNoAch', '隐藏无成就系统的游戏');
@@ -2275,7 +2365,12 @@
       // 顶栏那个读数**恒定是库里的总数** —— 它回答「我一共有多少游戏」,不该被一次
       // 搜索改写。筛选后的数量是另一个问题(「这张表现在给我看多少」),贴着表格放
       document.getElementById('cardTotal').textContent = String(allGames.length);
-      document.getElementById('rowCount').textContent = '显示 ' + rows.length + ' / 共 ' + allGames.length;
+      document.getElementById('rowCount').textContent =
+        '显示 ' + rows.length + ' / 共 ' + allGames.length;
+      // 搜索时筛选不起作用(见 hidingFilter)。**这件事让控件自己说** —— 变灰的芯片
+      // 就是「现在不作数」,不需要在计数后面缀一句解释。文字那一版试过,是多余的:
+      // 它要求人先读一句话,才能理解一个本该一眼看出来的状态
+      document.getElementById('filterChips').classList.toggle('inert', Boolean(filters.search));
 
       // 排序标记跟着 sortKey/sortDir 走。**放在 render 里而不是点击处理里** ——
       // 排序状态有默认值(初次加载就是按完成率倒序),挂在点击上的话第一次进页面
@@ -2665,6 +2760,10 @@
       const el = document.getElementById(id);
       el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', render);
     });
+    // 搜索框比别的多一件事:库里没有的时候去 Steam 找。**和 render 分开挂** ——
+    // render 是纯粹的重画,谁改了筛选都要跑;这一条只属于搜索框,混进 render 里
+    // 等于每次勾一下「隐藏已完成」都去想要不要发网络请求
+    document.getElementById('searchBox').addEventListener('input', onSearchInput);
 
     document.querySelectorAll('.view-toggle button').forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -2888,8 +2987,20 @@
       }).addGame(appid, name, family);
     }
 
+    /** 等 Steam 回话时的占位行。三条 —— 够看出「是个列表」,又不至于把冻结区撑高太多 */
+    function renderSkeleton() {
+      const box = document.getElementById('gameSearchResults');
+      document.getElementById('steamLabel').hidden = false;
+      box.style.display = 'flex';
+      const row = '<div class="game-search-result skeleton" aria-hidden="true">'
+        + '<span class="skel-img"></span><span class="skel-line"></span></div>';
+      box.innerHTML = row.repeat(3);
+      measureTopbar();
+    }
+
     function renderSearchResults(items) {
       const box = document.getElementById('gameSearchResults');
+      document.getElementById('steamLabel').hidden = !(items && items.length);
       if (!items || items.length === 0) {
         box.style.display = 'none';
         box.innerHTML = '';
@@ -2900,11 +3011,14 @@
         return;
       }
       box.style.display = 'flex';
+      // **button 而不是 div。** 原来是挂了 click 的 div:鼠标能用,键盘完全够不着 ——
+      // tab 走不到、回车没反应,而这是「添加一个游戏」唯一的入口。
+      // type="button" 是必须的:默认 type 是 submit,将来这块要是进了 form 就会提交页面
       box.innerHTML = items.map(function(g) {
-        return '<div class="game-search-result" data-appid="' + g.appid + '" data-name="' + escapeHtml(g.name) + '">'
-          + '<img src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+        return '<button type="button" class="game-search-result" data-appid="' + g.appid + '" data-name="' + escapeHtml(g.name) + '">'
+          + '<img src="' + thumbUrl(g.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'" alt="">'
           + '<span>' + escapeHtml(g.name) + ' <span class="appid-hint">(' + g.appid + ')</span></span>'
-          + '</div>';
+          + '</button>';
       }).join('');
 
       box.querySelectorAll('.game-search-result').forEach(function(el) {
@@ -2922,29 +3036,80 @@
       measureTopbar();
     }
 
-    function runGameSearch() {
-      const query = document.getElementById('gameSearchBox').value.trim();
-      // 一开始搜下一个游戏,上一条「已添加…点这里查看」就该退场 —— 那个按钮
-      // 指着的是上一款游戏,留在旁边只会让人点错
-      if (!query) { renderSearchResults([]); setAddMsg(''); return; }
-
-      setAddMsg('搜索中...');
+    /**
+     * 库里一个都没匹配上的时候,去 Steam 上找。
+     *
+     * **只有这一种情况才发这个请求。** 本地筛选是免费的、瞬时的,而这是个有限流的
+     * 网络调用,而绝大多数搜索是在找自己已经有的游戏。因为搜索会绕开所有勾选框
+     * (见 hidingFilter),「本地 0 条」是拿整个库判出来的,这个开关才站得住脚 ——
+     * 要是还按筛选后的结果判,一半以上的搜索都会跑到这里来。
+     */
+    function runGameSearch(query) {
+      // 在忙 = 画几条占位行,不是写一句话。见 .game-search-result.skeleton
+      renderSkeleton();
       rpc.withSuccessHandler(function(items) {
-        setAddMsg((items && items.length === 0) ? '没有找到匹配的游戏' : '');
+        // 请求回来时用户可能已经接着打字了。**用当时那个词对一下**,不然慢的那个响应
+        // 会盖掉快的那个,列表和输入框对不上(经典的竞态,这里debounce 挡不住)
+        if (document.getElementById('searchBox').value.trim() !== query) return;
+        if (!items || items.length === 0) {
+          // 真正的死胡同,这一种才需要用词
+          setAddMsg('没有找到「' + query + '」');
+          renderSearchResults([]);
+          return;
+        }
+        // **成功不写字。** 结果自己就是「搜到了」这句话:十行带封面的游戏一出来,
+        // 不会有人还需要一句「下面是 Steam 上的结果」来确认
+        setAddMsg('');
         renderSearchResults(items);
       }).withFailureHandler(function(err) {
-        setAddMsg('搜索失败: ' + err.message, 'error');
+        if (document.getElementById('searchBox').value.trim() !== query) return;
+        // **别把本地的故障说成 Steam 的故障。** `Failed to fetch` 是这条 fetch 根本
+        // 没发出去 —— 后台服务没在跑 / 端口被占 / 刚被关掉,和 Steam 一点关系没有。
+        // 照直写「搜索 Steam 失败」会把人指去查网络和 Steam,而要修的是本地那个服务
+        // (实测撞到过:开着页面的时候服务进程停了,提示说的是 Steam 挂了)
+        const local = /Failed to fetch|NetworkError|load failed/i.test(String(err.message));
+        setAddMsg(local ? '连不上后台服务,刷新一下页面' : '搜索 Steam 失败:' + err.message, 'error');
+        renderSearchResults([]);
       }).searchSteamGames(query);
     }
 
+    /**
+     * 输入框每次变化都走这里。**两段速度不一样,故意的:**
+     *
+     * - 本地筛选**立刻**跑(render 已经在别处绑了,零成本、零延迟)
+     * - Steam 那一段等 300ms 停下来再说,而且只在库里一条都没匹配上时才发
+     *
+     * 「加载提示要配得上等待时间,近乎瞬时的操作不要闪一下」—— 所以本地那段没有任何
+     * 转圈,而「正在 Steam 上找…」只可能在 debounce 之后出现,不会为一次本地就能
+     * 解决的搜索闪一下。
+     */
     let searchTimeout = null;
-    document.getElementById('gameSearchBox').addEventListener('input', function() {
+    function onSearchInput() {
+      const query = document.getElementById('searchBox').value.trim();
+      const extra = document.getElementById('searchExtra');
       clearTimeout(searchTimeout);
-      searchTimeout = setTimeout(runGameSearch, 300);
-    });
-    document.getElementById('gameSearchBox').addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { clearTimeout(searchTimeout); runGameSearch(); }
-    });
+
+      // 开始搜下一个词,上一条「已添加…点这里查看」就该退场 —— 那个按钮指着的是
+      // 上一款游戏,留在旁边只会让人点错
+      renderSearchResults([]);
+      setAddMsg('');
+
+      if (!query) {
+        extra.hidden = true;
+        measureTopbar();
+        return;
+      }
+      // 库里有就到此为止:表格已经把它们显示出来了,不需要再多说一句
+      const hit = allGames.some(function(g) { return g.name.toLowerCase().indexOf(query.toLowerCase()) !== -1; });
+      if (hit) {
+        extra.hidden = true;
+        measureTopbar();
+        return;
+      }
+      extra.hidden = false;
+      measureTopbar();
+      searchTimeout = setTimeout(function() { runGameSearch(query); }, 300);
+    }
 
     document.getElementById('confirmAddBtn').addEventListener('click', function() {
       const modal = document.getElementById('addConfirmModal');
@@ -2954,7 +3119,9 @@
       const family = document.getElementById('confirmFamily').checked;
       modal.classList.remove('show');
       renderSearchResults([]);
-      document.getElementById('gameSearchBox').value = '';
+      // **搜索框不清空。** 它现在也是筛选框:清掉的话表格会瞬间跳回全库,
+      // 而刚加进来的那一行就淹在三百行里了 —— 留着搜索词,新游戏正好就在表里
+      // （它必然匹配这个词,不然搜不出来）,下面那句「已添加…点这里查看」也才对得上
       // 复位成默认勾选:这个框会被复用,上一次取消勾选不该留给下一款游戏
       document.getElementById('confirmFamily').checked = true;
       addSelectedGame(appid, name, family);
