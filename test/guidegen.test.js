@@ -681,6 +681,38 @@ describe('分段撰写', () => {
     assert.deepEqual(chunkDefs([1, 2, 3, 4, 5], 2).map((c) => c.length), [2, 2, 1]);
     assert.deepEqual(chunkDefs([1, 2, 3], 10).map((c) => c.length), [3], '装得下就只有一段');
     assert.equal(chunkDefs([1, 2, 3], 0).length, 3, 'size 传 0 不能死循环');
+    assert.deepEqual(chunkDefs([], 50), [], '一个成就都没有就没有段');
+  });
+
+  test('chunkDefs 把成就均摊到各段,不让最后一段变成零头', () => {
+    const n = (len) => Array.from({ length: len }, (_, i) => i);
+    // 这条是照着真事写的:人中之龙0 有 55 个成就,配 chunkSize=50。
+    // 朴素切片给 50 + 5 —— 段数同样是 2,却让第一段顶着上限去撞 max_tokens
+    assert.deepEqual(chunkDefs(n(55), 50).map((c) => c.length), [28, 27]);
+    assert.deepEqual(chunkDefs(n(101), 50).map((c) => c.length), [34, 34, 33]);
+    // 整除时和以前一模一样 —— 均摊不该改动本来就均匀的情况
+    assert.deepEqual(chunkDefs(n(100), 50).map((c) => c.length), [50, 50]);
+    assert.deepEqual(chunkDefs(n(50), 50).map((c) => c.length), [50]);
+  });
+
+  test('chunkDefs 均摊之后:段数不增加、没有一段超上限、成就不丢不重', () => {
+    for (let len = 1; len <= 120; len++) {
+      for (const size of [1, 2, 7, 50]) {
+        const defs = Array.from({ length: len }, (_, i) => i);
+        const chunks = chunkDefs(defs, size);
+        const flat = chunks.flat();
+        // **上限是硬的。** 均摊只该把段变短;超了就等于悄悄把用户配的值改大了
+        assert.ok(chunks.every((c) => c.length <= size), `len=${len} size=${size} 有段超过上限`);
+        // 段数不能比朴素切法多 —— 多一段就是多一次请求、多一次搜索预算
+        assert.ok(
+          chunks.length <= Math.ceil(len / size),
+          `len=${len} size=${size} 段数比朴素切法还多`
+        );
+        // 顺序和完整性:模型是按「第 N–M 个成就」写的,漏一个或重一个都会
+        // 变成校验器口中的 missing-checkbox,而真因在这里
+        assert.deepEqual(flat, defs, `len=${len} size=${size} 成就丢了或顺序变了`);
+      }
+    }
   });
 
   test('只有一段时,发过去的话和以前一字不差 —— 小攻略的行为不能被这次改动碰到', () => {
