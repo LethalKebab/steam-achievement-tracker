@@ -32,7 +32,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "provider": "deepseek",   // "deepseek" | "anthropic" | "gemini" | "deepseek-openai"
     "apiKey": "…",            // or DEEPSEEK_/ANTHROPIC_/GEMINI_API_KEY, picked by provider
     "model": "",              // blank = that provider's own default; names aren't portable
-    "effort": "high",         // low | medium | high | xhigh | max
+    "effort": "high",         // low | medium | high | off — the one lever that changes speed
+    "thinking": null,         // "adaptive" | "disabled" | "off"; blank = per-endpoint default
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 500,   // refuse to generate above this
     "chunkSize": 50,          // max achievements per writing pass; passes are evenly sized
@@ -104,7 +105,24 @@ On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising 
 
 **`chunkSize` is a ceiling, not a pass length.** The number of passes is computed from it and the achievements are then spread evenly, so 55 achievements at the default become two passes of 28 and 27 — not 50 and 5. Lowering it therefore shortens every pass and adds passes only as needed; it can never make a pass longer.
 
-`maxTokens` caps thinking **and** prose together, not prose alone. A pass that runs out mid-way is not silently accepted — the generator halves that pass and re-asks the two halves, repeating until the writing fits or the pass is down to five achievements. **So a truncation is usually not something you need to act on**, and reaching for a bigger `maxTokens` is usually the wrong reflex: the budget is shared with thinking, and raising it has been measured to buy thinking rather than prose (16000 → 32000 moved output tokens +79% and guide text +7%). If a five-achievement pass still won't fit, the message says so, and the thing to change is the endpoint or model — thinking can only be capped where the provider accepts the parameter, which compatibility endpoints do not. `effort` is the depth knob; there is no temperature setting, because the models this targets reject it outright.
+`maxTokens` caps thinking **and** prose together, not prose alone. A pass that runs out mid-way is not silently accepted — the generator halves that pass and re-asks the two halves, repeating until the writing fits or the pass is down to five achievements. **So a truncation is usually not something you need to act on**, and reaching for a bigger `maxTokens` is usually the wrong reflex: the budget is shared with thinking, and raising it has been measured to buy thinking rather than prose (16000 → 32000 moved output tokens +79% and guide text +7%). If a five-achievement pass still won't fit, the message says so, and the thing to change is the endpoint or model. There is no temperature setting, because the models this targets reject it outright.
+
+**`effort` is the depth knob, and it is also the only setting here that meaningfully changes how long a run takes.** It was documented as a knob for a long time while never actually being sent on the DeepSeek path — the code bundled it with two Anthropic-only fields and switched all three off whenever a custom endpoint was configured, which the `deepseek` preset always is. Measured on 2026-08-17 over one identical 10-achievement pass with search on:
+
+| `effort` | wall time | searches issued | guide text per achievement |
+|---|---|---|---|
+| not sent (the old behaviour) | 337 s | 8 | 255 chars |
+| **`high` (the default, and what now ships)** | **179 s** | 6 | **306 chars** |
+| `medium` | 219 s | 6 | 275 chars |
+| `low` | 43 s | 2 | 211 chars |
+
+Note `high` came out both faster *and* wordier than sending nothing, and faster than `medium`. Single runs on this path vary by up to 8× on identical input (see below), so read the table as "low is dramatically faster, the rest are close" rather than as a strict ranking.
+
+**It is one dial, not three** — thinking, searching and prose length all move together, so turning it down genuinely buys less research rather than the same research delivered faster. That trade is meant to be visible: every run prints how many searches were actually issued, in the terminal and on the Dashboard, so you can see what a lower setting cost you. `off` stops the field being sent at all, which is what to use if an endpoint rejects it; the error message says so when that happens.
+
+`thinking` is a separate switch and is normally left alone. `"disabled"` makes a pass finish in seconds, and **also stops the model searching the web entirely** — it then writes guides from memory, which is the failure this tool otherwise refuses to allow. Use `effort` to go faster, not this.
+
+Neither setting is sent to endpoints that haven't been tested with it, since acceptance varies by endpoint and an untested one is left exactly as it was. Set `"anthropicExtras": true` to force them on for a custom endpoint you know accepts them.
 
 `allowedDomains` defaults to empty, meaning no restriction. Filling it in **hard-restricts** search to those domains — the API offers no way to merely prefer one. It's tempting to lock search onto Chinese guide sites (3DM, 游民星空, NGA, B站), but how well those are actually indexed hasn't been measured yet, so the default doesn't trade measured quality for an unmeasured assumption.
 
