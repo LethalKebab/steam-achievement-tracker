@@ -707,6 +707,13 @@
       gap: var(--s3);
       margin-bottom: var(--s2);
     }
+    /* 冻结区里的**最后一行不留下边距**:那块每高一像素,能看见的表格就少一像素,
+       而顶栏自己的 padding-bottom 已经把间距给足了。
+       同理,冻结区末尾那个 `margin-bottom: var(--s5)` 归顶栏管,不归里面这几行 */
+    .topbar .table-bar { margin-bottom: 0; }
+    /* 搜索下拉在冻结区里是临时出现的,它自带的负上边距是为了贴住输入框 —— 留着,
+       但下边距去掉,不然一搜索整块就多顶开一截 */
+    .topbar .game-search-results { margin-bottom: 0; }
     /* 结果计数**贴着表格**,因为它说的是这张表;顶栏那个读数说的是整个库。
        两个数字含义不同,放在一处会被读成同一个 */
     .row-count {
@@ -1642,6 +1649,67 @@
         </span>
       </div>
     </div>
+
+    <!-- ====================================================================
+      **筛选、添加、计数这三行也在冻结区里面。**
+
+      它们说的都是「下面那张表现在给你看什么」,而翻到三百行开外之后想改一个筛选、
+      或者想看一眼「显示 8 / 共 314」,原来都得一路滚回顶上。
+
+      放进 .topbar 而不是另做一个 sticky 容器,是为了让 `--topbar-h` 继续等于
+      「冻结了多高」这一件事:表头的吸附位置(`th { top: var(--topbar-h) }`)、
+      跳转的落点计算、ResizeObserver 那套重新测量,全都不用改一个字。
+      另起一层就要再养一个高度变量,而两个变量迟早对不上。
+
+      **`#rowEditMenu` 和几个弹框不能进来**:前者是 absolute 定位、坐标按整页算
+      (`window.scrollY + rect.bottom`),而 sticky 是定位元素,会变成它的包含块;
+      后者是 fixed,进来只是白占一层嵌套。
+      ==================================================================== -->
+    <div class="controls">
+      <input type="text" id="searchBox" placeholder="搜索游戏名...">
+      <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
+           打满的游戏对这个问题没有贡献 -->
+      <label class="checkbox">
+        <input type="checkbox" id="hideComplete" checked> 隐藏已完成
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="favOnly"> 只看喜爱
+      </label>
+      <!-- 默认勾上。**界面上不出现 "Unvetted"** —— 那是 Steam 接口里的词,不是用户的词;
+           数据库里那一列仍叫 Unvetted(会进 CSV,是兼容面)。解释放 title,不占屏幕 -->
+      <label class="checkbox" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上面那个平均完成率 —— 和 Steam 自己的算法一致。">
+        <input type="checkbox" id="hideUnvetted" checked> 隐藏受限游戏
+      </label>
+      <!-- 默认勾上,和「隐藏已完成」同一个理由:这一页回答的是「还有什么值得打」,
+           而没有成就系统的游戏对这个问题一条贡献都没有 —— 它们连一个可打的目标都没有。
+           要看整个库(比如找一款游戏改标记)取消勾选就行 -->
+      <label class="checkbox">
+        <input type="checkbox" id="hideNoAch" checked> 隐藏无成就系统的游戏
+      </label>
+    </div>
+
+    <div class="add-game-row">
+      <input type="text" id="gameSearchBox" placeholder="添加新游戏...">
+      <!-- 加完之后这里会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
+           **不自动跳** —— 添加完接着加下一个是很常见的用法,自动滚到几百行开外
+           会把「添加新游戏」那个输入框带走 -->
+      <span class="add-game-msg" id="addGameMsg"></span>
+    </div>
+    <!-- 搜索结果也在冻结区里:它属于上面那个输入框。冻结区因此会临时变高,
+         而 --topbar-h 是 ResizeObserver 量出来的,表头会自己让开 -->
+    <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
+
+    <!-- 「多少」和「怎么看」放同一行:两者说的都是下面这张列表 -->
+    <div class="table-bar">
+      <div class="view-toggle" role="group" aria-label="视图">
+        <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
+             前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
+             名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
+        <button type="button" class="on" data-view="table">列表</button>
+        <button type="button" data-view="gallery">网格</button>
+      </div>
+      <div class="row-count" id="rowCount"></div>
+    </div>
   </div>
 
   <!--
@@ -1654,35 +1722,6 @@
     <button type="button" class="gen-close" id="genClose" title="关闭" aria-label="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
   </div>
-
-  <div class="controls">
-    <input type="text" id="searchBox" placeholder="搜索游戏名...">
-    <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
-         打满的游戏对这个问题没有贡献 -->
-    <label class="checkbox">
-      <input type="checkbox" id="hideComplete" checked> 隐藏已完成
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="favOnly"> 只看喜爱
-    </label>
-    <!-- 默认勾上。**界面上不出现 "Unvetted"** —— 那是 Steam 接口里的词,不是用户的词;
-         数据库里那一列仍叫 Unvetted(会进 CSV,是兼容面)。解释放 title,不占屏幕 -->
-    <label class="checkbox" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上面那个平均完成率 —— 和 Steam 自己的算法一致。">
-      <input type="checkbox" id="hideUnvetted" checked> 隐藏受限游戏
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="hideNoAch"> 隐藏无成就系统的游戏
-    </label>
-  </div>
-
-  <div class="add-game-row">
-    <input type="text" id="gameSearchBox" placeholder="添加新游戏...">
-    <!-- 加完之后这里会变成一个可点的按钮(见 showAddedMsg):点它跳到那一行。
-         **不自动跳** —— 添加完接着加下一个是很常见的用法,自动滚到几百行开外
-         会把「添加新游戏」那个输入框带走 -->
-    <span class="add-game-msg" id="addGameMsg"></span>
-  </div>
-  <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
 
   <div class="row-menu" id="rowEditMenu" hidden></div>
 
@@ -1722,17 +1761,6 @@
     </div>
   </div>
 
-  <!-- 「多少」和「怎么看」放同一行:两者说的都是下面这张列表 -->
-  <div class="table-bar">
-    <div class="view-toggle" role="group" aria-label="视图">
-      <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
-           前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
-           名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
-      <button type="button" class="on" data-view="table">列表</button>
-      <button type="button" data-view="gallery">网格</button>
-    </div>
-    <div class="row-count" id="rowCount"></div>
-  </div>
   <table id="gameTable">
     <thead>
       <tr>
@@ -2130,14 +2158,42 @@
      * 浏览器不支持时什么都不做:CSS 里那个默认值还在,表头照常吸附,只是位置可能
      * 差几个像素 —— 比抛异常把后面的初始化全带停了好。
      */
+    /**
+     * 重新量一次冻结区高度。**给那些"我知道自己刚把它变高了"的地方主动调**
+     * (目前只有搜索下拉),而不是全指望 observer 接住 —— 见下面那段说明。
+     * 默认是空实现,免得 trackTopbarHeight 还没跑到就有人调。
+     */
+    let measureTopbar = function() {};
+
     (function trackTopbarHeight() {
       const bar = document.querySelector('.topbar');
-      if (!bar || typeof ResizeObserver === 'undefined') return;
+      if (!bar) return;
       const apply = function() {
         document.documentElement.style.setProperty('--topbar-h', bar.offsetHeight + 'px');
       };
-      new ResizeObserver(apply).observe(bar);
+      measureTopbar = apply;
+      // **观察者要存下来。** 规范上有观察目标的 observer 不该被回收,但把一个对象
+      // 建出来就扔、指望别人替你留着,本来就不是该赌的事
+      if (typeof ResizeObserver !== 'undefined') {
+        window.__topbarRO = new ResizeObserver(apply);
+        window.__topbarRO.observe(bar);
+      }
       apply();
+
+      /**
+       * **除了 observer,还要在这两个时刻各量一次。**
+       *
+       * 上面那次同步测量发生在脚本执行的一刻,而那时布局还没定:自托管的中文字体
+       * 尚未换上,字宽不同 → 那排筛选芯片换行的位置不同 → 顶栏高度不同。
+       * 冻结区从一行长到四行之后,这个差额不再是几个像素的事 —— 量错一次,
+       * 表头就会停在一个空档下面,而且**在下一次窗口尺寸变化之前不会自己好**。
+       *
+       * observer 本该接住字体换上引起的那次重排,但它只在页面**真的在渲染**时才有
+       * 回调(这一点是实测撞到的:预览面板没显示时,连 observe() 那次首发回调都不来)。
+       * 所以这两个明确的时机自己补一次,不把正确性全押在一条通道上。
+       */
+      window.addEventListener('load', apply, { once: true });
+      if (document.fonts?.ready) document.fonts.ready.then(apply);
     })();
 
     /**
@@ -2837,6 +2893,10 @@
       if (!items || items.length === 0) {
         box.style.display = 'none';
         box.innerHTML = '';
+        // 收起来之后冻结区变矮了,表头要跟着上来 —— 这里主动量一次,不等 observer:
+        // 这一条是**唯一一处冻结区高度会在会话中途变化**的地方,而它是我们自己改的,
+        // 自己知道就自己报,比押在一条只在页面真的渲染时才有回调的通道上稳
+        measureTopbar();
         return;
       }
       box.style.display = 'flex';
@@ -2858,6 +2918,8 @@
           document.getElementById('addConfirmModal').classList.add('show');
         });
       });
+      // 下拉展开之后冻结区高了一截,表头要让开(理由同上面那次)
+      measureTopbar();
     }
 
     function runGameSearch() {
