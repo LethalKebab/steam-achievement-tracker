@@ -417,6 +417,62 @@ test('搜索失败照样枪毙整轮,哪怕同一轮里抓页也失败了', () =
   assert.ok(!v.reason.includes('url_not_accessible'), '拦路原因里不该混进不拦路的那条');
 });
 
+describe('供应商把内部控制符写进正文', () => {
+  // 实测 2026-08-17,KINGDOM HEARTS + DeepSeek:第 173 个成就写到一半变成
+  //   `- [ ] **The Warrior: Ventus</｜｜DSML｜｜parameter>`
+  //   `</｜｜DSML｜｜invoke>` `</｜｜DSML｜｜tool_calls>`
+  // 然后输出就没了,后面 10 个成就再没写。**停止原因正常、正文非空、工具没报错** ——
+  // 三样表面全对,所以这之前一个分支都拦不住,那三行乱码直接落进了用户的草稿。
+  // 要不是恰好少了 10 个 checkbox 被校验器间接挡下,它会跟着写进 Notion 页面。
+  const ok = (text) => checkResult({
+    stopReason: 'end_turn', rawStopReason: 'end_turn', text,
+    usage: { ...emptyUsage(), outputTokens: 900 }, toolErrors: [], content: [{ type: 'text' }],
+  });
+
+  test('认得出各家的记号', () => {
+    const cases = [
+      ['a<｜tool▁calls▁begin｜>b', 'DeepSeek 的全角竖线记号'],
+      ['x</｜｜DSML｜｜invoke>y', '线上真的撞到的那一种'],
+      ['<|im_start|>assistant', 'Llama / OpenAI 那一系'],
+      ['正文 </invoke> 正文', '工具调用闭合标签'],
+    ];
+    for (const [text, why] of cases) {
+      const v = ok(text);
+      assert.equal(v.ok, false, why + ' 没拦住');
+      assert.equal(v.code, 'control-token');
+    }
+  });
+
+  test('**不能把正常攻略误判掉** —— 误判一次就是白花一轮的钱', () => {
+    // 攻略正文里合法地带着真 HTML,判据必须窄到跟它们不可能撞车
+    const legit = [
+      '- [ ] **成就名**<br>官方描述<br>心得',
+      '<details><summary>全结局对照</summary>正文</details>',
+      '<table><tr><td>A</td><td>B</td></tr></table>',
+      '<span underline="true">如果进行此动作则无法获得X成就。</span>',
+      '解锁率 a<b 这种写法也不能炸',
+      '正文里出现一个全角竖线 ｜,但不在尖括号里',
+      '| 表格 | 用的是 ASCII 竖线 |',
+    ];
+    for (const text of legit) {
+      assert.equal(ok(text).ok, true, `误判了正常内容:${text}`);
+    }
+  });
+
+  test('不许「删掉标记接着用」—— 正文是断的,不是脏的', () => {
+    // 只把那几行剔掉,会得到一份看起来完整、实际少了一截的攻略。
+    // 失败会报出来,少东西不会 —— 这个项目最防的就是后者
+    const v = ok('- [ ] **A**<br>desc<br>note\n- [ ] **B</｜｜DSML｜｜parameter>');
+    assert.equal(v.ok, false, '有半份内容也不能放行');
+    assert.match(v.reason, /正文是断的/);
+  });
+
+  test('报错里带上撞到的那一段,不然下次还是只能猜', () => {
+    const v = ok('x</｜｜DSML｜｜invoke>y');
+    assert.match(v.reason, /DSML/, '要把实际撞到的记号回显出来');
+  });
+});
+
 describe('「没有正文」必须带上「那到底回来了什么」', () => {
   // 这是这条路上最难查的一种失败:HTTP 200、没有工具错误、停止原因也正常,就是一个
   // text 块都没有。而回包的形状指向完全不同的处置 —— 光一句"没有输出任何正文",

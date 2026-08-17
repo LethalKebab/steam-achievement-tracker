@@ -1153,6 +1153,58 @@ describe('分段撰写', () => {
         assert.equal(second[0].role, 'user');
       });
 
+      test('控制符泄漏走同一条阶梯:先原样重问,补上就当没事发生', async () => {
+        // 供应商把内部记号写进正文,输出从那里断掉(见 lib/ai.js 的 leakedControlToken)。
+        // 和空回复同类:是这一次采样跑偏,不是这一段有问题 —— 重问一次很可能就正常了。
+        // 线上那次(KINGDOM HEARTS)因为没有这道拦截,三轮都把断掉的正文当成功收下了,
+        // 结果少 10 个成就,而那三行乱码进了草稿
+        const { db, config } = manyEnv(N);
+        const provider = scriptedProvider([
+          { text: '```markdown\n- [ ] **成就1**<br>完成第1关。<br>写到一半</｜｜DSML｜｜parameter>\n' },
+          { text: seg(MANY) },
+        ]);
+        const events = [];
+        const r = await generateGuide(db, {
+          db, config, provider, steam: manySteam(), appid: '1',
+          onProgress: (e) => events.push(e),
+        });
+
+        assert.equal(r.ok, true, '重问一次就该好');
+        assert.equal(provider.asked.length, 2);
+        const ev = events.find((e) => e.phase === 'retry');
+        assert.ok(ev, '要发重问的进度事件');
+        assert.equal(ev.reason, 'control-token');
+        // 断掉的那半份绝不能留在成品里
+        assert.doesNotMatch(readFileSync(r.path, 'utf8'), /DSML/, '乱码不能进攻略文件');
+      });
+
+      test('一直泄漏也不拖垮整份 —— 记下来接着写后面的', async () => {
+        // control-token 必须在 CHUNK_LOCAL 里:它是这一段自己的问题(HTTP 200),
+        // 不是供应商坏了,所以放过这一段、接着写后面几段是对的
+        // 每段 5 个 == MIN_CHUNK,所以切不动 —— 这条只考「记下来接着跑」,
+        // 不把切分的行为也混进来
+        const LOTS = Array.from({ length: 10 }, (_, i) => def(`K${i}`, `成就${i + 1}`, `完成第${i + 1}关。`));
+        const e = freshEnv({ defs: LOTS });
+        e.config.ai = { maxAchievements: 500, chunkSize: 5 };
+        const steam = {
+          async fetchPlayerAchievements() {
+            return { achievements: LOTS.map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+          },
+          async fetchGlobalAchievementPercentages() { return null; },
+        };
+        const junk = { text: '```markdown\n- [ ] **x**<br>y</｜｜DSML｜｜invoke>\n' };
+        const provider = scriptedProvider([
+          { text: seg(LOTS.slice(0, 5)) },  // 第 1 段正常
+          junk, junk,                        // 第 2 段:泄漏 + 重问还泄漏 → 切不动,记下来放过
+          { text: seg(LOTS.slice(5)) },      // 第 2 轮把它补上
+        ]);
+        const r = await generateGuide(e.db, { config: e.config, provider, steam, appid: '1' })
+          .catch((err) => ({ threw: err }));
+        assert.ok(!r.threw, '不该整份抛出去:' + (r.threw && r.threw.message));
+        assert.equal(r.ok, true, '第二轮补上了就该落地');
+        assert.doesNotMatch(readFileSync(r.path, 'utf8'), /DSML/);
+      });
+
       test('重问还是空 ⇒ 按长度问题处理,切成两半', async () => {
         // 第二次还空就不是抽风了。兼容端点上既发不出压 thinking 的参数,也不能假定
         // 它会把「额度被思考吃光」如实报成 max_tokens —— 所以"空回复"里混着一部分
