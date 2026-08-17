@@ -1263,6 +1263,20 @@
       color: var(--text);
     }
     #gen-bar .warn { color: var(--text-3); }
+    /* 浮窗里那几个动作长得一样,不管底下是 <a> 还是 <button> —— 「打开攻略」和
+       「打开文件夹」是并列的两件事,一个有下划线一个是方块按钮就把它们分了级 */
+    #gen-bar a,
+    #gen-bar .gen-link {
+      color: var(--accent);
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      cursor: pointer;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    #gen-bar .gen-link:disabled { opacity: 0.5; cursor: default; }
     /* 有任务在跑 = 只能收起;跑完了 = 才能关掉。两个按钮永远只露一个 */
     #gen-bar.live #genClose,
     #gen-bar:not(.live) #genToggle { display: none; }
@@ -3054,6 +3068,24 @@
       // 写进内层 span,不要覆盖 genBar 本身 —— 两个按钮是它的兄弟节点,
       // 覆盖 innerHTML 会把按钮一起冲掉
       genMsg.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
+      // 「打开文件夹」是每次重写内容之后新长出来的节点,所以在这里统一挂 ——
+      // 事件委托挂不上:整条 #gen-bar 在收起状态下自己就是个"点一下展开"的按钮,
+      // 冒泡上去会顺手把浮窗折起来
+      genMsg.querySelectorAll('[data-reveal]').forEach(function(b) {
+        b.addEventListener('click', function(e) {
+          e.stopPropagation();
+          const appid = b.getAttribute('data-reveal');
+          b.disabled = true;
+          rpc.withSuccessHandler(function(res) {
+            b.disabled = false;
+            // 打不开就把原因说出来,别做成一个点了没反应的按钮
+            if (res && res.error) b.textContent = res.error;
+          }).withFailureHandler(function(err) {
+            b.disabled = false;
+            b.textContent = '打不开:' + err.message;
+          }).revealGuideFile(appid);
+        });
+      });
       syncGenChrome();
     }
 
@@ -3112,10 +3144,19 @@
             : searches === 0
               ? '<br><span class="warn">' + GEN_WARN + ' 一次都没搜,内容等同于凭记忆写的。</span>'
               : '';
-          // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找
+          // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找。
+          //
+          // **两个后端给的不是同一组动作。** Notion 那份点开就是排好版的页面,一个链接
+          // 就够;本地那份经 /guide/ 出来是**纯文本 markdown 源码**(防 XSS,见
+          // server.js),真要读还得用编辑器开文件 —— 所以本地多给一个「打开文件夹」。
+          //
+          // 本地这条以前是一截**不可点的绝对路径**:同一份攻略,表格行里那个「📖 攻略」
+          // 按钮能点(走 /guide/<appid>),偏偏生成完这一刻不能点 —— 而那正是最想
+          // 立刻点进去看一眼的时刻
           const where = r.target === 'notion'
             ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开攻略</a>'
-            : escapeHtml(r.path || '');
+            : '<a href="/guide/' + encodeURIComponent(r.appid) + '" target="_blank" rel="noopener">打开攻略</a>'
+              + ' · <button type="button" class="gen-link" data-reveal="' + escapeHtml(r.appid) + '">打开文件夹</button>';
           // **搜索次数和 token 移到悬停里。** 屏幕上留下的三样是:哪款游戏、覆盖了
           // 多少成就、去哪看。token 仍然报(这是唯一花钱的功能,数字必须能查到),
           // 但它是事后对账用的,不该和「成了没有」抢同一行。
