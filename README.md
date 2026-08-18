@@ -76,6 +76,16 @@ node tracker.js guide-gen <appid>    # asks once before it starts
 
 Works with DeepSeek, Anthropic or Gemini. The finished guide goes **into Notion** when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead. What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
 
+**Changing part of a guide instead of all of it.** Once a guide exists, `--only` rewrites just the entries you name and leaves every other byte exactly as it was — including passages you edited yourself:
+
+```bash
+node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
+node tracker.js guide-gen <appid> --only thin --dry-run     # see what it picked, spend nothing
+node tracker.js guide-gen <appid> --only "成就名A,成就名B"
+```
+
+`--only` takes `rare` (globally rare achievements), `thin` (entries with almost no advice written), `locked` / `unlocked`, `failing` (whatever last failed validation), `section:<heading>`, or a comma-separated list of achievement names. **Run it with `--dry-run` first** — that prints the entries it selected and the exact request, without sending anything. Full reference: [docs/guides.md](docs/guides.md#having-one-written-for-you).
+
 ## Everyday use
 
 This section is the source install. In the app, opening it does what `serve` does and **立即同步** does what `sync` does, which covers everyday use — the rest of the table is available by running the commands in the app's own folder.
@@ -97,7 +107,8 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `notion-check` | Checks the Notion side: token, database, title property, status options, page count. Writes nothing unless you pass `--fix` (append missing options) or `--probe-write` (create + archive one page to prove write access) | Notion |
 | `ai-check` | Checks the AI provider and that its web search really works | AI provider |
 | `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
-| `guide-gen <appid> --overwrite` | Regenerates over an existing guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |
+| `guide-gen <appid> --overwrite` | Regenerates the **whole** guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |
+| `guide-gen <appid> --only <what>` | Rewrites **just the entries you name**; every other byte stays as it is. `--note "…"` says what to change | AI + Steam (+ Notion) |
 | `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, checking it arrived intact | Notion |
 | `drafts` | Lists what's piled up in `guides/.drafts/`; `--clean` removes it | — |
 

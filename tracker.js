@@ -17,7 +17,8 @@
  *   node tracker.js notion-check    Notion 侧体检(token/库/属性/选项;--fix 补选项,--probe-write 试写)
  *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
  *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
- *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词,--overwrite 重写已有的)
+ *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词,--overwrite 整篇重写,
+ *                                     --only <选择器> [--note "要求"] 只重写其中几条)
  *   node tracker.js guide-to-notion <appid>  把本地 markdown 攻略搬到 Notion(--dry-run 只预览)
  *   node tracker.js log [n]         看最近的同步日志
  */
@@ -46,10 +47,13 @@ import {
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
-import { generateGuide, planGuide, buildSystemPrompt, DRAFTS_DIR } from './lib/guidegen.js';
-import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
 import {
-  BACKUPS_DIR, overwritePreflight, formatPreflight, diffGuides, formatDiff,
+  generateGuide, planGuide, buildSystemPrompt, buildPatchMessage, DRAFTS_DIR,
+} from './lib/guidegen.js';
+import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
+import { planPatch, patchGuide, PATCH_ROUNDS } from './lib/guidepatch.js';
+import {
+  BACKUPS_DIR, overwritePreflight, formatPreflight, formatPatchPreflight, diffGuides, formatDiff,
 } from './lib/guidebackup.js';
 import { importAll, exportAll } from './lib/csv.js';
 
@@ -78,9 +82,15 @@ function flagValue(name) {
  * 只是所在的命令(`init` / `drafts`)不收位置参数,所以没撞上过。留在表外等于
  * 「哪天这两个命令加了位置参数就悄悄坏掉」,而那不是个该留着的赌注
  */
+// `--only` / `--note`(局部重写)漏登记的后果正是上面那段说的那种:
+// `guide-gen --only rare 1937500` 会把 `rare` 当成 appid,报出来是「这个游戏不在列表里」。
+//
+// **注释必须留在这个 Set 外面。** `test/cli-hints.test.js` 是拿一条简单正则把这个字面量
+// 抠出来再按逗号切的,里面塞一句带逗号的中文注释,切出来的碎片会盖掉紧跟其后的那一项 ——
+// 于是 `'--only'` 明明写着,断言却报它没登记。踩过一次,记在这儿
 const VALUE_FLAGS = new Set([
   '--rounds', '--file', '--model', '--provider', '--port', '--effort',
-  '--key', '--id', '--older-than',
+  '--key', '--id', '--older-than', '--only', '--note',
 ]);
 
 /**
@@ -1026,8 +1036,16 @@ async function cmdAiCheck() {
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
   if (!appid) {
-    throw new Error('用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local] [--overwrite]');
+    throw new Error(
+      '用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local] [--overwrite]\n' +
+        '      只改其中几条:guide-gen <appid> --only <选择器> [--note "要求"]'
+    );
   }
+  // **`--only` 是另一条流水线**(lib/guidepatch.js):只重写点名的那几条,别的字节不动。
+  // 在这里分流而不是在下面加分支,因为它要说的话和整篇重写正好相反 —— 那个预检讲
+  // 「你会失去什么」,这个讲「什么会留下」,一段措辞服务两种问法两边都会写歪
+  if (flagValue('only') !== undefined) return cmdGuidePatch(appid);
+
   const dryRun = flags.has('--dry-run');
   const overwrite = flags.has('--overwrite');
 
@@ -1230,6 +1248,170 @@ async function cmdGuideGen() {
 }
 
 /**
+ * 局部重写:`guide-gen <appid> --only <选择器> [--note "要求"]`。
+ *
+ * 由 `cmdGuideGen` 在看到 `--only` 时分流过来 —— 一个命令名,两种报告形状。
+ *
+ * **报告的重点和整篇重写相反。** 那边讲「你会失去什么」(整篇替换、手动勾选全丢);
+ * 这边讲「什么会留下」(其余多少个框一字不动、多少个手动勾选保住了),因为那正是
+ * 用户选局部而不是整篇时唯一确凿、可量化的好处。
+ *
+ * `--dry-run` 印**解析出来的选择集 + 完整的那条请求**,一个字节都不发。这是这条路上
+ * 最该先跑的一步:选择器有没有选中你以为的那几条,只有印出来才知道 —— 而选错了
+ * 再跑就是花钱改错东西。
+ */
+async function cmdGuidePatch(appid) {
+  const selector = String(flagValue('only') ?? '').trim();
+  const instruction = flagValue('note') ?? null;
+  const dryRun = flags.has('--dry-run');
+  const fresh = flags.has('--fresh');
+
+  const config = applyAiFlags(loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] }));
+  const db = openDb(config.dbPath);
+  const steam = new SteamClient(config, { log: () => {} });
+  const notion = new NotionClient(config);
+  const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? PATCH_ROUNDS);
+
+  const pp = await planPatch(db, { config, steam, appid, notion, selector });
+  const { plan, entries, unlocatable, baseline, kind } = pp;
+
+  console.log(`\n《${plan.game}》(appid ${appid})· ${kind === 'notion' ? 'Notion 页面' : '本地文件'}:${plan.existing.url}`);
+  console.log(`\n  按「${selector}」挑中 ${entries.length} 条成就:`);
+  for (const e of entries.slice(0, 12)) {
+    const pct = plan.rarity?.get(e.apiName);
+    const rare = pct === undefined || pct === null ? '' : `  (全球 ${pct.toFixed(1)}%)`;
+    console.log(`       ${e.def.name_cn || e.def.name_en}${rare}`);
+  }
+  if (entries.length > 12) console.log(`       …… 还有 ${entries.length - 12} 条`);
+
+  console.log('');
+  console.log(formatPatchPreflight(pp.preflight, { defsCount: plan.defs.length }));
+
+  // 点了但攻略里定位不到的:**报出来,不当它不存在**。它们的症状是 missing-checkbox,
+  // 而那要整篇重写(或者手写一条)才补得上,不是这条命令能做的事
+  if (unlocatable.length) {
+    console.log(`\n  ⚠️  另有 ${unlocatable.length} 条点到了、但现有攻略里没有对应的 checkbox,这次改不到:`);
+    for (const a of unlocatable.slice(0, 8)) {
+      const d = plan.defs.find((x) => x.api_name === a);
+      console.log(`       ${d?.name_cn || d?.name_en || a}`);
+    }
+    if (unlocatable.length > 8) console.log(`       …… 还有 ${unlocatable.length - 8} 条`);
+    console.log('       这几条是"攻略里压根没写",要整篇重写(--overwrite)或者自己补一行。');
+  }
+
+  // 旧攻略本来就没过的那些。**说清楚这次不会去修它们** —— 否则跑完看到报告里还有
+  // 这些错,会以为是这次改坏的
+  const oldBlocking = baseline.findings.filter((f) => f.level === 'error');
+  const outside = oldBlocking.filter((f) => !f.apiName || !pp.scope.apiNames.includes(f.apiName));
+  if (outside.length) {
+    console.log(`\n  ℹ️  这份攻略本来就有 ${outside.length} 条校验问题落在这次范围之外,不会被这次改动碰到,也不会拦路:`);
+    for (const f of outside.slice(0, 5)) console.log(`       ${f.message}`);
+    if (outside.length > 5) console.log(`       …… 还有 ${outside.length - 5} 条`);
+  }
+
+  const probe = await providerFor(config, { needKey: !dryRun });
+  console.log(`\n  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
+  warnEnvOverrides();
+  console.log(`  原文备份到 ${join(config.guidesDir, BACKUPS_DIR)}`);
+
+  if (probe.canSearch === false && !flags.has('--no-research')) {
+    throw new Error(
+      `${probe.name} 没有服务端联网搜索,重写出来的内容是模型**凭已有知识写的**,不是查来的。\n` +
+        '  真要这么跑,加 --no-research 明说;想要经过调研的,换一家有联网的' +
+        '(--provider anthropic 或 --provider gemini)。'
+    );
+  }
+  if (probe.canSearch === false) {
+    console.log('  ⚠️  --no-research:这几条不会经过任何联网调研');
+  }
+
+  if (dryRun) {
+    console.log('\n--dry-run:不发任何请求。会发过去的那条请求:\n');
+    console.log('─'.repeat(70));
+    console.log(buildPatchMessage(entries, { instruction, fresh }));
+    console.log('─'.repeat(70));
+    console.log('\n(system 提示词和整篇生成是同一份,看它请跑 guide-gen --dry-run)');
+    return;
+  }
+
+  if (!flags.has('--yes')) {
+    const io = makeSecretReader();
+    const answer = await io.ask(
+      `\n这一步会联网研究并重写上面那 ${entries.length} 条,其余 ${pp.preflight.keeping} 个框一字不动。继续?(y/N)`
+    );
+    io.close();
+    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+  }
+
+  const p = progressPrinter();
+  const started = Date.now();
+
+  const r = await patchGuide(db, {
+    config, provider: probe, steam, appid, notion,
+    selector, instruction, fresh, rounds, patchPlan: pp,
+    onProgress(ev) {
+      if (ev.phase === 'write') p.update(`  第 ${ev.round}/${ev.of} 轮:联网研究 + 重写 ${ev.scope} 条…`);
+      else if (ev.phase === 'rewrite') p.update(`  第 ${ev.round}/${ev.of} 轮:按校验结果再改一次…`);
+      else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
+      else if (ev.phase === 'retry') p.done(`  第 ${ev.round} 轮没拿到正文,原样再问一次(${ev.reason})`);
+      else if (ev.phase === 'check') {
+        // **交回来几条要 done 不能 update。** 「少写了两条」是这条路上唯一一种
+        // 闸门全绿而请求没被满足的情况,被下一行覆盖掉就没人知道了
+        const miss = ev.missing ? `,少了 ${ev.missing} 条` : '';
+        const extra = ev.extra ? `,多写了 ${ev.extra} 条(已忽略)` : '';
+        p.done(`  第 ${ev.round} 轮:交回 ${ev.wrote}/${ev.of} 条${miss}${extra}`);
+      } else if (ev.phase === 'lint') {
+        p.done(`  第 ${ev.round} 轮:这次改动 ${ev.caused} 条要改,旧问题 ${ev.preExisting} 条(不拦)`);
+      } else if (ev.phase === 'warn') p.done(`  ⚠️  ${ev.note}`);
+      else if (ev.phase === 'backup') p.update('  备份原文…');
+      else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
+      else if (ev.phase === 'notion-patch') p.update(`  改 Notion 上的「${ev.name}」…`);
+      else if (ev.phase === 'notion-verify') p.update('  回读整页重新校验…');
+    },
+  });
+  p.done();
+
+  const secs = ((Date.now() - started) / 1000).toFixed(0);
+  console.log('\n' + '─'.repeat(70));
+  if (r.ok) {
+    console.log(`✅ 改完了 ${r.rewrote.length} 条,${r.rounds} 轮 · ${secs}s → ${r.url}`);
+    console.log(`  其余 ${pp.preflight.keeping} 个 checkbox 一字没动`);
+    if (r.backup) console.log(`  原文备份:${r.backup.path}`);
+  } else {
+    // 没过就一个字都没写 —— 这句必须说,否则用户会去翻攻略找哪里被改坏了
+    console.log(`❌ ${r.rounds} 轮之后仍没过,**原攻略一个字都没动**`);
+    if (r.missing.length) {
+      console.log(`  这 ${r.missing.length} 条模型没交回来:`);
+      for (const a of r.missing.slice(0, 8)) {
+        const d = plan.defs.find((x) => x.api_name === a);
+        console.log(`     ✖ ${d?.name_cn || d?.name_en || a}`);
+      }
+    }
+    for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
+    if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
+  }
+
+  // **不拦不等于不说。** 旧攻略本来就有的问题这次没去碰,但它们还在那儿
+  if (r.preExisting.length) {
+    console.log(`\n  ℹ️  这份攻略还有 ${r.preExisting.length} 条本来就有的校验问题(这次没碰,也没拦路):`);
+    for (const f of r.preExisting.slice(0, 5)) console.log(`       ${f.message}`);
+    if (r.preExisting.length > 5) console.log(`       …… 还有 ${r.preExisting.length - 5} 条`);
+  }
+  if (r.unapplied.extra.length) {
+    console.log(`\n  ⚠️  模型多写了 ${r.unapplied.extra.length} 条没点名的成就,**已忽略**(只贴回点名的那几条)`);
+  }
+  if (r.unapplied.unresolved.length) {
+    console.log(`  ⚠️  ${r.unapplied.unresolved.length} 条交回来的条目认不出是哪个成就,已忽略`);
+  }
+
+  console.log('  ' + formatUsage(r.usage));
+  console.log('\n⚠️  只验了格式和数据,内容需要你自己读一遍。');
+  if (!r.researched) console.log('    这几条没联网,内容是模型凭已有知识写的。');
+  else if (!r.searchQueries?.length) console.log('    ⚠️  一次搜索都没发出去,内容等同于凭记忆写的。');
+  else console.log(`\n🔎 搜了 ${r.searchQueries.length} 次:` + r.searchQueries.slice(0, 4).join(' / '));
+}
+
+/**
  * 把一份本地 markdown 攻略搬到 Notion。
  *
  * `--dry-run` 是推荐的第一步:转换会不会掉排版、Notion 那边接不接得住,
@@ -1401,7 +1583,13 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
                                           (以上三个 ai-check 和 guide-gen 都支持)
   node tracker.js guide-gen <appid>       让 AI 写一份攻略(默认先问一句才开始)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
-              guide-gen --overwrite       重写已有的那份攻略(先备份原文,再告诉你会失去什么)
+              guide-gen --overwrite       整篇重写(先备份原文,再告诉你会失去什么)
+              guide-gen --only <选择器>    **只重写点名的那几条**,其余一字不动。先备份。
+                                          rare[:%] 稀有的 · thin[:字数] 打法写得太薄的
+                                          locked / unlocked 按解锁状态 · failing 上次没过校验的
+                                          section:小节名 · 或者「成就名A,成就名B」直接点
+              guide-gen --note "要求"      配 --only 用,比如 --note "把互斥关系写清楚"
+                                          --fresh 不给模型看原文,让它重新查着写
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
   node tracker.js drafts                  列出 guides/.drafts/ 里堆的草稿(只列不删)
               drafts --clean              清掉;--older-than N 只清 N 天前的
@@ -1481,8 +1669,37 @@ const CLI_HINTS = {
     `    Remove-Item Env:${d.envVar} -ErrorAction SilentlyContinue`,
   'deepseek-length': () =>
     '  也可以把 config.json 的 ai.maxTokens 调小(DeepSeek 的上限比另外两家小)。',
-  'guide-exists': () => '  要覆盖它加 --overwrite(会先备份,并给出新旧对照)。',
+  'guide-exists': () =>
+    '  要整篇重写加 --overwrite(会先备份,并给出新旧对照)。\n' +
+    '  只想改其中几条:--only <选择器>(rare / thin / locked / unlocked / failing /\n' +
+    '  section:小节名 / 成就名或 api_name 的逗号列表),配 --note "要求"。',
   'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
+  // ---- 局部重写(--only)----
+  'no-guide-to-patch': () =>
+    '  --only 是改已有攻略里的几条。这一款还没有攻略,先生成一份:\n' +
+    '  去掉 --only 直接跑 guide-gen。',
+  'unknown-achievements': () =>
+    '  名字要和 Steam 上一字不差(中文名或英文名都行)。同名的成就按名字点不动 ——\n' +
+    '  用 api_name 点它,`node tracker.js guide-lint <appid>` 里能看到。',
+  'empty-scope-result': (d) =>
+    `  「${d.selector}」一条都没选中。放宽阈值试试:--only rare:30 或 --only thin:80,\n` +
+    '  或者直接点名:--only "成就名A,成就名B"。',
+  'nothing-locatable': () =>
+    '  点名的成就在攻略里都没有对应的 checkbox —— 那是"压根没写",不是"写得不好"。\n' +
+    '  这种要整篇重写(--overwrite),局部重写没有可以替换的位置。',
+  'no-rarity': () =>
+    '  Steam 这次没给出全球解锁率(限流或临时故障),等会儿再试,\n' +
+    '  或者换个不依赖它的选择器:--only thin / --only locked。',
+  'section-needs-local': () =>
+    '  Notion 上的攻略只读得到 checkbox,读不到小节结构。改用 --only thin / rare,\n' +
+    '  或者直接点名那一节里的成就。',
+  'bad-scope': () => '  选择器的写法:rare[:百分比] / thin[:字数] / locked / unlocked / failing / section:小节名。',
+  // `--only` 后面什么都没跟。**和 bad-scope 分开**:那个是写错了,这个是没写 ——
+  // 前者要纠正写法,后者要先知道有哪些写法可选
+  'empty-scope': () =>
+    '  --only 后面要跟选择器:rare[:百分比] 稀有的 / thin[:字数] 打法太薄的 /\n' +
+    '  locked / unlocked / failing / section:小节名,或者「成就名A,成就名B」直接点。\n' +
+    '  想整篇重写的话用 --overwrite,不要 --only。',
   'chunk-too-small': (d) =>
     `  别急着调大 ai.maxTokens —— 它是 thinking + 正文的总额,而一段只剩 ${d.size} 个成就\n` +
     '  还写不完,说明吃掉额度的是思考,调大只会让它想得更久(CLAUDE.md 有实测)。\n' +

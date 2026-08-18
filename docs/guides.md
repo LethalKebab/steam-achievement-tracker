@@ -118,6 +118,59 @@ The Dashboard offers the same thing: a game that already has a guide shows a **�
 next to its 📖 攻略 link. It asks the same question with the same information — what you are
 replacing, and which hand-ticked boxes will not survive — before anything is written.
 
+#### Rewriting only part of a guide
+
+`--overwrite` replaces the whole guide. `--only` replaces just the entries you name, and **every
+other byte of the guide stays exactly as it was** — other achievements, section headings, `<details>`
+blocks, tables, and any passage you edited by hand.
+
+```bash
+node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
+node tracker.js guide-gen <appid> --only "第三步,收集狂" --note "改成表格"
+node tracker.js guide-gen <appid> --only thin --dry-run
+```
+
+`--only` takes one of these:
+
+| Selector | Picks |
+|---|---|
+| `rare` / `rare:25` | Achievements below 15% global unlock rate (or the percentage you give). Same threshold the prompt uses to tell the model which entries deserve depth |
+| `thin` / `thin:80` | Entries whose advice — everything after the name and the official description — is under 40 characters. These are the ones where nothing was really written |
+| `locked` / `unlocked` | By your real unlock state |
+| `failing` | Whatever the validator currently reports on this guide and a rewrite could fix |
+| `section:主线` | Everything under that heading. Local guides only — a Notion page exposes checkboxes, not section structure |
+| `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
+
+`--note "…"` is the instruction, passed to the model as written. Without it the entries are simply
+rewritten from fresh research. `--fresh` withholds the existing text so the model starts over rather
+than revising; by default it *sees* what is there, which is what makes "写详细点" mean anything.
+
+**Run `--dry-run` first.** It prints the entries the selector picked and the exact request that would
+be sent, and spends nothing. A selector that matched the wrong entries is the one mistake here that
+costs money to discover.
+
+Three things are worth knowing about how this stays safe:
+
+- **Only the entries that were asked for are ever written back.** The guarantee comes from the
+  program splicing named entries at line numbers (local) or block ids (Notion) it recorded up front —
+  not from instructing the model to leave the rest alone. If the model returns an achievement that
+  wasn't named, it is reported and **discarded**.
+- **Problems the guide already had don't block the change.** A guide can fail validation for reasons
+  outside what you asked to fix — hand-written guides often do. Those are listed and stepped over;
+  only problems inside the entries being rewritten, or ones that appeared as a result of the change,
+  hold it back. Nothing is written until they clear.
+- **Hand-ticked sub-step boxes survive outside the scope.** They are the one thing a full rewrite
+  destroys, and `--only` loses them only under the entries it actually replaces. The confirmation
+  says how many are at risk and how many are being kept.
+
+On Notion the touched checkboxes are **edited in place** rather than the page being cleared and
+rewritten, so block ids survive — links you saved to a specific entry still work, and anything the
+markdown converter can't represent is never at risk. The page is read back and re-validated
+afterwards, same as a full generation.
+
+Achievements the guide has no checkbox for cannot be targeted this way — there is nothing to
+replace. Those are reported separately and need a full `--overwrite` (or a line written by hand).
+
 A guide that fails validation three times is left in `guides/.drafts/` rather than thrown away —
 you paid for it, and *which* checks failed is itself information. Nothing scans that directory, so
 leftovers are harmless, but they do accumulate. To see and clear them:
