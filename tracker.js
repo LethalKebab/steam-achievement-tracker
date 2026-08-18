@@ -1097,14 +1097,17 @@ async function cmdGuideGen() {
   const r = await generateGuide(db, {
     config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan,
     onProgress(ev) {
-      // 分段写时把段号带上 —— 九段的活只显示"第 1/3 轮"的话,进度十几分钟不动
-      const seg = ev.chunks > 1 ? ` 第 ${ev.chunk}/${ev.chunks} 段` : '';
       if (ev.phase === 'plan' && ev.chunks > 1) {
         p.done(`  ${ev.achievements} 个成就,一次写不完,分 ${ev.chunks} 段写`);
       } else if (ev.phase === 'rewrite') {
         p.done(`  校验没过,第 ${ev.round} 轮只重写其中 ${ev.chunks}/${ev.of} 段`);
-      } else if (ev.phase === 'ask') p.update(`  第 ${ev.round}/${ev.rounds} 轮${seg}:联网研究 + 撰写…`);
-      else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮${ev.label ? ` ${ev.label}` : ''}:${ev.name}…`);
+      } else if (ev.phase === 'ask') {
+        // **并发之后报「已写完几段」,不报「正在写第几段」。** 好几段同时在写,
+        // 而这个事件每段各发一次 —— 报当前段号会让这一行在 1/4、3/4、2/4 之间来回跳,
+        // 看着像进度在倒退。已写完的段数是单调的,顺序跑时同样成立
+        const prog = ev.chunks > 1 ? ` 已写完 ${ev.done ?? 0}/${ev.chunks} 段` : '';
+        p.update(`  第 ${ev.round}/${ev.rounds} 轮${prog}:联网研究 + 撰写…`);
+      } else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮${ev.label ? ` ${ev.label}` : ''}:${ev.name}…`);
       else if (ev.phase === 'check') p.update(`  第 ${ev.round} 轮:机械打勾 + 校验…`);
       else if (ev.phase === 'lint') {
         p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
