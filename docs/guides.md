@@ -118,21 +118,26 @@ The Dashboard offers the same thing: a game that already has a guide shows a **�
 next to its 📖 攻略 link. It asks the same question with the same information — what you are
 replacing, and which hand-ticked boxes will not survive — before anything is written.
 
-That dialog also carries the partial rewrite. The **范围** row offers 整篇, the computed presets
-with their counts (`稀有成就 27`, `未解锁 1`), and **自选…** (the threshold behind 稀有 is in its tooltip — the label is a name, not a parameter). Choosing anything
-but 整篇 reveals a **怎么改** field — the same thing `--note` passes on the command line, and
-leaving it blank simply means "research these again and rewrite them". The sentence above switches
-from what you lose to what stays (`只改 8 条,其余 43 个 checkbox 一字不动`) as you pick. A preset
-showing `0` has nothing matching; one showing `—` could not be computed (hover it for the reason) —
-those are different states and are not merged.
+That dialog also carries the partial rewrite, and its **范围** row is a plain either/or: **整篇**
+or **自选**. Choosing 自选 reveals a **怎么改** field — the same thing `--note` passes on the command
+line, where blank simply means "research these again and rewrite them" — and the sentence above
+switches from what you lose to what stays (`只改 8 条,其余 43 个 checkbox 一字不动`).
 
-**自选…** opens the guide's own achievements, grouped by the section headings they sit under,
-each row showing its global unlock rate and whether you have it. Every section heading carries its
-own **tri-state checkbox** — click it to take or drop the whole section — so picking a section and
+The computed sets (`稀有`, `未解锁`, `全选`) are **shortcuts inside the picker**, not scopes of their
+own: clicking one *ticks* those entries so you can see exactly which they are and then add or remove
+individually; clicking it again unticks that batch. They were scope options at first, and that was
+wrong for a concrete reason — you were confirming a paid, irreversible rewrite over a set you had
+never seen, and could not adjust afterwards.
+
+**自选** opens the guide's own achievements, grouped by the section headings they sit under, each
+row showing its global unlock rate and whether you have it. Every section heading carries its own
+**tri-state checkbox** — click it to take or drop the whole section — so picking a section and
 picking individual entries are the same control, which is why the dialog has no separate `section:`
 option. (That behaviour existed one round earlier as "click the heading", explained in a sentence
 that only appeared while nothing was selected; nobody found it. An affordance you have to read
-about is not an affordance.) There is a filter box, the
+about is not an affordance.) The heading itself **collapses** its section, so a long guide can be
+reduced to a list of section names rather than scrolled end to end; filtering shows matches whether
+or not their section is collapsed, and restores the collapsed state when you clear it. There is a filter box, the
 confirm button stays disabled until something is selected, and what gets sent is a plain list of
 the selected achievements.
 

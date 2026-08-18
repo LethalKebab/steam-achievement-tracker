@@ -663,7 +663,6 @@ describe('确认框里的推理强度', () => {
     assert.match(js, /scopeChoice\.value === 'all'\s*\n?\s*\?\s*null/,
       '选「整篇」必须传 null,而不是传一个 selector 为 all 的 scope —— '
       + '服务端按 scope 是否为空分流,两个都给会让"跑了哪条"取决于判断顺序');
-    assert.match(js, /selector: scopeChoice\.value/, '范围要进 scope.selector');
     assert.match(js, /note: noteInput\.value/, '那句要求也要传下去,不然输入框是个摆设');
   });
 
@@ -708,8 +707,32 @@ describe('确认框里的推理强度', () => {
   test('自选发出去的是 api_name 列表,不是成就名', () => {
     // 同名成就按名字点不动(库里真有 12 组同名),用名字会让请求在服务端被判成
     // unresolved —— 而界面上刚刚明明勾中了它
-    assert.match(js, /\[\.\.\.picker\.selected\]\.join\(','\)/,
+    assert.match(js, /selector: \[\.\.\.picker\.selected\]\.join\(','\)/,
       '选中的是 api_name,直接逗号拼成显式列表交给 resolveScope');
+  });
+
+  test('快捷选择是"勾上这一批",不是一种独立的范围', () => {
+    // **这是这一版的核心改动。** 做成范围档位时,选中「稀有成就 27」的人从没见过
+    // 那 27 条是什么,却要在这个集合上确认一次要花钱、且不可逆的操作,而且事后改不了。
+    // 现在它们只往 picker.selected 里加/减,那 27 条当场显示在列表里
+    const fn = js.slice(js.indexOf('function paintQuick'));
+    const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
+    assert.match(body, /sel\.delete\(it\.apiName\)/, '再点一次要能取消这一批');
+    assert.match(body, /sel\.add\(it\.apiName\)/, '点一下把这一批勾上');
+    // 范围只剩一个真正的二选一
+    const scope = js.slice(js.indexOf('const scopeChoice = {'));
+    const opts = scope.slice(0, scope.indexOf('\n      };'));
+    assert.match(opts, /value: 'all'/);
+    assert.match(opts, /value: 'pick'/);
+    assert.doesNotMatch(opts, /'rare'|'locked'|'failing'/,
+      '算出来的那几批不再是范围档位 —— 它们是列表里的快捷选择');
+  });
+
+  test('稀有的阈值由服务端下发,前端不自己写一个 15', () => {
+    // 界面上标成"稀有"的那批,必须和提示词判断"哪几条要写深"是同一条线。
+    // 两处各写一个数,漂了也没人会发现 —— 表现只是"界面说它稀有、程序不这么认为"
+    assert.match(js, /sc && sc\.rarePct/, '阈值从 previewGuidePatch 的返回值里取');
+    assert.match(js, /o\.picker\.rarePct/, '条目上色也用同一个值');
   });
 
   test('确认框不再写死时长', () => {
