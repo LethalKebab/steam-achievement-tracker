@@ -711,14 +711,43 @@ describe('确认框里的推理强度', () => {
       '选中的是 api_name,直接逗号拼成显式列表交给 resolveScope');
   });
 
-  test('快捷选择是"勾上这一批",不是一种独立的范围', () => {
-    // **这是这一版的核心改动。** 做成范围档位时,选中「稀有成就 27」的人从没见过
-    // 那 27 条是什么,却要在这个集合上确认一次要花钱、且不可逆的操作,而且事后改不了。
-    // 现在它们只往 picker.selected 里加/减,那 27 条当场显示在列表里
+  test('快捷选择是一次性的动作,不是开关', () => {
+    /**
+     * **它们曾经是开关,而那会让按一个键点亮另一个。**
+     *
+     * 亮起来的含义是"这一批已经全在选择里" —— 一个推导出来的事实,用户却读成
+     * "我按过这个键"。属性之间是相交的(那唯一一条未解锁的成就恰好也稀有),
+     * 于是点「稀有」会让「未解锁」跟着亮,再点它又会把「稀有」弄暗。
+     *
+     * 现在只加不减、不带状态。**钉住"没有减"这一半** —— 只钉 add 的话,
+     * 把 delete 加回来不会让任何测试变红。
+     */
     const fn = js.slice(js.indexOf('function paintQuick'));
     const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
-    assert.match(body, /sel\.delete\(it\.apiName\)/, '再点一次要能取消这一批');
-    assert.match(body, /sel\.add\(it\.apiName\)/, '点一下把这一批勾上');
+    assert.match(body, /sel\.add\(it\.apiName\)/, '点一下把这一批加进选择');
+    assert.doesNotMatch(body, /sel\.delete/,
+      '快捷键不减 —— 减会让"按一个键、暗另一个"那条连锁回来');
+    assert.doesNotMatch(body, /aria-pressed/, '它们不是开关,不该报按下状态');
+    // 只加的话必须有一条回头路,否则选错了只能一条条取消
+    assert.match(js, /pickClear\.onclick/, '要有「清空」');
+    assert.match(js, /o\.picker\.selected\.clear\(\)/, '清空要真的清');
+  });
+
+  test('勾一个条目要更新「已选 N 条」,不只是更新正文', () => {
+    /**
+     * 这条钉一个**真出现过**的 bug:计数原来只写在 `paintPicker` 末尾,而勾单个条目
+     * 故意不重绘整列表(重绘会把滚动位置弹回顶上),于是那一行卡在上一次整体重绘的值上。
+     *
+     * **它一直没被发现,是因为正文那句话是对的** —— 两个数字要放在一起看才对得出来。
+     * 抓到它靠的是拿 DOM 里真实勾上的框数去比显示的数,不是读界面。
+     */
+    assert.match(js, /function paintCount\(\)/,
+      '计数要单拎成一个函数,才可能被单条勾选那条路调用');
+    const handler = js.slice(js.indexOf("cb.addEventListener('change'"));
+    const body = handler.slice(0, handler.indexOf('\n              });')).replace(/\/\/[^\n]*/g, '');
+    assert.match(body, /paintCount\(\)/, '勾单条时必须刷新计数');
+    assert.match(body, /paintBody\(\)/, '正文也要刷新 —— 两个数字不能各走各的');
+
     // 范围只剩一个真正的二选一
     const scope = js.slice(js.indexOf('const scopeChoice = {'));
     const opts = scope.slice(0, scope.indexOf('\n      };'));

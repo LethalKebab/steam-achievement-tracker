@@ -123,11 +123,13 @@ or **自选**. Choosing 自选 reveals a **怎么改** field — the same thing 
 line, where blank simply means "research these again and rewrite them" — and the sentence above
 switches from what you lose to what stays (`只改 8 条,其余 43 个 checkbox 一字不动`).
 
-The computed sets (`稀有`, `未解锁`, `全选`) are **shortcuts inside the picker**, not scopes of their
-own: clicking one *ticks* those entries so you can see exactly which they are and then add or remove
-individually; clicking it again unticks that batch. They were scope options at first, and that was
-wrong for a concrete reason — you were confirming a paid, irreversible rewrite over a set you had
-never seen, and could not adjust afterwards.
+The computed sets (`全选`, `未解锁`, `稀有`) are **shortcuts inside the picker**, not scopes of their
+own: clicking one *ticks* those entries, so you can see exactly which they are and then add or drop
+individual ones. They only ever add — `清空`, next to the count, is the way back. They were scope
+options at first, and that was wrong for a concrete reason: you were confirming a paid, irreversible
+rewrite over a set you had never seen and could not adjust. They were also toggles for one round,
+which was wrong for a second reason — the batches overlap (a locked achievement can also be rare),
+so pressing one button would light or dim another.
 
 **自选** opens the guide's own achievements, grouped by the section headings they sit under, each
 row showing its global unlock rate and whether you have it. Every section heading carries its own

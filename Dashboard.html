@@ -1537,8 +1537,9 @@
       background: var(--surface-2); border: 1px solid transparent; cursor: pointer;
     }
     .ask-pick-quick:hover { color: var(--text); border-color: var(--line-2); }
-    /* 选中态 = 这一批**全在选择里**。和小节方框一个语义,所以也用强调色 */
-    .ask-pick-quick.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+    /* **没有选中态,因为它们不是开关。** 曾经有一个 `.on`,亮起来表示"这一批已经
+       全在选择里" —— 那是推导出来的事实,而用户读成"我按过这个键",于是按一个键
+       会让另一个亮/暗(属性之间相交,见 JS 里那段)。它们现在是一次性的动作 */
     .ask-pick-quick .n { font-variant-numeric: tabular-nums; opacity: .75; }
     .ask-pick-quick:disabled { opacity: .35; cursor: default; }
     .ask-pick-quick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1662,7 +1663,18 @@
     .ask-pick-item .pct { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
     .ask-pick-item .pct.rare { color: var(--accent); }
     .ask-pick-item .done { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--prog-done); }
-    .ask-pick-count { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--text-3); }
+    .ask-pick-foot { display: flex; align-items: baseline; gap: var(--s2); margin-top: var(--s2); }
+    .ask-pick-count { font-size: var(--fs-xs); color: var(--text-3); }
+    /* 「清空」是这一格里唯一带损失的动作,但损失很轻(重选一次而已),所以做成
+       一个安静的文字按钮 —— 找得到,但不抢 */
+    .ask-pick-clear {
+      margin-left: auto; padding: 2px 6px;
+      font: inherit; font-size: var(--fs-xs); color: var(--text-3);
+      background: none; border: 0; border-radius: var(--r-sm); cursor: pointer;
+    }
+    .ask-pick-clear:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+    .ask-pick-clear:disabled { opacity: .3; cursor: default; }
+    .ask-pick-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     /* 次级按钮:**透明底 + 正常字色 + 描边**。
        原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
        态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
@@ -2047,7 +2059,11 @@
         <div id="askPickQuick" role="group" aria-label="快捷选择"></div>
         <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="筛成就名…">
         <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
-        <div id="askPickCount" class="ask-pick-count" aria-live="polite"></div>
+        <!-- 计数和「清空」挨在一起:清空作用的正是旁边那个数,放在一处不用解释 -->
+        <div class="ask-pick-foot">
+          <span id="askPickCount" class="ask-pick-count" aria-live="polite"></span>
+          <button type="button" id="askPickClear" class="ask-pick-clear">清空</button>
+        </div>
       </div>
       <div class="ask-choice" id="askInputWrap" hidden>
         <label for="askInput" id="askInputLabel"></label>
@@ -3512,6 +3528,7 @@
         const pickFilter = document.getElementById('askPickFilter');
         const pickCount = document.getElementById('askPickCount');
         const pickQuick = document.getElementById('askPickQuick');
+        const pickClear = document.getElementById('askPickClear');
 
         function pickerShown() {
           if (!o.picker) return false;
@@ -3531,10 +3548,9 @@
           pickQuick.innerHTML = '';
           o.picker.shortcuts.forEach(function (sc2) {
             const hits = sc2.pick();
-            const on = hits.length > 0 && hits.every(function (it) { return sel.has(it.apiName); });
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'ask-pick-quick' + (on ? ' on' : '');
+            b.className = 'ask-pick-quick';
             b.textContent = sc2.label;
             const n = document.createElement('span');
             n.className = 'n';
@@ -3543,11 +3559,9 @@
             // 数字为 0 的档点了没有任何效果,灰掉;标签上那个 0 已经说明了原因
             b.disabled = hits.length === 0;
             if (sc2.title) b.title = sc2.title;
-            b.setAttribute('aria-pressed', String(on));
+            // **只加,不减,而且不带按下状态。** 见下面那段注释
             b.addEventListener('click', function () {
-              hits.forEach(function (it) {
-                if (on) sel.delete(it.apiName); else sel.add(it.apiName);
-              });
+              hits.forEach(function (it) { sel.add(it.apiName); });
               paintPicker();
               paintBody();
               refreshOk();
@@ -3656,8 +3670,7 @@
                 box.setAttribute('aria-label',
                   (on === items.length ? '取消选中「' : '全选「') + secName + '」这一节');
                 box.className = 'ask-pick-box' + (on === items.length ? ' on' : on ? ' some' : '');
-                // 勾掉一条可能让「稀有」那一批不再是全选 —— 那一排也得跟着变
-                paintQuick();
+                paintCount();
                 paintBody();
                 refreshOk();
               });
@@ -3692,7 +3705,23 @@
             empty.textContent = q ? '没有匹配的成就' : '这份攻略里没有能局部重写的条目';
             pickList.appendChild(empty);
           }
+          paintCount();
+        }
+
+        /**
+         * 「已选 N 条」和「清空」的可用性。
+         *
+         * **单拎出来是因为它必须能被单独调用。** 它原来写在 `paintPicker` 末尾,而勾一个
+         * 条目**故意不重绘整列表**(重绘会把滚动位置弹回顶上,而人正一条条往下勾)——
+         * 于是勾单条时这一行永远不更新:正文的数字在动,它卡在上一次整体重绘的值上。
+         *
+         * 之所以一直没被发现,是因为正文那句话是对的,**两个数字要放在一起看才对得出来**。
+         * 抓到它靠的是拿 DOM 里真实勾上的框数去比显示的数,而不是读界面。
+         */
+        function paintCount() {
+          const sel = o.picker.selected;
           pickCount.textContent = '已选 ' + sel.size + ' 条';
+          pickClear.disabled = sel.size === 0;
         }
 
         /** 自选但一条没勾 = 没有可执行的请求。**闸门放在按钮上,不是放在错误提示里** */
@@ -3715,8 +3744,15 @@
         if (o.picker) {
           pickFilter.value = '';
           pickFilter.oninput = paintPicker;
+          pickClear.onclick = function () {
+            o.picker.selected.clear();
+            paintPicker();
+            paintBody();
+            refreshOk();
+          };
         } else {
           pickFilter.oninput = null;
+          pickClear.onclick = null;
         }
 
         syncInput();
@@ -3988,15 +4024,22 @@
       const rarePct = (sc && sc.rarePct) || 15;
 
       /**
-       * 列表上方那几个快捷选择。**它们曾经是「范围」那一行的档位,现在不是了。**
+       * 列表上方那几个快捷选择。**它们是一次性的动作,不是开关。**
        *
-       * 做成档位时有个真缺陷:选中「稀有成就 27」的人**从没见过那 27 条是什么**,
-       * 却要在这个集合上确认一次要花钱、且不可逆的操作;而且选中之后增删不了 ——
-       * 想去掉其中两条都做不到。
+       * 曾经是开关,亮起来表示"这一批已经全在选择里"。那个含义是**推导出来的事实**,
+       * 而用户读到的是"我按过这个键" —— 两件事被同一个亮起来表达了,于是:
        *
-       * 现在它们只是"把符合的那批勾上",于是那 27 条当场显示在列表里、还能改。
-       * 行为和小节标题上那个方框**完全一致**(再点一次就取消这一批),因为它们本来
-       * 就是同一件事的两个轴:小节按**位置**分组,这几个按**属性**分组。
+       *   点「稀有」→ 27 条勾上 → 而那唯一一条未解锁的成就恰好也稀有 →
+       *   「未解锁」的全部内容都进了选择 → 它**跟着亮**,尽管没人按过它。
+       *   再点「未解锁」(它亮着,所以动作是减)→ 去掉那 1 条 →「稀有」只剩 26/27 →
+       *   **它又跟着暗**。按一个键,亮/暗的是另一个。
+       *
+       * **小节之间不相交,属性之间相交** —— 三态方框那套模型在这里不成立,搬过来
+       * 就会得到上面那种连锁。所以这几个键不再有状态:点一下就是"把这批加进选择",
+       * 仅此而已。想清空用旁边的「清空」,想去掉某几条就在列表里取消勾选。
+       *
+       * 代价是"整批撤销"要多点一下(清空 → 重选)。换来的是**每次点击的结果都能
+       * 从按钮的名字读出来**,而这个框里发生的下一件事要花钱且不可逆。
        */
       const shortcuts = [
         { key: 'all', label: '全选', pick: function () { return allItems; } },
