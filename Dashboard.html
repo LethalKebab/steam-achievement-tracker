@@ -1550,6 +1550,28 @@ padding: var(--s2);
     }
     .ask-pick-head:hover { background: var(--surface-2); color: var(--text); }
     .ask-pick-head .n { margin-left: auto; font-weight: 400; color: var(--text-3); }
+    /* 小节的三态方框。**画得和条目里那些原生 checkbox 一样大、一样位置** ——
+       它就是靠"看起来是同一种东西"来说明自己能点的,尺寸一偏就变成一个装饰 */
+    .ask-pick-box {
+      flex: 0 0 auto;
+      width: 13px; height: 13px;
+      border: 1px solid var(--text-3);
+      border-radius: 3px;
+      position: relative;
+    }
+    .ask-pick-head:hover .ask-pick-box { border-color: var(--text-2); }
+    .ask-pick-box.on, .ask-pick-box.some { background: var(--accent); border-color: var(--accent); }
+    /* 全选:对勾。半选:一横。两个都用 ::after 画,不引额外的字形 */
+    .ask-pick-box.on::after {
+      content: ''; position: absolute; left: 4px; top: 1px;
+      width: 3px; height: 7px;
+      border: solid var(--accent-ink); border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+    .ask-pick-box.some::after {
+      content: ''; position: absolute; left: 2px; top: 5px;
+      width: 7px; height: 2px; background: var(--accent-ink);
+    }
     .ask-pick-item {
       display: flex; align-items: center; gap: var(--s2);
       padding: 4px 6px; border-radius: var(--r-sm);
@@ -3352,12 +3374,14 @@ padding: var(--s2);
             // 选中态要**说出来**,不能只靠底色 —— 只用 class 的话读屏用户读不到
             // 这一组里哪个是选中的(ui-ux-pro-max 把这条列为 Critical)
             b.setAttribute('aria-pressed', String(opt.value === g.value));
-            // 选不了的要**能说出为什么**:一个灰按钮上写着「稀有 0」和一个因为
+            // **title 和 disabled 是两件事,别绑在一起。** 早先这行写在
+            // `if (opt.disabled)` 里面,因为那时 title 只用来解释"为什么灰着";
+            // 后来「稀有成就」把判据(全球解锁率 <15%)放进 title,而它是个
+            // **能点的**按钮 —— 于是提示一个字都不出现,而按钮看上去完全正常。
+            // 选不了的仍然要能说出为什么:一个写着「稀有 0」的灰按钮,和一个因为
             // Steam 没答话而算不出来的灰按钮,长得一样、含义相反
-            if (opt.disabled) {
-              b.disabled = true;
-              if (opt.title) b.title = opt.title;
-            }
+            if (opt.title) b.title = opt.title;
+            if (opt.disabled) b.disabled = true;
             b.addEventListener('click', function () {
               g.value = opt.value;
               [...group.children].forEach(function (c) {
@@ -3432,7 +3456,26 @@ padding: var(--s2);
             head.type = 'button';
             head.className = 'ask-pick-head';
             const allOn = items.every(function (it) { return sel.has(it.apiName); });
+            const someOn = !allOn && items.some(function (it) { return sel.has(it.apiName); });
             head.innerHTML = '';
+            /**
+             * **整节选中要有一个看得见的控件,不能只靠"点标题也能选"这句话。**
+             *
+             * 上一版就是那样:行为已经实现了,提示写在正文里 —— 而那句提示只在
+             * 一条都没勾的时候出现,勾了第一条它就被数字替换掉。结果是**功能做了
+             * 但没人知道它存在**,用户照旧一条一条点。
+             *
+             * 现在小节标题左边就是一个和条目同样的方框,三态:全选 / 半选
+             * (`indeterminate`)/ 未选。它长得像那些条目的框,所以不用读任何字
+             * 就知道能点;半选态还顺带回答了"这一节我选了一部分吗"。
+             *
+             * 它是 `<span>` 而不是真 `<input>`:整个标题已经是个 `<button>`,
+             * 里面套一个可聚焦的输入框会让一次 Tab 停两下、一次点击触发两条路径
+             */
+            const box = document.createElement('span');
+            box.className = 'ask-pick-box' + (allOn ? ' on' : someOn ? ' some' : '');
+            box.setAttribute('aria-hidden', 'true');
+            head.appendChild(box);
             head.appendChild(document.createTextNode(g.heading || '未分节'));
             const n = document.createElement('span');
             n.className = 'n';
@@ -3462,10 +3505,12 @@ padding: var(--s2);
               cb.checked = sel.has(it.apiName);
               cb.addEventListener('change', function () {
                 if (cb.checked) sel.add(it.apiName); else sel.delete(it.apiName);
-                // 只重画这一节的计数和正文,不整列表重绘 —— 重绘会把滚动位置弹回顶上,
-                // 而人正一条条往下勾
-                n.textContent = items.filter(function (x) { return sel.has(x.apiName); }).length + '/' + items.length;
-                head.setAttribute('aria-pressed', String(items.every(function (x) { return sel.has(x.apiName); })));
+                // 只重画这一节的计数、方框和正文,不整列表重绘 —— 重绘会把滚动位置
+                // 弹回顶上,而人正一条条往下勾
+                const on = items.filter(function (x) { return sel.has(x.apiName); }).length;
+                n.textContent = on + '/' + items.length;
+                head.setAttribute('aria-pressed', String(on === items.length));
+                box.className = 'ask-pick-box' + (on === items.length ? ' on' : on ? ' some' : '');
                 paintBody();
                 refreshOk();
               });
@@ -3807,9 +3852,10 @@ padding: var(--s2);
             // 陈述一个我们并没有查出来的事实,而且它劝人别再试 —— 恰恰反了
             label: x.label + ' ' + (x.unavailable ? '—' : x.count),
             disabled: x.unavailable || x.count === 0,
-            // 0 那种不给 title:标签上那个 0 已经把话说完了。— 那种必须给,
-            // 否则用户看到的是一个没有任何解释的灰按钮
-            title: x.unavailable ? x.reason : '',
+            // 判据放 title,不放标签。**标签是名字,不是参数** —— 「稀有 <15%」
+            // 那种写法一行按钮里混着数学表达式,读起来像配置项不像选项。
+            // 算不上来的时候原因优先:那种灰按钮不解释一句就完全没法理解
+            title: x.unavailable ? x.reason : (x.title || ''),
           };
         })).concat([{
           value: 'pick',
@@ -3852,9 +3898,12 @@ padding: var(--s2);
           if (s.scope === 'pick') {
             const n = picker.selected.size;
             // 一条没勾时说"勾了才知道",而不是硬报一个 0 —— 这时候还没有可陈述的事实
+            // 一条没勾时说"勾了才知道",而不是硬报一个 0 —— 这时候还没有可陈述的事实。
+            // **不再解释"点小节标题能整节选"**:小节那一行现在自己带一个三态方框,
+            // 看得见就不用说。一句只在 0 条时出现、勾了第一条就消失的提示,做不到教学
             return n
               ? '只改选中的 ' + n + ' 条,其余 ' + (p.boxes - n) + ' 个 checkbox 一字不动。原文先备份。'
-              : '在下面勾要重写的成就。点小节标题可以整节选中。';
+              : '在下面勾要重写的成就。';
           }
           const x = byKey[s.scope];
           if (!x) return '';

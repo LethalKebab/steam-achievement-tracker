@@ -1584,7 +1584,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       整篇重写(先备份原文,再告诉你会失去什么)
               guide-gen --only <选择器>    **只重写点名的那几条**,其余一字不动。先备份。
-                                          rare[:%] 稀有 · locked 还没打的 · failing 上次没过校验的
+                                          rare[:%] 稀有成就(全球解锁率 <15%)· locked 还没打的
                                           section:小节名 · 或者「成就名A,成就名B」直接点
               guide-gen --note "要求"      配 --only 用,比如 --note "把互斥关系写清楚"
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
@@ -1668,7 +1668,7 @@ const CLI_HINTS = {
     '  也可以把 config.json 的 ai.maxTokens 调小(DeepSeek 的上限比另外两家小)。',
   'guide-exists': () =>
     '  要整篇重写加 --overwrite(会先备份,并给出新旧对照)。\n' +
-    '  只想改其中几条:--only <选择器>(rare / locked / failing /\n' +
+    '  只想改其中几条:--only <选择器>(rare / locked /\n' +
     '  section:小节名 / 成就名或 api_name 的逗号列表),配 --note "要求"。',
   'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
   // ---- 局部重写(--only)----
@@ -1691,12 +1691,12 @@ const CLI_HINTS = {
     '  命令行这条路按小节挑需要本地攻略全文。\n' +
     '  Notion 上的攻略要按小节挑,去 Dashboard 点 ♻ 重写 →「挑几条…」——\n' +
     '  那边读的是整页的块,小节结构在(点小节标题就是整节选中)。',
-  'bad-scope': () => '  选择器的写法:rare[:百分比] / locked / failing / section:小节名。',
+  'bad-scope': () => '  选择器的写法:rare[:百分比] / locked / section:小节名。',
   // `--only` 后面什么都没跟。**和 bad-scope 分开**:那个是写错了,这个是没写 ——
   // 前者要纠正写法,后者要先知道有哪些写法可选
   'empty-scope': () =>
-    '  --only 后面要跟选择器:rare[:百分比] 稀有 / locked 还没打的 /\n' +
-    '  failing 上次没过校验的 / section:小节名,或者「成就名A,成就名B」直接点名。\n' +
+    '  --only 后面要跟选择器:rare[:百分比] 稀有成就(全球解锁率 <15%)/\n' +
+    '  locked 还没打的 / section:小节名,或者「成就名A,成就名B」直接点名。\n' +
     '  想整篇重写的话用 --overwrite,不要 --only。',
   'chunk-too-small': (d) =>
     `  别急着调大 ai.maxTokens —— 它是 thinking + 正文的总额,而一段只剩 ${d.size} 个成就\n` +

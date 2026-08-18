@@ -418,14 +418,15 @@ describe('选择器', () => {
   /**
    * **选择器只有 Dashboard 上有对应按钮的那几个。**
    *
-   * 删掉过三个:`all`(整篇重写有 `--overwrite`,这是第二条几乎一样的路)、
-   * `thin`(判据说不清楚,做不成按钮)、`unlocked`(没人要过"重写我已经打过的")。
+   * 删掉过四个:`all`(整篇重写有 `--overwrite`,这是第二条几乎一样的路)、
+   * `thin`(判据说不清楚,做不成按钮)、`unlocked`(没人要过"重写我已经打过的")、
+   * `failing`(真实语料里几乎永远是空集,一个常年显示 0 的按钮只制造疑问)。
    *
    * 钉住它们**不认得**,而不只是钉住剩下的认得:一个悄悄加回来的选择器不会让任何
    * 测试变红,而它会让「这个功能能做什么」在 CLI 和界面上有两个答案。
    */
-  test('删掉的三个选择器当成"没这个东西",按名字去解析', () => {
-    for (const gone of ['all', 'thin', 'unlocked']) {
+  test('删掉的四个选择器当成"没这个东西",按名字去解析', () => {
+    for (const gone of ['all', 'thin', 'unlocked', 'failing']) {
       const r = resolveScope({ ...base, selector: gone });
       // 落到显式列表那条分支 ⇒ 认不出这个"成就名" ⇒ 进 unresolved,而不是选中一批
       assert.deepEqual(r.apiNames, [], `${gone} 不该还能选中成就`);
@@ -443,16 +444,6 @@ describe('选择器', () => {
       () => resolveScope({ ...base, text: null, selector: 'section:主线' }),
       (e) => e.code === 'section-needs-local'
     );
-  });
-
-  test('failing 从改之前那次 lint 里挑人', () => {
-    const baseline = [
-      { level: 'error', code: 'missing-checkbox', apiName: 'C' },
-      { level: 'error', code: 'checked-mismatch', apiName: 'A' },
-    ];
-    const r = resolveScope({ ...base, baseline, selector: 'failing' });
-    // checked-mismatch 不算"这条写得不对" —— 模型压根不许写勾选状态
-    assert.deepEqual(r.apiNames, ['C']);
   });
 
   test('显式列表认中文名、英文名和 api_name', () => {

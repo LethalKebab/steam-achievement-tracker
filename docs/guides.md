@@ -119,7 +119,7 @@ next to its 📖 攻略 link. It asks the same question with the same informatio
 replacing, and which hand-ticked boxes will not survive — before anything is written.
 
 That dialog also carries the partial rewrite. The **范围** row offers 整篇, the computed presets
-with their counts (`稀有 <15% 27`, `未解锁 1`, `没过校验 0`), and **挑几条…**. Choosing anything
+with their counts (`稀有成就 27`, `未解锁 1`), and **挑几条…** (the threshold behind 稀有 is in its tooltip — the label is a name, not a parameter). Choosing anything
 but 整篇 reveals a **怎么改** field — the same thing `--note` passes on the command line, and
 leaving it blank simply means "research these again and rewrite them". The sentence above switches
 from what you lose to what stays (`只改 8 条,其余 43 个 checkbox 一字不动`) as you pick. A preset
@@ -127,9 +127,12 @@ showing `0` has nothing matching; one showing `—` could not be computed (hover
 those are different states and are not merged.
 
 **挑几条…** opens the guide's own achievements, grouped by the section headings they sit under,
-each row showing its global unlock rate and whether you have it. Clicking a **section heading
-selects that whole section**, so picking a section and picking individual entries are the same
-control — which is why the dialog has no separate `section:` option. There is a filter box, the
+each row showing its global unlock rate and whether you have it. Every section heading carries its
+own **tri-state checkbox** — click it to take or drop the whole section — so picking a section and
+picking individual entries are the same control, which is why the dialog has no separate `section:`
+option. (That behaviour existed one round earlier as "click the heading", explained in a sentence
+that only appeared while nothing was selected; nobody found it. An affordance you have to read
+about is not an affordance.) There is a filter box, the
 confirm button stays disabled until something is selected, and what gets sent is a plain list of
 the selected achievements.
 
@@ -157,15 +160,16 @@ node tracker.js guide-gen <appid> --only thin --dry-run
 |---|---|
 | `rare` / `rare:25` | Achievements below 15% global unlock rate (or the percentage you give). Same threshold the prompt uses to tell the model which entries deserve depth |
 | `locked` | Ones you haven't earned yet |
-| `failing` | Whatever the validator currently reports on this guide and a rewrite could fix |
 | `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
 | `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
 
 That list is deliberately the same set the Dashboard dialog offers. Three selectors were removed
 once it existed — `all` (whole-guide rewrite has its own flag, `--overwrite`), `thin` (its criterion
-needs its threshold explained before it means anything, which makes it unusable as a button) and
-`unlocked` (rewriting entries you have already earned was never something anyone asked for). If a
-selector cannot be drawn as a button, that is a signal about the selector.
+needs its threshold explained before it means anything, which makes it unusable as a button),
+`unlocked` (rewriting entries you have already earned was never something anyone asked for) and
+`failing` (in practice that set is almost always empty, and a button permanently reading `0` just
+makes you work out what the `0` means every time — `guide-lint <appid>` lists those properly).
+If a selector cannot be drawn as a button, that is a signal about the selector.
 
 `--note "…"` is the instruction, passed to the model as written. Without it the entries are simply
 rewritten from fresh research. The model always *sees* the existing entry, which is what makes
