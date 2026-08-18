@@ -120,8 +120,9 @@ replacing, and which hand-ticked boxes will not survive — before anything is w
 
 That dialog also carries the partial rewrite, and its **范围** row is a plain either/or: **整篇**
 or **自选**. Choosing 自选 reveals a **怎么改** field — the same thing `--note` passes on the command
-line, where blank simply means "research these again and rewrite them" — and the sentence above
-switches from what you lose to what stays (`只改 8 条,其余 43 个 checkbox 一字不动`).
+line, where blank simply means "research these again and rewrite them". 整篇 states what you are
+replacing and what you lose; 自选 states nothing — the count under the list and the word 自选 itself
+already say it, and the dialog holds one width throughout so nothing shifts as you tick.
 
 The computed sets (`全选`, `未解锁`, `稀有`) are **shortcuts inside the picker**, not scopes of their
 own: clicking one *ticks* those entries, so you can see exactly which they are and then add or drop

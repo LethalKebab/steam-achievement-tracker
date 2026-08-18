@@ -1525,6 +1525,18 @@
     .ask-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
     /* ---- 自选:按小节分组的成就清单 ---- */
+    /**
+     * **带挑选列表的那个框宽度固定,不跟着内容走。**
+     *
+     * `.modal-box` 平时是内容撑出来的宽度,对只有一两句话的框正合适。但这个框里
+     * 有一份会变的列表:勾一条、收起一节、切一次筛选,最宽的那行内容就换了一个,
+     * 于是整个对话框跟着抽动 —— 而人正把鼠标停在某个复选框上。**界面在你操作时
+     * 自己动,是最难受的一类**,你会失去"刚才那个框在哪儿"的把握。
+     *
+     * 只对传了 `picker` 的框固定(靠 JS 挂 `.ask-wide`),别的确认框保持原样 ——
+     * 它们没有会变的内容,给个固定宽度只会显得空。
+     */
+    .modal-box.ask-wide { width: 520px; max-width: 100%; }
     #askPickWrap { margin-top: var(--s4); text-align: left; }
     #askPickFilter { width: 100%; margin-bottom: var(--s2); }
     /* 快捷选择那一排。**做得比范围那一行轻** —— 它们不是决定,是省几十次点击的捷径,
@@ -3423,6 +3435,10 @@
     function askConfirm(o) {
       return new Promise(function (resolve) {
         const modal = document.getElementById('askModal');
+        // 有挑选列表的框固定宽度:里面的内容会变,而界面不该在人操作时自己抽动。
+        // 判据是"这个框有没有 picker",不是"picker 现在显不显示" —— 否则切一次
+        // 整篇/自选就跳一次宽度,那是同一个毛病换了个触发点
+        modal.querySelector('.modal-box').classList.toggle('ask-wide', Boolean(o.picker));
         const okBtn = document.getElementById('askOkBtn');
         const cancelBtn = document.getElementById('askCancelBtn');
         document.getElementById('askTitle').textContent = o.title;
@@ -4116,14 +4132,12 @@
               // 早就是这么决定的,这里跟上
             ].filter(Boolean).join('\n');
           }
-          // 自选。**一条没勾时说"勾了才知道",而不是硬报一个 0** —— 这时候还没有
-          // 可陈述的事实。不再解释"点小节标题能整节选":小节那一行自己带一个三态
-          // 方框,看得见就不用说,而一句只在 0 条时出现、勾了第一条就消失的提示,
-          // 做不到教学
-          const n = picker.selected.size;
-          return n
-            ? '只改选中的 ' + n + ' 条,其余 ' + (p.boxes - n) + ' 个 checkbox 一字不动。原文先备份。'
-            : '在下面勾要重写的成就。';
+          // **自选这一支不写正文。**
+          //
+          // 「只改选中的 27 条」是在复述列表底下那行「已选 27 条」,而「其余 24 个
+          // 一字不动」正是"自选"这两个字本身的意思 —— 一句话把屏幕上已有的两样
+          // 东西各说了一遍。状态自己在那儿摆着,不需要旁白。
+          return '';
         },
         okText: '重写',
         danger: true,
