@@ -141,3 +141,37 @@ describe('CLI_HINTS 覆盖了库里带 detail 的每一个错误码', () => {
     assert.deepEqual(gone, [], `这些文件不在 lib/ 了,豁免条目该删:${gone.join(', ')}`);
   });
 });
+
+/**
+ * 取值型 flag 漏登记会**静默错位**,不会报错。
+ *
+ * `positionalArgs` 靠 `VALUE_FLAGS` 才知道 `--effort low 648800` 里 `low` 是值、
+ * `648800` 才是 appid。漏登记的话 appid 会变成 `low`,而报出来的是
+ * 「找不到这个游戏」之类跟 `--effort` 毫无关系的话 —— 照着那句话查永远查不到真因。
+ * `--rounds` 当年就是为这个进的表(注释里写着 `guide-gen --rounds 2 1937500`)。
+ */
+describe('取值型 flag 都登记进 VALUE_FLAGS 了', () => {
+  const valueFlags = new Set(
+    (tracker.match(/const VALUE_FLAGS = new Set\(\[([^\]]*)\]\)/)?.[1] ?? '')
+      .split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean)
+  );
+
+  test('flagValue 读的每一个 flag 都在表里', () => {
+    // flagValue('x') 的意思就是"x 后面跟着一个值",所以它和 VALUE_FLAGS 必须一一对应。
+    // 少一个就错位,而错位不报错
+    const read = new Set([...tracker.matchAll(/flagValue\('([^']+)'\)/g)].map((m) => '--' + m[1]));
+    const missing = [...read].filter((f) => !valueFlags.has(f));
+    assert.deepEqual(missing, [],
+      `这些 flag 后面跟着值,却没进 VALUE_FLAGS:${missing.join(' ')} —— `
+      + '于是那个值会被当成位置参数(appid),报出来的错跟真因毫无关系');
+  });
+
+  test('--effort 能透到请求体里,而且是 flag 不是设置项', () => {
+    assert.ok(valueFlags.has('--effort'), '--effort low 648800 会把 low 当 appid');
+    const fn = tracker.slice(tracker.indexOf('function applyAiFlags'));
+    const body = fn.slice(0, fn.indexOf('\n}')).replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.match(body, /config\.ai\.effort\s*=\s*effort/,
+      'applyAiFlags 要真的把它写进 config.ai.effort —— 注释里提到不算,'
+      + '这个文件的开头就写着为什么源码断言必须先剥注释');
+  });
+});
