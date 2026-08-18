@@ -488,6 +488,10 @@ describe('选择器', () => {
   });
 
   test('空选择器和瞎写的阈值都当场拒绝', () => {
+    // `--only ""` 曾经在 planPatch 里被一个 `if (!selector)` 的内部捷径吞掉,
+    // 于是它交回 `scope: null`,调用方读 `pp.scope.apiNames` 当场 TypeError ——
+    // 一个用户错误变成了一句看不懂的崩溃。「调用方没给」和「用户给了个空的」
+    // 是两件事,判据必须是 `== null` 而不是假值
     assert.throws(() => resolveScope({ ...base, selector: '' }), (e) => e.code === 'empty-scope');
     assert.throws(() => resolveScope({ ...base, selector: 'rare:很稀有' }), (e) => e.code === 'bad-scope');
     assert.throws(() => resolveScope({ ...base, selector: 'section:' }), (e) => e.code === 'bad-scope');

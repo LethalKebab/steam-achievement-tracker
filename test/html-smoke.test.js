@@ -695,6 +695,16 @@ describe('确认框里的推理强度', () => {
       'refreshOk 要无条件跑,负责把上一次留下的 disabled 复位');
   });
 
+  test('planPatch 的"只要 plan"捷径判的是 null,不是假值', () => {
+    // 这条钉在源码上,因为触发它要 Steam 和 Notion。`if (!selector)` 会把用户敲的
+    // `--only ""` 也走进内部捷径,交回 scope: null,调用方紧接着读 .apiNames 崩掉 ——
+    // 一个有专属错误码和终端建议的用户错误,变成一句看不懂的 TypeError
+    const src = readFileSync(new URL('../lib/guidepatch.js', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    assert.match(src, /if \(selector === null \|\| selector === undefined\)/,
+      '内部捷径必须只认 null/undefined —— 空字符串是用户错误,该照常抛 empty-scope');
+  });
+
   test('挑几条发出去的是 api_name 列表,不是成就名', () => {
     // 同名成就按名字点不动(库里真有 12 组同名),用名字会让请求在服务端被判成
     // unresolved —— 而界面上刚刚明明勾中了它
