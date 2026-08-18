@@ -258,9 +258,13 @@ async function cmdInitNotion() {
   try {
     const cfg = loadConfig();
     console.log('\n配置 Notion 攻略同步\n');
-    console.log('token 从哪来:https://www.notion.so/my-integrations 新建一个 Internal Integration,');
-    console.log('复制它的 secret。然后把攻略页面(或它们共同的父页面)加到这个 integration 的');
-    console.log('connections 里:Notion 页面右上角 ••• → Connections → 加上它,否则 API 会返回 404。\n');
+    // 英文一律照抄 Notion 界面上的原字(New integration / Internal),不用「Internal
+    // Integration」这种概念名 —— 那五个字在 Notion 上一处都没有,照着找的人找不到
+    console.log('token 从哪来:打开 https://www.notion.so/my-integrations,点 New integration,');
+    console.log('Type 选 Internal,复制生成的密钥(ntn_ 开头)。然后把攻略页面(或它们共同的');
+    console.log('父页面)授权给它:Notion 页面右上角 ••• → 连接 / Connections → 选中它,');
+    console.log('否则 API 会返回 404。\n');
+    console.log('带图的完整步骤:docs/notion-setup.md\n');
 
     const token = await io.askSecret('Notion Integration Token(输入不会显示): ');
     if (!token) throw new Error('没输入 token');

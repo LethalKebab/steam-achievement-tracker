@@ -255,6 +255,68 @@ test('请求体不带那四个会 400 的参数,而且必须是流式', () => {
   assert.equal(body.output_config.effort, 'high');
 });
 
+/**
+ * `thinking` / `output_config` / `fallbacks` 以前捆在 `anthropicExtras` 一个开关上,
+ * 而那个开关问的是「这是不是官方端点」。`provider: "deepseek"` 预设总会设 baseUrl,
+ * 于是 `ai.effort` —— config.js 里注释写着「深浅旋钮」的那个 —— **一次都没被发出去过**。
+ *
+ * 钉住的是分开这件事本身。合回去不会让任何东西报错:请求照发、攻略照写,只是慢十倍,
+ * 而那正是这个 bug 活了这么久的原因。
+ */
+describe('推理深浅是独立旋钮,不跟着端点身份走', () => {
+  const KEY = { apiKey: 'k' };
+  const DEEPSEEK = { ...KEY, baseUrl: 'https://api.deepseek.com/anthropic' };
+  const build = (ai) =>
+    new AnthropicProvider(ai, { fetchImpl: fakeFetch([]) })
+      .buildBody({ system: 's', messages: [{ role: 'user', content: 'x' }] });
+
+  test('兼容端点上 effort 要发出去,而 thinking 不发', () => {
+    const body = build({ ...DEEPSEEK, effort: 'low' });
+    assert.deepEqual(body.output_config, { effort: 'low' },
+      'effort 是这条路上唯一有效的提速旋钮,不能因为端点不是官方的就被一起吞掉');
+    assert.ok(!('thinking' in body),
+      '同时发 adaptive 会把 effort 顶掉:实测同一个 effort:low,43 秒变 87 秒');
+  });
+
+  test('官方端点的行为一个字都没变', () => {
+    const body = build({ ...KEY, effort: 'high' });
+    assert.deepEqual(body.thinking, { type: 'adaptive' });
+    assert.deepEqual(body.output_config, { effort: 'high' });
+    assert.equal(body.fallbacks, 'default');
+  });
+
+  test('没量过的端点默认什么都不发 —— 别拿别人的可用性换我们的速度', () => {
+    const body = build({ ...KEY, baseUrl: 'https://someones-proxy.example/v1', effort: 'high' });
+    assert.ok(!('output_config' in body) && !('thinking' in body),
+      '「认不认这个字段」是逐个端点量出来的,推不出来。这些端点今天就没在收它');
+    const opted = build({
+      ...KEY, baseUrl: 'https://someones-proxy.example/v1', effort: 'high', anthropicExtras: true,
+    });
+    assert.deepEqual(opted.output_config, { effort: 'high' }, '自建端点确实认的话要有路开');
+  });
+
+  test('两个旋钮都能单独关掉', () => {
+    assert.ok(!('output_config' in build({ ...KEY, effort: 'off' })), 'effort: off');
+    assert.ok(!('thinking' in build({ ...KEY, effort: 'high', thinking: 'off' })), 'thinking: off');
+  });
+
+  test('thinking: disabled 发得出去 —— 但它会连搜索一起关掉,不是「更快的 high」', () => {
+    const body = build({ ...DEEPSEEK, thinking: 'disabled', effort: 'low' });
+    assert.deepEqual(body.thinking, { type: 'disabled' });
+  });
+
+  test('永远不发 budget_tokens —— 它返回 200 然后朝反方向走', () => {
+    for (const ai of [{ ...KEY, effort: 'high' }, { ...DEEPSEEK, thinking: 'adaptive' }]) {
+      const body = build(ai);
+      if (body.thinking) {
+        assert.ok(!('budget_tokens' in body.thinking),
+          '官方端点上是 400;DeepSeek 收下它返回 200,然后思考得更多'
+          + '(要 2000 得到 49653 字,不发才 38196 字)—— 没有任何东西会报错');
+      }
+    }
+  });
+});
+
 test('system 最后一块打了 cache_control(回灌重写靠它省钱)', () => {
   const p = new AnthropicProvider(AI, { fetchImpl: fakeFetch([]) });
   const body = p.buildBody({ system: '一大段规则', messages: [{ role: 'user', content: 'x' }] });

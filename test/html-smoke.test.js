@@ -50,6 +50,25 @@ const markupOnly = (html) =>
   html.replace(/<style[^>]*>[\s\S]*?<\/style>/g, '').replace(/<script[\s\S]*?<\/script>/g, '');
 
 /**
+ * 再把 `<!-- -->` 也剥掉。
+ *
+ * `markupOnly` 不管注释,而「这段文案里不许出现某个词」这类断言里,**解释那个词为什么
+ * 不能用的注释就写在它旁边** —— 不剥的话断言被注释喂饱,把代码删了它照样绿。
+ * 这是这个仓库反复踩的同一个坑(tray.test.js 的 maybeAutoSync、Dashboard 的
+ * loadDashboard(),见 CLAUDE.md「Strip comments before any source assertion」)。
+ */
+const markupNoComments = (html) => markupOnly(html).replace(/<!--[\s\S]*?-->/g, '');
+
+/** 某一步的那段标记。按 data-step 切,别按字节数切 —— 切窗口会随内容长短悄悄挪 */
+const stepBlock = (html, n) => {
+  const m = markupNoComments(html).match(
+    new RegExp(`data-step="${n}"[\\s\\S]*?(?=data-step="${n + 1}"|</form>)`)
+  );
+  assert.ok(m, `Setup.html 里找不到 data-step="${n}" 这一段`);
+  return m[0];
+};
+
+/**
  * 「页面可能产出的东西」的全部来源:静态标记 **加上** JS 里拼 HTML 的那些字符串。
  *
  * Dashboard 的表格几乎整个是 JS 拼出来的 —— `class="manual-input"`、
@@ -204,6 +223,31 @@ describe('踩过的坑,钉住', () => {
     assert.deepEqual(offenders, [],
       '浏览器拒绝校验 display:none 的必填控件,只在控制台报 not focusable —— '
       + '界面上就是「按了保存没反应」。校验要走 stepOneOk 那条人工路径');
+  });
+
+  /**
+   * 用户实报(2026-08-17):照着设置页第 3 步去 Notion,页面上找不到「Internal Integration」。
+   * 因为 Notion 上根本没这几个字 —— 按钮叫 `New integration`,`Internal` 是里面 Type 那栏的值。
+   *
+   * 钉的是**规则**不是措辞:说明步骤里出现的英文必须是控件上的原字。概念名读起来对,
+   * 照着找的人却找不到,而这种错不会报任何东西 —— 它只是让人卡在那儿。
+   */
+  test('Notion 那一步引的是界面原字,不是「Internal Integration」这种概念名', () => {
+    const step = stepBlock(read('Setup.html'), 3);
+    assert.match(step, /New integration/,
+      '要给出 Notion 上那个按钮的原字。用户是照着这段话在屏幕上找东西的');
+    assert.doesNotMatch(step, /Internal\s+Integration/i,
+      'Notion 界面上没有「Internal Integration」这个东西:New integration 是按钮,'
+      + 'Internal 是 Type 那一栏的选项。合成一个词组就等于让人去找一个不存在的标签');
+  });
+
+  test('设置页要有走查入口,而且它指的那份文档还在', () => {
+    const step = stepBlock(read('Setup.html'), 3);
+    assert.match(step, /docs\/notion-setup\.md/,
+      '「让我打开说明跟着走」是用户提的第二个诉求。走查页面一直都在,缺的只是这个入口');
+    assert.ok(existsSync(join(ROOT, 'docs/notion-setup.md')),
+      '设置页指着 docs/notion-setup.md。文档改名不会让任何东西报错,'
+      + '只会让那个链接变成 404 —— 而点它的人正是已经卡住的那个');
   });
 
   test('classList.toggle 的第二个参数必须布尔化,否则 undefined 会翻转', () => {

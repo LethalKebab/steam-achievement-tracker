@@ -434,12 +434,23 @@
 
     <section class="step" data-step="3" hidden>
       <h2 class="step-title">Step 3 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
+      <!-- **每个 <code> 里是 Notion 界面上的原字**,不是这件东西的叫法。
+           原来第 1 步写的是「建一个 Internal Integration」—— 而 Notion 上没有任何一处
+           写着这五个字:按钮叫 New integration,Internal 是里面 Type 那一栏的选项。
+           于是照着找的人在屏幕上找不到我们说的东西(用户实报)。说明步骤里出现的
+           英文一律照抄控件本身,别用概念名 -->
       <ol>
-        <li>在 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a> 建一个 Internal Integration,复制 secret</li>
-        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>Connections</code> → 加上它</li>
+        <li>在 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a> 点 <code>New integration</code>,Type 选 <code>Internal</code>,复制密钥</li>
+        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>连接 / Connections</code> → 选中它</li>
       </ol>
+      <!-- 走查页面一直都在(docs/notion-setup.md),只是 UI 上没有入口 —— 用户报的
+           「能不能让我打开说明跟着走」缺的就是这一行。指向 GitHub 上渲染好的那份而不是
+           自己再抄一遍:重抄一份的下场就是上面那条注释 -->
+      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener">详细步骤 ↗</a></p>
       <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空则不改</span></label>
-      <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="secret_...">
+      <!-- 现在新建的密钥是 ntn_ 开头。老的 secret_ 仍然有效,所以这里只是换掉占位符
+           给出的样子,验证那一侧不认前缀(认前缀就会在 Notion 下次改名时把好 token 拒了) -->
+      <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="ntn_...">
       <label for="notion-db">攻略数据库 ID</label>
       <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
       <button type="button" class="btn-outline" id="notion-make">＋ 新建一个攻略数据库</button>
