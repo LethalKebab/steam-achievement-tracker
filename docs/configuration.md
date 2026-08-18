@@ -32,7 +32,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "provider": "deepseek",   // "deepseek" | "anthropic" | "gemini" | "deepseek-openai"
     "apiKey": "…",            // or DEEPSEEK_/ANTHROPIC_/GEMINI_API_KEY, picked by provider
     "model": "",              // blank = that provider's own default; names aren't portable
-    "effort": "high",         // low | medium | high | off — the one lever that changes speed
+    "effort": "high",         // low | medium | high | off — research depth; also settable per run
     "thinking": null,         // "adaptive" | "disabled" | "off"; blank = per-endpoint default
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
     "maxAchievements": 500,   // refuse to generate above this
@@ -112,20 +112,25 @@ One visible consequence: because several passes are being written at once, progr
 
 `maxTokens` caps thinking **and** prose together, not prose alone. A pass that runs out mid-way is not silently accepted — the generator halves that pass and re-asks the two halves, repeating until the writing fits or the pass is down to five achievements. **So a truncation is usually not something you need to act on**, and reaching for a bigger `maxTokens` is usually the wrong reflex: the budget is shared with thinking, and raising it has been measured to buy thinking rather than prose (16000 → 32000 moved output tokens +79% and guide text +7%). If a five-achievement pass still won't fit, the message says so, and the thing to change is the endpoint or model. There is no temperature setting, because the models this targets reject it outright.
 
-**`effort` is the depth knob, and it is also the only setting here that meaningfully changes how long a run takes.** It was documented as a knob for a long time while never actually being sent on the DeepSeek path — the code bundled it with two Anthropic-only fields and switched all three off whenever a custom endpoint was configured, which the `deepseek` preset always is. Measured on 2026-08-17 over one identical 10-achievement pass with search on:
+**`effort` decides how much research goes into a guide, and it is the only setting here that changes how long a run takes.** You can set it three ways, in increasing order of scope: pick it in the confirmation that appears before each generation on the Dashboard; pass `--effort low` to `guide-gen` or `ai-check`; or change this value to move the default.
 
-| `effort` | wall time | searches issued | guide text per achievement |
+Measured over one identical game (16 achievements, same prompt, back to back), which is the comparison worth quoting because absolute timings on this path vary by up to 8× run to run:
+
+| `effort` | wall time | searches | entries written from a template |
 |---|---|---|---|
-| not sent (the old behaviour) | 337 s | 8 | 255 chars |
-| **`high` (the default, and what now ships)** | **179 s** | 6 | **306 chars** |
-| `medium` | 219 s | 6 | 275 chars |
-| `low` | 43 s | 2 | 211 chars |
+| `high` (default) | 280 s | 5 | **0 of 16** |
+| `medium` | 262 s | 4 | **0 of 16** |
+| `low` | **35 s** | 2 | **9 of 16** |
 
-Note `high` came out both faster *and* wordier than sending nothing, and faster than `medium`. Single runs on this path vary by up to 8× on identical input (see below), so read the table as "low is dramatically faster, the rest are close" rather than as a strict ranking.
+**What a lower setting costs is breadth, not depth.** At `low` the hardest achievements are still written properly — it is the large middle of the list that degrades, into lines like "clear every fate in Chapter III to unlock", which could have been written without looking anything up. Total guide length barely moves, so length is not a way to tell whether you lost something; the number of searches actually issued is printed after every run, in the terminal and on the Dashboard, and that is.
 
-**It is one dial, not three** — thinking, searching and prose length all move together, so turning it down genuinely buys less research rather than the same research delivered faster. That trade is meant to be visible: every run prints how many searches were actually issued, in the terminal and on the Dashboard, so you can see what a lower setting cost you. `off` stops the field being sent at all, which is what to use if an endpoint rejects it; the error message says so when that happens.
+`high` and `medium` were not distinguishable here — the gap between them is inside the run-to-run noise. The real step is between `medium` and `low`.
 
-`thinking` is a separate switch and is normally left alone. `"disabled"` makes a pass finish in seconds, and **also stops the model searching the web entirely** — it then writes guides from memory, which is the failure this tool otherwise refuses to allow. Use `effort` to go faster, not this.
+The default is `high` because a guide is meant to be a lasting record of how a game is played, and nine content-free entries is over half of one. `low` is worth choosing when you only want the hard parts solved and want them now.
+
+`off` stops the field being sent at all — use it if an endpoint rejects it, which the error message will tell you.
+
+`thinking` is a separate switch and is normally left alone. `"disabled"` makes a pass finish in seconds and **also stops the model searching the web at all**, so it writes from memory — the exact failure this tool otherwise refuses to allow. Use `effort` to go faster, not this.
 
 Neither setting is sent to endpoints that haven't been tested with it, since acceptance varies by endpoint and an untested one is left exactly as it was. Set `"anthropicExtras": true` to force them on for a custom endpoint you know accepts them.
 

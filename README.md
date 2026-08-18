@@ -72,9 +72,10 @@ Details, and how matching works: [docs/guides.md](docs/guides.md).
 node tracker.js init --ai            # pick a provider, paste a key; verified on the spot
 node tracker.js ai-check             # confirms web search actually works
 node tracker.js guide-gen <appid>    # asks once before it starts
+node tracker.js guide-gen <appid> --effort low   # fast, shallower research
 ```
 
-Works with DeepSeek, Anthropic or Gemini. The finished guide goes **into Notion** when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead. What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
+Works with DeepSeek, Anthropic or Gemini. The same choice is offered in the Dashboard, in the confirmation before each run. The finished guide goes **into Notion** when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead. What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
 
 ## Everyday use
 
