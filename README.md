@@ -80,11 +80,11 @@ Works with DeepSeek, Anthropic or Gemini. The finished guide goes **into Notion*
 
 ```bash
 node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
-node tracker.js guide-gen <appid> --only thin --dry-run     # see what it picked, spend nothing
+node tracker.js guide-gen <appid> --only locked --dry-run   # see what it picked, spend nothing
 node tracker.js guide-gen <appid> --only "成就名A,成就名B"
 ```
 
-`--only` takes `rare` (globally rare achievements), `thin` (entries with almost no advice written), `locked` / `unlocked`, `failing` (whatever last failed validation), `section:<heading>`, or a comma-separated list of achievement names. **Run it with `--dry-run` first** — that prints the entries it selected and the exact request, without sending anything. Full reference: [docs/guides.md](docs/guides.md#having-one-written-for-you).
+`--only` takes `rare` (globally rare achievements), `locked` (ones you haven't earned yet), `failing` (whatever last failed validation), `section:<heading>`, or a comma-separated list of achievement names. **Run it with `--dry-run` first** — that prints the entries it selected and the exact request, without sending anything. The Dashboard offers the same thing on the ♻ 重写 dialog, plus a per-achievement picker; the two surfaces deliberately offer the same set. Full reference: [docs/guides.md](docs/guides.md#having-one-written-for-you).
 
 ## Everyday use
 

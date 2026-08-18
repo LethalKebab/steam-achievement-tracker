@@ -156,15 +156,20 @@ node tracker.js guide-gen <appid> --only thin --dry-run
 | Selector | Picks |
 |---|---|
 | `rare` / `rare:25` | Achievements below 15% global unlock rate (or the percentage you give). Same threshold the prompt uses to tell the model which entries deserve depth |
-| `thin` / `thin:80` | Entries whose advice — everything after the name and the official description — is under 40 characters. These are the ones where nothing was really written |
-| `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
-| `locked` / `unlocked` | By your real unlock state |
+| `locked` | Ones you haven't earned yet |
 | `failing` | Whatever the validator currently reports on this guide and a rewrite could fix |
+| `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
 | `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
 
+That list is deliberately the same set the Dashboard dialog offers. Three selectors were removed
+once it existed — `all` (whole-guide rewrite has its own flag, `--overwrite`), `thin` (its criterion
+needs its threshold explained before it means anything, which makes it unusable as a button) and
+`unlocked` (rewriting entries you have already earned was never something anyone asked for). If a
+selector cannot be drawn as a button, that is a signal about the selector.
+
 `--note "…"` is the instruction, passed to the model as written. Without it the entries are simply
-rewritten from fresh research. `--fresh` withholds the existing text so the model starts over rather
-than revising; by default it *sees* what is there, which is what makes "写详细点" mean anything.
+rewritten from fresh research. The model always *sees* the existing entry, which is what makes
+"写详细点" mean anything.
 
 **Run `--dry-run` first.** It prints the entries the selector picked and the exact request that would
 be sent, and spends nothing. A selector that matched the wrong entries is the one mistake here that

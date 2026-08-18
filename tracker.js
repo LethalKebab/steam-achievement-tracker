@@ -1264,7 +1264,6 @@ async function cmdGuidePatch(appid) {
   const selector = String(flagValue('only') ?? '').trim();
   const instruction = flagValue('note') ?? null;
   const dryRun = flags.has('--dry-run');
-  const fresh = flags.has('--fresh');
 
   const config = applyAiFlags(loadConfig({ required: dryRun ? ['steam'] : ['steam', 'ai'] }));
   const db = openDb(config.dbPath);
@@ -1328,7 +1327,7 @@ async function cmdGuidePatch(appid) {
   if (dryRun) {
     console.log('\n--dry-run:不发任何请求。会发过去的那条请求:\n');
     console.log('─'.repeat(70));
-    console.log(buildPatchMessage(entries, { instruction, fresh }));
+    console.log(buildPatchMessage(entries, { instruction }));
     console.log('─'.repeat(70));
     console.log('\n(system 提示词和整篇生成是同一份,看它请跑 guide-gen --dry-run)');
     return;
@@ -1348,7 +1347,7 @@ async function cmdGuidePatch(appid) {
 
   const r = await patchGuide(db, {
     config, provider: probe, steam, appid, notion,
-    selector, instruction, fresh, rounds, patchPlan: pp,
+    selector, instruction, rounds, patchPlan: pp,
     onProgress(ev) {
       if (ev.phase === 'write') p.update(`  第 ${ev.round}/${ev.of} 轮:联网研究 + 重写 ${ev.scope} 条…`);
       else if (ev.phase === 'rewrite') p.update(`  第 ${ev.round}/${ev.of} 轮:按校验结果再改一次…`);
@@ -1585,11 +1584,9 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       整篇重写(先备份原文,再告诉你会失去什么)
               guide-gen --only <选择器>    **只重写点名的那几条**,其余一字不动。先备份。
-                                          rare[:%] 稀有的 · thin[:字数] 打法没写或只有一句
-                                          locked / unlocked 按解锁状态 · failing 上次没过校验的
+                                          rare[:%] 稀有 · locked 还没打的 · failing 上次没过校验的
                                           section:小节名 · 或者「成就名A,成就名B」直接点
               guide-gen --note "要求"      配 --only 用,比如 --note "把互斥关系写清楚"
-                                          --fresh 不给模型看原文,让它重新查着写
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
   node tracker.js drafts                  列出 guides/.drafts/ 里堆的草稿(只列不删)
               drafts --clean              清掉;--older-than N 只清 N 天前的
@@ -1671,7 +1668,7 @@ const CLI_HINTS = {
     '  也可以把 config.json 的 ai.maxTokens 调小(DeepSeek 的上限比另外两家小)。',
   'guide-exists': () =>
     '  要整篇重写加 --overwrite(会先备份,并给出新旧对照)。\n' +
-    '  只想改其中几条:--only <选择器>(rare / thin / locked / unlocked / failing /\n' +
+    '  只想改其中几条:--only <选择器>(rare / locked / failing /\n' +
     '  section:小节名 / 成就名或 api_name 的逗号列表),配 --note "要求"。',
   'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
   // ---- 局部重写(--only)----
@@ -1682,7 +1679,7 @@ const CLI_HINTS = {
     '  名字要和 Steam 上一字不差(中文名或英文名都行)。同名的成就按名字点不动 ——\n' +
     '  用 api_name 点它,`node tracker.js guide-lint <appid>` 里能看到。',
   'empty-scope-result': (d) =>
-    `  「${d.selector}」一条都没选中。放宽阈值试试:--only rare:30 或 --only thin:80,\n` +
+    `  「${d.selector}」一条都没选中。放宽阈值试试:--only rare:30,\n` +
     '  或者直接点名:--only "成就名A,成就名B"。',
   'nothing-locatable': () =>
     '  点名的成就在攻略里都没有对应的 checkbox —— 那是"压根没写",不是"写得不好"。\n' +
@@ -1694,12 +1691,12 @@ const CLI_HINTS = {
     '  命令行这条路按小节挑需要本地攻略全文。\n' +
     '  Notion 上的攻略要按小节挑,去 Dashboard 点 ♻ 重写 →「挑几条…」——\n' +
     '  那边读的是整页的块,小节结构在(点小节标题就是整节选中)。',
-  'bad-scope': () => '  选择器的写法:rare[:百分比] / thin[:字数] / locked / unlocked / failing / section:小节名。',
+  'bad-scope': () => '  选择器的写法:rare[:百分比] / locked / failing / section:小节名。',
   // `--only` 后面什么都没跟。**和 bad-scope 分开**:那个是写错了,这个是没写 ——
   // 前者要纠正写法,后者要先知道有哪些写法可选
   'empty-scope': () =>
-    '  --only 后面要跟选择器:rare[:百分比] 稀有的 / thin[:字数] 打法没写的 /\n' +
-    '  locked / unlocked / failing / section:小节名,或者「成就名A,成就名B」直接点。\n' +
+    '  --only 后面要跟选择器:rare[:百分比] 稀有 / locked 还没打的 /\n' +
+    '  failing 上次没过校验的 / section:小节名,或者「成就名A,成就名B」直接点名。\n' +
     '  想整篇重写的话用 --overwrite,不要 --only。',
   'chunk-too-small': (d) =>
     `  别急着调大 ai.maxTokens —— 它是 thinking + 正文的总额,而一段只剩 ${d.size} 个成就\n` +

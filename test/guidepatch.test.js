@@ -29,7 +29,7 @@ import { readFileSync } from 'node:fs';
 import { parseTodos, todoSpans, spliceLines } from '../lib/markdown.js';
 import { lintGuide } from '../lib/guidelint.js';
 import {
-  RARE_PCT, THIN_CHARS, guideProse, resolveScope, scopeEntries, classifyFindings,
+  RARE_PCT, resolveScope, scopeEntries, classifyFindings,
 } from '../lib/guidescope.js';
 import {
   parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback,
@@ -411,32 +411,26 @@ describe('选择器', () => {
     );
   });
 
-  test('thin 挑没写打法的,不挑整条都不存在的', () => {
-    const thinGuide = [
-      '# 测试游戏',
-      '- [ ] **第一步**<br>完成第一关。',
-      '- [ ] **第二步**<br>完成第二关。<br>' + '这条写得很详细,'.repeat(6),
-    ].join('\n');
-    const todos = parseTodos(thinGuide);
-
-    const r = resolveScope({ ...base, todos, text: thinGuide, selector: 'thin' });
-    assert.ok(r.apiNames.includes('A'), '只抄了官方描述的该被选中');
-    assert.ok(!r.apiNames.includes('B'), '写得详细的不该被选中');
-    // C / D 在这份攻略里压根没有框 —— 那是"缺 checkbox",归 failing 管,不是"没写打法"
-    assert.ok(!r.apiNames.includes('C'));
-    assert.ok(!r.apiNames.includes('D'));
-  });
-
-  test('guideProse 剥掉名字和描述之后才量长度', () => {
-    const only = guideProse('**第一步**<br>完成第一关。', DEFS[0]);
-    assert.equal(only, '', '只有名字和官方描述 ⇒ 打法是空的');
-    assert.ok(guideProse('**第一步**<br>完成第一关。<br>开局就能拿。', DEFS[0]).includes('开局'));
-    assert.equal(THIN_CHARS, 40);
-  });
-
-  test('locked / unlocked 按真实解锁状态分', () => {
-    assert.deepEqual(resolveScope({ ...base, selector: 'unlocked' }).apiNames, ['A']);
+  test('locked 挑还没打的那些', () => {
     assert.deepEqual(resolveScope({ ...base, selector: 'locked' }).apiNames, ['B', 'C', 'D']);
+  });
+
+  /**
+   * **选择器只有 Dashboard 上有对应按钮的那几个。**
+   *
+   * 删掉过三个:`all`(整篇重写有 `--overwrite`,这是第二条几乎一样的路)、
+   * `thin`(判据说不清楚,做不成按钮)、`unlocked`(没人要过"重写我已经打过的")。
+   *
+   * 钉住它们**不认得**,而不只是钉住剩下的认得:一个悄悄加回来的选择器不会让任何
+   * 测试变红,而它会让「这个功能能做什么」在 CLI 和界面上有两个答案。
+   */
+  test('删掉的三个选择器当成"没这个东西",按名字去解析', () => {
+    for (const gone of ['all', 'thin', 'unlocked']) {
+      const r = resolveScope({ ...base, selector: gone });
+      // 落到显式列表那条分支 ⇒ 认不出这个"成就名" ⇒ 进 unresolved,而不是选中一批
+      assert.deepEqual(r.apiNames, [], `${gone} 不该还能选中成就`);
+      assert.deepEqual(r.unresolved, [gone], `${gone} 该被当成一个认不出的成就名报出来`);
+    }
   });
 
   test('section: 只取那一节里的成就', () => {
@@ -609,10 +603,13 @@ describe('提示词', () => {
     assert.match(msg, /- \[ \]/, '勾选状态那条规矩要重申');
   });
 
-  test('--fresh 抽掉原文,只留清单', () => {
+  test('原文一律给,没有"不给它看"这个档', () => {
+    // 曾经有个 `fresh` 开关抽掉原文。删了 —— 界面上没有它,而「写详细点 / 补上
+    // 前置条件」这类要求占绝大多数、且全都以看得见原文为前提。多传一个它不认识的
+    // 参数也不该改变行为
     const msg = buildPatchMessage(entriesFor(['B']), { instruction: '重新查', fresh: true });
-    assert.ok(!msg.includes('接着打就行'), '--fresh 不该把原文给它看');
-    assert.match(msg, /完成第二关。/, '官方描述还是要给 —— 那是硬规则要照抄的东西');
+    assert.match(msg, /接着打就行/, '原文永远给');
+    assert.match(msg, /完成第二关。/, '官方描述也要给 —— 那是硬规则要照抄的东西');
   });
 
   test('没给要求时说清楚是"重新写",不留空', () => {
