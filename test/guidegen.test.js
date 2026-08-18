@@ -812,7 +812,7 @@ describe('Dashboard 上的「生成」按钮', () => {
       '必须先拿到预检结果再弹确认框'
     );
     assert.match(fn, /danger: true/, '覆盖不可逆,确认按钮要标红');
-    assert.match(fn, /startGuideGen\(appid, true\)/, '不把 overwrite 传下去,服务端会照常拒绝');
+    assert.match(fn, /startGuideGen\(appid, true[,)]/, '不把 overwrite 传下去,服务端会照常拒绝');
   });
 
   test('生成和重写不会同时出现在一行 —— 一个针对没攻略的,一个针对有攻略的', () => {
