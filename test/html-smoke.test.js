@@ -680,10 +680,10 @@ describe('确认框里的推理强度', () => {
     assert.match(body, /isComposing/, '组词中的 Enter 要挡掉');
     assert.match(body, /e\.target ===/, '要按焦点在哪儿区分:人还在输入框里打字,不是在决定');
     assert.match(body, /okBtn\.disabled/,
-      '确定按钮被闸住的时候 Enter 也要挡 —— 否则「挑几条却一条没勾」能靠回车绕过去');
+      '确定按钮被闸住的时候 Enter 也要挡 —— 否则「自选却一条没勾」能靠回车绕过去');
   });
 
-  test('挑几条却一条没勾时,确定按钮是闸住的', () => {
+  test('自选却一条没勾时,确定按钮是闸住的', () => {
     // 空选择发出去 = 一个选不中任何成就的请求,而它会在服务端才被拒。
     // 闸门要放在按钮上:让人**看见**为什么点不了,而不是点下去再收一条错误
     assert.match(js, /pickerShown\(\)\s*&&\s*o\.picker\.selected\.size === 0/,
@@ -705,7 +705,7 @@ describe('确认框里的推理强度', () => {
       '内部捷径必须只认 null/undefined —— 空字符串是用户错误,该照常抛 empty-scope');
   });
 
-  test('挑几条发出去的是 api_name 列表,不是成就名', () => {
+  test('自选发出去的是 api_name 列表,不是成就名', () => {
     // 同名成就按名字点不动(库里真有 12 组同名),用名字会让请求在服务端被判成
     // unresolved —— 而界面上刚刚明明勾中了它
     assert.match(js, /\[\.\.\.picker\.selected\]\.join\(','\)/,

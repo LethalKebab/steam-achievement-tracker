@@ -1524,7 +1524,7 @@
     .ask-input::placeholder { color: var(--text-3); }
     .ask-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-    /* ---- 挑几条:按小节分组的成就清单 ---- */
+    /* ---- 自选:按小节分组的成就清单 ---- */
     #askPickWrap { margin-top: var(--s4); text-align: left; }
     #askPickFilter { width: 100%; margin-bottom: var(--s2); }
     /* **定高 + 自己滚。** 一份攻略动辄几十上百条,让它撑开对话框的话确定/取消会被
@@ -1960,7 +1960,7 @@ padding: var(--s2);
       <!-- 一句话的输入(局部重写的「怎么改」)。**标签是可见的、而且带 for** ——
            只靠 placeholder 当标签,一开始打字它就消失了,而这一格正是打完字之后
            最需要确认"这一栏是什么"的地方 -->
-      <!-- 挑几条:按小节分组的成就清单。**点小节标题 = 选中整节**,所以「选一个小节」
+      <!-- 自选:按小节分组的成就清单。**点小节标题 = 选中整节**,所以「选一个小节」
            和「选几条成就」是同一个控件的两种用法 —— 界面上不需要为它们各开一个模式,
            发出去的请求也永远是一串点名的成就,后端那条路本来就在 -->
       <div id="askPickWrap" hidden>
@@ -3421,7 +3421,7 @@ padding: var(--s2);
         }
 
         /**
-         * 挑几条:按小节分组的清单,**点小节标题选中整节**。
+         * 自选:按小节分组的清单,**点小节标题选中整节**。
          *
          * 选择写回 `o.picker.selected`(一个 Set),和 choices 一样 —— askConfirm
          * 的返回值仍然是布尔,调用方从自己传进来的对象上取结果。
@@ -3548,7 +3548,7 @@ padding: var(--s2);
           pickCount.textContent = '已选 ' + sel.size + ' 条';
         }
 
-        /** 挑几条但一条没勾 = 没有可执行的请求。**闸门放在按钮上,不是放在错误提示里** */
+        /** 自选但一条没勾 = 没有可执行的请求。**闸门放在按钮上,不是放在错误提示里** */
         function refreshOk() {
           const blocked = pickerShown() && o.picker.selected.size === 0;
           okBtn.disabled = blocked;
@@ -3602,7 +3602,7 @@ padding: var(--s2);
             if (e.isComposing || e.keyCode === 229) return;
             // 框里的两个输入框(「怎么改」和挑选列表的筛选)都算"人还在写",不是在决定
             if (e.target === inputEl || e.target === pickFilter) return;
-            if (okBtn.disabled) return; // 挑了「挑几条」却一条没勾,Enter 不能绕过这道闸
+            if (okBtn.disabled) return; // 挑了「自选」却一条没勾,Enter 不能绕过这道闸
             close(true);
           }
         }
@@ -3837,7 +3837,7 @@ padding: var(--s2);
       const pickGroups = (sc && !sc.error && sc.pickable) ? sc.pickable : [];
       const pickable = pickGroups.reduce(function (n, g) { return n + g.items.length; }, 0);
       const byKey = presets.reduce(function (m, x) { m[x.key] = x; return m; }, {});
-      // 挑几条:一个控件同时解决「选一个小节」和「选几条成就」—— 点小节标题就是整节。
+      // 自选:一个控件同时解决「选一个小节」和「选几条成就」—— 点小节标题就是整节。
       // 所以范围这一排不需要为 section 再开一档
       const picker = { groups: pickGroups, selected: new Set(), when: function (s) { return s.scope === 'pick'; } };
       const scopeChoice = {
@@ -3859,7 +3859,7 @@ padding: var(--s2);
           };
         })).concat([{
           value: 'pick',
-          label: '挑几条…',
+          label: '自选…',
           // 一条都定位不到就没得挑。灰掉并说明,好过点开一个空列表
           disabled: pickable === 0,
           title: pickable === 0 ? '这份攻略里没有能局部重写的条目' : '按小节挑,或者逐条勾',
@@ -3929,7 +3929,7 @@ padding: var(--s2);
 
       // 整篇走 overwrite,局部走 scope。**两个不同时传** —— 服务端按 scope 是否为空
       // 分流,同时给会让"到底跑了哪条"取决于服务端的判断顺序
-      // 「挑几条」发出去的是一串点名的 api_name —— 后端 resolveScope 的显式列表那条路,
+      // 「自选」发出去的是一串点名的 api_name —— 后端 resolveScope 的显式列表那条路,
       // 不需要为界面新开一种选择器。用 api_name 而不是成就名:同名成就按名字点不动
       const scope = scopeChoice.value === 'all'
         ? null
