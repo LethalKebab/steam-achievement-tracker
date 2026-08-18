@@ -29,6 +29,11 @@ flowchart LR
 
 建好之后页面上会有一串 **Internal Integration Secret**,`ntn_` 或 `secret_` 开头。点 **Show** → **Copy**,先存到记事本里,第 ③ 步要用。
 
+> **如果你的 Notion 把 integration 叫成 connection**:是同一个东西。Notion 的开发者文档已经改用
+> `connection` 这套词(密钥叫 *installation access token*,在 **Configuration** 标签页里),但产品界面
+> 上的按钮仍然写着 **New integration**。哪边的字和这里对不上,按你屏幕上的走 —— 程序两种都收,
+> 它不认前缀也不认叫法。
+
 > **这串东西等于你 Notion 的钥匙**,别发给别人、别贴到聊天里。程序只把它存在你自己电脑上的 `config.json`(权限 600)。
 
 ---

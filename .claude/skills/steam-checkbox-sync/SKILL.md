@@ -42,7 +42,7 @@ The design deliberately prefers a missed checkbox (no match found) over a wrong 
 
 **Notion backend** (needs a token — this is the only part of the project that talks to a third party):
 
-1. Create an Internal Integration at notion.so/my-integrations (e.g. "Steam Achievement Sync"), copy its secret.
+1. At notion.so/my-integrations press **New integration**, set Type to **Internal**, name it (e.g. "Steam Achievement Sync"), copy the key (`ntn_…`). Quote those labels verbatim when writing instructions — "Internal Integration" is the concept, not anything printed on Notion's screen.
 2. Put it in `config.json` as `notion.token`, or export `NOTION_TOKEN`. **Never in source** — the repo is public.
 3. Also set `notion.overviewDbId` to the database holding your guide pages (open it in Notion; the 32-hex chunk in the URL).
 4. In Notion, open the shared parent page of all guide pages (e.g. "Entertainment") → `•••` → Connections → add the integration once; child pages inherit access. Without this, the API returns 404/no-permission.
