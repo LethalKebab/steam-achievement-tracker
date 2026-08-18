@@ -1497,6 +1497,32 @@
       font-size: var(--fs-sm);
       color: var(--text-3);
     }
+    /* 标签宽度对齐:两三组控件竖着排的时候,标签不等宽会让每一行的控件各起各的头,
+       读起来像三个不相干的块。定宽 + 右对齐把它们钉成一列 */
+    .ask-choice > span:first-child,
+    .ask-choice > label:first-child { flex: 0 0 auto; min-width: 4.5em; text-align: right; }
+    /* 选中态**不能只靠底色** —— .view-toggle button.on 已经给了底色,这里补一条
+       描边,因为这一组里有 disabled 项(条数为 0 的范围),而 disabled 也是灰底,
+       只靠明暗区分"选中"和"不可选"在深色主题下差得太近 */
+    .ask-choice .view-toggle button.on { box-shadow: inset 0 0 0 1px var(--accent); }
+    .ask-choice .view-toggle button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    /* 一句话输入。沿用页面上输入控件的那套底色和描边,不为一个框新造一种外观 */
+    .ask-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 8px var(--s3);
+      font: inherit;
+      font-size: var(--fs-sm);
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+    }
+    .ask-input::placeholder { color: var(--text-3); }
+    .ask-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     /* 次级按钮:**透明底 + 正常字色 + 描边**。
        原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
        态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
@@ -1861,13 +1887,19 @@
     <div class="modal-box" style="max-width:520px;">
       <div class="game-name" id="askTitle"></div>
       <div id="askBody" style="font-size:13px; color:var(--text-3); text-align:left; white-space:pre-wrap; margin:12px 0 0;"></div>
-      <!-- **选项和确认合在一起,因为它们是同一个决定。** 「要不要花这笔」和「花多深」
-           问的是一件事,拆成两步等于让人先答应再挑。这一格平时是空的,只有调用方
-           传了 choice 才长出来 —— 复用 .view-toggle(页面上已有的分段控件),
-           而不是新造一个只在这里出现的形状 -->
-      <div class="ask-choice" id="askChoice" hidden>
-        <span id="askChoiceLabel"></span>
-        <div class="view-toggle" role="group" id="askChoiceGroup"></div>
+      <!-- **选项和确认合在一起,因为它们是同一个决定。** 「要不要花这笔」和「改什么、
+           花多深」问的是一件事,拆成两步等于让人先答应再挑。这一格平时是空的,只有
+           调用方传了 choices 才长出来 —— 复用 .view-toggle(页面上已有的分段控件),
+           而不是新造一个只在这里出现的形状。
+           每组一行,由 askConfirm 动态生成:重写那个框要问两件事(范围、推理强度),
+           生成那个只问一件 —— 组数写死在 markup 里就得为多的那个留一格空的 -->
+      <div id="askChoices"></div>
+      <!-- 一句话的输入(局部重写的「要求」)。**标签是可见的、而且带 for** ——
+           只靠 placeholder 当标签,一开始打字它就消失了,而这一格正是打完字之后
+           最需要确认"这一栏是什么"的地方 -->
+      <div class="ask-choice" id="askInputWrap" hidden>
+        <label for="askInput" id="askInputLabel"></label>
+        <input type="text" id="askInput" class="ask-input" autocomplete="off">
       </div>
       <div class="modal-btns">
         <button class="add-game-btn" id="askOkBtn">确认</button>
@@ -3226,42 +3258,95 @@
         const okBtn = document.getElementById('askOkBtn');
         const cancelBtn = document.getElementById('askCancelBtn');
         document.getElementById('askTitle').textContent = o.title;
-        const bodyEl = document.getElementById('askBody');
-        bodyEl.textContent = o.body || '';
+        // 正文由下面的 paintBody() 写(它还要处理"跟着选择变"的那种)。
         // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的
-        bodyEl.style.display = o.body ? '' : 'none';
+        const bodyEl = document.getElementById('askBody');
         okBtn.textContent = o.okText || '确认';
 
-        // **返回值还是布尔。** 选择写回调用方自己传进来的 `o.choice.value`,
-        // 所以 askConfirm 的契约没变 —— 它有六处调用点,为了多一个可选控件去改
-        // 返回类型,等于让五个不相干的地方跟着动
-        const choiceWrap = document.getElementById('askChoice');
-        const choiceGroup = document.getElementById('askChoiceGroup');
-        choiceWrap.hidden = !o.choice;
-        choiceGroup.innerHTML = '';
-        if (o.choice) {
-          document.getElementById('askChoiceLabel').textContent = o.choice.label;
-          choiceGroup.setAttribute('aria-label', o.choice.label);
-          o.choice.options.forEach(function (opt) {
+        // **返回值还是布尔。** 选择写回调用方自己传进来的 `o.choices[i].value`,
+        // 所以 askConfirm 的契约没变 —— 它有六处调用点,为了多几个可选控件去改
+        // 返回类型,等于让四个不相干的地方跟着动。
+        //
+        // 从单个 `choice` 改成 `choices` 数组,是因为重写那个框要问**两件事**
+        // (改哪些、查多深)。留一个 `choice` 再加一个 `choice2` 会是同一个问题的
+        // 第二套机制 —— 这个项目里那种形状每次都会漂
+        const choicesWrap = document.getElementById('askChoices');
+        choicesWrap.innerHTML = '';
+        const groups = o.choices || [];
+
+        /** 正文可以是一句话,也可以是一个"跟着选择变"的函数 —— 数字要当场对得上 */
+        function paintBody() {
+          const text = typeof o.body === 'function'
+            ? o.body(groups.reduce(function (acc, g) { acc[g.key] = g.value; return acc; }, {}))
+            : (o.body || '');
+          bodyEl.textContent = text;
+          bodyEl.style.display = text ? '' : 'none';
+        }
+
+        groups.forEach(function (g) {
+          const row = document.createElement('div');
+          row.className = 'ask-choice';
+          const label = document.createElement('span');
+          label.textContent = g.label;
+          const group = document.createElement('div');
+          group.className = 'view-toggle';
+          group.setAttribute('role', 'group');
+          group.setAttribute('aria-label', g.label);
+
+          g.options.forEach(function (opt) {
             const b = document.createElement('button');
             b.type = 'button';
             b.textContent = opt.label;
             // 比较式直接写在调用点上:html-smoke 要求 toggle 的第二个参数一眼看得出
             // 是布尔(局部变量名看不出来,而 undefined 会让它翻转而不是关闭)
-            b.classList.toggle('on', opt.value === o.choice.value);
+            b.classList.toggle('on', opt.value === g.value);
             // 选中态要**说出来**,不能只靠底色 —— 只用 class 的话读屏用户读不到
             // 这一组里哪个是选中的(ui-ux-pro-max 把这条列为 Critical)
-            b.setAttribute('aria-pressed', String(opt.value === o.choice.value));
+            b.setAttribute('aria-pressed', String(opt.value === g.value));
+            // 选不了的要**能说出为什么**:一个灰按钮上写着「稀有 0」和一个因为
+            // Steam 没答话而算不出来的灰按钮,长得一样、含义相反
+            if (opt.disabled) {
+              b.disabled = true;
+              if (opt.title) b.title = opt.title;
+            }
             b.addEventListener('click', function () {
-              o.choice.value = opt.value;
-              [...choiceGroup.children].forEach(function (c) {
+              g.value = opt.value;
+              [...group.children].forEach(function (c) {
                 c.classList.toggle('on', c === b);
                 c.setAttribute('aria-pressed', String(c === b));
               });
+              // 选完立刻重画正文和依赖它的控件 —— 「只改 5 条」这种数字必须和
+              // 当前选中的那个范围对得上,慢一步就是在骗人
+              paintBody();
+              syncInput();
             });
-            choiceGroup.appendChild(b);
+            group.appendChild(b);
           });
+
+          row.appendChild(label);
+          row.appendChild(group);
+          choicesWrap.appendChild(row);
+        });
+
+        // 一句话输入。`o.input.when` 决定它在哪些选择下才出现 —— 渐进披露:
+        // 「要求」只对局部重写有意义,整篇重写时摆在那儿是一个不会被读的输入框
+        const inputWrap = document.getElementById('askInputWrap');
+        const inputEl = document.getElementById('askInput');
+        function syncInput() {
+          if (!o.input) { inputWrap.hidden = true; return; }
+          const state = groups.reduce(function (acc, g) { acc[g.key] = g.value; return acc; }, {});
+          inputWrap.hidden = typeof o.input.when === 'function' ? !o.input.when(state) : false;
         }
+        if (o.input) {
+          document.getElementById('askInputLabel').textContent = o.input.label;
+          inputEl.placeholder = o.input.placeholder || '';
+          inputEl.value = o.input.value || '';
+          inputEl.oninput = function () { o.input.value = inputEl.value; };
+        } else {
+          inputEl.oninput = null;
+        }
+        syncInput();
+        paintBody();
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
 
@@ -3279,7 +3364,17 @@
         function onOutside(e) { if (e.target === modal) close(false); }
         function onKey(e) {
           if (e.key === 'Escape') close(false);
-          else if (e.key === 'Enter') close(true);
+          else if (e.key === 'Enter') {
+            // **中文输入法按 Enter 是在上屏候选词,不是在确认。** 这个框现在有一个
+            // 一句话输入,而这是个中文界面 —— 不挡的话,打「把互斥关系写清楚」的
+            // 过程中每选一次词就会当场把这次(要花钱、且不可逆)的操作确认掉。
+            //
+            // 两道都要:`isComposing` 管输入法组词中的那次 Enter,而组词结束后
+            // 焦点还在输入框里的 Enter 也不该算确认 —— 那时人还在写,不是在决定
+            if (e.isComposing || e.keyCode === 229) return;
+            if (e.target === document.getElementById('askInput')) return;
+            close(true);
+          }
         }
 
         okBtn.addEventListener('click', onOk);
@@ -3480,38 +3575,105 @@
       btn.disabled = true;
       showGen('⏳ 检查《' + name + '》…', false, true);
 
-      const p = await new Promise((resolve) => {
-        rpc.withSuccessHandler(resolve)
-          .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
-          .previewGuideRewrite(appid);
-      });
+      // **两次预检一起拿。** 「整篇会失去什么」和「每个范围各改几条」是同一个决定
+      // 的两半,分两次往返的话,那一排范围按钮会比对话框晚出来 —— 一个先画出来
+      // 再自己长出五个按钮的框,看着像是刚才点漏了
+      const [p, sc] = await Promise.all([
+        new Promise((resolve) => {
+          rpc.withSuccessHandler(resolve)
+            .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
+            .previewGuideRewrite(appid);
+        }),
+        new Promise((resolve) => {
+          rpc.withSuccessHandler(resolve)
+            .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
+            .previewGuidePatch(appid);
+        }),
+      ]);
       if (!p || p.error) {
         btn.disabled = false;
         return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true, false);
       }
 
-      // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
-      // 都是他点下去之后自然会看到的,不必在这里先讲一遍
+      /**
+       * 范围那一排。**按钮上就带着条数,所以不需要一句解释它的话** ——
+       * 「稀有 5」自己说完了自己是什么。这一格是这个框里的主要决定。
+       *
+       * 条数为 0 的范围**留在原位但点不动**,不隐藏:隐藏之后「这游戏没有稀有成就」
+       * 和「没有这个功能」在界面上是同一件事,而它们不是。算不出来的(比如 Steam
+       * 没给解锁率)也一样灰,但 title 里写的是原因 —— 那两种灰的含义正相反。
+       */
+      const presets = (sc && !sc.error && sc.presets) ? sc.presets : [];
+      const byKey = presets.reduce(function (m, x) { m[x.key] = x; return m; }, {});
+      const scopeChoice = {
+        key: 'scope',
+        label: '范围',
+        value: 'all',
+        options: [{ value: 'all', label: '整篇' }].concat(presets.map(function (x) {
+          return {
+            value: x.key,
+            // **算不出来的写「—」,不写 0。** 两个都是灰按钮,但含义相反:0 是
+            // 「这游戏没有稀有成就」,— 是「Steam 这次没给解锁率」。写成 0 就是在
+            // 陈述一个我们并没有查出来的事实,而且它劝人别再试 —— 恰恰反了
+            label: x.label + ' ' + (x.unavailable ? '—' : x.count),
+            disabled: x.unavailable || x.count === 0,
+            // 0 那种不给 title:标签上那个 0 已经把话说完了。— 那种必须给,
+            // 否则用户看到的是一个没有任何解释的灰按钮
+            title: x.unavailable ? x.reason : '',
+          };
+        })),
+      };
       const rewriteChoice = effortChoice();
+      // 一句要求。只在选了局部范围时露出来 —— 整篇重写用不到它,摆在那儿是一个
+      // 不会被读的输入框
+      const noteInput = {
+        label: '要求',
+        placeholder: '比如:把前置条件和易错过的地方写清楚(可留空)',
+        value: '',
+        when: function (s) { return s.scope !== 'all'; },
+      };
+
       const ok = await askConfirm({
         title: '重写《' + name + '》的攻略?',
-        body: [
-          '现有 ' + p.boxes + ' 个 checkbox 会被整份替换,原文先备份。',
-          p.atRisk ? p.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
-          // 这里原来还有一句「约 2–4 分钟」。**删掉了**:同样的输入实测跑三次是
-          // 76/174/337 秒,给区间就是在承诺一个我们给不出的东西;而且推理强度现在
-          // 可调,低档快八倍,那句话会当场变成错的。时长看进度条 —— 隔壁那个生成框
-          // 早就是这么决定的,这里跟上
-        ].filter(Boolean).join('\n'),
+        // **正文跟着范围变。** 整篇讲「你会失去什么」,局部讲「什么会留下」——
+        // 这两句话不是同一句话的两种说法,而这个框要能同时是两个框
+        body: function (s) {
+          if (s.scope === 'all') {
+            return [
+              '现有 ' + p.boxes + ' 个 checkbox 会被整份替换,原文先备份。',
+              p.atRisk ? p.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
+              // 这里原来还有一句「约 2–4 分钟」。**删掉了**:同样的输入实测跑三次是
+              // 76/174/337 秒,给区间就是在承诺一个我们给不出的东西;而且推理强度现在
+              // 可调,低档快八倍,那句话会当场变成错的。时长看进度条 —— 隔壁那个生成框
+              // 早就是这么决定的,这里跟上
+            ].filter(Boolean).join('\n');
+          }
+          const x = byKey[s.scope];
+          if (!x) return '';
+          return [
+            '只改 ' + x.count + ' 条,其余 ' + x.keeping + ' 个 checkbox 一字不动。原文先备份。',
+            x.atRisk ? x.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
+            // 这一行是选局部而不是整篇唯一确凿、可量化的好处,别省
+            x.savedTicks ? '另外 ' + x.savedTicks + ' 个手动勾选保住了。' : null,
+            x.unlocatable ? x.unlocatable + ' 条攻略里没写过,这次改不到。' : null,
+          ].filter(Boolean).join('\n');
+        },
         okText: '重写',
         danger: true,
-        choice: rewriteChoice,
+        choices: [scopeChoice, rewriteChoice],
+        input: noteInput,
       });
       if (!ok) {
         btn.disabled = false;
         genBar.style.display = 'none';
         return;
       }
+
+      // 整篇走 overwrite,局部走 scope。**两个不同时传** —— 服务端按 scope 是否为空
+      // 分流,同时给会让"到底跑了哪条"取决于服务端的判断顺序
+      const scope = scopeChoice.value === 'all'
+        ? null
+        : { selector: scopeChoice.value, note: noteInput.value.trim() || null };
 
       rpc
         .withSuccessHandler(function (r) {
@@ -3526,7 +3688,7 @@
           btn.disabled = false;
           showGen(GEN_WARN + ' ' + err, true, false);
         })
-        .startGuideGen(appid, true, rewriteChoice.value);
+        .startGuideGen(appid, true, rewriteChoice.value, scope);
     };
 
     /**
@@ -3540,6 +3702,9 @@
      */
     function effortChoice() {
       return {
+        // 组名。askConfirm 把每组的当前值按 key 收成一个对象交给正文函数,
+        // 于是「选了什么范围」和「选了多深」在那句话里都取得到
+        key: 'effort',
         label: '推理强度',
         options: [
           { value: 'low', label: '低' },
@@ -3621,7 +3786,7 @@
       // 他要去读的时候说,所以留在结果那一行,不放在这里。
       // 带损失的那几个框(重写、删除)不适用这条,它们的正文是必须的
       const choice = effortChoice();
-      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成', choice });
+      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成', choices: [choice] });
       if (!ok) return;
       genCollapsed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;
@@ -3786,9 +3951,20 @@
               escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
               (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
             : '';
+          // 局部重写要说的是**另一件事**:改了几条、其余没动。说成「已生成 · 11/11
+          // 个成就」的话,一次只改了 5 条的操作看起来和整篇重写一模一样,而"没动的
+          // 那部分"正是他选局部的理由。旧问题也在这里报 —— 这次没碰、也没拦路,
+          // 但不说出来的话下次校验看到它们会以为是这次改坏的
+          const pat = r.patched;
+          const preExisting = pat && pat.preExisting
+            ? '<br><span class="warn">' + GEN_WARN + ' 攻略里还有 ' + pat.preExisting +
+              ' 条本来就有的校验问题,这次没碰</span>'
+            : '';
+          const headline = pat
+            ? GEN_OK + ' 《' + s.game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where
+            : GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where;
           showGen(
-            GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
-              noResearch + unsyncable +
+            headline + noResearch + unsyncable + preExisting +
               '<br><span class="warn">内容需要你自己过一遍。</span>',
             false, live
           );

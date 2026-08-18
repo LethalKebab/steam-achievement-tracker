@@ -118,6 +118,13 @@ The Dashboard offers the same thing: a game that already has a guide shows a **�
 next to its 📖 攻略 link. It asks the same question with the same information — what you are
 replacing, and which hand-ticked boxes will not survive — before anything is written.
 
+That dialog also carries the partial rewrite. The **范围** row offers 整篇 plus one button per
+preset, each showing how many entries it would change (`稀有 27`, `写得薄 8`, `未解锁 1`); the
+sentence underneath switches from what you lose to what stays (`只改 8 条,其余 43 个 checkbox
+一字不动`) as you pick. Choosing anything but 整篇 reveals a **要求** field — the same thing
+`--note` passes on the command line. A preset showing `0` has nothing matching; one showing `—`
+could not be computed (hover it for the reason) — those are different states and are not merged.
+
 #### Rewriting only part of a guide
 
 `--overwrite` replaces the whole guide. `--only` replaces just the entries you name, and **every

@@ -654,7 +654,26 @@ describe('确认框里的推理强度', () => {
   test('选的那一档要真的跟着请求走', () => {
     // 控件做出来、值没传下去 —— 界面上一切正常,而每次跑的还是默认档
     assert.match(js, /startGuideGen\(appid, false, choice\.value\)/, '生成那一路');
-    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value\)/, '重写那一路');
+    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value, scope\)/, '重写那一路');
+  });
+
+  test('局部重写的范围要真的跟着请求走,而且和整篇互斥', () => {
+    // 范围选了、值没传下去,表现是每次都整篇重写 —— 而那正好是这个功能要避免的
+    // 那件事,还带着「已改 N 条」的成功提示。界面上一切正常
+    assert.match(js, /scopeChoice\.value === 'all'\s*\n?\s*\?\s*null/,
+      '选「整篇」必须传 null,而不是传一个 selector 为 all 的 scope —— '
+      + '服务端按 scope 是否为空分流,两个都给会让"跑了哪条"取决于判断顺序');
+    assert.match(js, /selector: scopeChoice\.value/, '范围要进 scope.selector');
+    assert.match(js, /note: noteInput\.value/, '那句要求也要传下去,不然输入框是个摆设');
+  });
+
+  test('中文输入法的 Enter 不能当成确认', () => {
+    // 这个框现在有一句话输入,而界面是中文的:打字时每选一次候选词都会按 Enter。
+    // 不挡的话,写「把互斥关系写清楚」的过程中会当场把这次要花钱、且不可逆的操作确认掉
+    const fn = js.slice(js.indexOf('function onKey'));
+    const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
+    assert.match(body, /isComposing/, '组词中的 Enter 要挡掉');
+    assert.match(body, /askInput/, '焦点还在输入框里的 Enter 也不该算确认');
   });
 
   test('确认框不再写死时长', () => {
