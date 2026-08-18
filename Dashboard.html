@@ -1894,7 +1894,7 @@
            每组一行,由 askConfirm 动态生成:重写那个框要问两件事(范围、推理强度),
            生成那个只问一件 —— 组数写死在 markup 里就得为多的那个留一格空的 -->
       <div id="askChoices"></div>
-      <!-- 一句话的输入(局部重写的「要求」)。**标签是可见的、而且带 for** ——
+      <!-- 一句话的输入(局部重写的「怎么改」)。**标签是可见的、而且带 for** ——
            只靠 placeholder 当标签,一开始打字它就消失了,而这一格正是打完字之后
            最需要确认"这一栏是什么"的地方 -->
       <div class="ask-choice" id="askInputWrap" hidden>
@@ -3329,7 +3329,7 @@
         });
 
         // 一句话输入。`o.input.when` 决定它在哪些选择下才出现 —— 渐进披露:
-        // 「要求」只对局部重写有意义,整篇重写时摆在那儿是一个不会被读的输入框
+        // 「怎么改」只对局部重写有意义,整篇重写时摆在那儿是一个不会被读的输入框
         const inputWrap = document.getElementById('askInputWrap');
         const inputEl = document.getElementById('askInput');
         function syncInput() {
@@ -3627,8 +3627,13 @@
       // 一句要求。只在选了局部范围时露出来 —— 整篇重写用不到它,摆在那儿是一个
       // 不会被读的输入框
       const noteInput = {
-        label: '要求',
-        placeholder: '比如:把前置条件和易错过的地方写清楚(可留空)',
+        // **标签是一个能回答的问句,不是一个抽象名词。** 原来写的是「要求」,而那
+        // 三个字要人先猜出这一栏想要什么 —— 一个需要先被理解的输入框等于没有标签。
+        // 「怎么改」的任何回答都是合法输入
+        label: '怎么改',
+        // placeholder 要答的其实是**留空会怎样**:那才是「我该填什么」背后的问题。
+        // 先说留空的后果,再给一个能照抄的例子
+        placeholder: '留空 = 重新查着写。也可以:写详细点、标出易错过',
         value: '',
         when: function (s) { return s.scope !== 'all'; },
       };

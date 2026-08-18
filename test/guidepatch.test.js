@@ -411,7 +411,7 @@ describe('选择器', () => {
     );
   });
 
-  test('thin 挑打法写得太薄的,不挑压根没写的', () => {
+  test('thin 挑没写打法的,不挑整条都不存在的', () => {
     const thinGuide = [
       '# 测试游戏',
       '- [ ] **第一步**<br>完成第一关。',
@@ -422,7 +422,7 @@ describe('选择器', () => {
     const r = resolveScope({ ...base, todos, text: thinGuide, selector: 'thin' });
     assert.ok(r.apiNames.includes('A'), '只抄了官方描述的该被选中');
     assert.ok(!r.apiNames.includes('B'), '写得详细的不该被选中');
-    // C / D 在这份攻略里压根没有框 —— 那是"缺 checkbox",归 failing 管,不是"写得薄"
+    // C / D 在这份攻略里压根没有框 —— 那是"缺 checkbox",归 failing 管,不是"没写打法"
     assert.ok(!r.apiNames.includes('C'));
     assert.ok(!r.apiNames.includes('D'));
   });
