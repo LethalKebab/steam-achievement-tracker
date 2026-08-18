@@ -97,7 +97,15 @@ That asks which provider, takes your key without echoing it, and **verifies it w
 ```bash
 node tracker.js ai-check              # confirms search actually works
 node tracker.js guide-gen <appid>     # asks once before it starts
+node tracker.js guide-gen <appid> --effort low   # faster, less research
 ```
+
+`--effort` (`low` / `medium` / `high`, default `high`) sets how much research goes into
+this one guide; the Dashboard offers the same three in the confirmation before each run.
+Lower settings do not write worse solutions for the hard achievements — they stop
+researching the easy middle of the list, which then gets filled with lines that could have
+been written without looking anything up. See
+[configuration.md](configuration.md#notes-on-individual-options) for the measurements.
 
 If a guide is already registered for that appid, `guide-gen` refuses — regenerating over
 one is a separate, explicit action:
