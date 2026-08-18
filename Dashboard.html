@@ -1483,6 +1483,20 @@
       margin-top: var(--s5);
     }
     .modal-box .modal-btns button { min-width: 96px; padding: 9px var(--s4); }
+    /* 标签和控件同一行:三个档位很短,拆成两行会让这一格看着比它的份量重 */
+    /* **只放大确认框里的这一个,不动 .view-toggle 本身。** 顶栏那个是次要控件,
+       这一个是这个框里的主要决定,而它正下方的确定/取消是 38px 高 —— 沿用顶栏的
+       25px 会让它读起来像脚注。同一个类在两处有不同的份量,是位置决定的,不是样式漂移 */
+    .ask-choice .view-toggle button { padding: 8px var(--s4); }
+    .ask-choice {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--s3);
+      margin-top: var(--s4);
+      font-size: var(--fs-sm);
+      color: var(--text-3);
+    }
     /* 次级按钮:**透明底 + 正常字色 + 描边**。
        原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
        态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
@@ -1777,8 +1791,8 @@
         <!-- 「网格 / 列表」是中文界面里这个切换的固定说法,不需要学。
              前两版都栽在同一件事上:「图库」是 Gallery 的逐字对译;「封面」是拿一个
              名词当视图名,读着像在给图片贴标签,而不是在说一种看法。 -->
-        <button type="button" class="on" data-view="table">列表</button>
-        <button type="button" data-view="gallery">网格</button>
+        <button type="button" class="on" aria-pressed="true" data-view="table">列表</button>
+        <button type="button" aria-pressed="false" data-view="gallery">网格</button>
       </div>
       <div class="filter-chips" id="filterChips">
       <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
@@ -1847,6 +1861,14 @@
     <div class="modal-box" style="max-width:520px;">
       <div class="game-name" id="askTitle"></div>
       <div id="askBody" style="font-size:13px; color:var(--text-3); text-align:left; white-space:pre-wrap; margin:12px 0 0;"></div>
+      <!-- **选项和确认合在一起,因为它们是同一个决定。** 「要不要花这笔」和「花多深」
+           问的是一件事,拆成两步等于让人先答应再挑。这一格平时是空的,只有调用方
+           传了 choice 才长出来 —— 复用 .view-toggle(页面上已有的分段控件),
+           而不是新造一个只在这里出现的形状 -->
+      <div class="ask-choice" id="askChoice" hidden>
+        <span id="askChoiceLabel"></span>
+        <div class="view-toggle" role="group" id="askChoiceGroup"></div>
+      </div>
       <div class="modal-btns">
         <button class="add-game-btn" id="askOkBtn">确认</button>
         <button class="add-game-btn btn-secondary" id="askCancelBtn">取消</button>
@@ -2787,6 +2809,8 @@
         expandedAppid = null;
         document.querySelectorAll('.view-toggle button').forEach(function(b) {
           b.classList.toggle('on', b === btn);
+          // 选中态只画不报的话,读屏用户读不到这一组里哪个是当前视图
+          b.setAttribute('aria-pressed', String(b === btn));
         });
         render();
       });
@@ -3207,6 +3231,37 @@
         // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的
         bodyEl.style.display = o.body ? '' : 'none';
         okBtn.textContent = o.okText || '确认';
+
+        // **返回值还是布尔。** 选择写回调用方自己传进来的 `o.choice.value`,
+        // 所以 askConfirm 的契约没变 —— 它有六处调用点,为了多一个可选控件去改
+        // 返回类型,等于让五个不相干的地方跟着动
+        const choiceWrap = document.getElementById('askChoice');
+        const choiceGroup = document.getElementById('askChoiceGroup');
+        choiceWrap.hidden = !o.choice;
+        choiceGroup.innerHTML = '';
+        if (o.choice) {
+          document.getElementById('askChoiceLabel').textContent = o.choice.label;
+          choiceGroup.setAttribute('aria-label', o.choice.label);
+          o.choice.options.forEach(function (opt) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.textContent = opt.label;
+            // 比较式直接写在调用点上:html-smoke 要求 toggle 的第二个参数一眼看得出
+            // 是布尔(局部变量名看不出来,而 undefined 会让它翻转而不是关闭)
+            b.classList.toggle('on', opt.value === o.choice.value);
+            // 选中态要**说出来**,不能只靠底色 —— 只用 class 的话读屏用户读不到
+            // 这一组里哪个是选中的(ui-ux-pro-max 把这条列为 Critical)
+            b.setAttribute('aria-pressed', String(opt.value === o.choice.value));
+            b.addEventListener('click', function () {
+              o.choice.value = opt.value;
+              [...choiceGroup.children].forEach(function (c) {
+                c.classList.toggle('on', c === b);
+                c.setAttribute('aria-pressed', String(c === b));
+              });
+            });
+            choiceGroup.appendChild(b);
+          });
+        }
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
 
@@ -3437,15 +3492,20 @@
 
       // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
       // 都是他点下去之后自然会看到的,不必在这里先讲一遍
+      const rewriteChoice = effortChoice();
       const ok = await askConfirm({
         title: '重写《' + name + '》的攻略?',
         body: [
           '现有 ' + p.boxes + ' 个 checkbox 会被整份替换,原文先备份。',
           p.atRisk ? p.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
-          '约 2–4 分钟。',
+          // 这里原来还有一句「约 2–4 分钟」。**删掉了**:同样的输入实测跑三次是
+          // 76/174/337 秒,给区间就是在承诺一个我们给不出的东西;而且推理强度现在
+          // 可调,低档快八倍,那句话会当场变成错的。时长看进度条 —— 隔壁那个生成框
+          // 早就是这么决定的,这里跟上
         ].filter(Boolean).join('\n'),
         okText: '重写',
         danger: true,
+        choice: rewriteChoice,
       });
       if (!ok) {
         btn.disabled = false;
@@ -3466,8 +3526,29 @@
           btn.disabled = false;
           showGen(GEN_WARN + ' ' + err, true, false);
         })
-        .startGuideGen(appid, true);
+        .startGuideGen(appid, true, rewriteChoice.value);
     };
+
+    /**
+     * 生成/重写共用的那一格。**默认 high**,而这个默认是量出来的不是拍的:
+     * 同一款游戏同一套提示词,low 那份 16 条里有 9 条是「第 III 章全体查证正确即解锁」
+     * 这种套模板的句子,high 一条都没有。省下来的八倍时间买的是那批中等难度成就的内容。
+     *
+     * 三档在效果上**不是等距的** —— 实测 high 和 medium 分不开(都是 0 条模板句,
+     * 时间差埋在噪声里),断崖在 medium 和 low 之间。所以用三个离散按钮而不是滑块:
+     * 滑块的形状本身在暗示均匀,而这里不均匀。
+     */
+    function effortChoice() {
+      return {
+        label: '推理强度',
+        options: [
+          { value: 'low', label: '低' },
+          { value: 'medium', label: '中' },
+          { value: 'high', label: '高' },
+        ],
+        value: 'high',
+      };
+    }
 
     window.migrateGuide = function (btn) {
       const appid = btn.getAttribute('data-migrate');
@@ -3539,7 +3620,8 @@
       // 要提醒 —— 时长看进度条就知道,而"内容未经验证"这条本来就该在攻略真的写出来、
       // 他要去读的时候说,所以留在结果那一行,不放在这里。
       // 带损失的那几个框(重写、删除)不适用这条,它们的正文是必须的
-      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成' });
+      const choice = effortChoice();
+      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成', choice });
       if (!ok) return;
       genCollapsed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;
@@ -3562,7 +3644,7 @@
           btn.disabled = false;
           showGen(GEN_WARN + ' ' + err, true, false);
         })
-        .startGuideGen(appid);
+        .startGuideGen(appid, false, choice.value);
     };
 
     /**

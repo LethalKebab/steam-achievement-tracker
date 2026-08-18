@@ -67,8 +67,21 @@ function flagValue(name) {
   return i >= 0 ? argv[i + 1] : undefined;
 }
 
-/** 取值型 flag —— 它们后面那个参数是值,不是位置参数(见 positionalArgs) */
-const VALUE_FLAGS = new Set(['--rounds', '--file', '--model', '--provider', '--port']);
+/**
+ * 取值型 flag —— 它们后面那个参数是值,不是位置参数(见 positionalArgs)。
+ *
+ * **这张表要和 `flagValue()` 读的那一套一一对应**,`test/cli-hints.test.js` 钉住了这一点。
+ * 漏登记不会报错,只会让那个值被当成位置参数:`guide-gen --effort low 648800` 里
+ * appid 变成 `low`,而报出来的是「找不到这个游戏」之类跟 `--effort` 毫无关系的话。
+ *
+ * `--key` / `--id` / `--older-than` 是补登记的(2026-08-18):它们一直是取值型,
+ * 只是所在的命令(`init` / `drafts`)不收位置参数,所以没撞上过。留在表外等于
+ * 「哪天这两个命令加了位置参数就悄悄坏掉」,而那不是个该留着的赌注
+ */
+const VALUE_FLAGS = new Set([
+  '--rounds', '--file', '--model', '--provider', '--port', '--effort',
+  '--key', '--id', '--older-than',
+]);
 
 /**
  * 位置参数,排掉取值型 flag 的值。
@@ -82,7 +95,7 @@ function positionalArgs() {
 }
 
 /**
- * `--provider` / `--model` 覆盖配置。
+ * `--provider` / `--model` / `--effort` 覆盖配置。
  *
  * 有环境变量(AI_PROVIDER / AI_MODEL)还加 flag,是因为**环境变量的写法各 shell 不一样**:
  * `AI_MODEL=x node ...` 在 PowerShell 里直接报 CommandNotFound,得写成
@@ -99,6 +112,19 @@ function applyAiFlags(config) {
     if (!model) config.ai.model = '';
   }
   if (model) config.ai.model = model;
+
+  // **`--effort` 是"这一次要多深"的选择,所以它属于 flag,不属于设置。**
+  //
+  // 这根旋钮换的是**广度**:实测(见 docs/ai-guide-writing.md)`low` 比 `high` 快
+  // 八倍,而省下来的地方是那一大批中等难度成就的内容 —— 最难那几条两边都写得透。
+  // 于是"这游戏我只想要难点提示"和"这是我要长期留着的笔记"是两次不同的决定,
+  // 而不是一个该写进 config.json 的长期偏好。
+  //
+  // 不校验取值:各家的档位名不一样(Anthropic 还有 xhigh/max,DeepSeek 上没实测过),
+  // 写死一张白名单就会在供应商加档位的那天把合法值拒掉。填错的后果是供应商回一个
+  // 400,而 errorFromResponse 对这个字段留了专门的提示
+  const effort = flagValue('effort');
+  if (effort) config.ai.effort = effort;
   return config;
 }
 
@@ -1370,7 +1396,9 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
               ai-check --models           问 API 这个 key 能用哪些模型(gemini)
               --provider X --model Y      临时换供应商/模型,不改 config.json
-                                          (ai-check 和 guide-gen 都支持)
+              --effort low|medium|high    这一次查多深(默认 high)。low 快得多,省掉的是
+                                          那批中等难度成就的内容,最难那几条两边都写得透
+                                          (以上三个 ai-check 和 guide-gen 都支持)
   node tracker.js guide-gen <appid>       让 AI 写一份攻略(默认先问一句才开始)
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       重写已有的那份攻略(先备份原文,再告诉你会失去什么)

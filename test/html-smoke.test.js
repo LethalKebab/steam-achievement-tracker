@@ -599,3 +599,68 @@ describe('自托管字体', () => {
       + '打包版会没有字体 —— 而 npm start 一切正常,所以这个漏掉不会被发现');
   });
 });
+
+
+/**
+ * 推理强度那一格。**默认必须是高** —— 低档实测把 16 条里的 9 条写成套模板的句子
+ * (「第 III 章全体查证正确即解锁」),而那是攻略一半以上的条目。默认漂到低档不会
+ * 报任何错,只会让所有新攻略悄悄变薄。
+ */
+describe('确认框里的推理强度', () => {
+  const dash = read('Dashboard.html');
+  const markup = markupNoComments(dash);
+  const js = inlineScripts(dash).join('\n').replace(/\/\/[^\n]*/g, '');
+
+  // **把函数取出来真跑一遍,不要用正则查 `value: 'high'`。**
+  // 第一版就是那么写的,而它永远不会失败 —— 选项列表里本来就有一条
+  // `{ value: 'high', label: '高' }`,正则匹配到的是那一条,把默认值改成 low 照样绿。
+  // 变异测试抓到的。这个函数没有依赖,取出来执行是唯一说得准的办法
+  const effortChoice = (() => {
+    const at = js.indexOf('function effortChoice');
+    const end = js.indexOf('\n    }', at) + '\n    }'.length;
+    return new Function(js.slice(at, end) + '; return effortChoice;')();
+  })();
+
+  test('默认是高,而且三档齐全', () => {
+    assert.equal(effortChoice().value, 'high',
+      '低档会把一半以上的条目写成模板句 —— 默认漂过去不会报错,只会让攻略悄悄变薄');
+    assert.deepEqual(effortChoice().options.map((o) => o.value), ['low', 'medium', 'high'],
+      '顺序也是内容:从左到右是从省到深,反过来会让人按位置选错');
+    assert.equal(effortChoice().label, '推理强度');
+  });
+
+  test('选中态要报出来,而且两处都要写', () => {
+    // ui-ux-pro-max 把这条列为 Critical:紧凑控件要暴露 pressed/selected 状态。
+    // **只查"出现过"不行** —— 初次渲染和点击换选各写一处,删掉其中一处照样绿,
+    // 而那正好是「报了但从此不更新」的样子。变异测试抓到的
+    const at = js.indexOf('function askConfirm');
+    const body = js.slice(at, js.indexOf('\n    }', at));
+    const writes = (body.match(/aria-pressed/g) ?? []).length;
+    assert.ok(writes >= 2,
+      `askConfirm 里只写了 ${writes} 处 aria-pressed。初次渲染和点击换选都要写,`
+      + '少一处就是"报了但不更新",比不报更误导');
+  });
+
+  test('视图切换的每一个按钮都报选中态', () => {
+    // **逐个查,不是"有一个带就算过"** —— 漏掉的那个就是永远不报状态的那个
+    const btns = markup.match(/<button[^>]*data-view[^>]*>/g) ?? [];
+    assert.ok(btns.length >= 2, '视图切换的按钮找不到了');
+    for (const b of btns) {
+      assert.match(b, /aria-pressed/,
+        `这个按钮不报选中态:${b} —— 同一页两个分段控件,一个报一个不报比都不报更糟`);
+    }
+  });
+
+  test('选的那一档要真的跟着请求走', () => {
+    // 控件做出来、值没传下去 —— 界面上一切正常,而每次跑的还是默认档
+    assert.match(js, /startGuideGen\(appid, false, choice\.value\)/, '生成那一路');
+    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value\)/, '重写那一路');
+  });
+
+  test('确认框不再写死时长', () => {
+    // 同样输入实测 76/174/337 秒,而且推理强度可调之后低档快八倍 —— 任何写死的
+    // 区间都是在承诺一个给不出的东西。时长看进度条
+    const noBlockComments = js.replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.doesNotMatch(markup + noBlockComments, /约 \d[–-]\d 分钟/, '这句话在低档上会当场变错');
+  });
+});
