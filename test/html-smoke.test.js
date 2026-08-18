@@ -667,13 +667,39 @@ describe('确认框里的推理强度', () => {
     assert.match(js, /note: noteInput\.value/, '那句要求也要传下去,不然输入框是个摆设');
   });
 
-  test('中文输入法的 Enter 不能当成确认', () => {
-    // 这个框现在有一句话输入,而界面是中文的:打字时每选一次候选词都会按 Enter。
-    // 不挡的话,写「把互斥关系写清楚」的过程中会当场把这次要花钱、且不可逆的操作确认掉
+  test('Enter 不能绕过这个框里的三道闸', () => {
+    // 这个框现在有两个输入框(「怎么改」、挑选列表的筛选),而界面是中文的:
+    // 打字时每选一次候选词都会按 Enter。不挡的话,写「把互斥关系写清楚」的过程中
+    // 会当场把这次要花钱、且不可逆的操作确认掉。
+    //
+    // **断言钉意图,不钉写法** —— 上一版查的是字面的 `askInput`,而把
+    // `document.getElementById('askInput')` 换成一个局部变量就让它红了,
+    // 尽管那条规矩一个字没变
     const fn = js.slice(js.indexOf('function onKey'));
     const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
     assert.match(body, /isComposing/, '组词中的 Enter 要挡掉');
-    assert.match(body, /askInput/, '焦点还在输入框里的 Enter 也不该算确认');
+    assert.match(body, /e\.target ===/, '要按焦点在哪儿区分:人还在输入框里打字,不是在决定');
+    assert.match(body, /okBtn\.disabled/,
+      '确定按钮被闸住的时候 Enter 也要挡 —— 否则「挑几条却一条没勾」能靠回车绕过去');
+  });
+
+  test('挑几条却一条没勾时,确定按钮是闸住的', () => {
+    // 空选择发出去 = 一个选不中任何成就的请求,而它会在服务端才被拒。
+    // 闸门要放在按钮上:让人**看见**为什么点不了,而不是点下去再收一条错误
+    assert.match(js, /pickerShown\(\)\s*&&\s*o\.picker\.selected\.size === 0/,
+      '空选择必须让确定按钮不可点');
+    // 这个弹窗是复用的同一个 DOM,不无条件复位的话,下一个不带 picker 的框
+    // 会开出来就点不动,而且没有任何理由解释自己为什么点不动
+    const sync = js.slice(js.indexOf('function syncPicker'));
+    assert.match(sync.slice(0, sync.indexOf('\n        }')), /refreshOk\(\)/,
+      'refreshOk 要无条件跑,负责把上一次留下的 disabled 复位');
+  });
+
+  test('挑几条发出去的是 api_name 列表,不是成就名', () => {
+    // 同名成就按名字点不动(库里真有 12 组同名),用名字会让请求在服务端被判成
+    // unresolved —— 而界面上刚刚明明勾中了它
+    assert.match(js, /\[\.\.\.picker\.selected\]\.join\(','\)/,
+      '选中的是 api_name,直接逗号拼成显式列表交给 resolveScope');
   });
 
   test('确认框不再写死时长', () => {

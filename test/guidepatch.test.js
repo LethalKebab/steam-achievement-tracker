@@ -444,7 +444,7 @@ describe('选择器', () => {
     assert.deepEqual(resolveScope({ ...base, selector: 'section:主线' }).apiNames, ['A', 'B', 'C']);
   });
 
-  test('section: 在 Notion 上明确报错,不选空集', () => {
+  test('拿不到全文时 section: 明确报错,不选空集', () => {
     assert.throws(
       () => resolveScope({ ...base, text: null, selector: 'section:主线' }),
       (e) => e.code === 'section-needs-local'

@@ -1523,6 +1523,47 @@
     }
     .ask-input::placeholder { color: var(--text-3); }
     .ask-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    /* ---- 挑几条:按小节分组的成就清单 ---- */
+    #askPickWrap { margin-top: var(--s4); text-align: left; }
+    #askPickFilter { width: 100%; margin-bottom: var(--s2); }
+    /* **定高 + 自己滚。** 一份攻略动辄几十上百条,让它撑开对话框的话确定/取消会被
+       推到屏幕外 —— 而那是这个框里唯一能退出的两个按钮 */
+    #askPickList {
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+      background: var(--bg);
+padding: var(--s2);
+    }
+    .ask-pick-sec { margin-bottom: var(--s2); }
+    .ask-pick-sec:last-child { margin-bottom: 0; }
+    /* 小节标题本身是个按钮:点它 = 选中/取消整节。它必须看得出可点,
+       又不能和条目抢注意力 —— 所以用字重和字号拉开,而不是加个边框 */
+    .ask-pick-head {
+      display: flex; align-items: center; gap: var(--s2);
+      width: 100%; padding: 4px 6px; margin-bottom: 2px;
+      font: inherit; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em;
+      color: var(--text-2); background: none; border: 0; border-radius: var(--r-sm);
+      cursor: pointer; text-align: left;
+    }
+    .ask-pick-head:hover { background: var(--surface-2); color: var(--text); }
+    .ask-pick-head .n { margin-left: auto; font-weight: 400; color: var(--text-3); }
+    .ask-pick-item {
+      display: flex; align-items: center; gap: var(--s2);
+      padding: 4px 6px; border-radius: var(--r-sm);
+      font-size: var(--fs-sm); color: var(--text-2); cursor: pointer;
+    }
+    .ask-pick-item:hover { background: var(--surface-2); color: var(--text); }
+    .ask-pick-item input { accent-color: var(--accent); margin: 0; flex: 0 0 auto; }
+    .ask-pick-item .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 稀有度和解锁状态是**挑的时候最想知道的两件事**,所以跟着每一条走。
+       右对齐成一列,眼睛能顺着扫下来而不用在每行里找 */
+    .ask-pick-item .pct { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .ask-pick-item .pct.rare { color: var(--accent); }
+    .ask-pick-item .done { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--prog-done); }
+    .ask-pick-count { margin-top: var(--s2); font-size: var(--fs-xs); color: var(--text-3); }
     /* 次级按钮:**透明底 + 正常字色 + 描边**。
        原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
        态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
@@ -1897,6 +1938,14 @@
       <!-- 一句话的输入(局部重写的「怎么改」)。**标签是可见的、而且带 for** ——
            只靠 placeholder 当标签,一开始打字它就消失了,而这一格正是打完字之后
            最需要确认"这一栏是什么"的地方 -->
+      <!-- 挑几条:按小节分组的成就清单。**点小节标题 = 选中整节**,所以「选一个小节」
+           和「选几条成就」是同一个控件的两种用法 —— 界面上不需要为它们各开一个模式,
+           发出去的请求也永远是一串点名的成就,后端那条路本来就在 -->
+      <div id="askPickWrap" hidden>
+        <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="筛成就名…">
+        <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
+        <div id="askPickCount" class="ask-pick-count" aria-live="polite"></div>
+      </div>
       <div class="ask-choice" id="askInputWrap" hidden>
         <label for="askInput" id="askInputLabel"></label>
         <input type="text" id="askInput" class="ask-input" autocomplete="off">
@@ -3319,6 +3368,7 @@
               // 当前选中的那个范围对得上,慢一步就是在骗人
               paintBody();
               syncInput();
+              syncPicker();
             });
             group.appendChild(b);
           });
@@ -3345,7 +3395,140 @@
         } else {
           inputEl.oninput = null;
         }
+
+        /**
+         * 挑几条:按小节分组的清单,**点小节标题选中整节**。
+         *
+         * 选择写回 `o.picker.selected`(一个 Set),和 choices 一样 —— askConfirm
+         * 的返回值仍然是布尔,调用方从自己传进来的对象上取结果。
+         */
+        const pickWrap = document.getElementById('askPickWrap');
+        const pickList = document.getElementById('askPickList');
+        const pickFilter = document.getElementById('askPickFilter');
+        const pickCount = document.getElementById('askPickCount');
+
+        function pickerShown() {
+          if (!o.picker) return false;
+          const state = groups.reduce(function (acc, g) { acc[g.key] = g.value; return acc; }, {});
+          return typeof o.picker.when === 'function' ? o.picker.when(state) : true;
+        }
+
+        function paintPicker() {
+          if (!o.picker) return;
+          const q = (pickFilter.value || '').trim().toLowerCase();
+          const sel = o.picker.selected;
+          pickList.innerHTML = '';
+
+          o.picker.groups.forEach(function (g) {
+            const items = g.items.filter(function (it) {
+              return !q || it.name.toLowerCase().indexOf(q) >= 0;
+            });
+            if (!items.length) return;
+
+            const sec = document.createElement('div');
+            sec.className = 'ask-pick-sec';
+
+            const head = document.createElement('button');
+            head.type = 'button';
+            head.className = 'ask-pick-head';
+            const allOn = items.every(function (it) { return sel.has(it.apiName); });
+            head.innerHTML = '';
+            head.appendChild(document.createTextNode(g.heading || '未分节'));
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = items.filter(function (it) { return sel.has(it.apiName); }).length + '/' + items.length;
+            head.appendChild(n);
+            // 整节选中与否要**说出来**,不能只靠那个 n/m 数字 —— 读屏用户读不到布局。
+            //
+            // **不要在这儿挂 title。** 挂过一版「选中这一节」,结果无障碍树里这个按钮
+            // 的名字变成了那句提示,小节名整个消失 —— 而小节名才是它身上最重要的信息。
+            // 「点标题能整节选」这件事由正文那句话交代,不必再让每个标题重复一遍
+            head.setAttribute('aria-pressed', String(allOn));
+            head.addEventListener('click', function () {
+              items.forEach(function (it) {
+                if (allOn) sel.delete(it.apiName); else sel.add(it.apiName);
+              });
+              paintPicker();
+              paintBody();
+              refreshOk();
+            });
+            sec.appendChild(head);
+
+            items.forEach(function (it) {
+              const row = document.createElement('label');
+              row.className = 'ask-pick-item';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.checked = sel.has(it.apiName);
+              cb.addEventListener('change', function () {
+                if (cb.checked) sel.add(it.apiName); else sel.delete(it.apiName);
+                // 只重画这一节的计数和正文,不整列表重绘 —— 重绘会把滚动位置弹回顶上,
+                // 而人正一条条往下勾
+                n.textContent = items.filter(function (x) { return sel.has(x.apiName); }).length + '/' + items.length;
+                head.setAttribute('aria-pressed', String(items.every(function (x) { return sel.has(x.apiName); })));
+                paintBody();
+                refreshOk();
+              });
+              const nm = document.createElement('span');
+              nm.className = 'nm';
+              nm.textContent = it.name;
+              row.appendChild(cb);
+              row.appendChild(nm);
+              if (it.rarity !== null && it.rarity !== undefined) {
+                const pct = document.createElement('span');
+                // 和提示词、和「稀有」那个预设共用同一条线,不然界面上的「难」和
+                // 程序认的「难」是两回事
+                pct.className = 'pct' + (it.rarity < 15 ? ' rare' : '');
+                pct.textContent = it.rarity + '%';
+                row.appendChild(pct);
+              }
+              if (it.unlocked) {
+                const d = document.createElement('span');
+                d.className = 'done';
+                d.textContent = '已解锁';
+                row.appendChild(d);
+              }
+              sec.appendChild(row);
+            });
+
+            pickList.appendChild(sec);
+          });
+
+          if (!pickList.children.length) {
+            const empty = document.createElement('div');
+            empty.className = 'ask-pick-count';
+            empty.textContent = q ? '没有匹配的成就' : '这份攻略里没有能局部重写的条目';
+            pickList.appendChild(empty);
+          }
+          pickCount.textContent = '已选 ' + sel.size + ' 条';
+        }
+
+        /** 挑几条但一条没勾 = 没有可执行的请求。**闸门放在按钮上,不是放在错误提示里** */
+        function refreshOk() {
+          const blocked = pickerShown() && o.picker.selected.size === 0;
+          okBtn.disabled = blocked;
+          okBtn.style.opacity = blocked ? '0.45' : '';
+          okBtn.style.cursor = blocked ? 'default' : '';
+        }
+
+        function syncPicker() {
+          const show = pickerShown();
+          pickWrap.hidden = !show;
+          if (show) paintPicker();
+          // **无论有没有 picker 都要跑。** 这个弹窗是复用的同一个 DOM,上一次调用
+          // 可能把确定按钮设成了 disabled;不无条件复位的话,下一个不带 picker 的
+          // 框会开出来就点不动,而且它没有任何理由解释自己为什么点不动
+          refreshOk();
+        }
+        if (o.picker) {
+          pickFilter.value = '';
+          pickFilter.oninput = paintPicker;
+        } else {
+          pickFilter.oninput = null;
+        }
+
         syncInput();
+        syncPicker();
         paintBody();
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
@@ -3372,7 +3555,9 @@
             // 两道都要:`isComposing` 管输入法组词中的那次 Enter,而组词结束后
             // 焦点还在输入框里的 Enter 也不该算确认 —— 那时人还在写,不是在决定
             if (e.isComposing || e.keyCode === 229) return;
-            if (e.target === document.getElementById('askInput')) return;
+            // 框里的两个输入框(「怎么改」和挑选列表的筛选)都算"人还在写",不是在决定
+            if (e.target === inputEl || e.target === pickFilter) return;
+            if (okBtn.disabled) return; // 挑了「挑几条」却一条没勾,Enter 不能绕过这道闸
             close(true);
           }
         }
@@ -3604,7 +3789,12 @@
        * 没给解锁率)也一样灰,但 title 里写的是原因 —— 那两种灰的含义正相反。
        */
       const presets = (sc && !sc.error && sc.presets) ? sc.presets : [];
+      const pickGroups = (sc && !sc.error && sc.pickable) ? sc.pickable : [];
+      const pickable = pickGroups.reduce(function (n, g) { return n + g.items.length; }, 0);
       const byKey = presets.reduce(function (m, x) { m[x.key] = x; return m; }, {});
+      // 挑几条:一个控件同时解决「选一个小节」和「选几条成就」—— 点小节标题就是整节。
+      // 所以范围这一排不需要为 section 再开一档
+      const picker = { groups: pickGroups, selected: new Set(), when: function (s) { return s.scope === 'pick'; } };
       const scopeChoice = {
         key: 'scope',
         label: '范围',
@@ -3621,7 +3811,13 @@
             // 否则用户看到的是一个没有任何解释的灰按钮
             title: x.unavailable ? x.reason : '',
           };
-        })),
+        })).concat([{
+          value: 'pick',
+          label: '挑几条…',
+          // 一条都定位不到就没得挑。灰掉并说明,好过点开一个空列表
+          disabled: pickable === 0,
+          title: pickable === 0 ? '这份攻略里没有能局部重写的条目' : '按小节挑,或者逐条勾',
+        }]),
       };
       const rewriteChoice = effortChoice();
       // 一句要求。只在选了局部范围时露出来 —— 整篇重写用不到它,摆在那儿是一个
@@ -3653,6 +3849,13 @@
               // 早就是这么决定的,这里跟上
             ].filter(Boolean).join('\n');
           }
+          if (s.scope === 'pick') {
+            const n = picker.selected.size;
+            // 一条没勾时说"勾了才知道",而不是硬报一个 0 —— 这时候还没有可陈述的事实
+            return n
+              ? '只改选中的 ' + n + ' 条,其余 ' + (p.boxes - n) + ' 个 checkbox 一字不动。原文先备份。'
+              : '在下面勾要重写的成就。点小节标题可以整节选中。';
+          }
           const x = byKey[s.scope];
           if (!x) return '';
           return [
@@ -3667,6 +3870,7 @@
         danger: true,
         choices: [scopeChoice, rewriteChoice],
         input: noteInput,
+        picker: picker,
       });
       if (!ok) {
         btn.disabled = false;
@@ -3676,9 +3880,14 @@
 
       // 整篇走 overwrite,局部走 scope。**两个不同时传** —— 服务端按 scope 是否为空
       // 分流,同时给会让"到底跑了哪条"取决于服务端的判断顺序
+      // 「挑几条」发出去的是一串点名的 api_name —— 后端 resolveScope 的显式列表那条路,
+      // 不需要为界面新开一种选择器。用 api_name 而不是成就名:同名成就按名字点不动
       const scope = scopeChoice.value === 'all'
         ? null
-        : { selector: scopeChoice.value, note: noteInput.value.trim() || null };
+        : {
+          selector: scopeChoice.value === 'pick' ? [...picker.selected].join(',') : scopeChoice.value,
+          note: noteInput.value.trim() || null,
+        };
 
       rpc
         .withSuccessHandler(function (r) {

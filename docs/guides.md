@@ -118,13 +118,26 @@ The Dashboard offers the same thing: a game that already has a guide shows a **�
 next to its 📖 攻略 link. It asks the same question with the same information — what you are
 replacing, and which hand-ticked boxes will not survive — before anything is written.
 
-That dialog also carries the partial rewrite. The **范围** row offers 整篇 plus one button per
-preset, each showing how many entries it would change (`稀有 27`, `没写打法 8`, `未解锁 1`); the
-sentence underneath switches from what you lose to what stays (`只改 8 条,其余 43 个 checkbox
-一字不动`) as you pick. Choosing anything but 整篇 reveals a **怎么改** field — the same thing
-`--note` passes on the command line, and leaving it blank simply means "research these again and
-rewrite them". A preset showing `0` has nothing matching; one showing `—` could not be computed
-(hover it for the reason) — those are different states and are not merged.
+That dialog also carries the partial rewrite. The **范围** row offers 整篇, the computed presets
+with their counts (`稀有 <15% 27`, `未解锁 1`, `没过校验 0`), and **挑几条…**. Choosing anything
+but 整篇 reveals a **怎么改** field — the same thing `--note` passes on the command line, and
+leaving it blank simply means "research these again and rewrite them". The sentence above switches
+from what you lose to what stays (`只改 8 条,其余 43 个 checkbox 一字不动`) as you pick. A preset
+showing `0` has nothing matching; one showing `—` could not be computed (hover it for the reason) —
+those are different states and are not merged.
+
+**挑几条…** opens the guide's own achievements, grouped by the section headings they sit under,
+each row showing its global unlock rate and whether you have it. Clicking a **section heading
+selects that whole section**, so picking a section and picking individual entries are the same
+control — which is why the dialog has no separate `section:` option. There is a filter box, the
+confirm button stays disabled until something is selected, and what gets sent is a plain list of
+the selected achievements.
+
+**Section grouping works on Notion guides too.** `fetchAllToDoBlocks` only collects checkboxes,
+so it cannot see headings — but the dialog reads the page with `fetchAllBlocks`, which returns
+every block including headings. (`--only section:` on the command line is still local-only; it
+receives the markdown text rather than the blocks.) If the outline can't be read for any reason,
+the list falls back to a flat one rather than failing.
 
 #### Rewriting only part of a guide
 
@@ -144,9 +157,9 @@ node tracker.js guide-gen <appid> --only thin --dry-run
 |---|---|
 | `rare` / `rare:25` | Achievements below 15% global unlock rate (or the percentage you give). Same threshold the prompt uses to tell the model which entries deserve depth |
 | `thin` / `thin:80` | Entries whose advice — everything after the name and the official description — is under 40 characters. These are the ones where nothing was really written |
+| `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
 | `locked` / `unlocked` | By your real unlock state |
 | `failing` | Whatever the validator currently reports on this guide and a rewrite could fix |
-| `section:主线` | Everything under that heading. Local guides only — a Notion page exposes checkboxes, not section structure |
 | `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
 
 `--note "…"` is the instruction, passed to the model as written. Without it the entries are simply

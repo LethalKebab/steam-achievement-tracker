@@ -1691,8 +1691,9 @@ const CLI_HINTS = {
     '  Steam 这次没给出全球解锁率(限流或临时故障),等会儿再试,\n' +
     '  或者换个不依赖它的选择器:--only thin / --only locked。',
   'section-needs-local': () =>
-    '  Notion 上的攻略只读得到 checkbox,读不到小节结构。改用 --only thin / rare,\n' +
-    '  或者直接点名那一节里的成就。',
+    '  命令行这条路按小节挑需要本地攻略全文。\n' +
+    '  Notion 上的攻略要按小节挑,去 Dashboard 点 ♻ 重写 →「挑几条…」——\n' +
+    '  那边读的是整页的块,小节结构在(点小节标题就是整节选中)。',
   'bad-scope': () => '  选择器的写法:rare[:百分比] / thin[:字数] / locked / unlocked / failing / section:小节名。',
   // `--only` 后面什么都没跟。**和 bad-scope 分开**:那个是写错了,这个是没写 ——
   // 前者要纠正写法,后者要先知道有哪些写法可选
