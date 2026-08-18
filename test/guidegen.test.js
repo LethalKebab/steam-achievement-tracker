@@ -35,6 +35,7 @@ import {
   extractMarkdown,
   stripLeadingHeader,
   buildHeader,
+  joinBodies,
   guideFileName,
   buildAchievementList,
   buildSystemPrompt,
@@ -950,6 +951,43 @@ describe('分段撰写', () => {
     assert.match(buildChunkMessage(chunks, 2), /最后一段,写完就停/);
   });
 
+  /**
+   * 各段并发写之后模型看不见别段,于是相邻两段都属于「主线」时会各写一行 `## 主线`。
+   * 提示词那边说的是"标题照开,重了程序合",这里就是那句承诺的兑现处 ——
+   * 少了它,攻略里会出现一个空标题紧跟着同名标题,内容一条没少但读起来像分类断了。
+   */
+  describe('拼接时合掉跨段重复的小节标题', () => {
+    test('紧挨着的同名标题合成一个', () => {
+      const out = joinBodies(['## 主线\n\n- [ ] **A**', '## 主线\n\n- [ ] **B**']);
+      assert.equal(out.match(/## 主线/g).length, 1, '两段都开了「主线」,只该留一个标题');
+      assert.match(out, /\*\*A\*\*[\s\S]*\*\*B\*\*/, '条目一条都不能少,顺序也不能变');
+    });
+
+    test('中间隔了别的小节又转回来的,不合 —— 那是游戏自己的分类', () => {
+      const out = joinBodies(['## 主线\n- [ ] **A**', '## 支线\n- [ ] **B**', '## 主线\n- [ ] **C**']);
+      assert.equal(out.match(/## 主线/g).length, 2,
+        '只合紧挨着的。隔着别的小节又回来是合法结构,合掉等于把 C 塞进支线');
+    });
+
+    test('层级不同不合 —— `## 收集` 和 `### 收集` 是两个东西', () => {
+      const out = joinBodies(['## 收集\n- [ ] **A**', '### 收集\n- [ ] **B**']);
+      assert.match(out, /## 收集/);
+      assert.match(out, /### 收集/);
+    });
+
+    test('只在段首合。段中间出现的同名标题不动', () => {
+      const out = joinBodies(['## 主线\n- [ ] **A**', '- [ ] **B**\n\n## 主线\n- [ ] **C**']);
+      assert.equal(out.match(/## 主线/g).length, 2,
+        '第二段是以条目开头的,它里面那个标题是新开的一节,不是重复的开头');
+    });
+
+    test('空段和失败段(null)直接跳过,不留空行也不错位', () => {
+      assert.equal(joinBodies(['## A\n- [ ] **x**', null, '', '## B\n- [ ] **y**']),
+        '## A\n- [ ] **x**\n\n## B\n- [ ] **y**');
+      assert.equal(joinBodies([null, null]), '', '一段都没有就是空字符串,不是 "null"');
+    });
+  });
+
   test('chunksNeedingRewrite 按 apiName 把问题定位到具体那一段', () => {
     const chunks = chunkDefs(BIG, 2);
     const blocking = [{ code: 'missing-checkbox', apiName: 'E', message: 'x' }];
@@ -1334,7 +1372,159 @@ describe('分段撰写', () => {
             return true;
           }
         );
+      });
+
+      /**
+       * **「并发」不能只是个说法。** 段数没变、请求数没变、攻略也一模一样,所以把
+       * runPool 换回 for 循环,整套测试原本一条都不会红 —— 唯一的差别是墙上时间,
+       * 而那正是这次改动的**全部**目的。所以这一条直接量重叠:让每段的请求挂住,
+       * 数同时在飞的有几个。
+       */
+      test('第一轮各段真的同时在飞,不是排队', async () => {
+        const { db, config } = lotsEnv();
+        config.ai.concurrency = 3;
+        let inFlight = 0;
+        let peak = 0;
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) }, { text: seg(quarter(1)) },
+          { text: seg(quarter(2)) }, { text: seg(quarter(3)) },
+        ]);
+        const inner = provider.send.bind(provider);
+        provider.send = async (args) => {
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          // 挂一拍再往下走 —— 排队的话这一拍里不会有第二段进来,峰值就停在 1
+          await new Promise((r) => setTimeout(r, 0));
+          inFlight--;
+          return inner(args);
+        };
+        await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
+        assert.equal(peak, 3, `同时在飞的峰值是 ${peak},说明还在一段一段排队`);
+      });
+
+      test('concurrency: 1 退回顺序 —— 排查问题时要有这条退路', async () => {
+        const { db, config } = lotsEnv();
+        config.ai.concurrency = 1;
+        let inFlight = 0;
+        let peak = 0;
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) }, { text: seg(quarter(1)) },
+          { text: seg(quarter(2)) }, { text: seg(quarter(3)) },
+        ]);
+        const inner = provider.send.bind(provider);
+        provider.send = async (args) => {
+          inFlight++;
+          peak = Math.max(peak, inFlight);
+          await new Promise((r) => setTimeout(r, 0));
+          inFlight--;
+          return inner(args);
+        };
+        await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
+        assert.equal(peak, 1);
+      });
+
+      test('顺序跑时,整体故障之后一个请求都不再发', async () => {
+        // `concurrency: 1` 就是原来的顺序行为,这一条把它原样钉住:撞墙即停,不多问一次
+        const { db, config } = lotsEnv();
+        config.ai.concurrency = 1;
+        const boom = Object.assign(new Error('deepseek API HTTP 401:key 不对'), { code: 'bad-api-key' });
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { throws: boom },
+        ]);
+        await assert.rejects(() =>
+          generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }));
         assert.equal(provider.asked.length, 3, '整体故障不该再去问第 4 段 —— 那是同一堵墙');
+      });
+
+      test('并发跑时,撞墙之后停止派新活 —— 多撞的次数由并发数封顶,不随段数涨', async () => {
+        // **并发下"当场停"做不到:请求已经发出去了,取消不了。** 能做到的是不再往下派,
+        // 于是最坏多撞 concurrency-1 次,而不是每剩一段撞一次 —— 这就是它的全部价值。
+        //
+        // **这一条的形状是被变异测试逼出来的。** 第一版用 8 段 + 并发 2、脚本只给两条,
+        // 于是每条泳道都是被自己那次错误停下的("脚本用完了"),`stop` 拿掉照样绿。
+        // 要让 `stop` 成为唯一能解释结果的东西,得让**不出错的泳道有活可接**:
+        // 8 段、并发 3、只有第 2 段炸,其余六段的成功回复都备好。
+        //   有 stop:派出 0/1/2,第 1 段炸 ⇒ 0 和 2 跑完就收工,一共 3 次
+        //   没 stop:0 完了接 3、2 完了接 4 …… 一路问到 8 次
+        const e = freshEnv({ defs: LOTS });
+        e.config.ai = { maxAchievements: 500, chunkSize: 3, concurrency: 3 }; // 24 / 3 = 8 段
+        const boom = Object.assign(new Error('HTTP 401'), { code: 'bad-api-key' });
+        const third = (n) => LOTS.slice(n * 3, n * 3 + 3);
+        const provider = scriptedProvider([
+          { text: seg(third(0)) },
+          { throws: boom },
+          ...Array.from({ length: 6 }, (_, k) => ({ text: seg(third(k + 2)) })),
+        ]);
+        await assert.rejects(
+          () => generateGuide(e.db, { db: e.db, config: e.config, provider, steam: lotsSteam(), appid: '1' }),
+          (err) => {
+            assert.equal(err.code, 'bad-api-key',
+              '**抛的必须是段号最小的那个错**。401 会让在飞的请求一起失败,'
+              + '而它们谁先 reject 取决于网络快慢 —— 取"最先炸的"会让同一个输入两次跑报出不同的原因');
+            return true;
+          }
+        );
+        assert.ok(provider.asked.length <= 4,
+          `问了 ${provider.asked.length} 次(8 段)。撞墙后还在派新活,`
+          + '等于每剩一段再撞一次同一堵墙 —— 而那正是顺序版当场抛出去要省掉的东西');
+      });
+
+      test('两段一起炸时,报的是段号小的那个,不是先炸的那个', async () => {
+        // **这一条是变异测试逼出来的:只有一段失败时,排序和不排序结果一样。**
+        // 真实场景是 401 —— 在飞的请求会一起失败,而谁先 reject 只取决于网络快慢。
+        // 取"最先炸的"意味着同一个输入两次跑能报出不同的原因,排查时先怀疑的方向就不一样。
+        // 所以这里故意让**段号小的那个慢一点炸**:不排序的话它一定选不中。
+        const { db, config } = lotsEnv();
+        config.ai.concurrency = 3;
+        const early = Object.assign(new Error('第 2 段先炸'), { code: 'later-shard' });
+        const late = Object.assign(new Error('第 1 段后炸'), { code: 'first-shard' });
+        const provider = {
+          model: 'x', asked: [], webTools: () => [],
+          async send({ messages }) {
+            const msg = messages.at(-1).content;
+            this.asked.push(msg);
+            const from = Number(msg.match(/第 (\d+)–/)?.[1] ?? 0);
+            if (from === 1) { await new Promise((r) => setTimeout(r, 30)); throw late; }
+            if (from === 7) throw early;
+            const text = seg(quarter((from - 1) / 6));
+            return {
+              content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
+              usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
+              model: 'x', continuations: 0, toolErrors: [], searchQueries: [],
+            };
+          },
+        };
+        await assert.rejects(
+          () => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }),
+          (err) => {
+            assert.equal(err.code, 'first-shard',
+              '第 2 段先 reject,但要报的是第 1 段那个 —— 否则同一个输入两次跑报出不同的原因');
+            return true;
+          }
+        );
+      });
+
+      test('重写失败时,保住上一轮已经写好的那一段', async () => {
+        // 重写轮里那一格装的是上一轮的正文。**改不动不等于该丢掉** ——
+        // 抹成空的话,一次"这轮没改好"就把原来能用的那份也带走了,
+        // 而用户看到的是那一段凭空消失,不是"这一段没改好"
+        const { db, config } = lotsEnv();
+        const provider = scriptedProvider([
+          { text: seg(quarter(0)) },
+          { text: seg(quarter(1)) },
+          { text: seg(quarter(2)) },
+          // 第 4 段少写一个成就 ⇒ 校验不过 ⇒ 第二轮定点重写它
+          { text: seg(quarter(3).slice(0, 5)) },
+          { text: '', stop: 'refusal' },   // 第 2 轮:重写失败
+          { text: '', stop: 'refusal' },   // 第 3 轮:还是失败
+        ]);
+        const r = await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
+        const draft = readFileSync(r.draftPath, 'utf8');
+        assert.match(draft, new RegExp(quarter(3)[0].name_cn),
+          '第 4 段第一轮写出来的内容必须还在 —— 重写没成功,不代表要把它删掉');
+        assert.match(draft, new RegExp(quarter(0)[0].name_cn), '别的段更不该受影响');
       });
 
       test('整体故障抛出去时,已经写好的几段仍然留在草稿里', async () => {
