@@ -115,15 +115,19 @@ sub-steps match no achievement, so those come back unticked. If the backup fails
 is written. Add `--dry-run` to see all of that and stop there.
 
 The Dashboard offers the same thing: a game that already has a guide shows a **♻ 重写** button
-next to its 📖 攻略 link. It asks the same question with the same information — what you are
-replacing, and which hand-ticked boxes will not survive — before anything is written.
+next to its 📖 攻略 link, and it runs the same preflight before anything is written.
 
 That dialog also carries the partial rewrite, and its **范围** row is a plain either/or: **整篇**
-or **自选**. Choosing 自选 reveals a **怎么改** field — the same thing `--note` passes on the command
-line, where blank simply means "research these again and rewrite them". Neither mode narrates its
-own state: 自选 shows a count under the list and says nothing above it, and 整篇 says nothing either
-**except the one thing you cannot get back** — how many hand-ticked sub-step boxes will revert. The
-dialog holds one width throughout, so nothing shifts under the cursor as you tick.
+(the default) or **自选**. Choosing 自选 reveals a **重写要求** field — the same thing `--note` passes
+on the command line, where blank simply means "research these again and rewrite them". The dialog
+holds one width throughout, so nothing shifts under the cursor as you tick.
+
+**It has no body text at all.** Scope, count and instruction are each written on the control that
+carries them, and every sentence that was once above them turned out to be a restatement of
+something already on screen — including the loss note, which "rewrite" already implies and the
+backup already covers. That note is still printed in full on the command line: `--overwrite`
+writes for someone who typed a flag and can afford the detail, a dialog cannot, and one wording
+forced to serve both is wrong in both places.
 
 The computed sets (`全选`, `未解锁`, `稀有`) are **shortcuts inside the picker**, not scopes of their
 own: clicking one *ticks* those entries, so you can see exactly which they are and then add or drop
@@ -160,7 +164,7 @@ blocks, tables, and any passage you edited by hand.
 ```bash
 node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
 node tracker.js guide-gen <appid> --only "第三步,收集狂" --note "改成表格"
-node tracker.js guide-gen <appid> --only thin --dry-run
+node tracker.js guide-gen <appid> --only locked --dry-run
 ```
 
 `--only` takes one of these:

@@ -286,6 +286,9 @@ describe('差异预览 —— 说清楚会失去什么', () => {
   });
 
   test('手动勾上的子步骤框被点名 —— 这是覆盖唯一真正丢掉的用户数据', () => {
+    // **命令行现在是唯一说这件事的地方。** Dashboard 那个确认框的正文已经删光了
+    // (界面上要短,而且"重写"两个字本身就含这个意思,备份也还在)。这里再删,
+    // 就没有任何一处提过它了 —— 而它确实是覆盖唯一拿不回来的用户数据
     const p = overwritePreflight({ oldTodos, defs: DEFS, oldText: GUIDE });
     assert.equal(p.atRiskTicks.length, 1);
     assert.match(formatPreflight(p), /手动勾上的子步骤框会变回未勾选/);

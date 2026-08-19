@@ -2058,7 +2058,7 @@
            每组一行,由 askConfirm 动态生成:重写那个框要问两件事(范围、推理强度),
            生成那个只问一件 —— 组数写死在 markup 里就得为多的那个留一格空的 -->
       <div id="askChoices"></div>
-      <!-- 一句话的输入(局部重写的「怎么改」)。**标签是可见的、而且带 for** ——
+      <!-- 一句话的输入(局部重写的「重写要求」)。**标签是可见的、而且带 for** ——
            只靠 placeholder 当标签,一开始打字它就消失了,而这一格正是打完字之后
            最需要确认"这一栏是什么"的地方 -->
       <!-- 自选:按小节分组的成就清单。**点小节标题 = 选中整节**,所以「选一个小节」
@@ -2066,8 +2066,9 @@
            发出去的请求也永远是一串点名的成就,后端那条路本来就在 -->
       <div id="askPickWrap" hidden>
         <!-- 快捷选择:把符合条件的那批**勾上**,而不是变成一个看不见的集合直接拿去跑。
-             再点一次就取消这一批 —— 和小节标题上那个方框同一个行为,因为它们本来就是
-             同一件事的两个轴:小节按位置分组,这几个按属性分组 -->
+             **只加不减,而且不报按下状态** —— 曾经是可以再点一次取消的开关,那会让
+             「稀有」在没人按过它的时候自己亮起来(它那批恰好全被别的按钮选进去了),
+             取消一下又连带熄灭另一个。回头路是旁边的「清空」。理由见 js 里那段长注释 -->
         <div id="askPickQuick" role="group" aria-label="快捷选择"></div>
         <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就">
         <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
@@ -3442,9 +3443,14 @@
         const okBtn = document.getElementById('askOkBtn');
         const cancelBtn = document.getElementById('askCancelBtn');
         document.getElementById('askTitle').textContent = o.title;
-        // 正文由下面的 paintBody() 写(它还要处理"跟着选择变"的那种)。
-        // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的
+        // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的。
+        //
+        // **正文是一句固定的话,不会跟着选择变。** 这里曾经收一个函数,按当前选中的
+        // 范围现算一句 —— 那是为重写那个框做的,而重写框的正文最后一句也删了
+        // (见下面调用点)。没有调用方的机制会漂,所以跟着一起删
         const bodyEl = document.getElementById('askBody');
+        bodyEl.textContent = o.body || '';
+        bodyEl.style.display = o.body ? '' : 'none';
         okBtn.textContent = o.okText || '确认';
 
         // **返回值还是布尔。** 选择写回调用方自己传进来的 `o.choices[i].value`,
@@ -3457,15 +3463,6 @@
         const choicesWrap = document.getElementById('askChoices');
         choicesWrap.innerHTML = '';
         const groups = o.choices || [];
-
-        /** 正文可以是一句话,也可以是一个"跟着选择变"的函数 —— 数字要当场对得上 */
-        function paintBody() {
-          const text = typeof o.body === 'function'
-            ? o.body(groups.reduce(function (acc, g) { acc[g.key] = g.value; return acc; }, {}))
-            : (o.body || '');
-          bodyEl.textContent = text;
-          bodyEl.style.display = text ? '' : 'none';
-        }
 
         groups.forEach(function (g) {
           const row = document.createElement('div');
@@ -3501,9 +3498,6 @@
                 c.classList.toggle('on', c === b);
                 c.setAttribute('aria-pressed', String(c === b));
               });
-              // 选完立刻重画正文和依赖它的控件 —— 「只改 5 条」这种数字必须和
-              // 当前选中的那个范围对得上,慢一步就是在骗人
-              paintBody();
               syncInput();
               syncPicker();
             });
@@ -3579,7 +3573,6 @@
             b.addEventListener('click', function () {
               hits.forEach(function (it) { sel.add(it.apiName); });
               paintPicker();
-              paintBody();
               refreshOk();
             });
             pickQuick.appendChild(b);
@@ -3632,7 +3625,6 @@
                 if (allOn) sel.delete(it.apiName); else sel.add(it.apiName);
               });
               paintPicker();
-              paintBody();
               refreshOk();
             });
 
@@ -3687,7 +3679,6 @@
                   (on === items.length ? '取消选中「' : '全选「') + secName + '」这一节');
                 box.className = 'ask-pick-box' + (on === items.length ? ' on' : on ? ' some' : '');
                 paintCount();
-                paintBody();
                 refreshOk();
               });
               const label = document.createElement('span');
@@ -3763,7 +3754,6 @@
           pickClear.onclick = function () {
             o.picker.selected.clear();
             paintPicker();
-            paintBody();
             refreshOk();
           };
         } else {
@@ -3773,7 +3763,6 @@
 
         syncInput();
         syncPicker();
-        paintBody();
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
 
@@ -4004,9 +3993,14 @@
       btn.disabled = true;
       showGen('⏳ 检查《' + name + '》…', false, true);
 
-      // **两次预检一起拿。** 「整篇会失去什么」和「每个范围各改几条」是同一个决定
-      // 的两半,分两次往返的话,那一排范围按钮会比对话框晚出来 —— 一个先画出来
-      // 再自己长出五个按钮的框,看着像是刚才点漏了
+      // **两次预检一起拿,而且两次的失败不是一回事。**
+      //
+      // `previewGuideRewrite` 是**闸门**:它跑的是整篇重写真正会跑的那份 plan,
+      // 跑不通就别把框打开(默认落在整篇)。`previewGuidePatch` 只是把可选的条目
+      // 拿回来,它失败只让「自选」变灰,整篇照走 —— 所以 `p.error` 拦,`sc.error` 不拦。
+      //
+      // 并行是因为串行的话那份挑选列表会比对话框晚出来:一个先画出来、再自己
+      // 长出一列成就的框,看着像是刚才点漏了
       const [p, sc] = await Promise.all([
         new Promise((resolve) => {
           rpc.withSuccessHandler(resolve)
@@ -4128,41 +4122,23 @@
 
       const ok = await askConfirm({
         title: '重写《' + name + '》的攻略?',
-        // **正文跟着范围变。** 整篇讲「你会失去什么」,局部讲「什么会留下」——
-        // 这两句话不是同一句话的两种说法,而这个框要能同时是两个框
-        body: function (s) {
-          if (s.scope === 'all') {
-            /**
-             * **整篇这一支只留"会失去什么",别的都删了。**
-             *
-             * 删掉的是「现有 51 个 checkbox 会被整份替换」——「整篇」两个字已经说了
-             * 全部替换,那 51 只是把它数了一遍;跟自选那边的「只改选中的 27 条」
-             * 是同一种复述。
-             *
-             * **留下的这一句不是旁白,是这个框存在的理由。** 手动勾上的子步骤框是
-             * 整篇重写唯一真正不可挽回的损失(成就框会被机械打勾按数据库勾回原样,
-             * 子步骤匹配不到任何成就,重新生成后一律变回未勾选)。它推不出来、
-             * 别处也没写,而人是在这一屏决定要不要付这个代价的。没有损失时这里
-             * 就是空的 —— 没有可陈述的事实就不说话。
-             *
-             * 「原文先备份」跟着一起删了:它是我们这边的保底措施,不是他要决定的事,
-             * 和 CLI 那边"备份失败就不写"不印出来是同一条理由。
-             *
-             * (更早还有一句「约 2–4 分钟」,也删了:同样的输入实测跑三次是
-             * 76/174/337 秒,给区间是在承诺一个我们给不出的东西,而且推理强度可调之后
-             * 低档快八倍,那句话会当场变成错的。时长看进度条。)
-             */
-            return p.atRisk
-              ? p.atRisk + ' 个手动勾的子步骤会变回未勾选 —— 这是整篇重写唯一拿不回来的东西。'
-              : '';
-          }
-          // **自选这一支不写正文。**
-          //
-          // 「只改选中的 27 条」是在复述列表底下那行「已选 27 条」,而「其余 24 个
-          // 一字不动」正是"自选"这两个字本身的意思 —— 一句话把屏幕上已有的两样
-          // 东西各说了一遍。状态自己在那儿摆着,不需要旁白。
-          return '';
-        },
+        /**
+         * **这个框没有正文。** 四轮删下来一句不剩,每一句都是在复述屏幕上已有的东西:
+         *
+         *   「约 2–4 分钟」                      同样的输入实测 76/174/337 秒,
+         *                                        推理强度可调之后低档快八倍,写死就是错的
+         *   「现有 51 个 checkbox 会被整份替换」  「整篇」已经说了全部替换,51 只是数了一遍
+         *   「只改选中的 27 条」                  列表底下那行「已选 27 条」就在旁边摆着
+         *   「原文先备份」                        我们这边的保底措施,不是他要决定的事
+         *   「N 个手动勾的子步骤会变回未勾选」    「重写」本身就含这个意思,何况备份还在
+         *
+         * 标题问的是要不要重写,范围、条数、要求三样都写在下面的控件上 —— 状态自己
+         * 摆在那儿,不需要旁白。
+         *
+         * **CLI 那边不跟着删:** `formatPreflight` 照旧把要丢的手动勾选逐条
+         * 印出来。命令行是给敲了 flag 的人看的,可以详细;界面上要短。同一份措辞
+         * 硬凑给两边用,两边都不合适 —— 和 `previewGuideRewrite` 交数字不交句子同理。
+         */
         okText: '重写',
         danger: true,
         choices: [scopeChoice, rewriteChoice],
