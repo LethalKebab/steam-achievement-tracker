@@ -179,7 +179,7 @@ node tracker.js guide-gen <appid> --only locked --dry-run
 
 | Selector | Picks |
 |---|---|
-| `rare` / `rare:25` | Achievements below 15% global unlock rate (or the percentage you give). Same threshold the prompt uses to tell the model which entries deserve depth |
+| `rare` / `rare:25` | Achievements below 10% global unlock rate (or the percentage you give). Not merely the same number as the prompt's 🟠 tier — `rarityTag` imports the constant, so the entries the prompt calls 偏难 and the entries `rare` picks cannot drift apart |
 | `locked` | Ones you haven't earned yet |
 | `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
 | `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |

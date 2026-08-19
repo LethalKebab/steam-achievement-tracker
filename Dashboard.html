@@ -3486,7 +3486,7 @@
             b.setAttribute('aria-pressed', String(opt.value === g.value));
             // **title 和 disabled 是两件事,别绑在一起。** 早先这行写在
             // `if (opt.disabled)` 里面,因为那时 title 只用来解释"为什么灰着";
-            // 后来「稀有成就」把判据(全球解锁率 <15%)放进 title,而它是个
+            // 后来「稀有成就」把判据(全球解锁率 <10%)放进 title,而它是个
             // **能点的**按钮 —— 于是提示一个字都不出现,而按钮看上去完全正常。
             // 选不了的仍然要能说出为什么:一个写着「稀有 0」的灰按钮,和一个因为
             // Steam 没答话而算不出来的灰按钮,长得一样、含义相反
@@ -3688,9 +3688,10 @@
               row.appendChild(label);
               if (it.rarity !== null && it.rarity !== undefined) {
                 const pct = document.createElement('span');
-                // 阈值由服务端下发,前端不自己写一个 15 —— 界面上的「难」和程序认的
-                // 「难」必须是同一条线
-                pct.className = 'pct' + (it.rarity < (o.picker.rarePct || 15) ? ' rare' : '');
+                // 阈值由服务端下发,前端不自己定一个 —— 界面上的「难」和程序认的
+                // 「难」必须是同一条线。后面那个 10 只是服务端没下发时的兜底,
+                // 和 RARE_PCT 相等由测试钉住
+                pct.className = 'pct' + (it.rarity < (o.picker.rarePct || 10) ? ' rare' : '');
                 pct.textContent = it.rarity + '%';
                 row.appendChild(pct);
               }
@@ -4029,9 +4030,9 @@
       const pickGroups = (sc && !sc.error && sc.pickable) ? sc.pickable : [];
       const pickable = pickGroups.reduce(function (n, g) { return n + g.items.length; }, 0);
       const allItems = pickGroups.reduce(function (a, g) { return a.concat(g.items); }, []);
-      // 阈值由服务端下发(见 previewGuidePatch 的 rarePct),前端不自己写一个 15 ——
+      // 阈值由服务端下发(见 previewGuidePatch 的 rarePct),前端不自己定一个 ——
       // 「稀有」选谁、百分比什么时候标成强调色,和提示词判断哪几条要写深必须同一条线
-      const rarePct = (sc && sc.rarePct) || 15;
+      const rarePct = (sc && sc.rarePct) || 10;
 
       /**
        * 列表上方那几个快捷选择。**它们是一次性的动作,不是开关。**
