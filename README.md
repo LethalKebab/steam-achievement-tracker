@@ -85,7 +85,7 @@ node tracker.js guide-gen <appid> --only locked --dry-run   # see what it picked
 node tracker.js guide-gen <appid> --only "成就名A,成就名B"
 ```
 
-`--only` takes `rare` (below 15% global unlock rate), `locked` (ones you haven't earned yet), `section:<heading>`, or a comma-separated list of achievement names. **Run it with `--dry-run` first** — that prints the entries it selected and the exact request, without sending anything. The Dashboard offers the same thing on the ♻ 重写 dialog, plus a per-achievement picker; the two surfaces deliberately offer the same set. Full reference: [docs/guides.md](docs/guides.md#having-one-written-for-you).
+`--only` takes `rare` (below 10% global unlock rate), `locked` (ones you haven't earned yet), `section:<heading>`, or a comma-separated list of achievement names. **Run it with `--dry-run` first** — that prints the entries it selected and the exact request, without sending anything. The Dashboard offers the same thing on the ♻ 重写 dialog, plus a per-achievement picker; the two surfaces deliberately offer the same set. Full reference: [docs/guides.md](docs/guides.md#having-one-written-for-you).
 
 ## Everyday use
 

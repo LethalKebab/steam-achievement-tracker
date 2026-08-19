@@ -711,26 +711,44 @@ describe('确认框里的推理强度', () => {
       '选中的是 api_name,直接逗号拼成显式列表交给 resolveScope');
   });
 
-  test('快捷选择是一次性的动作,不是开关', () => {
+  test('筛选片只改显示,一个字都不碰选择', () => {
     /**
-     * **它们曾经是开关,而那会让按一个键点亮另一个。**
+     * **这是这一格的核心不变式,也是它前两版各自的死因。**
      *
-     * 亮起来的含义是"这一批已经全在选择里" —— 一个推导出来的事实,用户却读成
-     * "我按过这个键"。属性之间是相交的(那唯一一条未解锁的成就恰好也稀有),
-     * 于是点「稀有」会让「未解锁」跟着亮,再点它又会把「稀有」弄暗。
+     * 一版是"批量选中"开关:亮起来表示"这一批已经全在选择里" —— 一个推导出来的
+     * 事实,用户却读成"我按过这个键"。属性之间相交(那唯一一条未解锁的成就恰好也
+     * 稀有),于是点「稀有」会让「未解锁」跟着亮,再点它又把「稀有」弄暗。
      *
-     * 现在只加不减、不带状态。**钉住"没有减"这一半** —— 只钉 add 的话,
-     * 把 delete 加回来不会让任何测试变红。
+     * 二版改成"一次性加进选择、不带状态":连锁没了,但只会做并集 ——「既稀有又
+     * 没打的」表达不出来,只能选完 22 条再一条条取消。
+     *
+     * 现在是筛选。**只要它不碰 selected,按下态就重新是诚实的**(它表示"我按下了
+     * 这个筛选"),交集也白捡:两片都按下就是且。所以这里钉的不是某个写法,是
+     * 那条边界 —— 处理函数里一旦出现 sel,一版的连锁就有路回来了。
      */
-    const fn = js.slice(js.indexOf('function paintQuick'));
+    const fn = js.slice(js.indexOf('function paintFilters'));
     const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
-    assert.match(body, /sel\.add\(it\.apiName\)/, '点一下把这一批加进选择');
-    assert.doesNotMatch(body, /sel\.delete/,
-      '快捷键不减 —— 减会让"按一个键、暗另一个"那条连锁回来');
-    assert.doesNotMatch(body, /aria-pressed/, '它们不是开关,不该报按下状态');
-    // 只加的话必须有一条回头路,否则选错了只能一条条取消
+    assert.match(body, /active\.(add|delete)/, '点一下切换的是筛选状态');
+    // `sel` 和 `selected` 都要挡。第一版只写了 `\bsel\b`,而变异验证里最自然的那种
+    // 破坏方式(`o.picker.selected.add(...)`)从它底下走过去了 —— `\b` 在 "selected"
+    // 的 sel 后面不成立。**只钉住局部变量名等于只钉住一种写法**
+    assert.doesNotMatch(body, /\bsel(ected)?\b/, '筛选不许碰选择 —— 碰了就又变回"批量选中"');
+    assert.match(body, /aria-pressed/, '它现在真的是开关(筛选的开关),要报按下状态');
+
+    // 收下这批是另一个按钮的事,而它收的必须是**显示出来的**那批
+    assert.match(js, /pickAll\.onclick/, '要有「全选」');
+    assert.match(js, /shownItems\(\)\.forEach/, '全选收的是显示出来的那批');
     assert.match(js, /pickClear\.onclick/, '要有「清空」');
     assert.match(js, /o\.picker\.selected\.clear\(\)/, '清空要真的清');
+  });
+
+  test('列表画谁和全选收谁,判据只有一处', () => {
+    // 两处各写一遍筛选条件,「全选」就会悄悄收下屏幕上没有的东西 —— 而下一步
+    // 是花钱且不可逆的。所以 shownFilter() 是唯一的判据,列表和 shownItems 都用它
+    assert.equal((js.match(/function shownFilter\(\)/g) ?? []).length, 1);
+    assert.match(js, /const ok = shownFilter\(\);/, '列表用它');
+    assert.match(js, /return pickerItems\(\)\.filter\(shownFilter\(\)\);/, '全选那批也用它');
+    assert.match(js, /g\.items\.filter\(ok\)/, '每个小节按同一个判据过滤');
   });
 
   test('勾一个条目要更新「已选 N 条」', () => {

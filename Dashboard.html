@@ -1549,9 +1549,14 @@
       background: var(--surface-2); border: 1px solid transparent; cursor: pointer;
     }
     .ask-pick-quick:hover { color: var(--text); border-color: var(--line-2); }
-    /* **没有选中态,因为它们不是开关。** 曾经有一个 `.on`,亮起来表示"这一批已经
-       全在选择里" —— 那是推导出来的事实,而用户读成"我按过这个键",于是按一个键
-       会让另一个亮/暗(属性之间相交,见 JS 里那段)。它们现在是一次性的动作 */
+    /* **按下态回来了,但含义换了。** 早先它表示"这一批已经全在选择里" —— 那是
+       推导出来的事实,而用户读成"我按过这个键",于是按一个键会让另一个亮/暗。
+       现在它表示的就是"我按下了这个筛选",一个只由点击改变的状态。
+       视觉沿用这个框里其他按下态(.view-toggle button.on),不另造一种亮法 */
+    .ask-pick-quick.on {
+      color: var(--text-hi); background: var(--surface-3);
+      border-color: var(--accent); box-shadow: var(--sh-1);
+    }
     .ask-pick-quick .n { font-variant-numeric: tabular-nums; opacity: .75; }
     .ask-pick-quick:disabled { opacity: .35; cursor: default; }
     .ask-pick-quick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -1679,8 +1684,11 @@
     .ask-pick-count { font-size: var(--fs-xs); color: var(--text-3); }
     /* 「清空」是这一格里唯一带损失的动作,但损失很轻(重选一次而已),所以做成
        一个安静的文字按钮 —— 找得到,但不抢 */
+    /* 两个动作装在一个盒子里,由盒子靠右 —— 各自带 margin-left:auto 的话
+       flex 会把剩余空间平分给它俩,于是「全选」和「清空」被拆到两头 */
+    .ask-pick-acts { margin-left: auto; display: flex; gap: 2px; }
     .ask-pick-clear {
-      margin-left: auto; padding: 2px 6px;
+      padding: 2px 6px;
       font: inherit; font-size: var(--fs-xs); color: var(--text-3);
       background: none; border: 0; border-radius: var(--r-sm); cursor: pointer;
     }
@@ -2065,17 +2073,21 @@
            和「选几条成就」是同一个控件的两种用法 —— 界面上不需要为它们各开一个模式,
            发出去的请求也永远是一串点名的成就,后端那条路本来就在 -->
       <div id="askPickWrap" hidden>
-        <!-- 快捷选择:把符合条件的那批**勾上**,而不是变成一个看不见的集合直接拿去跑。
-             **只加不减,而且不报按下状态** —— 曾经是可以再点一次取消的开关,那会让
-             「稀有」在没人按过它的时候自己亮起来(它那批恰好全被别的按钮选进去了),
-             取消一下又连带熄灭另一个。回头路是旁边的「清空」。理由见 js 里那段长注释 -->
-        <div id="askPickQuick" role="group" aria-label="快捷选择"></div>
+        <!-- 属性筛选。按下 = 列表只显示这一批,两片都按下 = **且**。
+             **它们只改"显示什么",一个字都不碰选择** —— 这是这一格改过两轮才落到的形状,
+             理由见 js 里那段长注释 -->
+        <div id="askPickQuick" role="group" aria-label="筛选"></div>
         <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就">
         <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
-        <!-- 计数和「清空」挨在一起:清空作用的正是旁边那个数,放在一处不用解释 -->
+        <!-- 计数和两个动作挨在一起:它们作用的正是旁边那个数,放在一处不用解释。
+             **「全选」收下的是当前显示出来的那批**,所以它和上面的筛选片是一对 ——
+             筛出来、看一眼、一键收下。没有筛选时它就是全选整份,和以前那个按钮一样 -->
         <div class="ask-pick-foot">
           <span id="askPickCount" class="ask-pick-count" aria-live="polite"></span>
-          <button type="button" id="askPickClear" class="ask-pick-clear">清空</button>
+          <div class="ask-pick-acts">
+            <button type="button" id="askPickAll" class="ask-pick-clear">全选</button>
+            <button type="button" id="askPickClear" class="ask-pick-clear">清空</button>
+          </div>
         </div>
       </div>
       <div class="ask-choice" id="askInputWrap" hidden>
@@ -3486,7 +3498,7 @@
             b.setAttribute('aria-pressed', String(opt.value === g.value));
             // **title 和 disabled 是两件事,别绑在一起。** 早先这行写在
             // `if (opt.disabled)` 里面,因为那时 title 只用来解释"为什么灰着";
-            // 后来「稀有成就」把判据(全球解锁率 <15%)放进 title,而它是个
+            // 后来「稀有成就」把判据(全球解锁率 <10%)放进 title,而它是个
             // **能点的**按钮 —— 于是提示一个字都不出现,而按钮看上去完全正常。
             // 选不了的仍然要能说出为什么:一个写着「稀有 0」的灰按钮,和一个因为
             // Steam 没答话而算不出来的灰按钮,长得一样、含义相反
@@ -3539,6 +3551,7 @@
         const pickCount = document.getElementById('askPickCount');
         const pickQuick = document.getElementById('askPickQuick');
         const pickClear = document.getElementById('askPickClear');
+        const pickAll = document.getElementById('askPickAll');
 
         function pickerShown() {
           if (!o.picker) return false;
@@ -3552,28 +3565,70 @@
          * 和小节标题那个方框同一个行为,不是巧合 —— 它们是同一件事的两个轴,
          * 一个按位置分组、一个按属性分组。两处行为不一致的话,用户得分别学两遍。
          */
-        function paintQuick() {
-          if (!o.picker || !o.picker.shortcuts) return;
-          const sel = o.picker.selected;
+        /**
+         * 显示判据。**只有这一处** —— 列表画谁、「全选」收谁,必须是同一批:
+         * 两处各写一遍的话,「全选」会悄悄收下屏幕上没有的东西,而这个框的下一步
+         * 是花钱且不可逆的。
+         *
+         * 数字筛(属性)和文字筛(搜索框)之间是**且**,几片属性之间也是且。
+         */
+        function shownFilter() {
+          const q = (pickFilter.value || '').trim().toLowerCase();
+          const active = o.picker.active;
+          const fs = o.picker.filters || [];
+          return function (it) {
+            if (q && it.name.toLowerCase().indexOf(q) < 0) return false;
+            for (let i = 0; i < fs.length; i++) {
+              if (active.has(fs[i].key) && !fs[i].test(it)) return false;
+            }
+            return true;
+          };
+        }
+
+        /**
+         * 这份攻略里能挑的全部条目,摊平。
+         *
+         * **从 `o.picker.groups` 现算,不是从调用方那边闭包捞。** 调用方确实有一个
+         * 现成的 `allItems`,但它在那个点击处理函数的作用域里,而这几个函数在
+         * `askConfirm` 里面 —— 引用它是运行时 ReferenceError,`node --check` 看不出来
+         */
+        function pickerItems() {
+          return o.picker.groups.reduce(function (a, g) { return a.concat(g.items); }, []);
+        }
+
+        /** 当前显示出来的那批。给「全选」和它自己的可用性判断用 */
+        function shownItems() {
+          return pickerItems().filter(shownFilter());
+        }
+
+        function paintFilters() {
+          if (!o.picker || !o.picker.filters) return;
+          const active = o.picker.active;
           pickQuick.innerHTML = '';
-          o.picker.shortcuts.forEach(function (sc2) {
-            const hits = sc2.pick();
+          o.picker.filters.forEach(function (f) {
+            // **各算各的,不算交集。** 这个数是"这份攻略里有多少条符合它",一个
+            // 不随另一片开关变动的事实;按下两片之后看见的条数由列表和小节上的
+            // n/总数 给出,不需要按钮也跟着跳
+            const hits = pickerItems().filter(f.test).length;
+            const on = active.has(f.key);
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'ask-pick-quick';
-            b.textContent = sc2.label;
+            b.className = 'ask-pick-quick' + (on ? ' on' : '');
+            b.textContent = f.label;
             const n = document.createElement('span');
             n.className = 'n';
-            n.textContent = hits.length;
+            n.textContent = hits;
             b.appendChild(n);
-            // 数字为 0 的档点了没有任何效果,灰掉;标签上那个 0 已经说明了原因
-            b.disabled = hits.length === 0;
-            if (sc2.title) b.title = sc2.title;
-            // **只加,不减,而且不带按下状态。** 见下面那段注释
+            // 一条都没有的筛选点了只会得到一个空列表,灰掉;标签上那个 0 已经说明了原因
+            b.disabled = hits === 0;
+            b.setAttribute('aria-pressed', String(on));
+            if (f.title) b.title = f.title;
             b.addEventListener('click', function () {
-              hits.forEach(function (it) { sel.add(it.apiName); });
+              if (on) active.delete(f.key); else active.add(f.key);
+              // **只重画,不动选择,所以也不用 refreshOk()** —— 确定按钮的闸只看
+              // 选了几条,而这次点击一条都没改。这条边界由 html-smoke 钉着:
+              // 这个处理函数里出现 sel / selected 就算破
               paintPicker();
-              refreshOk();
             });
             pickQuick.appendChild(b);
           });
@@ -3581,15 +3636,16 @@
 
         function paintPicker() {
           if (!o.picker) return;
-          const q = (pickFilter.value || '').trim().toLowerCase();
           const sel = o.picker.selected;
-          paintQuick();
+          const ok = shownFilter();
+          // 筛着的时候小节一律展开:人是为了找东西才筛的,把结果藏在收起来的小节
+          // 后面等于白筛。文字筛和属性筛在这件事上没有区别
+          const filtering = Boolean((pickFilter.value || '').trim()) || o.picker.active.size > 0;
+          paintFilters();
           pickList.innerHTML = '';
 
           o.picker.groups.forEach(function (g) {
-            const items = g.items.filter(function (it) {
-              return !q || it.name.toLowerCase().indexOf(q) >= 0;
-            });
+            const items = g.items.filter(ok);
             if (!items.length) return;
 
             const sec = document.createElement('div');
@@ -3631,7 +3687,7 @@
             const toggle = document.createElement('button');
             toggle.type = 'button';
             toggle.className = 'ask-pick-toggle';
-            const open = !o.picker.collapsed.has(secName) || Boolean(q);
+            const open = !o.picker.collapsed.has(secName) || filtering;
             toggle.setAttribute('aria-expanded', String(open));
             const caret = document.createElement('span');
             caret.className = 'ask-pick-caret';
@@ -3688,9 +3744,10 @@
               row.appendChild(label);
               if (it.rarity !== null && it.rarity !== undefined) {
                 const pct = document.createElement('span');
-                // 阈值由服务端下发,前端不自己写一个 15 —— 界面上的「难」和程序认的
-                // 「难」必须是同一条线
-                pct.className = 'pct' + (it.rarity < (o.picker.rarePct || 15) ? ' rare' : '');
+                // 阈值由服务端下发,前端不自己定一个 —— 界面上的「难」和程序认的
+                // 「难」必须是同一条线。后面那个 10 只是服务端没下发时的兜底,
+                // 和 RARE_PCT 相等由测试钉住
+                pct.className = 'pct' + (it.rarity < (o.picker.rarePct || 10) ? ' rare' : '');
                 pct.textContent = it.rarity + '%';
                 row.appendChild(pct);
               }
@@ -3709,7 +3766,21 @@
           if (!pickList.children.length) {
             const empty = document.createElement('div');
             empty.className = 'ask-pick-count';
-            empty.textContent = q ? '没有匹配的成就' : '这份攻略里没有能局部重写的条目';
+            /**
+             * 空有好几种,而它们是**不同的事**:只说"空的"会让人以为是最后那种,
+             * 而那是唯一一种没救的。
+             *
+             * 筛选和搜索**同时**开着时要两个都说出来 —— 只报其中一个,人就会去
+             * 改另一个,而那个其实没问题。这条是写完之后想到的:先前那版按筛选片
+             * 的数量分支,搜索词根本没进判断
+             */
+            const hasQ = Boolean((pickFilter.value || '').trim());
+            const nf = o.picker.active.size;
+            empty.textContent = !pickerItems().length ? '这份攻略里没有能局部重写的条目'
+              : hasQ && nf ? '没有同时满足筛选和搜索词的成就'
+                : hasQ ? '没有匹配的成就'
+                  : nf > 1 ? '没有同时满足这几个筛选的成就'
+                    : '没有符合这个筛选的成就';
             pickList.appendChild(empty);
           }
           paintCount();
@@ -3729,6 +3800,10 @@
           const sel = o.picker.selected;
           pickCount.textContent = '已选 ' + sel.size + ' 条';
           pickClear.disabled = sel.size === 0;
+          // 「全选」在**显示出来的那批已经全在选择里**时没有可做的事 —— 空列表
+          // 也落在这一支(every 对空集为真)。灰掉好过点一下什么都不发生
+          const shown = shownItems();
+          pickAll.disabled = shown.every(function (it) { return sel.has(it.apiName); });
         }
 
         /** 自选但一条没勾 = 没有可执行的请求。**闸门放在按钮上,不是放在错误提示里** */
@@ -3751,13 +3826,24 @@
         if (o.picker) {
           pickFilter.value = '';
           pickFilter.oninput = paintPicker;
+          // **收下的是显示出来的那批,不是全部。** 没开筛选时两者相同,所以这个
+          // 按钮在最常见的情况下还是"全选整份";开着筛选时它才是筛选的落点
+          pickAll.onclick = function () {
+            const sel = o.picker.selected;
+            shownItems().forEach(function (it) { sel.add(it.apiName); });
+            paintPicker();
+            refreshOk();
+          };
           pickClear.onclick = function () {
             o.picker.selected.clear();
             paintPicker();
             refreshOk();
           };
         } else {
+          // 这个弹窗是复用的同一个 DOM:上一次的回调不解开,下一个不带 picker 的框
+          // 会拿着上一次的 o.picker 跑
           pickFilter.oninput = null;
+          pickAll.onclick = null;
           pickClear.onclick = null;
         }
 
@@ -4028,39 +4114,42 @@
        */
       const pickGroups = (sc && !sc.error && sc.pickable) ? sc.pickable : [];
       const pickable = pickGroups.reduce(function (n, g) { return n + g.items.length; }, 0);
-      const allItems = pickGroups.reduce(function (a, g) { return a.concat(g.items); }, []);
-      // 阈值由服务端下发(见 previewGuidePatch 的 rarePct),前端不自己写一个 15 ——
+      // 阈值由服务端下发(见 previewGuidePatch 的 rarePct),前端不自己定一个 ——
       // 「稀有」选谁、百分比什么时候标成强调色,和提示词判断哪几条要写深必须同一条线
-      const rarePct = (sc && sc.rarePct) || 15;
+      const rarePct = (sc && sc.rarePct) || 10;
 
       /**
-       * 列表上方那几个快捷选择。**它们是一次性的动作,不是开关。**
+       * 列表上方那两片。**它们是筛选,不是选择** —— 按下只改"显示什么",一个字
+       * 都不碰已经勾上的东西。这一格改过两轮,两轮都是被真实使用推翻的:
        *
-       * 曾经是开关,亮起来表示"这一批已经全在选择里"。那个含义是**推导出来的事实**,
-       * 而用户读到的是"我按过这个键" —— 两件事被同一个亮起来表达了,于是:
+       * **一版:开关式的"批量选中"。** 亮起来表示"这一批已经全在选择里"。那个含义是
+       * **推导出来的事实**,而用户读到的是"我按过这个键":点「稀有」→ 27 条勾上 →
+       * 那唯一一条未解锁的成就恰好也稀有 →「未解锁」的全部内容都进了选择 → 它
+       * **跟着亮**,尽管没人按过它;再点它(亮着,所以动作是减)→「稀有」又跟着暗。
+       * 按一个键,亮/暗的是另一个。
        *
-       *   点「稀有」→ 27 条勾上 → 而那唯一一条未解锁的成就恰好也稀有 →
-       *   「未解锁」的全部内容都进了选择 → 它**跟着亮**,尽管没人按过它。
-       *   再点「未解锁」(它亮着,所以动作是减)→ 去掉那 1 条 →「稀有」只剩 26/27 →
-       *   **它又跟着暗**。按一个键,亮/暗的是另一个。
+       * **二版:一次性的"加进选择",不带按下态。** 上面那个连锁没了,但只会做**并集** ——
+       * 「稀有里去掉已解锁的」和「既稀有又没打的」表达不出来(这俩其实是同一个集合),
+       * 只能选完 22 条再一条条取消。
        *
-       * **小节之间不相交,属性之间相交** —— 三态方框那套模型在这里不成立,搬过来
-       * 就会得到上面那种连锁。所以这几个键不再有状态:点一下就是"把这批加进选择",
-       * 仅此而已。想清空用旁边的「清空」,想去掉某几条就在列表里取消勾选。
+       * **现在:筛选。** 两片都按下 = 且,这正好就是那个要不到的交集;而"收下这批"
+       * 交给下面的「全选」——**看和选分开**,你先看见这 22 条长什么样,再决定要不要。
+       * 那也正是这个框该有的样子:下一步花钱且不可逆,不该在一个没看过的集合上确认。
        *
-       * 代价是"整批撤销"要多点一下(清空 → 重选)。换来的是**每次点击的结果都能
-       * 从按钮的名字读出来**,而这个框里发生的下一件事要花钱且不可逆。
+       * 按下态因此重新诚实了:它表示"我按下了这个筛选",一个只由点击改变的状态。
+       *
+       * 「全选」不在这里 —— 它不是一种属性,是一个动作,归到计数旁边那一格。
        */
-      const shortcuts = [
-        { key: 'all', label: '全选', pick: function () { return allItems; } },
-        {
-          key: 'locked', label: '未解锁',
-          pick: function () { return allItems.filter(function (it) { return !it.unlocked; }); },
-        },
+      const filters = [
         {
           key: 'rare', label: '稀有',
           title: '全球解锁率低于 ' + rarePct + '% 的成就',
-          pick: function () { return allItems.filter(function (it) { return it.rarity !== null && it.rarity < rarePct; }); },
+          test: function (it) { return it.rarity !== null && it.rarity !== undefined && it.rarity < rarePct; },
+        },
+        {
+          key: 'locked', label: '未解锁',
+          title: '还没打下来的那些',
+          test: function (it) { return !it.unlocked; },
         },
       ];
 
@@ -4070,7 +4159,10 @@
         groups: pickGroups,
         selected: new Set(),
         collapsed: new Set(),
-        shortcuts: shortcuts,
+        filters: filters,
+        // 按下了哪几片。**和 selected 是两个集合**,这是整个改动的要点:
+        // 筛选动它,选择动 selected,谁也不碰谁
+        active: new Set(),
         rarePct: rarePct,
         when: function (s) { return s.scope === 'pick'; },
       };

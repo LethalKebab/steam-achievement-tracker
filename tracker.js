@@ -1584,7 +1584,7 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
               guide-gen --overwrite       整篇重写(先备份原文,再告诉你会失去什么)
               guide-gen --only <选择器>    **只重写点名的那几条**,其余一字不动。先备份。
-                                          rare[:%] 稀有成就(全球解锁率 <15%)· locked 还没打的
+                                          rare[:%] 稀有成就(全球解锁率 <10%)· locked 还没打的
                                           section:小节名 · 或者「成就名A,成就名B」直接点
               guide-gen --note "要求"      配 --only 用,比如 --note "把互斥关系写清楚"
               guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
@@ -1695,7 +1695,7 @@ const CLI_HINTS = {
   // `--only` 后面什么都没跟。**和 bad-scope 分开**:那个是写错了,这个是没写 ——
   // 前者要纠正写法,后者要先知道有哪些写法可选
   'empty-scope': () =>
-    '  --only 后面要跟选择器:rare[:百分比] 稀有成就(全球解锁率 <15%)/\n' +
+    '  --only 后面要跟选择器:rare[:百分比] 稀有成就(全球解锁率 <10%)/\n' +
     '  locked 还没打的 / section:小节名,或者「成就名A,成就名B」直接点名。\n' +
     '  想整篇重写的话用 --overwrite,不要 --only。',
   'chunk-too-small': (d) =>

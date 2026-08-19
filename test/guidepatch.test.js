@@ -35,7 +35,7 @@ import {
   parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback,
 } from '../lib/guidepatch.js';
 import { patchPreflight, formatPatchPreflight } from '../lib/guidebackup.js';
-import { buildPatchMessage } from '../lib/guidegen.js';
+import { buildPatchMessage, buildAchievementList } from '../lib/guidegen.js';
 
 // ---------------------------------------------------------------------------
 // 脚手架
@@ -394,13 +394,16 @@ describe('选择器', () => {
 
   test('rare 用的是和提示词同一条线', () => {
     const r = resolveScope({ ...base, selector: 'rare' });
-    // C 是 1.1%,D 是 12% —— 都在 15% 以下
-    assert.deepEqual(r.apiNames, ['C', 'D']);
-    assert.equal(RARE_PCT, 15);
+    // C 是 1.1%,进;**D 是 12%,不进** —— 它正好卡在旧线(15%)和新线(10%)之间,
+    // 所以这条断言同时钉住"线在 10%"和"线确实动过"
+    assert.deepEqual(r.apiNames, ['C']);
+    assert.equal(RARE_PCT, 10);
   });
 
-  test('rare:5 收紧阈值', () => {
-    assert.deepEqual(resolveScope({ ...base, selector: 'rare:5' }).apiNames, ['C']);
+  test('rare:15 放宽阈值 —— 参数能覆盖默认线', () => {
+    // 拿旧的那个数当参数:D(12%)重新进来。这条以前是 rare:5,而 5 和新的默认线
+    // 选出来是同一批,证明不了参数有没有被读进去
+    assert.deepEqual(resolveScope({ ...base, selector: 'rare:15' }).apiNames, ['C', 'D']);
   });
 
   test('拿不到解锁率时 rare 报错,而不是选空集', () => {
@@ -635,5 +638,49 @@ describe('提示词', () => {
     );
     assert.match(fb, /A 的问题/);
     assert.ok(!fb.includes('D 的问题'), '别段的问题塞进来,模型会顺手去改它这轮不该动的东西');
+  });
+});
+
+/**
+ * 「稀有」只有一条线
+ * ------------------------------------------------
+ * `RARE_PCT` 同时决定四件事:`--only rare` 选谁、提示词给哪几条打 🟠「偏难」、
+ * Dashboard 上哪些百分比标成强调色、以及两处帮助文本里印的那个数。
+ *
+ * 前两件现在是**同一个常量**(`rarityTag` import 它),这一组钉的是后两件 ——
+ * 它们各自是字面量,而且是**字符串**,漂了不会有任何东西报错:表现只是界面或者
+ * 帮助文本说"稀有 = 低于 15%",而程序按 10% 选。2026-08-18 从 15% 改到 10% 时,
+ * 全项目一共有六处写着这个数。
+ */
+describe('稀有的阈值只有一条线', () => {
+  const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+
+  test('提示词的 🟠 档就是 RARE_PCT —— 不是又写了一遍', () => {
+    const defs = [def('LOW', '刚好在线内'), def('HIGH', '刚好在线外')];
+    // 用 RARE_PCT 现算边界值,这样常量再改一次这条测试也还是对的
+    const rarity = new Map([['LOW', RARE_PCT - 0.1], ['HIGH', RARE_PCT + 0.1]]);
+    const list = buildAchievementList('测试', 1, defs, rarity);
+    const lineOf = (name) => list.split('\n').find((l) => l.includes(name));
+    assert.match(lineOf('刚好在线内'), /🟠|🔴/, '线内的要被标成偏难');
+    assert.doesNotMatch(lineOf('刚好在线外'), /🟠|🔴/, '线外的不该标 —— 两处的线错开了');
+  });
+
+  test('CLI 帮助文本印的就是这个数', () => {
+    const src = read('../tracker.js');
+    const hits = [...src.matchAll(/全球解锁率 <(\d+)%/g)].map((m) => Number(m[1]));
+    assert.ok(hits.length >= 2, '两处帮助文本都要提到阈值');
+    for (const n of hits) assert.equal(n, RARE_PCT);
+  });
+
+  test('Dashboard 的兜底值也是这个数', () => {
+    // 正常情况下阈值由服务端下发;兜底只在 previewGuidePatch 失败时用得上,
+    // 也正因为如此它漂了几乎不会被发现
+    const src = read('../Dashboard.html');
+    // 两处的形状不一样:`o.picker.rarePct || 10` 和 `(sc && sc.rarePct) || 10`,
+    // 所以 `\)?`。第一版漏了后者,断言当场报"两处兜底都在"不成立 —— 提取写窄了
+    // 会让这条测试悄悄只钉住一半
+    const hits = [...src.matchAll(/rarePct\)?\s*\|\|\s*(\d+)/g)].map((m) => Number(m[1]));
+    assert.equal(hits.length, 2, '两处兜底都要被匹配到');
+    for (const n of hits) assert.equal(n, RARE_PCT);
   });
 });
