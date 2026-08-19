@@ -654,7 +654,142 @@ describe('确认框里的推理强度', () => {
   test('选的那一档要真的跟着请求走', () => {
     // 控件做出来、值没传下去 —— 界面上一切正常,而每次跑的还是默认档
     assert.match(js, /startGuideGen\(appid, false, choice\.value\)/, '生成那一路');
-    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value\)/, '重写那一路');
+    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value, scope\)/, '重写那一路');
+  });
+
+  test('局部重写的范围要真的跟着请求走,而且和整篇互斥', () => {
+    // 范围选了、值没传下去,表现是每次都整篇重写 —— 而那正好是这个功能要避免的
+    // 那件事,还带着「已改 N 条」的成功提示。界面上一切正常
+    assert.match(js, /scopeChoice\.value === 'all'\s*\n?\s*\?\s*null/,
+      '选「整篇」必须传 null,而不是传一个 selector 为 all 的 scope —— '
+      + '服务端按 scope 是否为空分流,两个都给会让"跑了哪条"取决于判断顺序');
+    assert.match(js, /note: noteInput\.value/, '那句要求也要传下去,不然输入框是个摆设');
+  });
+
+  test('Enter 不能绕过这个框里的三道闸', () => {
+    // 这个框现在有两个输入框(「怎么改」、挑选列表的筛选),而界面是中文的:
+    // 打字时每选一次候选词都会按 Enter。不挡的话,写「把互斥关系写清楚」的过程中
+    // 会当场把这次要花钱、且不可逆的操作确认掉。
+    //
+    // **断言钉意图,不钉写法** —— 上一版查的是字面的 `askInput`,而把
+    // `document.getElementById('askInput')` 换成一个局部变量就让它红了,
+    // 尽管那条规矩一个字没变
+    const fn = js.slice(js.indexOf('function onKey'));
+    const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
+    assert.match(body, /isComposing/, '组词中的 Enter 要挡掉');
+    assert.match(body, /e\.target ===/, '要按焦点在哪儿区分:人还在输入框里打字,不是在决定');
+    assert.match(body, /okBtn\.disabled/,
+      '确定按钮被闸住的时候 Enter 也要挡 —— 否则「自选却一条没勾」能靠回车绕过去');
+  });
+
+  test('自选却一条没勾时,确定按钮是闸住的', () => {
+    // 空选择发出去 = 一个选不中任何成就的请求,而它会在服务端才被拒。
+    // 闸门要放在按钮上:让人**看见**为什么点不了,而不是点下去再收一条错误
+    assert.match(js, /pickerShown\(\)\s*&&\s*o\.picker\.selected\.size === 0/,
+      '空选择必须让确定按钮不可点');
+    // 这个弹窗是复用的同一个 DOM,不无条件复位的话,下一个不带 picker 的框
+    // 会开出来就点不动,而且没有任何理由解释自己为什么点不动
+    const sync = js.slice(js.indexOf('function syncPicker'));
+    assert.match(sync.slice(0, sync.indexOf('\n        }')), /refreshOk\(\)/,
+      'refreshOk 要无条件跑,负责把上一次留下的 disabled 复位');
+  });
+
+  test('planPatch 的"只要 plan"捷径判的是 null,不是假值', () => {
+    // 这条钉在源码上,因为触发它要 Steam 和 Notion。`if (!selector)` 会把用户敲的
+    // `--only ""` 也走进内部捷径,交回 scope: null,调用方紧接着读 .apiNames 崩掉 ——
+    // 一个有专属错误码和终端建议的用户错误,变成一句看不懂的 TypeError
+    const src = readFileSync(new URL('../lib/guidepatch.js', import.meta.url), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    assert.match(src, /if \(selector === null \|\| selector === undefined\)/,
+      '内部捷径必须只认 null/undefined —— 空字符串是用户错误,该照常抛 empty-scope');
+  });
+
+  test('自选发出去的是 api_name 列表,不是成就名', () => {
+    // 同名成就按名字点不动(库里真有 12 组同名),用名字会让请求在服务端被判成
+    // unresolved —— 而界面上刚刚明明勾中了它
+    assert.match(js, /selector: \[\.\.\.picker\.selected\]\.join\(','\)/,
+      '选中的是 api_name,直接逗号拼成显式列表交给 resolveScope');
+  });
+
+  test('快捷选择是一次性的动作,不是开关', () => {
+    /**
+     * **它们曾经是开关,而那会让按一个键点亮另一个。**
+     *
+     * 亮起来的含义是"这一批已经全在选择里" —— 一个推导出来的事实,用户却读成
+     * "我按过这个键"。属性之间是相交的(那唯一一条未解锁的成就恰好也稀有),
+     * 于是点「稀有」会让「未解锁」跟着亮,再点它又会把「稀有」弄暗。
+     *
+     * 现在只加不减、不带状态。**钉住"没有减"这一半** —— 只钉 add 的话,
+     * 把 delete 加回来不会让任何测试变红。
+     */
+    const fn = js.slice(js.indexOf('function paintQuick'));
+    const body = fn.slice(0, fn.indexOf('\n        }')).replace(/\/\/[^\n]*/g, '');
+    assert.match(body, /sel\.add\(it\.apiName\)/, '点一下把这一批加进选择');
+    assert.doesNotMatch(body, /sel\.delete/,
+      '快捷键不减 —— 减会让"按一个键、暗另一个"那条连锁回来');
+    assert.doesNotMatch(body, /aria-pressed/, '它们不是开关,不该报按下状态');
+    // 只加的话必须有一条回头路,否则选错了只能一条条取消
+    assert.match(js, /pickClear\.onclick/, '要有「清空」');
+    assert.match(js, /o\.picker\.selected\.clear\(\)/, '清空要真的清');
+  });
+
+  test('勾一个条目要更新「已选 N 条」', () => {
+    /**
+     * 这条钉一个**真出现过**的 bug:计数原来只写在 `paintPicker` 末尾,而勾单个条目
+     * 故意不重绘整列表(重绘会把滚动位置弹回顶上),于是那一行卡在上一次整体重绘的值上。
+     *
+     * 抓到它靠的是拿 DOM 里真实勾上的框数去比显示的数 —— 光看界面看不出来,
+     * 那一行自己长得一点问题都没有。现在这行数字是屏幕上唯一说"选了多少"的地方
+     * (确认框的正文已经删光),更没有第二处能对出来
+     */
+    assert.match(js, /function paintCount\(\)/,
+      '计数要单拎成一个函数,才可能被单条勾选那条路调用');
+    const handler = js.slice(js.indexOf("cb.addEventListener('change'"));
+    const body = handler.slice(0, handler.indexOf('\n              });')).replace(/\/\/[^\n]*/g, '');
+    assert.match(body, /paintCount\(\)/, '勾单条时必须刷新计数');
+
+    // 范围只剩一个真正的二选一
+    const scope = js.slice(js.indexOf('const scopeChoice = {'));
+    const opts = scope.slice(0, scope.indexOf('\n      };'));
+    assert.match(opts, /value: 'all'/);
+    assert.match(opts, /value: 'pick'/);
+    assert.doesNotMatch(opts, /'rare'|'locked'|'failing'/,
+      '算出来的那几批不再是范围档位 —— 它们是列表里的快捷选择');
+  });
+
+  test('重写确认框不写正文', () => {
+    /**
+     * 四轮删下来一句不剩,每一句都是在复述屏幕上已有的东西:时长(实测同样的输入
+     * 跑出 76/174/337 秒,写死就是错的)、「现有 51 个 checkbox 会被整份替换」
+     * (「整篇」两个字已经说了)、「只改选中的 27 条」(旁边就是「已选 27 条」)、
+     * 「原文先备份」(我们这边的保底措施,不是他要决定的事),最后是
+     * 「N 个手动勾的子步骤会变回未勾选」——「重写」本身就含这个意思,何况备份还在。
+     *
+     * **损失不是没人说,是换了个地方说:** CLI 的 `formatPreflight` 照旧把要丢的
+     * 手动勾选逐条印出来(guideoverwrite.test.js 钉着那一条)。命令行是给敲了 flag
+     * 的人看的,可以详细;界面上要短 —— 一份措辞硬凑给两边用,两边都不合适。
+     */
+    const call = js.slice(js.indexOf("title: '重写《'"));
+    const args = call.slice(0, call.indexOf('\n      });')).replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.match(args, /picker: picker/, '(先确认切到的确实是重写那个框)');
+    assert.doesNotMatch(args, /body:/, '范围、条数、要求都写在控件上,正文只会是复述');
+  });
+
+  test('稀有的阈值由服务端下发,前端不自己写一个 15', () => {
+    // 界面上标成"稀有"的那批,必须和提示词判断"哪几条要写深"是同一条线。
+    // 两处各写一个数,漂了也没人会发现 —— 表现只是"界面说它稀有、程序不这么认为"
+    assert.match(js, /sc && sc\.rarePct/, '阈值从 previewGuidePatch 的返回值里取');
+    assert.match(js, /o\.picker\.rarePct/, '条目上色也用同一个值');
+  });
+
+  test('没有正文的框要把那一格收起来,不是留一块空白', () => {
+    // 重写那个框现在一句正文都不写,而 #askBody 是常驻 markup —— 只清空 textContent
+    // 的话会留下一块带 margin 的空div,框看着像是渲染坏了。
+    //
+    // 顺带钉住另一半:有正文的框(删除、迁移)要照常显示出来。askConfirm 有六个调用点,
+    // 这两支各有人走
+    assert.match(js, /bodyEl\.textContent = o\.body \|\| ''/);
+    assert.match(js, /bodyEl\.style\.display = o\.body \? '' : 'none'/);
   });
 
   test('确认框不再写死时长', () => {

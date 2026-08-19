@@ -123,8 +123,104 @@ sub-steps match no achievement, so those come back unticked. If the backup fails
 is written. Add `--dry-run` to see all of that and stop there.
 
 The Dashboard offers the same thing: a game that already has a guide shows a **♻ 重写** button
-next to its 📖 攻略 link. It asks the same question with the same information — what you are
-replacing, and which hand-ticked boxes will not survive — before anything is written.
+next to its 📖 攻略 link, and it runs the same preflight before anything is written.
+
+That dialog also carries the partial rewrite, and its **范围** row is a plain either/or: **整篇**
+(the default) or **自选**. Choosing 自选 reveals a **重写要求** field — the same thing `--note` passes
+on the command line, where blank simply means "research these again and rewrite them". The dialog
+holds one width throughout, so nothing shifts under the cursor as you tick.
+
+**It has no body text at all.** Scope, count and instruction are each written on the control that
+carries them, and every sentence that was once above them turned out to be a restatement of
+something already on screen — including the loss note, which "rewrite" already implies and the
+backup already covers. That note is still printed in full on the command line: `--overwrite`
+writes for someone who typed a flag and can afford the detail, a dialog cannot, and one wording
+forced to serve both is wrong in both places.
+
+The computed sets (`全选`, `未解锁`, `稀有`) are **shortcuts inside the picker**, not scopes of their
+own: clicking one *ticks* those entries, so you can see exactly which they are and then add or drop
+individual ones. They only ever add — `清空`, next to the count, is the way back. They were scope
+options at first, and that was wrong for a concrete reason: you were confirming a paid, irreversible
+rewrite over a set you had never seen and could not adjust. They were also toggles for one round,
+which was wrong for a second reason — the batches overlap (a locked achievement can also be rare),
+so pressing one button would light or dim another.
+
+**自选** opens the guide's own achievements, grouped by the section headings they sit under, each
+row showing its global unlock rate and whether you have it. Every section heading carries its own
+**tri-state checkbox** — click it to take or drop the whole section — so picking a section and
+picking individual entries are the same control, which is why the dialog has no separate `section:`
+option. (That behaviour existed one round earlier as "click the heading", explained in a sentence
+that only appeared while nothing was selected; nobody found it. An affordance you have to read
+about is not an affordance.) The heading itself **collapses** its section, so a long guide can be
+reduced to a list of section names rather than scrolled end to end; filtering shows matches whether
+or not their section is collapsed, and restores the collapsed state when you clear it. There is a filter box, the
+confirm button stays disabled until something is selected, and what gets sent is a plain list of
+the selected achievements.
+
+**Section grouping works on Notion guides too.** `fetchAllToDoBlocks` only collects checkboxes,
+so it cannot see headings — but the dialog reads the page with `fetchAllBlocks`, which returns
+every block including headings. (`--only section:` on the command line is still local-only; it
+receives the markdown text rather than the blocks.) If the outline can't be read for any reason,
+the list falls back to a flat one rather than failing.
+
+#### Rewriting only part of a guide
+
+`--overwrite` replaces the whole guide. `--only` replaces just the entries you name, and **every
+other byte of the guide stays exactly as it was** — other achievements, section headings, `<details>`
+blocks, tables, and any passage you edited by hand.
+
+```bash
+node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
+node tracker.js guide-gen <appid> --only "第三步,收集狂" --note "改成表格"
+node tracker.js guide-gen <appid> --only locked --dry-run
+```
+
+`--only` takes one of these:
+
+| Selector | Picks |
+|---|---|
+| `rare` / `rare:25` | Achievements below 15% global unlock rate (or the percentage you give). Same threshold the prompt uses to tell the model which entries deserve depth |
+| `locked` | Ones you haven't earned yet |
+| `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
+| `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
+
+That list is deliberately the same set the Dashboard dialog offers. Three selectors were removed
+once it existed — `all` (whole-guide rewrite has its own flag, `--overwrite`), `thin` (its criterion
+needs its threshold explained before it means anything, which makes it unusable as a button),
+`unlocked` (rewriting entries you have already earned was never something anyone asked for) and
+`failing` (in practice that set is almost always empty, and a button permanently reading `0` just
+makes you work out what the `0` means every time — `guide-lint <appid>` lists those properly).
+If a selector cannot be drawn as a button, that is a signal about the selector.
+
+`--note "…"` is the instruction, passed to the model as written. Without it the entries are simply
+rewritten from fresh research. The model always *sees* the existing entry, which is what makes
+"写详细点" mean anything.
+
+**Run `--dry-run` first.** It prints the entries the selector picked and the exact request that would
+be sent, and spends nothing. A selector that matched the wrong entries is the one mistake here that
+costs money to discover.
+
+Three things are worth knowing about how this stays safe:
+
+- **Only the entries that were asked for are ever written back.** The guarantee comes from the
+  program splicing named entries at line numbers (local) or block ids (Notion) it recorded up front —
+  not from instructing the model to leave the rest alone. If the model returns an achievement that
+  wasn't named, it is reported and **discarded**.
+- **Problems the guide already had don't block the change.** A guide can fail validation for reasons
+  outside what you asked to fix — hand-written guides often do. Those are listed and stepped over;
+  only problems inside the entries being rewritten, or ones that appeared as a result of the change,
+  hold it back. Nothing is written until they clear.
+- **Hand-ticked sub-step boxes survive outside the scope.** They are the one thing a full rewrite
+  destroys, and `--only` loses them only under the entries it actually replaces. The confirmation
+  says how many are at risk and how many are being kept.
+
+On Notion the touched checkboxes are **edited in place** rather than the page being cleared and
+rewritten, so block ids survive — links you saved to a specific entry still work, and anything the
+markdown converter can't represent is never at risk. The page is read back and re-validated
+afterwards, same as a full generation.
+
+Achievements the guide has no checkbox for cannot be targeted this way — there is nothing to
+replace. Those are reported separately and need a full `--overwrite` (or a line written by hand).
 
 A guide that fails validation three times is left in `guides/.drafts/` rather than thrown away —
 you paid for it, and *which* checks failed is itself information. Nothing scans that directory, so

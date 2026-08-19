@@ -1497,6 +1497,196 @@
       font-size: var(--fs-sm);
       color: var(--text-3);
     }
+    /* 标签宽度对齐:两三组控件竖着排的时候,标签不等宽会让每一行的控件各起各的头,
+       读起来像三个不相干的块。定宽 + 右对齐把它们钉成一列 */
+    .ask-choice > span:first-child,
+    .ask-choice > label:first-child { flex: 0 0 auto; min-width: 4.5em; text-align: right; }
+    /* 选中态**不能只靠底色** —— .view-toggle button.on 已经给了底色,这里补一条
+       描边,因为这一组里有 disabled 项(条数为 0 的范围),而 disabled 也是灰底,
+       只靠明暗区分"选中"和"不可选"在深色主题下差得太近 */
+    .ask-choice .view-toggle button.on { box-shadow: inset 0 0 0 1px var(--accent); }
+    .ask-choice .view-toggle button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+    /* 一句话输入。沿用页面上输入控件的那套底色和描边,不为一个框新造一种外观 */
+    .ask-input {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 8px var(--s3);
+      font: inherit;
+      font-size: var(--fs-sm);
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+    }
+    .ask-input::placeholder { color: var(--text-3); }
+    .ask-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+    /* ---- 自选:按小节分组的成就清单 ---- */
+    /**
+     * **带挑选列表的那个框宽度固定,不跟着内容走。**
+     *
+     * `.modal-box` 平时是内容撑出来的宽度,对只有一两句话的框正合适。但这个框里
+     * 有一份会变的列表:勾一条、收起一节、切一次筛选,最宽的那行内容就换了一个,
+     * 于是整个对话框跟着抽动 —— 而人正把鼠标停在某个复选框上。**界面在你操作时
+     * 自己动,是最难受的一类**,你会失去"刚才那个框在哪儿"的把握。
+     *
+     * 只对传了 `picker` 的框固定(靠 JS 挂 `.ask-wide`),别的确认框保持原样 ——
+     * 它们没有会变的内容,给个固定宽度只会显得空。
+     */
+    .modal-box.ask-wide { width: 520px; max-width: 100%; }
+    #askPickWrap { margin-top: var(--s4); text-align: left; }
+    #askPickFilter { width: 100%; margin-bottom: var(--s2); }
+    /* 快捷选择那一排。**做得比范围那一行轻** —— 它们不是决定,是省几十次点击的捷径,
+       份量压过下面的列表就本末倒置了 */
+    #askPickQuick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }
+    .ask-pick-quick {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 9px; border-radius: var(--r-full, 999px);
+      font: inherit; font-size: var(--fs-xs); color: var(--text-2);
+      background: var(--surface-2); border: 1px solid transparent; cursor: pointer;
+    }
+    .ask-pick-quick:hover { color: var(--text); border-color: var(--line-2); }
+    /* **没有选中态,因为它们不是开关。** 曾经有一个 `.on`,亮起来表示"这一批已经
+       全在选择里" —— 那是推导出来的事实,而用户读成"我按过这个键",于是按一个键
+       会让另一个亮/暗(属性之间相交,见 JS 里那段)。它们现在是一次性的动作 */
+    .ask-pick-quick .n { font-variant-numeric: tabular-nums; opacity: .75; }
+    .ask-pick-quick:disabled { opacity: .35; cursor: default; }
+    .ask-pick-quick:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    /* **定高 + 自己滚。** 一份攻略动辄几十上百条,让它撑开对话框的话确定/取消会被
+       推到屏幕外 —— 而那是这个框里唯一能退出的两个按钮 */
+    #askPickList {
+      max-height: 280px;
+      overflow-y: auto;
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+      background: var(--bg);
+      padding: var(--s2);
+    }
+    .ask-pick-sec { margin-bottom: var(--s3); }
+    .ask-pick-sec:last-child { margin-bottom: 0; }
+
+    /* 小节这一行有**两个各管一件事的按钮**:方框管"整节选中",其余部分管"折叠"。
+       套在一个按钮里会变成嵌套可交互元素 —— 一次 Tab 停两下,一次点击两条路径 */
+    .ask-pick-head { display: flex; align-items: center; gap: var(--s2); }
+
+    /**
+     * 小节标题要**一眼区别于底下的条目**。
+     *
+     * 上一版把方框和条目的复选框对齐到同一个左边距,理由是"看起来是同一种东西才
+     * 知道能点" —— 那条理由本身没错,但它把**层级**一起抹平了:同一个左边距、
+     * 同样大的方框,标题和条目读起来是一列平的东西。
+     *
+     * 现在靠三样把它们分开,而方框仍然是方框(可点这件事没丢):
+     *   1. **条目整体右缩**(.ask-pick-items 的 padding-left),标题留在最左
+     *   2. 标题小一号、加粗、加字距,颜色更亮
+     *   3. 标题底下一条淡线,把这一节的范围划出来
+     */
+    .ask-pick-toggle {
+      flex: 1 1 auto; min-width: 0;
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 4px; border: 0; border-radius: var(--r-sm);
+      font: inherit; font-size: var(--fs-xs); font-weight: 700; letter-spacing: .06em;
+      color: var(--text); background: none; cursor: pointer; text-align: left;
+    }
+    .ask-pick-toggle:hover { background: var(--surface-2); }
+    .ask-pick-toggle .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ask-pick-toggle .n { margin-left: auto; font-weight: 400; letter-spacing: 0; color: var(--text-3); }
+    /* 折叠箭头:纯 CSS 三角,展开时朝下、收起时朝右。transform 是合成器属性,
+       不会因为一次展开把整张列表重排一遍 */
+    .ask-pick-caret {
+      flex: 0 0 auto; width: 0; height: 0;
+      border-left: 4px solid transparent; border-right: 4px solid transparent;
+      border-top: 5px solid var(--text-3);
+      transition: transform var(--dur-fast, .12s) ease;
+    }
+    .ask-pick-toggle[aria-expanded="false"] .ask-pick-caret { transform: rotate(-90deg); }
+    .ask-pick-sec > .ask-pick-items { border-top: 1px solid var(--line-1); padding-top: 2px; }
+
+    /* 三态方框。条目那边的复选框现在也是这个样子(见下面),两者仍然是"同一种东西",
+       只是不再站在同一个左边距上 */
+    .ask-pick-box {
+      flex: 0 0 auto;
+      width: 13px; height: 13px;
+      border: 1px solid var(--text-3);
+      border-radius: 3px;
+      background: var(--surface-2);
+      padding: 0; position: relative; cursor: pointer;
+    }
+    .ask-pick-box:hover { border-color: var(--text); }
+    .ask-pick-box.on, .ask-pick-box.some { background: var(--accent); border-color: var(--accent); }
+    /* 全选:对勾。半选:一横。两个都用 ::after 画,不引额外的字形 */
+    .ask-pick-box.on::after {
+      content: ''; position: absolute; left: 3px; top: 0;
+      width: 3px; height: 7px;
+      border: solid var(--accent-ink); border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+    .ask-pick-box.some::after {
+      content: ''; position: absolute; left: 2px; top: 4px;
+      width: 7px; height: 2px; background: var(--accent-ink);
+    }
+
+    /* 条目整体右缩一格 —— 这是"它们属于上面那个标题"唯一的视觉说明 */
+    .ask-pick-items { padding-left: 16px; }
+    .ask-pick-items[hidden] { display: none; }
+    .ask-pick-item {
+      display: flex; align-items: center; gap: var(--s2);
+      padding: 4px 6px; border-radius: var(--r-sm);
+      font-size: var(--fs-sm); color: var(--text-2); cursor: pointer;
+    }
+    .ask-pick-item:hover { background: var(--surface-2); color: var(--text); }
+    /**
+     * **原生 checkbox 在深色主题上读起来像禁用。**
+     *
+     * `accent-color` 只管**勾上之后**那个颜色;未勾选时画的还是浏览器自己那套
+     * 浅灰底 + 浅灰边,在这张深色表面上对比极低 —— 看着像一排点不动的框。
+     * 而这个列表里绝大多数框恰恰是未勾选的,也就是说默认状态全是"看起来不可选"。
+     *
+     * 所以自己画:`appearance: none` 之后给一条看得清的描边。**仍然是真的
+     * `<input type=checkbox>`** —— 键盘、label 关联、读屏的语义一样都没丢,
+     * 换掉的只有那层绘制。尺寸和小节那个方框一致,两者是同一种东西。
+     */
+    .ask-pick-item input[type="checkbox"] {
+      appearance: none; -webkit-appearance: none;
+      flex: 0 0 auto; margin: 0;
+      width: 13px; height: 13px;
+      border: 1px solid var(--text-3);
+      border-radius: 3px;
+      background: var(--surface-2);
+      position: relative; cursor: pointer;
+    }
+    .ask-pick-item:hover input[type="checkbox"] { border-color: var(--text); }
+    .ask-pick-item input[type="checkbox"]:checked { background: var(--accent); border-color: var(--accent); }
+    .ask-pick-item input[type="checkbox"]:checked::after {
+      content: ''; position: absolute; left: 3px; top: 0;
+      width: 3px; height: 7px;
+      border: solid var(--accent-ink); border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+    .ask-pick-item input[type="checkbox"]:focus-visible,
+    .ask-pick-box:focus-visible,
+    .ask-pick-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .ask-pick-item .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 稀有度和解锁状态是**挑的时候最想知道的两件事**,所以跟着每一条走。
+       右对齐成一列,眼睛能顺着扫下来而不用在每行里找 */
+    .ask-pick-item .pct { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .ask-pick-item .pct.rare { color: var(--accent); }
+    .ask-pick-item .done { flex: 0 0 auto; font-size: var(--fs-xs); color: var(--prog-done); }
+    .ask-pick-foot { display: flex; align-items: baseline; gap: var(--s2); margin-top: var(--s2); }
+    .ask-pick-count { font-size: var(--fs-xs); color: var(--text-3); }
+    /* 「清空」是这一格里唯一带损失的动作,但损失很轻(重选一次而已),所以做成
+       一个安静的文字按钮 —— 找得到,但不抢 */
+    .ask-pick-clear {
+      margin-left: auto; padding: 2px 6px;
+      font: inherit; font-size: var(--fs-xs); color: var(--text-3);
+      background: none; border: 0; border-radius: var(--r-sm); cursor: pointer;
+    }
+    .ask-pick-clear:hover:not(:disabled) { color: var(--text); background: var(--surface-2); }
+    .ask-pick-clear:disabled { opacity: .3; cursor: default; }
+    .ask-pick-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     /* 次级按钮:**透明底 + 正常字色 + 描边**。
        原来是 --panel-alt 底 + --text-dim 字,对比低到和这个组件自己的 :disabled
        态几乎一样 —— 于是「取消」看起来像不可点,或者像被劝阻的选项。
@@ -1861,13 +2051,36 @@
     <div class="modal-box" style="max-width:520px;">
       <div class="game-name" id="askTitle"></div>
       <div id="askBody" style="font-size:13px; color:var(--text-3); text-align:left; white-space:pre-wrap; margin:12px 0 0;"></div>
-      <!-- **选项和确认合在一起,因为它们是同一个决定。** 「要不要花这笔」和「花多深」
-           问的是一件事,拆成两步等于让人先答应再挑。这一格平时是空的,只有调用方
-           传了 choice 才长出来 —— 复用 .view-toggle(页面上已有的分段控件),
-           而不是新造一个只在这里出现的形状 -->
-      <div class="ask-choice" id="askChoice" hidden>
-        <span id="askChoiceLabel"></span>
-        <div class="view-toggle" role="group" id="askChoiceGroup"></div>
+      <!-- **选项和确认合在一起,因为它们是同一个决定。** 「要不要花这笔」和「改什么、
+           花多深」问的是一件事,拆成两步等于让人先答应再挑。这一格平时是空的,只有
+           调用方传了 choices 才长出来 —— 复用 .view-toggle(页面上已有的分段控件),
+           而不是新造一个只在这里出现的形状。
+           每组一行,由 askConfirm 动态生成:重写那个框要问两件事(范围、推理强度),
+           生成那个只问一件 —— 组数写死在 markup 里就得为多的那个留一格空的 -->
+      <div id="askChoices"></div>
+      <!-- 一句话的输入(局部重写的「重写要求」)。**标签是可见的、而且带 for** ——
+           只靠 placeholder 当标签,一开始打字它就消失了,而这一格正是打完字之后
+           最需要确认"这一栏是什么"的地方 -->
+      <!-- 自选:按小节分组的成就清单。**点小节标题 = 选中整节**,所以「选一个小节」
+           和「选几条成就」是同一个控件的两种用法 —— 界面上不需要为它们各开一个模式,
+           发出去的请求也永远是一串点名的成就,后端那条路本来就在 -->
+      <div id="askPickWrap" hidden>
+        <!-- 快捷选择:把符合条件的那批**勾上**,而不是变成一个看不见的集合直接拿去跑。
+             **只加不减,而且不报按下状态** —— 曾经是可以再点一次取消的开关,那会让
+             「稀有」在没人按过它的时候自己亮起来(它那批恰好全被别的按钮选进去了),
+             取消一下又连带熄灭另一个。回头路是旁边的「清空」。理由见 js 里那段长注释 -->
+        <div id="askPickQuick" role="group" aria-label="快捷选择"></div>
+        <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就">
+        <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
+        <!-- 计数和「清空」挨在一起:清空作用的正是旁边那个数,放在一处不用解释 -->
+        <div class="ask-pick-foot">
+          <span id="askPickCount" class="ask-pick-count" aria-live="polite"></span>
+          <button type="button" id="askPickClear" class="ask-pick-clear">清空</button>
+        </div>
+      </div>
+      <div class="ask-choice" id="askInputWrap" hidden>
+        <label for="askInput" id="askInputLabel"></label>
+        <input type="text" id="askInput" class="ask-input" autocomplete="off">
       </div>
       <div class="modal-btns">
         <button class="add-game-btn" id="askOkBtn">确认</button>
@@ -3223,45 +3436,333 @@
     function askConfirm(o) {
       return new Promise(function (resolve) {
         const modal = document.getElementById('askModal');
+        // 有挑选列表的框固定宽度:里面的内容会变,而界面不该在人操作时自己抽动。
+        // 判据是"这个框有没有 picker",不是"picker 现在显不显示" —— 否则切一次
+        // 整篇/自选就跳一次宽度,那是同一个毛病换了个触发点
+        modal.querySelector('.modal-box').classList.toggle('ask-wide', Boolean(o.picker));
         const okBtn = document.getElementById('askOkBtn');
         const cancelBtn = document.getElementById('askCancelBtn');
         document.getElementById('askTitle').textContent = o.title;
+        // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的。
+        //
+        // **正文是一句固定的话,不会跟着选择变。** 这里曾经收一个函数,按当前选中的
+        // 范围现算一句 —— 那是为重写那个框做的,而重写框的正文最后一句也删了
+        // (见下面调用点)。没有调用方的机制会漂,所以跟着一起删
         const bodyEl = document.getElementById('askBody');
         bodyEl.textContent = o.body || '';
-        // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的
         bodyEl.style.display = o.body ? '' : 'none';
         okBtn.textContent = o.okText || '确认';
 
-        // **返回值还是布尔。** 选择写回调用方自己传进来的 `o.choice.value`,
-        // 所以 askConfirm 的契约没变 —— 它有六处调用点,为了多一个可选控件去改
-        // 返回类型,等于让五个不相干的地方跟着动
-        const choiceWrap = document.getElementById('askChoice');
-        const choiceGroup = document.getElementById('askChoiceGroup');
-        choiceWrap.hidden = !o.choice;
-        choiceGroup.innerHTML = '';
-        if (o.choice) {
-          document.getElementById('askChoiceLabel').textContent = o.choice.label;
-          choiceGroup.setAttribute('aria-label', o.choice.label);
-          o.choice.options.forEach(function (opt) {
+        // **返回值还是布尔。** 选择写回调用方自己传进来的 `o.choices[i].value`,
+        // 所以 askConfirm 的契约没变 —— 它有六处调用点,为了多几个可选控件去改
+        // 返回类型,等于让四个不相干的地方跟着动。
+        //
+        // 从单个 `choice` 改成 `choices` 数组,是因为重写那个框要问**两件事**
+        // (改哪些、查多深)。留一个 `choice` 再加一个 `choice2` 会是同一个问题的
+        // 第二套机制 —— 这个项目里那种形状每次都会漂
+        const choicesWrap = document.getElementById('askChoices');
+        choicesWrap.innerHTML = '';
+        const groups = o.choices || [];
+
+        groups.forEach(function (g) {
+          const row = document.createElement('div');
+          row.className = 'ask-choice';
+          const label = document.createElement('span');
+          label.textContent = g.label;
+          const group = document.createElement('div');
+          group.className = 'view-toggle';
+          group.setAttribute('role', 'group');
+          group.setAttribute('aria-label', g.label);
+
+          g.options.forEach(function (opt) {
             const b = document.createElement('button');
             b.type = 'button';
             b.textContent = opt.label;
             // 比较式直接写在调用点上:html-smoke 要求 toggle 的第二个参数一眼看得出
             // 是布尔(局部变量名看不出来,而 undefined 会让它翻转而不是关闭)
-            b.classList.toggle('on', opt.value === o.choice.value);
+            b.classList.toggle('on', opt.value === g.value);
             // 选中态要**说出来**,不能只靠底色 —— 只用 class 的话读屏用户读不到
             // 这一组里哪个是选中的(ui-ux-pro-max 把这条列为 Critical)
-            b.setAttribute('aria-pressed', String(opt.value === o.choice.value));
+            b.setAttribute('aria-pressed', String(opt.value === g.value));
+            // **title 和 disabled 是两件事,别绑在一起。** 早先这行写在
+            // `if (opt.disabled)` 里面,因为那时 title 只用来解释"为什么灰着";
+            // 后来「稀有成就」把判据(全球解锁率 <15%)放进 title,而它是个
+            // **能点的**按钮 —— 于是提示一个字都不出现,而按钮看上去完全正常。
+            // 选不了的仍然要能说出为什么:一个写着「稀有 0」的灰按钮,和一个因为
+            // Steam 没答话而算不出来的灰按钮,长得一样、含义相反
+            if (opt.title) b.title = opt.title;
+            if (opt.disabled) b.disabled = true;
             b.addEventListener('click', function () {
-              o.choice.value = opt.value;
-              [...choiceGroup.children].forEach(function (c) {
+              g.value = opt.value;
+              [...group.children].forEach(function (c) {
                 c.classList.toggle('on', c === b);
                 c.setAttribute('aria-pressed', String(c === b));
               });
+              syncInput();
+              syncPicker();
             });
-            choiceGroup.appendChild(b);
+            group.appendChild(b);
+          });
+
+          row.appendChild(label);
+          row.appendChild(group);
+          choicesWrap.appendChild(row);
+        });
+
+        // 一句话输入。`o.input.when` 决定它在哪些选择下才出现 —— 渐进披露:
+        // 「怎么改」只对局部重写有意义,整篇重写时摆在那儿是一个不会被读的输入框
+        const inputWrap = document.getElementById('askInputWrap');
+        const inputEl = document.getElementById('askInput');
+        function syncInput() {
+          if (!o.input) { inputWrap.hidden = true; return; }
+          const state = groups.reduce(function (acc, g) { acc[g.key] = g.value; return acc; }, {});
+          inputWrap.hidden = typeof o.input.when === 'function' ? !o.input.when(state) : false;
+        }
+        if (o.input) {
+          document.getElementById('askInputLabel').textContent = o.input.label;
+          inputEl.placeholder = o.input.placeholder || '';
+          inputEl.value = o.input.value || '';
+          inputEl.oninput = function () { o.input.value = inputEl.value; };
+        } else {
+          inputEl.oninput = null;
+        }
+
+        /**
+         * 自选:按小节分组的清单,**点小节标题选中整节**。
+         *
+         * 选择写回 `o.picker.selected`(一个 Set),和 choices 一样 —— askConfirm
+         * 的返回值仍然是布尔,调用方从自己传进来的对象上取结果。
+         */
+        const pickWrap = document.getElementById('askPickWrap');
+        const pickList = document.getElementById('askPickList');
+        const pickFilter = document.getElementById('askPickFilter');
+        const pickCount = document.getElementById('askPickCount');
+        const pickQuick = document.getElementById('askPickQuick');
+        const pickClear = document.getElementById('askPickClear');
+
+        function pickerShown() {
+          if (!o.picker) return false;
+          const state = groups.reduce(function (acc, g) { acc[g.key] = g.value; return acc; }, {});
+          return typeof o.picker.when === 'function' ? o.picker.when(state) : true;
+        }
+
+        /**
+         * 快捷选择那一排。**每个都是开关**:这一批全在选择里就是"选中",再点取消。
+         *
+         * 和小节标题那个方框同一个行为,不是巧合 —— 它们是同一件事的两个轴,
+         * 一个按位置分组、一个按属性分组。两处行为不一致的话,用户得分别学两遍。
+         */
+        function paintQuick() {
+          if (!o.picker || !o.picker.shortcuts) return;
+          const sel = o.picker.selected;
+          pickQuick.innerHTML = '';
+          o.picker.shortcuts.forEach(function (sc2) {
+            const hits = sc2.pick();
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'ask-pick-quick';
+            b.textContent = sc2.label;
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = hits.length;
+            b.appendChild(n);
+            // 数字为 0 的档点了没有任何效果,灰掉;标签上那个 0 已经说明了原因
+            b.disabled = hits.length === 0;
+            if (sc2.title) b.title = sc2.title;
+            // **只加,不减,而且不带按下状态。** 见下面那段注释
+            b.addEventListener('click', function () {
+              hits.forEach(function (it) { sel.add(it.apiName); });
+              paintPicker();
+              refreshOk();
+            });
+            pickQuick.appendChild(b);
           });
         }
+
+        function paintPicker() {
+          if (!o.picker) return;
+          const q = (pickFilter.value || '').trim().toLowerCase();
+          const sel = o.picker.selected;
+          paintQuick();
+          pickList.innerHTML = '';
+
+          o.picker.groups.forEach(function (g) {
+            const items = g.items.filter(function (it) {
+              return !q || it.name.toLowerCase().indexOf(q) >= 0;
+            });
+            if (!items.length) return;
+
+            const sec = document.createElement('div');
+            sec.className = 'ask-pick-sec';
+
+            const allOn = items.every(function (it) { return sel.has(it.apiName); });
+            const someOn = !allOn && items.some(function (it) { return sel.has(it.apiName); });
+            const secName = g.heading || '未分节';
+
+            /**
+             * 小节这一行拆成**两个各管一件事的按钮**:
+             *
+             *   方框 → 整节选中/取消
+             *   其余 → 折叠/展开
+             *
+             * 上一版把整行做成一个按钮、方框只是里面的一个 span,于是没地方放折叠。
+             * 拆开之后两个动作各有各的落点,而且都还是原生 `<button>` —— 键盘能 Tab
+             * 到、能回车触发,不用自己补一套按键处理。**不能嵌套**:按钮套按钮在
+             * HTML 里是非法的,浏览器会把内层拎出去,行为随之不可预测。
+             */
+            const head = document.createElement('div');
+            head.className = 'ask-pick-head';
+
+            const box = document.createElement('button');
+            box.type = 'button';
+            box.className = 'ask-pick-box' + (allOn ? ' on' : someOn ? ' some' : '');
+            // 方框上没有可见文字,**必须自己带名字** —— 否则读屏读到的是一个没有
+            // 标签的按钮。写成动作而不是状态:它说的是"按下去会发生什么"
+            box.setAttribute('aria-label', (allOn ? '取消选中「' : '全选「') + secName + '」这一节');
+            box.setAttribute('aria-pressed', String(allOn));
+            box.addEventListener('click', function () {
+              items.forEach(function (it) {
+                if (allOn) sel.delete(it.apiName); else sel.add(it.apiName);
+              });
+              paintPicker();
+              refreshOk();
+            });
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'ask-pick-toggle';
+            const open = !o.picker.collapsed.has(secName) || Boolean(q);
+            toggle.setAttribute('aria-expanded', String(open));
+            const caret = document.createElement('span');
+            caret.className = 'ask-pick-caret';
+            caret.setAttribute('aria-hidden', 'true');
+            const nm = document.createElement('span');
+            nm.className = 'nm';
+            nm.textContent = secName;
+            const n = document.createElement('span');
+            n.className = 'n';
+            n.textContent = items.filter(function (it) { return sel.has(it.apiName); }).length + '/' + items.length;
+            toggle.appendChild(caret);
+            toggle.appendChild(nm);
+            toggle.appendChild(n);
+            toggle.addEventListener('click', function () {
+              if (o.picker.collapsed.has(secName)) o.picker.collapsed.delete(secName);
+              else o.picker.collapsed.add(secName);
+              paintPicker();
+            });
+
+            head.appendChild(box);
+            head.appendChild(toggle);
+            sec.appendChild(head);
+
+            const body = document.createElement('div');
+            body.className = 'ask-pick-items';
+            // **筛选时无视折叠。** 输了关键词还得先展开才看得到匹配,等于筛选没用;
+            // 而收起的状态记在 `collapsed` 里,清空筛选框之后原样恢复
+            body.hidden = !open;
+            sec.appendChild(body);
+
+            items.forEach(function (it) {
+              const row = document.createElement('label');
+              row.className = 'ask-pick-item';
+              const cb = document.createElement('input');
+              cb.type = 'checkbox';
+              cb.checked = sel.has(it.apiName);
+              cb.addEventListener('change', function () {
+                if (cb.checked) sel.add(it.apiName); else sel.delete(it.apiName);
+                // 只重画这一节的计数、方框和正文,不整列表重绘 —— 重绘会把滚动位置
+                // 弹回顶上,而人正一条条往下勾
+                const on = items.filter(function (x) { return sel.has(x.apiName); }).length;
+                n.textContent = on + '/' + items.length;
+                box.setAttribute('aria-pressed', String(on === items.length));
+                box.setAttribute('aria-label',
+                  (on === items.length ? '取消选中「' : '全选「') + secName + '」这一节');
+                box.className = 'ask-pick-box' + (on === items.length ? ' on' : on ? ' some' : '');
+                paintCount();
+                refreshOk();
+              });
+              const label = document.createElement('span');
+              label.className = 'nm';
+              label.textContent = it.name;
+              row.appendChild(cb);
+              row.appendChild(label);
+              if (it.rarity !== null && it.rarity !== undefined) {
+                const pct = document.createElement('span');
+                // 阈值由服务端下发,前端不自己写一个 15 —— 界面上的「难」和程序认的
+                // 「难」必须是同一条线
+                pct.className = 'pct' + (it.rarity < (o.picker.rarePct || 15) ? ' rare' : '');
+                pct.textContent = it.rarity + '%';
+                row.appendChild(pct);
+              }
+              if (it.unlocked) {
+                const d = document.createElement('span');
+                d.className = 'done';
+                d.textContent = '已解锁';
+                row.appendChild(d);
+              }
+              body.appendChild(row);
+            });
+
+            pickList.appendChild(sec);
+          });
+
+          if (!pickList.children.length) {
+            const empty = document.createElement('div');
+            empty.className = 'ask-pick-count';
+            empty.textContent = q ? '没有匹配的成就' : '这份攻略里没有能局部重写的条目';
+            pickList.appendChild(empty);
+          }
+          paintCount();
+        }
+
+        /**
+         * 「已选 N 条」和「清空」的可用性。
+         *
+         * **单拎出来是因为它必须能被单独调用。** 它原来写在 `paintPicker` 末尾,而勾一个
+         * 条目**故意不重绘整列表**(重绘会把滚动位置弹回顶上,而人正一条条往下勾)——
+         * 于是勾单条时这一行永远不更新:正文的数字在动,它卡在上一次整体重绘的值上。
+         *
+         * 之所以一直没被发现,是因为正文那句话是对的,**两个数字要放在一起看才对得出来**。
+         * 抓到它靠的是拿 DOM 里真实勾上的框数去比显示的数,而不是读界面。
+         */
+        function paintCount() {
+          const sel = o.picker.selected;
+          pickCount.textContent = '已选 ' + sel.size + ' 条';
+          pickClear.disabled = sel.size === 0;
+        }
+
+        /** 自选但一条没勾 = 没有可执行的请求。**闸门放在按钮上,不是放在错误提示里** */
+        function refreshOk() {
+          const blocked = pickerShown() && o.picker.selected.size === 0;
+          okBtn.disabled = blocked;
+          okBtn.style.opacity = blocked ? '0.45' : '';
+          okBtn.style.cursor = blocked ? 'default' : '';
+        }
+
+        function syncPicker() {
+          const show = pickerShown();
+          pickWrap.hidden = !show;
+          if (show) paintPicker();
+          // **无论有没有 picker 都要跑。** 这个弹窗是复用的同一个 DOM,上一次调用
+          // 可能把确定按钮设成了 disabled;不无条件复位的话,下一个不带 picker 的
+          // 框会开出来就点不动,而且它没有任何理由解释自己为什么点不动
+          refreshOk();
+        }
+        if (o.picker) {
+          pickFilter.value = '';
+          pickFilter.oninput = paintPicker;
+          pickClear.onclick = function () {
+            o.picker.selected.clear();
+            paintPicker();
+            refreshOk();
+          };
+        } else {
+          pickFilter.oninput = null;
+          pickClear.onclick = null;
+        }
+
+        syncInput();
+        syncPicker();
         okBtn.style.background = o.danger ? '#a33' : '';
         cancelBtn.style.display = o.notifyOnly ? 'none' : '';
 
@@ -3279,7 +3780,19 @@
         function onOutside(e) { if (e.target === modal) close(false); }
         function onKey(e) {
           if (e.key === 'Escape') close(false);
-          else if (e.key === 'Enter') close(true);
+          else if (e.key === 'Enter') {
+            // **中文输入法按 Enter 是在上屏候选词,不是在确认。** 这个框现在有一个
+            // 一句话输入,而这是个中文界面 —— 不挡的话,打「把互斥关系写清楚」的
+            // 过程中每选一次词就会当场把这次(要花钱、且不可逆)的操作确认掉。
+            //
+            // 两道都要:`isComposing` 管输入法组词中的那次 Enter,而组词结束后
+            // 焦点还在输入框里的 Enter 也不该算确认 —— 那时人还在写,不是在决定
+            if (e.isComposing || e.keyCode === 229) return;
+            // 框里的两个输入框(「怎么改」和挑选列表的筛选)都算"人还在写",不是在决定
+            if (e.target === inputEl || e.target === pickFilter) return;
+            if (okBtn.disabled) return; // 挑了「自选」却一条没勾,Enter 不能绕过这道闸
+            close(true);
+          }
         }
 
         okBtn.addEventListener('click', onOk);
@@ -3480,38 +3993,178 @@
       btn.disabled = true;
       showGen('⏳ 检查《' + name + '》…', false, true);
 
-      const p = await new Promise((resolve) => {
-        rpc.withSuccessHandler(resolve)
-          .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
-          .previewGuideRewrite(appid);
-      });
+      // **两次预检一起拿,而且两次的失败不是一回事。**
+      //
+      // `previewGuideRewrite` 是**闸门**:它跑的是整篇重写真正会跑的那份 plan,
+      // 跑不通就别把框打开(默认落在整篇)。`previewGuidePatch` 只是把可选的条目
+      // 拿回来,它失败只让「自选」变灰,整篇照走 —— 所以 `p.error` 拦,`sc.error` 不拦。
+      //
+      // 并行是因为串行的话那份挑选列表会比对话框晚出来:一个先画出来、再自己
+      // 长出一列成就的框,看着像是刚才点漏了
+      const [p, sc] = await Promise.all([
+        new Promise((resolve) => {
+          rpc.withSuccessHandler(resolve)
+            .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
+            .previewGuideRewrite(appid);
+        }),
+        new Promise((resolve) => {
+          rpc.withSuccessHandler(resolve)
+            .withFailureHandler((err) => resolve({ error: String(err && err.message || err) }))
+            .previewGuidePatch(appid);
+        }),
+      ]);
       if (!p || p.error) {
         btn.disabled = false;
         return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true, false);
       }
 
-      // 只说三件事:换掉什么、丢什么、多久。备份路径、失败时怎么办、写完还给对照,
-      // 都是他点下去之后自然会看到的,不必在这里先讲一遍
+      /**
+       * 范围那一排。**按钮上就带着条数,所以不需要一句解释它的话** ——
+       * 「稀有 5」自己说完了自己是什么。这一格是这个框里的主要决定。
+       *
+       * 条数为 0 的范围**留在原位但点不动**,不隐藏:隐藏之后「这游戏没有稀有成就」
+       * 和「没有这个功能」在界面上是同一件事,而它们不是。算不出来的(比如 Steam
+       * 没给解锁率)也一样灰,但 title 里写的是原因 —— 那两种灰的含义正相反。
+       */
+      const pickGroups = (sc && !sc.error && sc.pickable) ? sc.pickable : [];
+      const pickable = pickGroups.reduce(function (n, g) { return n + g.items.length; }, 0);
+      const allItems = pickGroups.reduce(function (a, g) { return a.concat(g.items); }, []);
+      // 阈值由服务端下发(见 previewGuidePatch 的 rarePct),前端不自己写一个 15 ——
+      // 「稀有」选谁、百分比什么时候标成强调色,和提示词判断哪几条要写深必须同一条线
+      const rarePct = (sc && sc.rarePct) || 15;
+
+      /**
+       * 列表上方那几个快捷选择。**它们是一次性的动作,不是开关。**
+       *
+       * 曾经是开关,亮起来表示"这一批已经全在选择里"。那个含义是**推导出来的事实**,
+       * 而用户读到的是"我按过这个键" —— 两件事被同一个亮起来表达了,于是:
+       *
+       *   点「稀有」→ 27 条勾上 → 而那唯一一条未解锁的成就恰好也稀有 →
+       *   「未解锁」的全部内容都进了选择 → 它**跟着亮**,尽管没人按过它。
+       *   再点「未解锁」(它亮着,所以动作是减)→ 去掉那 1 条 →「稀有」只剩 26/27 →
+       *   **它又跟着暗**。按一个键,亮/暗的是另一个。
+       *
+       * **小节之间不相交,属性之间相交** —— 三态方框那套模型在这里不成立,搬过来
+       * 就会得到上面那种连锁。所以这几个键不再有状态:点一下就是"把这批加进选择",
+       * 仅此而已。想清空用旁边的「清空」,想去掉某几条就在列表里取消勾选。
+       *
+       * 代价是"整批撤销"要多点一下(清空 → 重选)。换来的是**每次点击的结果都能
+       * 从按钮的名字读出来**,而这个框里发生的下一件事要花钱且不可逆。
+       */
+      const shortcuts = [
+        { key: 'all', label: '全选', pick: function () { return allItems; } },
+        {
+          key: 'locked', label: '未解锁',
+          pick: function () { return allItems.filter(function (it) { return !it.unlocked; }); },
+        },
+        {
+          key: 'rare', label: '稀有',
+          title: '全球解锁率低于 ' + rarePct + '% 的成就',
+          pick: function () { return allItems.filter(function (it) { return it.rarity !== null && it.rarity < rarePct; }); },
+        },
+      ];
+
+      // `collapsed` 存的是**收起来的**小节名,不是展开的 —— 默认全展开,而"默认值
+      // 是空集合"比"默认值是全部小节名"少一处要跟着 groups 同步的状态
+      const picker = {
+        groups: pickGroups,
+        selected: new Set(),
+        collapsed: new Set(),
+        shortcuts: shortcuts,
+        rarePct: rarePct,
+        when: function (s) { return s.scope === 'pick'; },
+      };
+
+      /**
+       * **范围现在是一个真正的二选一。**
+       *
+       * 之前这一行混着「整篇」和三个算出来的集合,而后者不是"范围",是"选择的起点" ——
+       * 把它们建模成范围是个分类错误。现在:整篇 = 全部重写,自选 = 我来挑。
+       */
+      const scopeChoice = {
+        key: 'scope',
+        label: '范围',
+        value: 'all',
+        options: [
+          { value: 'all', label: '整篇' },
+          {
+            value: 'pick',
+            label: '自选',
+            // 一条都定位不到就没得挑。灰掉并说明,好过点开一个空列表
+            disabled: pickable === 0,
+            title: pickable === 0 ? '这份攻略里没有能局部重写的条目' : '自己挑要重写哪几条',
+          },
+        ],
+      };
       const rewriteChoice = effortChoice();
+      // 一句要求。只在选了局部范围时露出来 —— 整篇重写用不到它,摆在那儿是一个
+      // 不会被读的输入框
+      const noteInput = {
+        /**
+         * 这一格的标签换过两次,两次都为了同一件事:让人不用猜这栏要填什么。
+         *
+         *   「要求」   —— 太抽象,三个字读完还是不知道要什么
+         *   「怎么改」 —— 具体了,但它是个**问句**,而旁边两行标签(范围、推理强度)
+         *                 都是名词短语。一群名词里混一个问句,读起来就随意 ——
+         *                 和当初「挑几条」在一排名词里的毛病一模一样
+         *   「重写要求」—— 名词短语,和这个框的标题(重写…)咬在一起,而且比光说
+         *                 「要求」多了"对什么的要求"这一半
+         *
+         * 「填什么」由 placeholder 交代,它答的是那个真正的问题:留空会怎样。
+         */
+        label: '重写要求',
+        // placeholder 要答的其实是**留空会怎样**:那才是「我该填什么」背后的问题。
+        // 先说留空的后果,再给一个能照抄的例子
+        placeholder: '留空 = 重新查着写。也可以:写详细点、标出易错过',
+        value: '',
+        when: function (s) { return s.scope !== 'all'; },
+      };
+
       const ok = await askConfirm({
         title: '重写《' + name + '》的攻略?',
-        body: [
-          '现有 ' + p.boxes + ' 个 checkbox 会被整份替换,原文先备份。',
-          p.atRisk ? p.atRisk + ' 个手动勾的子步骤会变回未勾选。' : null,
-          // 这里原来还有一句「约 2–4 分钟」。**删掉了**:同样的输入实测跑三次是
-          // 76/174/337 秒,给区间就是在承诺一个我们给不出的东西;而且推理强度现在
-          // 可调,低档快八倍,那句话会当场变成错的。时长看进度条 —— 隔壁那个生成框
-          // 早就是这么决定的,这里跟上
-        ].filter(Boolean).join('\n'),
+        /**
+         * **这个框没有正文。** 四轮删下来一句不剩,每一句都是在复述屏幕上已有的东西:
+         *
+         *   「约 2–4 分钟」                      同样的输入实测 76/174/337 秒,
+         *                                        推理强度可调之后低档快八倍,写死就是错的
+         *   「现有 51 个 checkbox 会被整份替换」  「整篇」已经说了全部替换,51 只是数了一遍
+         *   「只改选中的 27 条」                  列表底下那行「已选 27 条」就在旁边摆着
+         *   「原文先备份」                        我们这边的保底措施,不是他要决定的事
+         *   「N 个手动勾的子步骤会变回未勾选」    「重写」本身就含这个意思,何况备份还在
+         *
+         * 标题问的是要不要重写,范围、条数、要求三样都写在下面的控件上 —— 状态自己
+         * 摆在那儿,不需要旁白。
+         *
+         * **CLI 那边不跟着删:** `formatPreflight` 照旧把要丢的手动勾选逐条
+         * 印出来。命令行是给敲了 flag 的人看的,可以详细;界面上要短。同一份措辞
+         * 硬凑给两边用,两边都不合适 —— 和 `previewGuideRewrite` 交数字不交句子同理。
+         */
         okText: '重写',
         danger: true,
-        choice: rewriteChoice,
+        choices: [scopeChoice, rewriteChoice],
+        input: noteInput,
+        picker: picker,
       });
       if (!ok) {
         btn.disabled = false;
         genBar.style.display = 'none';
         return;
       }
+
+      /**
+       * 整篇走 overwrite,自选走 scope。**两个不同时传** —— 服务端按 scope 是否为空
+       * 分流,同时给会让"到底跑了哪条"取决于服务端的判断顺序。
+       *
+       * 自选发出去的**永远是一串点名的 api_name**,走后端 `resolveScope` 的显式列表
+       * 那条分支 —— 界面不需要自己的选择器种类。用 api_name 而不是成就名,是因为
+       * 同名成就按名字点不动(库里真有 12 组同名)。
+       *
+       * 这里曾经还有一个分支,把「稀有」之类的预设当选择器名发出去;那些预设搬进
+       * 挑选列表变成"勾上这一批"之后,发出去的就只剩这一种形状了。
+       */
+      const scope = scopeChoice.value === 'all'
+        ? null
+        : { selector: [...picker.selected].join(','), note: noteInput.value.trim() || null };
 
       rpc
         .withSuccessHandler(function (r) {
@@ -3526,7 +4179,7 @@
           btn.disabled = false;
           showGen(GEN_WARN + ' ' + err, true, false);
         })
-        .startGuideGen(appid, true, rewriteChoice.value);
+        .startGuideGen(appid, true, rewriteChoice.value, scope);
     };
 
     /**
@@ -3540,6 +4193,9 @@
      */
     function effortChoice() {
       return {
+        // 组名。askConfirm 把每组的当前值按 key 收成一个对象交给正文函数,
+        // 于是「选了什么范围」和「选了多深」在那句话里都取得到
+        key: 'effort',
         label: '推理强度',
         options: [
           { value: 'low', label: '低' },
@@ -3621,7 +4277,7 @@
       // 他要去读的时候说,所以留在结果那一行,不放在这里。
       // 带损失的那几个框(重写、删除)不适用这条,它们的正文是必须的
       const choice = effortChoice();
-      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成', choice });
+      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成', choices: [choice] });
       if (!ok) return;
       genCollapsed = false; // 自己点的生成,进度条要露出来
       btn.disabled = true;
@@ -3786,9 +4442,20 @@
               escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
               (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
             : '';
+          // 局部重写要说的是**另一件事**:改了几条、其余没动。说成「已生成 · 11/11
+          // 个成就」的话,一次只改了 5 条的操作看起来和整篇重写一模一样,而"没动的
+          // 那部分"正是他选局部的理由。旧问题也在这里报 —— 这次没碰、也没拦路,
+          // 但不说出来的话下次校验看到它们会以为是这次改坏的
+          const pat = r.patched;
+          const preExisting = pat && pat.preExisting
+            ? '<br><span class="warn">' + GEN_WARN + ' 攻略里还有 ' + pat.preExisting +
+              ' 条本来就有的校验问题,这次没碰</span>'
+            : '';
+          const headline = pat
+            ? GEN_OK + ' 《' + s.game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where
+            : GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where;
           showGen(
-            GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where +
-              noResearch + unsyncable +
+            headline + noResearch + unsyncable + preExisting +
               '<br><span class="warn">内容需要你自己过一遍。</span>',
             false, live
           );
