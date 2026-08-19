@@ -137,13 +137,21 @@ backup already covers. That note is still printed in full on the command line: `
 writes for someone who typed a flag and can afford the detail, a dialog cannot, and one wording
 forced to serve both is wrong in both places.
 
-The computed sets (`全选`, `未解锁`, `稀有`) are **shortcuts inside the picker**, not scopes of their
-own: clicking one *ticks* those entries, so you can see exactly which they are and then add or drop
-individual ones. They only ever add — `清空`, next to the count, is the way back. They were scope
-options at first, and that was wrong for a concrete reason: you were confirming a paid, irreversible
-rewrite over a set you had never seen and could not adjust. They were also toggles for one round,
-which was wrong for a second reason — the batches overlap (a locked achievement can also be rare),
-so pressing one button would light or dim another.
+Above the list sit two **filters** — `稀有` and `未解锁`. Pressing one narrows what the list shows;
+pressing both shows the intersection. **They change what you see and never touch what you have
+selected**, which is what makes their pressed state honest: it means "I pressed this", nothing else.
+`全选`, next to the count, takes everything currently shown, and `清空` is the way back.
+
+That split — filter to look, then take — is the third arrangement of this row, and each move was
+forced by using it:
+
+| Was | Broke because |
+|---|---|
+| Scope options next to 整篇 | You were confirming a paid, irreversible rewrite over a set you had never seen and could not adjust |
+| Toggles that selected a batch | The batches overlap (a locked achievement can also be rare), so pressing one lit or dimmed another — the lit state was a *derived fact* the user read as "I pressed this" |
+| One-shot buttons that added a batch | Add-only can express unions and nothing else. "The rare ones I haven't got yet" — the most useful set there is — could only be reached by taking all 22 rare and unticking by hand |
+
+Two filters give every combination the old rows could not: rare, locked, both, or neither.
 
 **自选** opens the guide's own achievements, grouped by the section headings they sit under, each
 row showing its global unlock rate and whether you have it. Every section heading carries its own
