@@ -484,21 +484,68 @@ describe('搜索框一个人干两件事', () => {
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
 
-  test('有搜索词时,四个勾选框一律让路', () => {
+  test('有搜索词时,五个筛选芯片一律让路', () => {
     // **这一条是「库里没有就去 Steam 加」那套的地基。** 不让路的话,「搜不到」有
-    // 一半以上的概率意思是「被自己的筛选挡住了」—— 实测三个默认勾选框挡着 316 款
-    // 里的 171 款 —— 于是搜一款已经打满的游戏,界面会建议你**再添加一次**。
+    // 一半以上的概率意思是「被自己的筛选挡住了」—— 实测三个开局在排除态的芯片挡着
+    // 316 款里的 171 款 —— 于是搜一款已经打满的游戏,界面会建议你**再添加一次**。
     // 破坏方式很隐蔽:把 return 改成继续往下走,表格看起来只是「少了几行」
     const src = js();
     const i = src.indexOf('function hidingFilter');
     assert.ok(i > 0, '找不到 hidingFilter —— 这条检查失去了目标,不是通过了');
     const block = src.slice(i, src.indexOf('\n    }', i));
     const searchAt = block.indexOf('f.search');
-    const firstCheckbox = block.indexOf('f.hideComplete');
-    assert.ok(searchAt > 0 && firstCheckbox > searchAt, '搜索必须在勾选框之前判');
-    // 搜索那一段必须自己 return 掉,不能落到下面的勾选框判断上
-    const searchBranch = block.slice(searchAt, firstCheckbox);
-    assert.match(searchBranch, /return/, '有搜索词时必须当场返回,不能继续过勾选框');
+    const chipLoop = block.indexOf('FILTERS.length');
+    assert.ok(searchAt > 0, 'hidingFilter 里找不到 f.search');
+    assert.ok(chipLoop > searchAt, '搜索必须在芯片循环之前判');
+    // 搜索那一段必须自己 return 掉,不能落到下面的芯片循环上
+    const searchBranch = block.slice(searchAt, chipLoop);
+    assert.match(searchBranch, /return/, '有搜索词时必须当场返回,不能继续过芯片');
+  });
+
+  test('芯片和 FILTERS 表两边的 key 必须一一对上,顺序也要一致', () => {
+    // **漏一边不会报错,只会「点了没反应」。** 事件是委托给容器的,所以 markup 里多
+    // 一个芯片照样会循环换色 —— 只是 hidingFilter 那个循环里没有它,表格一行不动。
+    // 反过来 FILTERS 里多一行,则是一个永远读不到状态的属性:currentFilters 只收
+    // markup 里存在的芯片,f[key] 是 undefined,既不是 'only' 也不是 'not',
+    // 于是被静默 continue 掉。**两个方向都是沉默的**,所以只能在这里钉。
+    //
+    // 顺序也一起钉:屏幕上的顺序是按常用度排的(两个想「只看」的在前,三个开局
+    // 挡掉的在后),而 FILTERS 的顺序决定「被谁挡住了」报的是哪一个 —— 两边错开
+    // 之后那句话会指着一个不相干的芯片说「点这里」
+    const src = js();
+    const table = src.slice(src.indexOf('const FILTERS = ['), src.indexOf('const NEXT_STATE'));
+    const inTable = [...table.matchAll(/key:\s*'([a-z]+)'/g)].map((m) => m[1]);
+    const page = read('Dashboard.html');
+    const chipsAt = page.indexOf('id="filterChips"');
+    const inMarkup = [...page.slice(chipsAt, chipsAt + 3000).matchAll(/data-filter="([a-z]+)"/g)]
+      .map((m) => m[1]);
+    assert.ok(inTable.length >= 5, 'FILTERS 表读空了 —— 这条检查失去了目标,不是通过了');
+    assert.deepEqual(inMarkup, inTable, '芯片和 FILTERS 必须同名同序');
+  });
+
+  test('三态的循环方向是 中立 → 只看 → 排除', () => {
+    // **方向不是随手定的,反过来会让两件最常做的事各多一次点击。**
+    // 三个状态排成一个环,中立只有一个前驱,所以只有一条路是一次点击。开局时
+    // 喜爱/家庭在中立、另外三个在排除 —— 前者的下一步通常是「只看」,后者是
+    // 「回中立」(取消隐藏去找一款游戏),这个方向正好让两者各一次点击。
+    // 反过来排的话双双变成两次,而**表格照样能用**,不会有任何东西报错,
+    // 只是每天多点几十下 —— 正是那种改了没人发现的退步
+    const src = js();
+    const m = src.match(/const NEXT_STATE = \{([^}]+)\}/);
+    assert.ok(m, '找不到 NEXT_STATE');
+    assert.match(m[1], /off:\s*'only'/, '中立的下一格必须是只看');
+    assert.match(m[1], /only:\s*'not'/, '只看的下一格必须是排除');
+    assert.match(m[1], /not:\s*'off'/, '排除的下一格必须是中立');
+  });
+
+  test('开局状态:喜爱和家庭中立,其余三个排除', () => {
+    // 默认视图必须和勾选框那一版**逐行相同** —— 三个「隐藏」勾选框默认勾上,
+    // 对应的就是排除态。改这里等于改所有人打开页面看到的第一屏,而它不报错
+    const page = read('Dashboard.html');
+    const chipsAt = page.indexOf('id="filterChips"');
+    const states = [...page.slice(chipsAt, chipsAt + 3000)
+      .matchAll(/data-filter="([a-z]+)" data-state="([a-z]+)"/g)].map((m) => m[1] + ':' + m[2]);
+    assert.deepEqual(states, ['fav:off', 'family:off', 'complete:not', 'unvetted:not', 'noach:not']);
   });
 
   test('库里有没有,不能决定要不要去 Steam 搜', () => {

@@ -552,14 +552,34 @@
       align-items: center;
     }
 
-    /* 筛选项从「原生 checkbox + 文字」改成**开关芯片**。
-       两个原因,一个是外观(原生勾选框在深色底上是操作系统画的一块浅色方块,
-       和这一页没有关系),一个是可读性:四个并排的裸勾选框,开没开要盯着看。
-       芯片亮起来是一眼的事。
-       **标记一个字没改** —— input 还在原处,id 还是那几个,`.checked` 照常读得到,
-       所以 render() 里那些 getElementById(...).checked 全部不用动。 */
-    label.checkbox {
+    /* 筛选芯片:**一个控件三个状态** —— 中立 / 只看 / 排除。
+       上一版是勾选框,而勾选框只有开和关两格。这排控件真正要表达的是三件事:
+       「不管这个属性」「只留有这个属性的」「去掉有这个属性的」。两格装不下三件事,
+       于是上一版把它拆给了两种控件各管一半 —— 「只看喜爱」管前一半,「隐藏已完成」
+       管后一半。代价有两个:同一个属性想换个方向看就没有控件可点(想「只看已完成」
+       当奖杯墙?没有这个东西),而且每加一个属性都得先决定它是「只看型」还是「隐藏型」,
+       决定错了就得改标记。三态之后五个芯片是同一种东西,顺序也就只按常用度排。
+
+       **循环方向是 中立 → 只看 → 排除 → 中立,这是算出来的,别随手调。**
+       三个状态排成一个环,中立只有一个前驱,所以只有一条路是一次点击。开局时
+       喜爱/家庭在中立、另外三个在排除 —— 前者最常见的下一步是「只看」,后者是
+       「回中立」(取消隐藏去找一款游戏),而这个方向正好让这两件事各一次点击。
+       反过来排的话这两件最常做的事双双变成两次。
+       代价是「回到刚离开的那个状态」要两次(只看→中立、中立→排除)。**这是环的
+       拓扑决定的,消不掉**,只能选把哪条路让便宜;想抹掉它得再加一个反向手势
+       (右键反向走一格),那是另一件事,现在没做。
+
+       **三个状态靠三样东西同时区分,不只是颜色。** 颜色单独承载状态是无障碍红线;
+       而且这一页四级表面之间只有 15% 上下的明度差,小芯片上单靠底色分不出三档:
+         中立   圆点 + 常规底
+         只看   圆点点亮 + 蓝底         —— 蓝在这一页里一直是「选中/收窄」
+         排除   横杠 + 凹陷底 + 删除线   —— 划掉一眼就是「不要这些」
+       **排除态不用红。** 红在这一页是危险色(--danger),而排除是五个里有三个开局
+       就在的常态,标红等于一直在喊。凹下去 + 划掉说的是「被推开了」,那才是它的意思。 */
+    .chip {
       font-size: var(--fs-sm);
+      font-family: inherit;
+      line-height: 1.4;
       color: var(--text-2);
       display: inline-flex;
       align-items: center;
@@ -573,37 +593,47 @@
       white-space: nowrap;
       transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
     }
-    label.checkbox:hover { border-color: var(--line-3); color: var(--text); }
-    /* 勾选框本身不显示,但**必须留在无障碍树里** —— 所以是 0 尺寸 + opacity,
-       不是 display:none(那会让它不可聚焦,键盘就选不到了) */
-    label.checkbox input {
-      position: absolute;
-      width: 1px;
-      height: 1px;
-      opacity: 0;
-      margin: 0;
-      pointer-events: none;
-    }
-    label.checkbox::before {
-      content: '';
+    .chip:hover { border-color: var(--line-3); color: var(--text); }
+    .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    /* 状态标记。**圆点变横杠是这一页唯一的形状变化**,所以宽高和圆角都得进过渡 ——
+       只过渡颜色的话,形状会在两帧之间硬跳一下 */
+    .chip-dot {
       width: 6px;
       height: 6px;
       border-radius: var(--r-full);
       background: var(--line-3);
-      transition: background var(--dur-1), box-shadow var(--dur-1);
+      flex-shrink: 0;
+      transition: background var(--dur-1), box-shadow var(--dur-1),
+                  width var(--dur-1), height var(--dur-1), border-radius var(--dur-1);
     }
-    label.checkbox:has(input:checked) {
+    .chip[data-state="only"] {
       background: var(--accent-soft);
       border-color: rgba(102, 192, 244, 0.45);
       color: var(--accent-hi);
     }
-    label.checkbox:has(input:checked)::before {
+    .chip[data-state="only"] .chip-dot {
       background: var(--accent);
       box-shadow: 0 0 0 3px rgba(102, 192, 244, 0.2);
     }
-    label.checkbox:has(input:focus-visible) {
-      outline: 2px solid var(--accent);
-      outline-offset: 2px;
+    /* 底色比 --surface 还暗一档 = 比这排控件所在的面**凹下去**。直接踩页面底色
+       --bg,不另造一个色:芯片陷进背景里,读起来就是「这些被推开了」。
+       --text-3 在 --bg 上是 6.85:1,划掉之后仍然远在 AA 之上 */
+    .chip[data-state="not"] {
+      background: var(--bg);
+      color: var(--text-3);
+    }
+    .chip[data-state="not"]:hover { color: var(--text-2); }
+    .chip[data-state="not"] .chip-label {
+      text-decoration: line-through;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 2px;
+    }
+    .chip[data-state="not"] .chip-dot {
+      width: 8px;
+      height: 2px;
+      border-radius: 1px;
+      background: var(--text-3);
+      box-shadow: none;
     }
 
     input[type="text"] {
@@ -1992,26 +2022,29 @@
         <button type="button" class="on" aria-pressed="true" data-view="table">列表</button>
         <button type="button" aria-pressed="false" data-view="gallery">网格</button>
       </div>
+      <!-- 五个三态芯片(中立/只看/排除,循环和配色见 CSS 里的 .chip)。
+           **顺序按常用度,不按属性性质**:喜爱、家庭是平时想「只看」的,放前面;
+           后三个开局就在排除态,是「平时别来烦我」那一类,放后面。
+
+           **标记只写 data-state,不写 aria-label** —— 状态的中文说法只有 STATE_NAME
+           一份,写在这儿等于抄第二份,改一处漏一处。开局由 setChipState 补齐。
+
+           **文字是光秃秃的名词。** 上一版叫「隐藏已完成」「只看喜爱」,那是把方向
+           焊进了名字里 —— 三态之后方向由芯片自己的状态说,名字再带方向就会读出
+           「只看隐藏已完成」这种东西。 -->
       <div class="filter-chips" id="filterChips">
-      <!-- 默认勾上。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
-           打满的游戏对这个问题没有贡献 -->
-      <label class="checkbox">
-        <input type="checkbox" id="hideComplete" checked> 隐藏已完成
-      </label>
-      <label class="checkbox">
-        <input type="checkbox" id="favOnly"> 只看喜爱
-      </label>
-      <!-- 默认勾上。**界面上不出现 "Unvetted"** —— 那是 Steam 接口里的词,不是用户的词;
+      <button type="button" class="chip" data-filter="fav" data-state="off"><span class="chip-dot"></span><span class="chip-label">喜爱</span></button>
+      <button type="button" class="chip" data-filter="family" data-state="off"><span class="chip-dot"></span><span class="chip-label">家庭</span></button>
+      <!-- 开局排除。它接替了原来那个「进行中」标签页 —— 这一页的问题是「还有什么值得打」,
+           打满的游戏对这个问题没有贡献。三态之后顺带白捡一个奖杯墙:点两下变「只看」 -->
+      <button type="button" class="chip" data-filter="complete" data-state="not"><span class="chip-dot"></span><span class="chip-label">已完成</span></button>
+      <!-- **界面上不出现 "Unvetted"** —— 那是 Steam 接口里的词,不是用户的词;
            数据库里那一列仍叫 Unvetted(会进 CSV,是兼容面)。解释放 title,不占屏幕 -->
-      <label class="checkbox" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上面那个平均完成率 —— 和 Steam 自己的算法一致。">
-        <input type="checkbox" id="hideUnvetted" checked> 隐藏受限游戏
-      </label>
-      <!-- 默认勾上,和「隐藏已完成」同一个理由:这一页回答的是「还有什么值得打」,
+      <button type="button" class="chip" data-filter="unvetted" data-state="not" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上面那个平均完成率 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label">受限</span></button>
+      <!-- 开局排除,和「已完成」同一个理由:这一页回答的是「还有什么值得打」,
            而没有成就系统的游戏对这个问题一条贡献都没有 —— 它们连一个可打的目标都没有。
-           要看整个库(比如找一款游戏改标记)取消勾选就行 -->
-      <label class="checkbox">
-        <input type="checkbox" id="hideNoAch" checked> 隐藏无成就系统的游戏
-      </label>
+           要看整个库(比如找一款游戏改标记)点一下打回中立就行 -->
+      <button type="button" class="chip" data-filter="noach" data-state="not"><span class="chip-dot"></span><span class="chip-label">无成就</span></button>
       </div>
       <div class="row-count" id="rowCount"></div>
     </div>
@@ -2145,16 +2178,52 @@
       return isRecentlyPlayed(g) && typeof g.total === 'number' && g.total > 0;
     };
 
+    /**
+     * 五个可筛的属性。**顺序就是屏幕上的顺序**,按常用度排,不按属性性质。
+     *
+     * 每个属性一个三态芯片(中立/只看/排除),不是两个方向各一个勾选框 —— 理由写在
+     * CSS 里 `.chip` 那一段。这张表是**唯一的真源**:筛选走它,「被谁挡住了」那句话
+     * 的用词也走它。加一个属性只要在这儿加一行,再在 HTML 里加一个芯片。
+     *
+     * 上一版是四处各记一遍:HTML 一个勾选框、currentFilters 一行、hidingFilter 一行、
+     * 事件绑定的 id 数组里一个字符串。**漏掉最后一处的表现是「点了没反应」,不报错**
+     * —— 加 hideComplete 时就漏过一次。现在事件是委托的,id 数组没有了。
+     */
+    const FILTERS = [
+      { key: 'fav',      label: '喜爱',   has: (g) => Boolean(g.favorite) },
+      { key: 'family',   label: '家庭',   has: (g) => Boolean(g.family) },
+      { key: 'complete', label: '已完成', has: (g) => g.rate === 1 },
+      { key: 'unvetted', label: '受限',   has: (g) => Boolean(g.unvetted) },
+      { key: 'noach',    label: '无成就', has: (g) => g.total === 'N/A' },
+    ];
+
+    /** 点一下走到的下一格。**中立 → 只看 → 排除 → 中立,方向别随手调**(见 CSS .chip) */
+    const NEXT_STATE = { off: 'only', only: 'not', not: 'off' };
+
+    /** 三态的中文说法。**只上无障碍树,不上屏** —— 屏幕上这三件事由圆点、横杠和
+     *  删除线说完了,再写一遍字是拿文字补一个本该一眼看出来的状态。
+     *  它同时也是「被「只看喜爱」挡住了」那句话的前半截,所以只能有这一份 */
+    const STATE_NAME = { off: '不筛选', only: '只看', not: '排除' };
+
+    /** 把芯片改到指定状态。**状态只存在 data-state 上**,CSS 全靠它选色;
+     *  aria-label 跟着一起改,否则读屏念到的永远是开局那一档 */
+    function setChipState(chip, state) {
+      chip.dataset.state = state;
+      chip.setAttribute('aria-label',
+        chip.querySelector('.chip-label').textContent + ':' + STATE_NAME[state]);
+    }
+
     /** 上面那排筛选控件当前的状态。读一次给整轮 render 用 —— 几百行里逐行问 DOM
      *  是白花的钱,而搜索框每敲一个字符就重画一次 */
     function currentFilters() {
-      return {
-        search: document.getElementById('searchBox').value.trim().toLowerCase(),
-        hideComplete: document.getElementById('hideComplete').checked,
-        hideUnvetted: document.getElementById('hideUnvetted').checked,
-        hideNoAch: document.getElementById('hideNoAch').checked,
-        favOnly: document.getElementById('favOnly').checked,
-      };
+      const f = { search: document.getElementById('searchBox').value.trim().toLowerCase() };
+      // 芯片自己就是状态的存放处(data-state),这里只是收成一个对象。
+      // **不另存一份 JS 状态** —— 两份迟早对不上,而对不上的表现是筛选结果和控件长相
+      // 各说各的,谁也看不出哪个才是真的
+      document.querySelectorAll('#filterChips .chip').forEach(function(chip) {
+        f[chip.dataset.filter] = chip.dataset.state;
+      });
+      return f;
     }
 
     /**
@@ -2168,24 +2237,36 @@
      * 或者反过来 —— 说跳过去了,然后跳到一个不存在的地方。
      */
     function hidingFilter(g, f) {
-      const by = (id, label) => ({ el: document.getElementById(id), label });
-      // **有搜索词时,搜索是唯一的判据,四个勾选框一律让路。**
+      // **有搜索词时,搜索是唯一的判据,五个芯片一律让路。**
       //
-      // 勾选框回答的是「平时默认给我看什么」,搜索回答的是「我现在要找这一个」。
+      // 芯片回答的是「平时默认给我看什么」,搜索回答的是「我现在要找这一个」。
       // 后者是点名,不该被前者否决 —— 而且行上有完成率、受限徽章、无成就系统这些,
       // 搜出来一眼就能判断,不需要靠筛选替你挡掉。
       //
-      // 这不只是顺手:三个勾选框默认全开,实测挡着 316 款里的 171 款。不让路的话,
+      // 这不只是顺手:三个芯片开局就在排除态,实测挡着 316 款里的 171 款。不让路的话,
       // 「搜不到」有一半以上的概率意思是「被自己的筛选挡住了」而不是「库里没有」——
       // 而下面那套「库里没有就去 Steam 找」正是拿这个判断当开关的,判错就会建议你
       // **再添加一次已经拥有的游戏**
       if (f.search) {
-        return g.name.toLowerCase().indexOf(f.search) === -1 ? by('searchBox', '搜索框') : null;
+        const box = document.getElementById('searchBox');
+        return g.name.toLowerCase().indexOf(f.search) === -1 ? { el: box, label: '搜索框' } : null;
       }
-      if (f.hideComplete && g.rate === 1) return by('hideComplete', '隐藏已完成');
-      if (f.hideUnvetted && g.unvetted) return by('hideUnvetted', '隐藏受限游戏');
-      if (f.hideNoAch && g.total === 'N/A') return by('hideNoAch', '隐藏无成就系统的游戏');
-      if (f.favOnly && !g.favorite) return by('favOnly', '只看喜爱');
+      // **多个芯片是交集,不是并集。** 同时开「只看喜爱」和「只看家庭」= 喜爱的家庭
+      // 游戏,很可能一条都不剩 —— 那是对的:五个说的是五个不同的属性,不同属性取交集
+      // 是筛选的通常含义(并集得让人先知道哪几个属性被并了,而屏幕上没地方说这件事)。
+      // 结果为空由表格下面那个读数负责报,不在这里补救
+      for (let i = 0; i < FILTERS.length; i++) {
+        const flt = FILTERS[i];
+        const state = f[flt.key];
+        if (state !== 'only' && state !== 'not') continue;
+        // 一个属性两个方向,同一个控件:「只看」挡掉没有这个属性的,「排除」挡掉有的
+        if (state === 'only' ? !flt.has(g) : flt.has(g)) {
+          return {
+            el: document.querySelector('#filterChips [data-filter="' + flt.key + '"]'),
+            label: STATE_NAME[state] + flt.label,
+          };
+        }
+      }
       return null;
     }
 
@@ -2196,7 +2277,7 @@
     /**
      * 'table' | 'gallery'。**这是「怎么看」,不是「看什么」** —— 筛选条件由上面那排
      * 控件决定,两个视图共用同一批结果。以前那套标签页把两件事混在一起(进行中/已完成
-     * 是筛选,喜爱既是筛选又是另一种排版),所以它拆成了 checkbox + 这个开关
+     * 是筛选,喜爱既是筛选又是另一种排版),所以它拆成了筛选芯片 + 这个开关
      */
     let viewMode = 'table';
     /**
@@ -2742,7 +2823,7 @@
           + '</div>';
 
         // 展开看的是「还差哪些成就」,判据是**这一行确实没打完**,不是标签页选了哪个。
-        // 标签页没了之后,关掉「隐藏已完成」时打满的游戏也会出现在表里 —— 给它展开箭头
+        // 标签页没了之后,「已完成」不在排除态时打满的游戏也会出现在表里 —— 给它展开箭头
         // 会展出一个空列表
         const canExpand = g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid;
         const rowClass = 'game-row' + (canExpand ? ' expandable' : '');
@@ -3015,16 +3096,25 @@
     });
 
 
-    // 每个筛选控件都要在这儿挂一个,漏一个的表现是「点了没反应」而不是报错 ——
-    // 加 hideComplete 时就漏过一次:默认值照常生效(首次渲染读得到 checked),
-    // 只有取消勾选时才看得出来。所以按 id 一次性挂,别再逐行写
-    ['searchBox', 'hideComplete', 'favOnly', 'hideUnvetted', 'hideNoAch'].forEach(function(id) {
-      const el = document.getElementById(id);
-      el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', render);
+    // **芯片用委托挂在容器上,不逐个挂。** 上一版是按 id 数组逐个挂,漏一个的表现是
+    // 「点了没反应」而不是报错 —— 加 hideComplete 时就漏过一次:默认值照常生效
+    // (首次渲染读得到状态),只有动它的时候才看得出来。委托之后这个坑不存在了:
+    // HTML 里加一个芯片就自动有反应,没有第二处要记得改
+    document.getElementById('filterChips').addEventListener('click', function(e) {
+      const chip = e.target.closest('.chip');
+      if (!chip) return;
+      setChipState(chip, NEXT_STATE[chip.dataset.state]);
+      render();
     });
+    // 开局把 aria-label 补齐 —— HTML 里只写了 data-state(状态的中文说法只有
+    // STATE_NAME 一份,写进标记等于抄第二份)
+    document.querySelectorAll('#filterChips .chip').forEach(function(chip) {
+      setChipState(chip, chip.dataset.state);
+    });
+    document.getElementById('searchBox').addEventListener('input', render);
     // 搜索框比别的多一件事:库里没有的时候去 Steam 找。**和 render 分开挂** ——
     // render 是纯粹的重画,谁改了筛选都要跑;这一条只属于搜索框,混进 render 里
-    // 等于每次勾一下「隐藏已完成」都去想要不要发网络请求
+    // 等于每次点一下「已完成」都去想要不要发网络请求
     document.getElementById('searchBox').addEventListener('input', onSearchInput);
 
     document.querySelectorAll('.view-toggle button').forEach(function(btn) {
@@ -3215,8 +3305,9 @@
       btn.addEventListener('click', function() {
         const blocking = hidingFilter(game, currentFilters());
         if (blocking) {
-          // 搜索框是输入框,清空;其余四个是勾选框,取消勾选
-          if (blocking.el.type === 'checkbox') blocking.el.checked = false;
+          // 搜索框是输入框,清空;芯片打回中立。**打回中立而不是走一格循环** ——
+          // 从排除走一格是「只看」,那会把表格换成完全相反的一批,而人要的只是看见这一行
+          if (blocking.el.dataset.filter) setChipState(blocking.el, 'off');
           else blocking.el.value = '';
           render();
         }
