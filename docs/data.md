@@ -74,37 +74,48 @@ Two more things that look like bugs and aren't:
 - A game can disappear from your owned-games list — a delisted free title, lapsed family sharing — while its achievement stats stay available forever. "Not owned" never means "not trackable."
 - If a shared game is played on someone else's account, your progress on it will correctly read 0 forever. That's the only account this tool can see.
 
-## Importing from a spreadsheet
+## Backup and restore
 
-If you already track this in a spreadsheet, import it **before your first sync**. Favorites (♥), spotlights (★), family flags, `Manual` rows and hand-entered achievement counts **cannot be recovered from Steam's API** — importing is the only way to keep them.
+One zip holding `data/steam.db`, everything under `guides/`, and `config.json`. Restore it on another machine and the app opens straight to the Dashboard — the credentials travel too, so there is no setup wizard to sit through.
 
-1. Export each sheet as CSV, with `RAW DATA`, `ACHIEVEMENTS`, or `GUIDES` somewhere in the filename.
-2. Put them all in one folder.
-3. `node tracker.js import ~/Downloads/steam-csvs`
+```bash
+node tracker.js backup                    # writes to backups/
+node tracker.js backup ~/Dropbox          # or anywhere
+node tracker.js backup --no-config        # leave the credentials out
 
-The packaged app ([launcher/README.md](../launcher/README.md)) exposes the same step as an optional folder-path field under **③ 从表格导入** on the setup page, since it has no terminal to run the command from. It runs this identical import, offers blank templates for the three files, and fails the whole form if the folder can't be read rather than saving credentials and reporting success. The setup page stays reachable from the **设置** button on the Dashboard, so a skipped import can be done later.
+node tracker.js restore <file.zip>        # asks before overwriting
+node tracker.js restore <file.zip> --keep-config   # data only, keep this machine's credentials
+```
 
-**"Before your first sync" is a recommendation, not a deadline.** Import overwrites `status`, `sync_locked`, `family`, `favorite`, `priority`, `name` and the counts on every run — it is written to be re-runnable, so importing after a sync still restores those columns. Going in the recommended order just avoids a sync's fresh Steam numbers being replaced by older spreadsheet ones. What is genuinely unrecoverable is the spreadsheet itself: Steam's API cannot supply ♥/★/family/`Manual`, so keep the CSVs until you have confirmed the import landed.
+In the app: the first-run screen offers **从备份恢复** before the setup wizard, and the settings page's **备份** tab has both halves. The backup is written to disk and its path shown — deliberately not offered as a browser download, because Electron would fall back to its native save dialog and [native dialogs do not work in this app](self-update.md).
 
-Columns are read **by position**, not by header text, so translated or renamed headers are fine:
+**The zip contains your credentials in plain text** — the Steam API key, the Notion token and the AI key — unless you pass `--no-config` (or untick the box). That is the point of including them, and it is also the risk: anyone who gets the file can spend your AI credit. Treat it like a password file.
 
-| Sheet | Columns, in order |
-|---|---|
-| `RAW DATA` | Status, AppID, Name, Achieved, Total, Rate, Favorite, Spotlight, NewAchDate, Family |
-| `ACHIEVEMENTS` | AppID, Game, ApiName, NameCN, NameEN, Description, Hidden, IconURL |
-| `GUIDES` | AppID, Game, URL, (type), Updated |
+Three things about it are load-bearing, and each fails silently if changed:
 
-It handles `TRUE`/`FALSE`, `45.00%`, `1,000` and `N/A`, skips rows without a numeric AppID, and is idempotent — fix something in the spreadsheet, re-run, and those columns are simply overwritten again.
+- **The database is snapshotted with `VACUUM INTO`, never file-copied.** It runs in WAL mode, so recent writes live in `data/steam.db-wal` until a checkpoint and a plain copy can be stale. Measured separately: while the app is running in the tray, `steam.db` is **locked** — PowerShell's `Get-FileHash` cannot even read it, while `VACUUM INTO` works fine.
+- **Restore does not replace the database file.** The server is holding an open handle and Windows will not let an open file be deleted. It attaches the backup as a second database and copies the tables across inside one transaction, so the handle stays valid and nothing needs restarting.
+- **Tables are copied column by shared column, not `SELECT *`.** An older backup has fewer columns (`cover_url` was added later), and `SELECT *` would fail outright on that — or, worse in the other direction, silently misalign. Missing columns take their default.
 
-Then run `node tracker.js sync` to fill in everything Steam *can* tell you.
+Restoring **replaces** the tables — it is a restore, not a merge, so rows on this machine that aren't in the backup are gone. Guide *files* are the exception: they are written over, never deleted, because losing a hand-written `.md` is unrecoverable while an extra unreferenced file costs nothing.
 
-> If your spreadsheet is named something like "Steam Achievement Tracker", the exported filenames all contain the word "achievement". Import only looks at the part after the last ` - `, so `... - RAW DATA.csv` is still recognised correctly.
+`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides.
 
-## Exporting
+## Exporting to a spreadsheet
 
 ```bash
 node tracker.js export            # writes to exports/
-node tracker.js export ~/backups  # or anywhere
+node tracker.js export ~/Desktop  # or anywhere
 ```
 
-Writes `RAW DATA.csv`, `ACHIEVEMENTS.csv` and `GUIDES.csv` — the same layout `import` reads, so a round trip is lossless. Handy for poking at the data in a spreadsheet, or as a backup you can read in twenty years without this tool.
+Writes `RAW DATA.csv`, `ACHIEVEMENTS.csv` and `GUIDES.csv`. Handy for sorting, filtering and charting the data in a spreadsheet.
+
+**This is one-way, and it is not a backup.** There is no import — the CSV path was removed on 2026-08-19 (see below), so nothing reads these files back. They also hold three tables and nothing else: your credentials in `config.json`, the local guide bodies under `guides/`, and `sync_log` are all absent. Use `node tracker.js backup` for anything you might need to restore.
+
+## Why there is no CSV import
+
+There used to be one — `node tracker.js import <folder>`, plus an optional folder field and three blank-template downloads on the setup page. It was written for a **single migration**: the author's own Google Sheet into this tool. That migration finished, and what remained was a path nobody walked and three templates that asked a new user to hand-type a few hundred rows of positional CSV, which was never going to happen.
+
+The columns it existed to carry — ♥, ★, the family flag, `Manual` rows and hand-entered counts — are still exactly the things Steam's API cannot supply. That has not changed. What changed is the answer for keeping them: `node tracker.js backup` moves the database itself, which is lossless by construction rather than by column-order discipline.
+
+The old implementation is in git if it is ever wanted back: `git log -- lib/csv.js`.

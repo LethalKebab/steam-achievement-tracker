@@ -52,7 +52,7 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 
 ### Optional, either way
 
-**Coming from a spreadsheet?** Import it **before** your first sync — `node tracker.js import <folder-of-csvs>`, or the optional folder field on the setup form, which also offers blank CSV templates in the right column order. Favorites, spotlights and hand-edited rows cannot be recovered from Steam, so keep the spreadsheet until the import has run; importing is repeatable, so a missed first attempt is not fatal. See [docs/data.md](docs/data.md#importing-from-a-spreadsheet).
+**Moving from another machine?** `node tracker.js backup` writes one zip holding the database, your guides and `config.json`; `node tracker.js restore <file.zip>` puts it back. The credentials travel with it, so the new machine opens straight to the Dashboard — the app offers the same two steps on its first-run screen and under the settings page's **备份** tab. The zip has your API keys in plain text unless you pass `--no-config`. See [docs/data.md](docs/data.md#backup-and-restore).
 
 **Guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked. The setup form covers Notion (step 3) and stays reachable afterwards from the gear button in the Dashboard's top-right corner. From source:
 
@@ -138,7 +138,7 @@ Refreshing the browser does none of it — that re-reads the local database only
 |---|---|
 | [docs/notion-setup.md](docs/notion-setup.md) | 连接 Notion 攻略库 —— 分步图解,含最容易漏的授权步骤和数据库 ID 的取法 |
 | [docs/configuration.md](docs/configuration.md) | every `config.json` option, environment variables, changing the port |
-| [docs/data.md](docs/data.md) | what's in the database, importing/exporting CSV, what Steam can't tell us |
+| [docs/data.md](docs/data.md) | what's in the database, backup/restore, CSV export, what Steam can't tell us |
 | [docs/guides.md](docs/guides.md) | guide checkbox sync, Notion setup, how matching works |
 | [CLAUDE.md](CLAUDE.md) | architecture and conventions, for working on the code |
 | [launcher/README.md](launcher/README.md) | how the Windows app is built and packaged, for working on it |

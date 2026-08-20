@@ -246,6 +246,87 @@
   }
   .btn-outline:hover { border-color: var(--accent); background: var(--accent-soft); }
 
+  /* ---- 首屏的岔路 ----------------------------------------------------
+     程序分不出「第一次用」和「老用户换了台电脑」—— 两种情况下都是没有 config、
+     没有数据。这是**唯一一件只能问的事**,所以它先于向导出现,而不是当作向导里
+     的一步。两个选择的副标题就是那个区分本身,不是对按钮的解释。 */
+  .gate { display: flex; flex-direction: column; gap: var(--s3); margin-top: var(--s5); }
+  .gate-choice {
+    width: 100%;
+    margin: 0;
+    text-align: left;
+    padding: var(--s4);
+    border-radius: var(--r-md);
+    font-family: inherit;
+    cursor: pointer;
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    color: var(--text);
+    transition: border-color var(--dur-1), background var(--dur-1);
+  }
+  .gate-choice:hover { border-color: var(--accent); background: var(--accent-soft); }
+  /* 主选择用实心:第一次用的人占多数,而点错的代价很低 —— 备份文件还在,
+     恢复在设置页里一直够得着 */
+  .gate-choice.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .gate-choice.primary:hover { background: var(--accent-hi); }
+  .gate-choice b { display: block; font-size: var(--fs-lg); font-weight: 600; }
+  .gate-choice span { display: block; margin-top: 2px; font-size: var(--fs-sm); opacity: 0.75; }
+
+  /* ---- 拖放区 --------------------------------------------------------
+     **拖放是主路径,点击选文件是次路径**,顺序不能反。原生对话框在打包版里是死的
+     (见 docs/self-update.md),而 <input type="file"> 走的是 Chromium 自己那条路 ——
+     大概率能用,但**没在打包版上验过**。拖放完全是页面里的事件,不碰任何原生 UI,
+     所以它必须是那个总能用的。真到了点击失灵的那天,这里也只是少一条捷径。 */
+  .drop {
+    border: 1px dashed var(--line-3);
+    border-radius: var(--r-md);
+    padding: var(--s5) var(--s4);
+    text-align: center;
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: border-color var(--dur-1), background var(--dur-1);
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+  .drop b { display: block; color: var(--text); font-size: var(--fs-md); font-weight: 600; margin-bottom: 2px; }
+
+  /* 恢复前把备份里是什么摊开。**这一段不是说明,是待覆盖数据的清单** */
+  .bk-info {
+    margin-top: var(--s3);
+    padding: var(--s3);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    font-size: var(--fs-sm);
+    color: var(--text-2);
+    line-height: 1.7;
+  }
+  .bk-info b { color: var(--text); font-weight: 600; }
+  .bk-path {
+    display: block;
+    margin-top: var(--s3);
+    padding: var(--s3);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    border: 1px solid var(--line-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: var(--fs-xs);
+    color: var(--text-2);
+    word-break: break-all;
+    user-select: all;
+  }
+  .bk-row { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s3); }
+  .bk-row .btn-sub { margin-top: 0; }
+  /* 「备份」和「恢复」是这一节里的两件事,中间要断开。`.step-title` 的上边距是 0
+     (它平时是一节的第一个元素),所以「打开文件夹」按钮会直接贴到「从备份恢复」
+     标题上,读起来像那个按钮属于下面那半截 */
+  #backup-restore { margin-top: var(--s5); }
+  .check {
+    display: flex; align-items: center; gap: 8px;
+    font-size: var(--fs-sm); color: var(--text-2); cursor: pointer;
+  }
+  .check input { width: auto; margin: 0; }
+
   /* 空状态行不占位。`.msg` 的 min-height 是给页面底部那条留的(它要防止提交时
      整页跳动),但这一条挂在按钮和「跳过」之间,空着就是一个 40px 的洞 */
   #notion-msg:empty { display: none; }
@@ -393,12 +474,26 @@
 <body>
   <form class="card" id="setup-form">
     <h1 id="page-title">初始设置</h1>
-    <div class="subtitle" id="page-subtitle">只需要填一次,凭据存在本机的 config.json 里</div>
+    <div class="subtitle" id="page-subtitle">只需要填一次,密钥都存在本机的 config.json 里</div>
+    <!-- 首次设置的岔路。**问的不是「你是不是新用户」** —— 那要人先猜到这个程序
+         管什么叫「新」。问的是有没有东西要带过来,这个人自己就知道答案。
+         设置页再进来时整块不出现:那时候 config 已经在了,岔路早就走过了 -->
+    <div class="gate" id="gate" hidden>
+      <button type="button" class="gate-choice primary" id="gate-new">
+        <b>全新设置</b><span>第一次用</span>
+      </button>
+      <button type="button" class="gate-choice" id="gate-restore">
+        <b>从备份恢复</b><span>手上有以前的备份文件</span>
+      </button>
+    </div>
+
     <ol class="steps" id="step-nav" hidden>
       <li data-goto="1">Steam</li>
       <li data-goto="2">AI</li>
       <li data-goto="3">Notion</li>
-      <li data-goto="4">表格</li>
+      <!-- 第 4 步只在设置页出现(首次设置时没有东西可备份)。首屏那条岔路
+           把人直接送进这一节的下半截,不经过步骤条 -->
+      <li data-goto="4" id="nav-backup" hidden>备份</li>
     </ol>
 
     <section class="step" data-step="1">
@@ -464,17 +559,43 @@
       <div class="msg" id="notion-msg" role="status"></div>
     </section>
 
+    <!-- 备份与恢复。整节在设置页里是第 4 步;首次设置时只有下半截(恢复)会被
+         首屏的岔路调出来 —— 那时候库是空的,「立即备份」没有意义。
+         2026-08-19 前这个位置上是「从表格导入」,那是另一件事,不是这个的前身 -->
     <section class="step" data-step="4" hidden>
-      <h2 class="step-title">Step 4 · 从表格导入<span class="tag opt">可选</span></h2>
-      <input id="csv" name="csv" type="text" autocomplete="off" placeholder="CSV 所在文件夹路径">
-      <div class="hint">
-        文件名里要含 <code>RAW DATA</code> / <code>ACHIEVEMENTS</code> / <code>GUIDES</code>。
-        空模板:
-        <a href="/template/RAW DATA.csv">RAW DATA</a> ·
-        <a href="/template/ACHIEVEMENTS.csv">ACHIEVEMENTS</a> ·
-        <a href="/template/GUIDES.csv">GUIDES</a><br>
-        <!-- 这一句留着是因为它警告的是**不可恢复的数据丢失**,不是在解释功能怎么用 -->
-        <strong>在第一次同步之前导。</strong>喜爱、置顶和手工改的行,Steam 补不回来。
+      <h2 class="step-title" id="backup-title">Step 4 · 备份与恢复<span class="tag opt">可选</span></h2>
+
+      <!-- 备完之后的三行是**有顺序的**:先说做出来的是什么(多少款游戏、多大),
+           再说它在哪,最后才是去那儿的按钮。一开始把结果那行摆在按钮下面,
+           它就和自己描述的那条路径隔开了 -->
+      <div id="backup-make">
+        <button type="button" class="btn-outline" id="bk-go">立即备份</button>
+        <!-- 标签直接点名是哪三个密钥。**光写「凭据」是不够的** —— 这个程序里
+             「Steam 凭据」是既有说法(指 API Key + SteamID),而这里一个词要同时
+             代表三家的密钥,不点名就没人知道勾的到底是什么 -->
+        <label class="check" style="margin-top: var(--s3)">
+          <input type="checkbox" id="bk-config" checked>
+          包含 Steam / Notion / AI 密钥
+        </label>
+        <!-- 这一句留着是因为它说的是**明文密钥会离开这台机器**,不是在解释功能怎么用 -->
+        <div class="hint" id="bk-warn">密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。</div>
+        <div class="msg" id="bk-msg" role="status"></div>
+        <code class="bk-path" id="bk-path" hidden></code>
+        <div class="bk-row" id="bk-done" hidden>
+          <button type="button" class="btn-sub" id="bk-reveal">打开文件夹</button>
+        </div>
+      </div>
+
+      <div id="backup-restore">
+        <h2 class="step-title" id="restore-title">从备份恢复</h2>
+        <div class="drop" id="drop" role="button" tabindex="0">
+          <b>把备份 .zip 拖到这里</b>
+          或点一下选文件
+        </div>
+        <input type="file" id="bk-file" accept=".zip" hidden>
+        <div class="bk-info" id="bk-info" hidden></div>
+        <button type="button" class="btn-sub btn-wide" id="bk-restore" hidden>恢复</button>
+        <div class="msg" id="restore-msg" role="status"></div>
       </div>
     </section>
 
@@ -658,7 +779,12 @@
     // 各步的输入框**始终在同一个 <form> 里**,只是被 hidden 掉;提交时读的是
     // `$(id).value`,隐藏节点照样读得到。于是"跳过"就等于"没填",
     // 保存那一整套逻辑一个字都不用改。
+    // **这两个数字不是一回事,合成一个就会有一节点不开。**
+    // STEP_COUNT 是总共几节(用来夹住 showStep 的范围);WIZARD_LAST 是首次设置
+    // 的向导走到哪一节为止 —— 「完成设置」挂在那里。第 4 节「备份」只在设置页
+    // 出现,不属于首次设置,所以两者从 2026-08-19 起分了家。
     const STEP_COUNT = 4;
+    const WIZARD_LAST = 3;
     let currentStep = 1;
 
     /**
@@ -702,8 +828,8 @@
         // 一步一个按钮:第 1 步必填走「下一步」,中间可选步骤走「跳过」,
         // 最后一步走提交。回上一步交给步骤条,那边随便点
         $('step-next').hidden = currentStep !== 1;
-        $('step-skip').hidden = currentStep === 1 || currentStep === STEP_COUNT;
-        btn.hidden = currentStep !== STEP_COUNT;
+        $('step-skip').hidden = currentStep === 1 || currentStep === WIZARD_LAST;
+        btn.hidden = currentStep !== WIZARD_LAST;
         refreshSkipLabel();
       }
       msg.className = 'msg';
@@ -711,13 +837,34 @@
     }
 
     function initSteps() {
+      // 首次设置先走岔路,向导等选了「全新设置」才出现。设置页没有这一步 ——
+      // config 已经在了,那个问题早就有答案了
+      if (!isEditMode) {
+        // **第 1 步在标记里是不带 hidden 的** —— 平时是 showStep() 把其余几节收起来,
+        // 而岔路这条分支不走 showStep,所以要自己收。少这一行,第 1 步就直接
+        // 摊在两个选择下面,岔路等于没岔
+        document.querySelectorAll('.step').forEach((s) => { s.hidden = true; });
+        // 副标题("只需要填一次…")是给向导写的,对「从备份恢复」那条讲不通,
+        // 而岔路上那两个选择本来就不需要一句说明。选了「全新设置」再放回去
+        $('page-subtitle').textContent = '';
+        $('gate').hidden = false;
+        $('gate-new').addEventListener('click', startWizard);
+        $('gate-restore').addEventListener('click', startRestore);
+        return;
+      }
+      $('nav-backup').hidden = false;
+      showWizard();
+    }
+
+    /** 步骤条 + 各步 + 按钮行,两种模式共用 */
+    function showWizard() {
       $('step-nav').hidden = false;
       // 这一行始终显示 —— 提交按钮住在里面。收起的是里面那两个向导按钮,不是整行
       $('step-actions').hidden = false;
 
-      // **两种模式下步骤条都能点。** 一步步走太慢,而这四节本来就互相独立,
+      // **两种模式下步骤条都能点。** 一步步走太慢,而这几节本来就互相独立,
       // 没有哪一节的内容依赖前一节填了什么。第 1 步的必填由提交时的校验兜底,
-      // 所以直接跳到第 4 步也不会漏掉它
+      // 所以直接跳到最后一步也不会漏掉它
       document.querySelectorAll('#step-nav li').forEach((li) => {
         li.classList.add('clickable');
         li.addEventListener('click', () => showStep(Number(li.dataset.goto)));
@@ -740,6 +887,27 @@
         });
       }
       showStep(1);
+    }
+
+    function startWizard() {
+      $('gate').hidden = true;
+      $('page-subtitle').textContent = '只需要填一次,密钥都存在本机的 config.json 里';
+      showWizard();
+    }
+
+    /**
+     * 首次设置里的恢复:只露第 4 节的下半截。
+     * **「立即备份」在这里没有意义** —— 库是空的,备出来的是一个空备份,
+     * 而一个能点但什么都不该点的按钮比没有这个按钮更糟。
+     */
+    function startRestore() {
+      $('gate').hidden = true;
+      $('backup-make').hidden = true;
+      $('backup-title').hidden = true;
+      $('restore-title').hidden = true;
+      $('page-title').textContent = '从备份恢复';
+      $('page-subtitle').textContent = '恢复后直接进 Dashboard,不用重新设置';
+      document.querySelector('.step[data-step="4"]').hidden = false;
     }
 
     /**
@@ -801,11 +969,146 @@
         + '。ID 已填好并存盘。', 'ok');
     });
 
+    // ---- 备份 -------------------------------------------------------------
+    //
+    // 备份写到盘上,**这里只显示路径,不给下载链接**。打包版没挂 will-download,
+    // Electron 会退回原生保存对话框,而原生对话框在这个程序里是死的
+    // (见 docs/self-update.md)。一个点了没反应的下载按钮比一条路径糟得多。
+    let lastBackupPath = '';
+
+    const setMsg = (id, text, cls) => {
+      const el = $(id);
+      el.className = 'msg' + (cls ? ' ' + cls : '');
+      el.textContent = text;
+    };
+
+    $('bk-go').addEventListener('click', async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      setMsg('bk-msg', '正在打包…');
+      try {
+        const r = await call('makeBackup', [{ includeConfig: $('bk-config').checked }]);
+        if (r.error) throw new Error(r.error);
+        lastBackupPath = r.path;
+        $('bk-path').textContent = r.path;
+        $('bk-path').hidden = false;
+        $('bk-done').hidden = false;
+        // 成功本身由路径和数字说明,不用再写一句「备份成功」。
+        // 小库要用 KB:一个 2 KB 的备份显示成「0.0 MB」读起来像是失败了
+        const size = r.sizeBytes >= 1048576
+          ? (r.sizeBytes / 1048576).toFixed(1) + ' MB'
+          : Math.max(1, Math.round(r.sizeBytes / 1024)) + ' KB';
+        setMsg('bk-msg', `${r.manifest.counts.games} 款游戏 · ${size}`, 'ok');
+      } catch (err) {
+        setMsg('bk-msg', err.message, 'error');
+      } finally {
+        b.disabled = false;
+      }
+    });
+
+    $('bk-reveal').addEventListener('click', async () => {
+      const r = await call('revealBackup', [lastBackupPath]);
+      if (r.error) setMsg('bk-msg', r.error, 'error');
+    });
+
+    // 不勾就没有密钥进 zip,那句警告也就不适用了 —— 留着会让人以为还是有
+    $('bk-config').addEventListener('change', () => {
+      $('bk-warn').hidden = !$('bk-config').checked;
+    });
+
+    // ---- 恢复 -------------------------------------------------------------
+    //
+    // **拖放是主路径。** 它完全发生在页面里,不碰任何原生 UI,所以在打包版里
+    // 一定能用。点击走的是 <input type="file">,那是 Chromium 自己的对话框
+    // (和 dialog.showOpenDialog 不是一条路),**但没在打包版上验过** ——
+    // 真失灵了也只是少一条捷径,功能不会没。
+    let pendingFile = null;
+
+    async function upload(file, query) {
+      const res = await fetch('/restore' + query, { method: 'POST', body: file });
+      const body = await res.json();
+      return body.ok ? body.result : { error: body.error || '上传失败' };
+    }
+
+    /** 先只看不写:恢复会清掉现有数据,得让人在动手之前看见里面是什么 */
+    async function previewFile(file) {
+      pendingFile = null;
+      $('bk-info').hidden = true;
+      $('bk-restore').hidden = true;
+      setMsg('restore-msg', '正在读取…');
+      try {
+        const r = await upload(file, '?dry=1');
+        if (r.error) throw new Error(r.error);
+        const c = r.manifest?.counts ?? {};
+        const when = r.manifest ? new Date(r.manifest.createdAt).toLocaleString('zh-CN') : '时间未知';
+        const lines = [
+          `<b>${when}</b> 的备份`,
+          `${c.games ?? '?'} 款游戏 · ${c.achievements ?? '?'} 条成就 · ${r.guideFiles} 个攻略文件`,
+          r.hasConfig ? '包含密钥,恢复后不用重新设置' : '不含密钥,恢复后要重填 Steam API Key',
+        ];
+        // 库里已经有东西才需要说会被清掉。首次设置时是 0,说了反而像在吓人
+        if (r.currentGames > 0) lines.push(`<b>本机现有的 ${r.currentGames} 款游戏会被替换</b>`);
+        $('bk-info').innerHTML = lines.join('<br>');
+        $('bk-info').hidden = false;
+        $('bk-restore').hidden = false;
+        pendingFile = file;
+        setMsg('restore-msg', '');
+      } catch (err) {
+        setMsg('restore-msg', err.message, 'error');
+      }
+    }
+
+    const drop = $('drop');
+    drop.addEventListener('click', () => $('bk-file').click());
+    drop.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); $('bk-file').click(); }
+    });
+    $('bk-file').addEventListener('change', (e) => {
+      const f = e.target.files?.[0];
+      if (f) previewFile(f);
+    });
+
+    // dragover 必须 preventDefault,否则浏览器接管这次拖放 —— 在 Electron 里
+    // 那意味着**窗口直接导航到这个文件**,应用就这么没了
+    for (const type of ['dragenter', 'dragover']) {
+      drop.addEventListener(type, (e) => {
+        e.preventDefault();
+        drop.classList.toggle('over', true);
+      });
+    }
+    drop.addEventListener('dragleave', () => drop.classList.toggle('over', false));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.toggle('over', false);
+      const f = e.dataTransfer?.files?.[0];
+      if (f) previewFile(f);
+    });
+    // 拖到窗口别处也不能让它导航走 —— 同一个坑,只是落点不同
+    for (const type of ['dragover', 'drop']) {
+      window.addEventListener(type, (e) => { if (e.target !== drop) e.preventDefault(); });
+    }
+
+    $('bk-restore').addEventListener('click', async (e) => {
+      if (!pendingFile) return;
+      const b = e.currentTarget;
+      b.disabled = true;
+      setMsg('restore-msg', '正在恢复…');
+      try {
+        const r = await upload(pendingFile, '');
+        if (r.error) throw new Error(r.error);
+        // 恢复完密钥就位,服务端的 config/steam 也当场改过了 —— 首页这时候
+        // 已经不再往 /setup 跳,直接过去就是 Dashboard,不用重启子进程
+        location.href = '/';
+      } catch (err) {
+        setMsg('restore-msg', err.message, 'error');
+        b.disabled = false;
+      }
+    });
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       const key = $('key').value.trim();
       const id = $('id').value.trim();
-      const csv = $('csv').value.trim();
       const notionToken = $('notion-token').value.trim();
       const notionDb = $('notion-db').value.trim();
       const aiProvider = $('ai-provider').value.trim();
@@ -823,17 +1126,16 @@
 
       btn.disabled = true;
       msg.className = 'msg';
-      msg.textContent = csv ? '正在验证凭据、导入表格数据…' : '正在验证…';
+      msg.textContent = '正在验证…';
 
       const done = [];
       try {
         // Steam 那部分:编辑模式下没填新 key 就不动它,免得为了改 Notion 还得
         // 把 API Key 翻出来重打一遍
         if (key || !isEditMode) {
-          const r = await call('completeSetup', [key, id, csv]);
+          const r = await call('completeSetup', [key, id]);
           if (r.error) throw new Error(r.error);
           done.push(`Steam 凭据可用(${r.gameCount} 款游戏)`);
-          if (r.imported) done.push(`导入了 ${r.imported.games?.imported ?? 0} 款游戏的表格数据`);
         }
 
         // Notion 是独立的一步:它失败不该把已经存好的 Steam 配置也说成失败。
