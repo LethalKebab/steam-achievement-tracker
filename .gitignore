@@ -4,8 +4,14 @@ config.json
 # 本地数据库(SQLite + WAL 临时文件)
 data/
 
-# CSV 导入导出的中间文件
+# CSV 导出的中间文件
 exports/
+
+# 备份 zip(`node tracker.js backup` / 设置页的「立即备份」的默认落点)。
+# **这是仓库里最不能进版本控制的东西**:里面装着整个 config.json,也就是
+# 明文的 Steam API Key、Notion token 和 AI 密钥,而这个仓库是公开的。
+# 数据库和攻略也都在里面。
+backups/
 
 # AI 生成但没通过校验的攻略草稿。攻略发现逻辑扫不到这个目录(非递归),
 # 仓库也不该收——没验过的内容不该有任何一条路径流向别人

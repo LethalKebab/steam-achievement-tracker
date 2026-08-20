@@ -9,8 +9,9 @@
  *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情;--fast 只查该查的)
  *   node tracker.js serve           起本地 Dashboard,数据太旧会自动后台同步
  *   node tracker.js status          看一眼当前数据和 AGCR
- *   node tracker.js import <目录>   从表格导出的 CSV 导入数据
  *   node tracker.js export [目录]   把三张表导出成 CSV
+ *   node tracker.js backup [目录]   打一个备份 zip(换机/重装用)
+ *   node tracker.js restore <文件>  从备份 zip 恢复
  *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
  *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
  *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
@@ -23,12 +24,12 @@
  *   node tracker.js log [n]         看最近的同步日志
  */
 import { createInterface } from 'node:readline/promises';
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { stdin, stdout } from 'node:process';
 import { Writable } from 'node:stream';
 
-import { loadConfig, saveConfig, ROOT, CONFIG_PATH } from './lib/config.js';
+import { loadConfig, saveConfig, ROOT, DATA_ROOT, CONFIG_PATH } from './lib/config.js';
 import {
   openDb, allGames, allGuides, countGames, getMeta, recentSyncLog,
   getGame, achievementsFor, appIdsWithAchievements,
@@ -55,7 +56,8 @@ import { planPatch, patchGuide, PATCH_ROUNDS } from './lib/guidepatch.js';
 import {
   BACKUPS_DIR, overwritePreflight, formatPreflight, formatPatchPreflight, diffGuides, formatDiff,
 } from './lib/guidebackup.js';
-import { importAll, exportAll } from './lib/csv.js';
+import { exportAll } from './lib/csv.js';
+import { createBackup, applyBackup, inspectBackup, backupName } from './lib/backup.js';
 
 // ---------------------------------------------------------------------------
 // 小工具
@@ -587,7 +589,6 @@ async function cmdInit() {
     }
 
     console.log('\n接下来:');
-    console.log('  node tracker.js import <csv目录>   ← 有表格里的历史数据就先导入(♥/★/家庭/Manual 标记只能靠这个带过来)');
     console.log('  node tracker.js sync               ← 首次全量同步(库大的话要几分钟)');
     console.log('  node tracker.js serve              ← 打开 Dashboard');
   } finally {
@@ -1512,24 +1513,112 @@ function cmdDrafts() {
   console.log(`\n✅ 删了 ${doomed.length} 份,还剩 ${files.length - doomed.length} 份。`);
 }
 
-function cmdImport() {
-  const dir = positional[0];
-  if (!dir) throw new Error('用法:node tracker.js import <放 CSV 的目录>');
-  const { db } = withSteam({ requireSteam: false });
-  const r = importAll(db, dir);
-  console.log('\n导入完成:');
-  if (r.games) console.log(`  ${r.games.file} → ${r.games.imported} 款游戏` + (r.games.skipped.length ? `(跳过 ${r.games.skipped.length} 行没有合法 appid 的)` : ''));
-  if (r.achievements) console.log(`  ${r.achievements.file} → ${r.achievements.games} 款游戏的 ${r.achievements.rows} 条成就详情`);
-  if (r.guides) console.log(`  ${r.guides.file} → ${r.guides.imported} 条攻略链接`);
-  console.log('\n♥/★/家庭共享/Manual 标记都带过来了。接着跑 `node tracker.js sync` 用 Steam 的最新数据刷一遍。');
-}
-
 function cmdExport() {
   const dir = positional[0] ?? join(ROOT, 'exports');
   mkdirSync(dir, { recursive: true });
   const { db } = withSteam({ requireSteam: false });
   console.log('\n导出到 ' + dir + ':');
   for (const f of exportAll(db, dir)) console.log(`  ${f.file}(${f.rows} 行)`);
+}
+
+/** 备份清单里记一下这份数据是哪个版本写的 —— 恢复时用来判断格式能不能读 */
+function pkgVersion() {
+  try {
+    return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 备份成一个 zip。**这个文件里有明文密钥**(config.json 整个进去),
+ * 所以提示语必须说出来 —— 少了这句,把备份丢进网盘的人不会知道自己丢了什么。
+ * --no-config 是不想带密钥时的出路。
+ */
+function cmdBackup() {
+  const withConfig = !flags.has('--no-config');
+  // **DATA_ROOT,不是 ROOT。** 备份是数据,得和它备的那份数据待在一起 ——
+  // 打包版用 TRACKER_DATA_DIR 把数据指到别处(见 lib/config.js),那时候 ROOT 是
+  // 代码所在的地方。写错的话 CLI 和设置页的「立即备份」会落在两个目录,
+  // 而用户问的是同一个问题:我的备份在哪
+  const dir = positional[0] ?? join(DATA_ROOT, 'backups');
+  mkdirSync(dir, { recursive: true });
+
+  const { config, db } = withSteam({ requireSteam: false });
+  const { zip, manifest } = createBackup({
+    db,
+    configPath: withConfig ? CONFIG_PATH : null,
+    guidesDir: config.guidesDir,
+    appVersion: pkgVersion(),
+  });
+
+  const out = join(dir, backupName());
+  writeFileSync(out, zip);
+
+  console.log('\n✅ 备份好了:' + out);
+  console.log(`   ${manifest.counts.games} 款游戏、${manifest.counts.achievements} 条成就、${manifest.counts.guides} 条攻略登记、${manifest.guideFiles} 个攻略文件`);
+  console.log(`   ${(zip.length / 1048576).toFixed(1)} MB`);
+  if (manifest.hasConfig) {
+    console.log('\n⚠️  里面有 config.json,也就是**明文的** Steam / Notion / AI 密钥。');
+    console.log('   拿到这个文件的人能花你的 AI 额度。不想带就加 --no-config。');
+  }
+  console.log('\n换到新机器:把这个 zip 拷过去,`node tracker.js restore <文件>`。');
+}
+
+/**
+ * 从备份恢复。**先看清楚再动手**:恢复会清掉现有的表,所以默认要确认一次,
+ * 而且确认之前先把备份里是什么、本机现在有什么都打出来 —— 一句
+ * 「确定吗?」什么信息都没给。
+ */
+async function cmdRestore() {
+  const file = positional[0];
+  if (!file) throw new Error('用法:node tracker.js restore <备份.zip>');
+  if (!existsSync(file)) throw new Error(`找不到 ${file}`);
+
+  const buf = readFileSync(file);
+  const { manifest, hasConfig, guideFiles } = inspectBackup(buf);
+
+  const { config, db } = withSteam({ requireSteam: false });
+  const existing = countGames(db);
+
+  console.log('\n备份内容:');
+  if (manifest) {
+    console.log(`  备于 ${new Date(manifest.createdAt).toLocaleString('zh-CN')}` + (manifest.appVersion ? `(版本 ${manifest.appVersion})` : ''));
+    console.log(`  ${manifest.counts.games} 款游戏、${manifest.counts.achievements} 条成就、${manifest.counts.guides} 条攻略登记`);
+  } else {
+    console.log('  (没有清单,可能是手工改过的 zip —— 数据本身还是照读)');
+  }
+  console.log(`  ${guideFiles.length} 个攻略文件`);
+  console.log(`  ${hasConfig ? '含 config.json(本机密钥会被覆盖)' : '不含 config.json'}`);
+
+  const keepConfig = flags.has('--keep-config');
+  console.log('\n本机现在:');
+  console.log(`  ${existing} 款游戏 —— **会被替换成备份里的那些**`);
+  if (hasConfig && keepConfig) console.log('  --keep-config:本机密钥保留不动');
+
+  if (!flags.has('--yes')) {
+    const rl = createInterface({ input: stdin, output: stdout });
+    try {
+      const ans = (await rl.question('\n继续?(y/N) ')).trim().toLowerCase();
+      if (ans !== 'y' && ans !== 'yes') return console.log('没动任何东西。');
+    } finally {
+      rl.close();
+    }
+  }
+
+  const r = applyBackup({
+    db,
+    buf,
+    configPath: CONFIG_PATH,
+    guidesDir: config.guidesDir,
+    restoreConfig: hasConfig && !keepConfig,
+  });
+
+  console.log('\n✅ 恢复完成:');
+  for (const [t, n] of Object.entries(r.tables)) console.log(`  ${t} → ${n} 行`);
+  console.log(`  攻略文件 → ${r.guideFiles} 个`);
+  if (r.config) console.log('  config.json → 已覆盖(密钥来自备份)');
+  console.log('\n接着跑 `node tracker.js sync` 用 Steam 的最新数据刷一遍。');
 }
 
 function cmdLog() {
@@ -1556,8 +1645,12 @@ Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
               sync --schema               只同步成就详情
   node tracker.js serve [--port 8777]     起本地 Dashboard(数据超过 12 小时会自动后台同步)
   node tracker.js status                  当前数据概览 + AGCR
-  node tracker.js import <目录>            从表格导出的 CSV 导入数据
-  node tracker.js export [目录]            三张表导出成 CSV(默认 exports/)
+  node tracker.js export [目录]            三张表导出成 CSV,给表格软件看(默认 exports/,单向,不是备份)
+  node tracker.js backup [目录]            打包成一个 zip:数据库 + 攻略 + config.json(默认 backups/)
+              backup --no-config          不装 config.json(zip 里就没有明文密钥了)
+  node tracker.js restore <文件.zip>       从备份恢复。**会覆盖现有数据**,先问一次
+              restore --keep-config       只搬数据,本机的密钥不动
+              restore --yes               不问,直接恢复
   node tracker.js guides [--notion|--local|--all]
                                           发现攻略页面并登记进 guides 表
   node tracker.js checkbox-sync [appid]   把 Steam 已解锁成就同步成攻略里的 ✅
@@ -1614,8 +1707,9 @@ const COMMANDS = {
   'guide-to-notion': cmdGuideToNotion,
   drafts: cmdDrafts,
   audit: cmdAudit,
-  import: cmdImport,
   export: cmdExport,
+  backup: cmdBackup,
+  restore: cmdRestore,
   log: cmdLog,
   help: cmdHelp,
   '--help': cmdHelp,

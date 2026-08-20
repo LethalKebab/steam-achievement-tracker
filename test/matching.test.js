@@ -15,8 +15,8 @@ import { tmpdir } from 'node:os';
 
 import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement, collectSubStepTicks, mapAchievementGuides, stripGuideEcho } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
-import { parseCsv, toCsv, tabName, importGames } from '../lib/csv.js';
-import { openDb, getGame } from '../lib/db.js';
+import { toCsv, exportAll } from '../lib/csv.js';
+import { openDb, insertGame, markNoAchievements, updateGameStats } from '../lib/db.js';
 import { extractNotionPageId, normalizeNotionId } from '../lib/notion.js';
 
 const ach = (nameCn, nameEn = '') => ({ nameCn, nameEn, apiname: nameCn });
@@ -287,67 +287,39 @@ describe('Notion ID 处理', () => {
   });
 });
 
-describe('CSV', () => {
-  test('引号包裹、字段内逗号、"" 转义、换行都能解析', () => {
-    const rows = parseCsv('a,b\n"含,逗号","含""引号"\n');
-    assert.deepEqual(rows, [
-      ['a', 'b'],
-      ['含,逗号', '含"引号'],
-    ]);
+describe('CSV 导出', () => {
+  // 导入删掉之后(2026-08-19),这里剩的是导出侧唯一的静默失效:一个名字里带逗号
+  // 或引号的游戏,转义写错不会报错,只会让那一行在表格软件里错位。
+  // 原来这条是靠 parseCsv(toCsv(x)) === x 的往返测的,而 parseCsv 是导入的一部分,
+  // 跟着一起没了 —— 所以改成直接钉输出的字面量,比自洽往返更硬。
+  test('逗号、引号、换行都要被引号包起来,引号还要翻倍', () => {
+    assert.equal(
+      toCsv([['名字', '备注'], ['苏丹的游戏', '有,逗号和"引号"']]),
+      '名字,备注\n苏丹的游戏,"有,逗号和""引号"""\n'
+    );
+    assert.equal(toCsv([['带\n换行']]), '"带\n换行"\n');
+    assert.equal(toCsv([['干净', '']]), '干净,\n');
   });
 
-  test('序列化后能原样解析回来', () => {
-    const rows = [
-      ['名字', '备注'],
-      ['苏丹的游戏', '有,逗号和"引号"'],
-    ];
-    assert.deepEqual(parseCsv(toCsv(rows)), rows);
-  });
-});
-
-describe('CSV 文件名识别', () => {
-  test('只看工作表名,表格名里的关键词不能干扰', () => {
-    // 表格叫 "Steam Achievement Tracker" 的时候,RAW DATA 的导出文件名里也有 achievement——
-    // 按整个文件名匹配会把 games 数据当成 achievements 导进去,整张表变垃圾数据
-    assert.equal(tabName('Steam Achievement Tracker - RAW DATA.csv'), 'rawdata');
-    assert.equal(tabName('Steam Achievement Tracker - ACHIEVEMENTS.csv'), 'achievements');
-    assert.equal(tabName('Steam Achievement Tracker - GUIDES.csv'), 'guides');
-  });
-
-  test('没有 " - " 分隔的文件名退回用整个名字', () => {
-    assert.equal(tabName('RAW DATA.csv'), 'rawdata');
-    assert.equal(tabName('guides.csv'), 'guides');
-  });
-});
-
-describe('CSV 数值解析', () => {
-  test('千位分隔符不能让成就数变成 null(真实数据里踩到过:1,000 个成就的游戏)', () => {
-    // Sheet 导出的是显示值,所以四位数会带逗号
-    const rows = parseCsv('Status,AppID,名字,完成数,成就总数,完成率\n,4164310,这是谐音梗,"1,000","1,000",100.00%\n');
-    assert.equal(rows[1][3], '1,000', '解析出来还是带逗号的原文');
-    // importGames 用的转换逻辑必须能吃下它 —— 这里直接验行为:导入后 total 应该是 1000
+  test("没有成就系统的游戏导出成 'N/A',不是 0 —— 空成就数和 0 个成就是两回事", () => {
+    // 这条以前只从导入那一侧被钉住('N/A' → has_achievements=0)。导入没了,
+    // 而写 'N/A' 的代码还在 exportAll 里,所以补一条从导出这一侧钉它的。
     const db = openDb(':memory:');
-    const f = join(tmpdir(), 'sat-csv-comma.csv');
-    writeFileSync(f, toCsv(rows));
-    importGames(db, f);
-    const g = getGame(db, '4164310');
-    assert.equal(g.achieved, 1000);
-    assert.equal(g.total, 1000);
-    rmSync(f, { force: true });
-  });
+    insertGame(db, { appid: '294100', name: 'RimWorld' });
+    markNoAchievements(db, '294100');
+    insertGame(db, { appid: '4164310', name: '这是谐音梗' });
+    updateGameStats(db, '4164310', { achieved: 1000, total: 1000 });
 
-  test("'N/A' 要变成 has_achievements=0,而不是 total=0", () => {
-    const db = openDb(':memory:');
-    const f = join(tmpdir(), 'sat-csv-na.csv');
-    writeFileSync(f, toCsv([
-      ['Status', 'AppID', '名字', '完成数', '成就总数'],
-      ['', '294100', 'RimWorld', '', 'N/A'],
-    ]));
-    importGames(db, f);
-    const g = getGame(db, '294100');
-    assert.equal(g.has_achievements, 0);
-    assert.equal(g.total, null);
-    rmSync(f, { force: true });
+    const dir = mkdtempSync(join(tmpdir(), 'sat-export-'));
+    exportAll(db, dir);
+    const rows = readFileSync(join(dir, 'RAW DATA.csv'), 'utf8').trim().split('\n');
+    rmSync(dir, { recursive: true, force: true });
+
+    const byApp = Object.fromEntries(rows.slice(1).map((r) => [r.split(',')[1], r.split(',')]));
+    assert.equal(byApp['294100'][4], 'N/A');
+    assert.equal(byApp['294100'][3], '');
+    assert.equal(byApp['4164310'][4], '1000', '四位数不能带千位分隔符');
+    assert.equal(byApp['4164310'][5], '100.00%');
   });
 });
 
