@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { markdownToBlocks, toRichText, chunkBlocks } from '../lib/notionblocks.js';
-import { richTextToPlain } from '../lib/notion.js';
+import { markdownToBlocks, toRichText, chunkBlocks, splitDeepChildren, blockDepth } from '../lib/notionblocks.js';
+import { richTextToPlain, NotionClient } from '../lib/notion.js';
 
 /** 把 rich_text 拼回纯文本 —— 和同步脚本读 Notion 时走的是同一个函数 */
 const plain = (rt) => richTextToPlain(rt.map((r) => ({ plain_text: r.text.content })));
@@ -234,4 +234,194 @@ test('标题里的粗体和下划线照常生效', () => {
 test('井号后面没有空格的不算标题(#1 号这种)', () => {
   const { blocks } = markdownToBlocks('#1 号目标\n');
   assert.equal(blocks[0].type, 'paragraph', '"#1 号" 是正文,不是标题');
+});
+
+// ---------------------------------------------------------------------------
+// <details> 折叠块
+// ---------------------------------------------------------------------------
+
+/**
+ * **SKILL.md 规则五要求长内容用 `<details><summary>` 折叠**,所以模型写它是照规矩
+ * 办事,认不出来的是转换器。认不出的后果和当年只认 `##` 一样:掉进普通段落分支,
+ * 页面上留下一行字面的 `<details><summary>…</summary>` 和一行 `</details>`。
+ * 实测在《加利宅邸悬案》(3641000) 上留了 4 个这样的块 —— 表格进去了,壳子变成了文字。
+ */
+test('details 变成 toggle,summary 变成它的标题', () => {
+  const { blocks, unconverted } = markdownToBlocks(
+    '<details><summary>16 个地点代码</summary>\n\n正文一行\n\n</details>'
+  );
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].type, 'toggle');
+  assert.equal(richTextToPlain(blocks[0].toggle.rich_text.map((r) => ({ plain_text: r.text.content }))),
+    '16 个地点代码');
+  assert.equal(blocks[0].toggle.children.length, 1);
+  assert.equal(blocks[0].toggle.children[0].type, 'paragraph');
+  assert.deepEqual(unconverted, [], '认出来了就不该再报"排版降级"');
+});
+
+test('**页面上不许再出现字面的标签**', () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>表</summary>\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n</details>'
+  );
+  const flat = JSON.stringify(blocks);
+  assert.doesNotMatch(flat, /<details/i, '开标签变成了正文');
+  assert.doesNotMatch(flat, /<\/details/i, '闭标签变成了正文 —— 这是实测留下的那 4 个块之一');
+  assert.doesNotMatch(flat, /<summary/i);
+});
+
+test('summary 单独一行也认', () => {
+  const { blocks } = markdownToBlocks('<details>\n<summary>各房间最早的一个场景代码</summary>\n\n正文\n\n</details>');
+  assert.equal(blocks[0].type, 'toggle');
+  assert.equal(blocks[0].toggle.rich_text[0].text.content, '各房间最早的一个场景代码');
+  assert.equal(blocks[0].toggle.children.length, 1, 'summary 那一行不该再当成正文留在里面');
+});
+
+test('表格进得去折叠块', () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>表</summary>\n\n| 地点 | 代码 |\n| --- | --- |\n| 书房 | A1 |\n\n</details>'
+  );
+  assert.equal(blocks[0].type, 'toggle');
+  assert.equal(blocks[0].toggle.children[0].type, 'table');
+  assert.equal(blocks[0].toggle.children[0].table.children.length, 2);
+});
+
+test('折叠块外面的内容不受影响,顺序也不变', () => {
+  const { blocks } = markdownToBlocks('## 标题\n\n<details><summary>x</summary>\n\n里面\n\n</details>\n\n外面');
+  assert.deepEqual(blocks.map((b) => b.type), ['heading_2', 'toggle', 'paragraph']);
+  assert.equal(blocks[2].paragraph.rich_text[0].text.content, '外面');
+});
+
+test('折叠块套折叠块:按层数配对,不是见到第一个闭标签就收', () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>外</summary>\n\n<details><summary>内</summary>\n\n里面\n\n</details>\n\n外层的尾巴\n\n</details>'
+  );
+  assert.equal(blocks.length, 1, '外层被内层的闭标签提前截断了');
+  const kids = blocks[0].toggle.children;
+  assert.equal(kids[0].type, 'toggle');
+  assert.equal(kids[1].type, 'paragraph');
+  assert.equal(kids[1].paragraph.rich_text[0].text.content, '外层的尾巴');
+});
+
+/**
+ * **没有闭合标签时绝不能一路吃到文末。** 模型被截断时正好会留下一个没关的
+ * `<details>` —— 那样整篇剩下的内容会全被塞进一个折叠块里,页面看起来"少了一大半",
+ * 而且不报错。退回旧行为(段落 + unconverted)是**看得见**的降级。
+ */
+test('没有闭合标签就退回旧行为,不吞掉后面的内容', () => {
+  const { blocks, unconverted } = markdownToBlocks('<details><summary>没关</summary>\n\n## 后面的小节\n\n正文');
+  assert.equal(blocks[0].type, 'paragraph', '没闭合的标签不该变成 toggle');
+  assert.ok(blocks.some((b) => b.type === 'heading_2'), '后面的小节被折叠块吞掉了');
+  assert.equal(unconverted.length, 1, '降级了就要报出来');
+});
+
+test('没写 summary 也给一个标题 —— 空标题的 toggle 是一条看不见的横杠', () => {
+  const { blocks } = markdownToBlocks('<details>\n\n正文\n\n</details>');
+  assert.equal(blocks[0].type, 'toggle');
+  assert.ok(blocks[0].toggle.rich_text[0].text.content.length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// 嵌套深度:Notion 一次只收两层
+// ---------------------------------------------------------------------------
+
+test('blockDepth 数的是块连同子孙的层数', () => {
+  const leaf = { type: 'paragraph', paragraph: { rich_text: [] } };
+  assert.equal(blockDepth(leaf), 1);
+  const one = { type: 'toggle', toggle: { rich_text: [], children: [leaf] } };
+  assert.equal(blockDepth(one), 2);
+  assert.equal(blockDepth({ type: 'toggle', toggle: { rich_text: [], children: [one] } }), 3);
+});
+
+test('两层以内的原样不动', () => {
+  const { blocks } = markdownToBlocks('| a | b |\n| --- | --- |\n| 1 | 2 |');
+  const { shallow, deferred } = splitDeepChildren(blocks);
+  assert.deepEqual(deferred, [], 'table > table_row 正好两层,不该被拆');
+  assert.equal(shallow[0].table.children.length, 2);
+});
+
+test('**三层的把整批 children 摘下来**,留着第二趟补', () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>表</summary>\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n</details>'
+  );
+  assert.equal(blockDepth(blocks[0]), 3, '前提变了:折叠块里包表格本来就是三层');
+  const { shallow, deferred } = splitDeepChildren(blocks);
+  assert.equal(shallow.length, 1);
+  assert.equal(shallow[0].toggle.children, undefined, 'children 没摘干净,请求还是三层');
+  assert.equal(shallow[0].toggle.rich_text[0].text.content, '表', '标题要留在第一趟');
+  assert.equal(deferred.length, 1);
+  assert.equal(deferred[0].index, 0, 'index 要指回 shallow 里的位置,调用方靠它拿父块 id');
+  assert.equal(deferred[0].children[0].type, 'table');
+});
+
+test('摘的是**整批**,不是只摘那个太深的 —— 留一半会打乱作者写的顺序', () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>x</summary>\n\n前面一句\n\n| a |\n| --- |\n| 1 |\n\n后面一句\n\n</details>'
+  );
+  const { deferred } = splitDeepChildren(blocks);
+  assert.equal(deferred.length, 1);
+  assert.deepEqual(deferred[0].children.map((b) => b.type), ['paragraph', 'table', 'paragraph']);
+});
+
+test('原来的块不被就地改掉 —— 调用方可能还要用它', () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>表</summary>\n\n| a |\n| --- |\n| 1 |\n\n</details>'
+  );
+  splitDeepChildren(blocks);
+  assert.ok(blocks[0].toggle.children, '原数组被就地掏空了');
+});
+
+// ---------------------------------------------------------------------------
+// appendBlocks 的两趟写法
+// ---------------------------------------------------------------------------
+
+/** 记下每次请求的假客户端。`request` 是 NotionClient 里唯一碰网络的地方 */
+function fakeClient() {
+  const client = new NotionClient({ notion: { token: 't' } });
+  const calls = [];
+  let n = 0;
+  client.request = async (method, path, payload) => {
+    calls.push({ method, path, payload });
+    return { results: (payload?.children ?? []).map(() => ({ id: `blk${++n}` })) };
+  };
+  return { client, calls };
+}
+
+test('**折叠块里包表格要分两趟写** —— 一次请求只送得进两层', async () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>16 个地点代码</summary>\n\n| 地点 | 代码 |\n| --- | --- |\n| 书房 | A1 |\n\n</details>'
+  );
+  const { client, calls } = fakeClient();
+  await client.appendBlocks('PAGE', blocks);
+
+  assert.equal(calls.length, 2, `应该发两趟,实际 ${calls.length} 趟`);
+
+  // 第一趟:toggle 本身,没有 children
+  assert.equal(calls[0].path, '/blocks/PAGE/children');
+  assert.equal(calls[0].payload.children[0].type, 'toggle');
+  assert.equal(calls[0].payload.children[0].toggle.children, undefined);
+  assert.equal(blockDepth(calls[0].payload.children[0]), 1);
+
+  // 第二趟:补进第一趟建出来的那个 toggle 里
+  assert.equal(calls[1].path, '/blocks/blk1/children', '补到了别的块上,内容会跑到页面外面');
+  assert.equal(calls[1].payload.children[0].type, 'table');
+  // 这一趟自己也不能超过两层
+  for (const b of calls[1].payload.children) {
+    assert.ok(blockDepth(b) <= 2, `第二趟又发了 ${blockDepth(b)} 层`);
+  }
+});
+
+test('两层以内的还是一趟,别为了没用的事多发请求', async () => {
+  const { blocks } = markdownToBlocks('## 标题\n\n- [ ] **成就**<br>说明');
+  const { client, calls } = fakeClient();
+  await client.appendBlocks('PAGE', blocks);
+  assert.equal(calls.length, 1);
+});
+
+test('拿不到父块 id 就报错,不让折叠块静悄悄地空着', async () => {
+  const { blocks } = markdownToBlocks(
+    '<details><summary>表</summary>\n\n| a |\n| --- |\n| 1 |\n\n</details>'
+  );
+  const client = new NotionClient({ notion: { token: 't' } });
+  client.request = async () => ({ results: [] }); // Notion 没回新块
+  await assert.rejects(() => client.appendBlocks('PAGE', blocks), /没能补上|半篇攻略/);
 });
