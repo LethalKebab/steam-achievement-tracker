@@ -432,3 +432,63 @@ test('模型明确属于另一家时当场拦下,而不是让人去撞供应商�
   assert.doesNotThrow(() => assertModelMatchesProvider('deepseek', 'my-selfhosted-model'));
   assert.doesNotThrow(() => assertModelMatchesProvider('anthropic', ''));
 });
+
+// ---------------------------------------------------------------------------
+// --models
+// ---------------------------------------------------------------------------
+
+/**
+ * `ai-check --models` 这条路。
+ *
+ * **它此前一个测试都没有,而且它坏了整整一个版本周期。** `listModels` 里混进过一行
+ * 从 `#once` 掉出来的 `streaming = true;`(缩进都是歪的),而 ESM 是严格模式,
+ * 给未声明的变量赋值直接 `ReferenceError` —— 于是这个命令**每一次调用都抛**,
+ * 连请求都发不出去,报出来的还是一句 `streaming is not defined`,把真正的错误盖掉了。
+ *
+ * 这个文件开头写着「记错了但会当场报错的(模型名、工具名、端点)不需要测,第一次真跑
+ * 就知道了」。那条规矩对**供应商那边的事实**是对的,但它在这里漏了一类:这不是记错了
+ * 供应商的什么,而是我们自己的代码在够到供应商之前就炸了。而 `--models` 恰恰是
+ * CLAUDE.md 里写的「唯一让我们发现默认模型早就过期了的东西」—— 一个诊断命令坏掉,
+ * 正好在没人会去用它的时候悄悄发生。
+ */
+describe('listModels', () => {
+  const jsonResponse = (body) => ({ ok: true, status: 200, headers: new Headers(), json: async () => body });
+
+  const MODELS = {
+    models: [
+      { name: 'models/gemini-flash-latest', displayName: 'Gemini Flash Latest', inputTokenLimit: 1048576, outputTokenLimit: 65536, supportedGenerationMethods: ['generateContent'] },
+      { name: 'models/embedding-001', displayName: 'Embedding', supportedGenerationMethods: ['embedContent'] },
+    ],
+  };
+
+  test('拿得回可用模型,而且不抛', async () => {
+    const fetchImpl = fakeFetch([jsonResponse(MODELS)]);
+    const list = await new GeminiProvider(AI, { fetchImpl }).listModels();
+    assert.deepEqual(list, [
+      { name: 'gemini-flash-latest', display: 'Gemini Flash Latest', inputLimit: 1048576, outputLimit: 65536 },
+    ]);
+  });
+
+  test('只留能 generateContent 的 —— 嵌入模型列出来只会让人挑错', async () => {
+    const fetchImpl = fakeFetch([jsonResponse(MODELS)]);
+    const list = await new GeminiProvider(AI, { fetchImpl }).listModels();
+    assert.ok(!list.some((m) => m.name.startsWith('embedding')));
+  });
+
+  test('key 走请求头,不走查询串', async () => {
+    const fetchImpl = fakeFetch([jsonResponse(MODELS)]);
+    await new GeminiProvider(AI, { fetchImpl }).listModels();
+    assert.ok(!fetchImpl.calls[0].url.includes('key='), 'key 进了 URL —— 会进日志和错误上报');
+    assert.equal(fetchImpl.calls[0].headers['x-goog-api-key'], 'test-key');
+  });
+
+  test('非 200 抛的是能照着做的错,不是 ReferenceError', async () => {
+    // 坏掉的那一版里,**任何**响应都先撞上 `streaming is not defined`,
+    // 于是连 403 该说什么都看不见了
+    const fetchImpl = fakeFetch([errResponse(403, { error: { code: 403, message: 'permission denied' } })]);
+    await assert.rejects(
+      () => new GeminiProvider(AI, { fetchImpl }).listModels(),
+      (e) => !(e instanceof ReferenceError) && /403|permission/i.test(e.message)
+    );
+  });
+});
