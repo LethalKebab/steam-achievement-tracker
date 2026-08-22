@@ -45,7 +45,7 @@ For "rewrite a guide's whole checklist from scratch" you want *all* achievements
 |---|---|
 | register/update a guide link | `upsertGuide(db, {appid, name, url, kind})` in `lib/db.js` — **writes name and url together**; writing only the url leaves renamed games with stale names (this regressed once) |
 | discover new Notion guide pages | `node tracker.js guides --notion` |
-| remove a guide | `deleteGuide(db, appid)`, or `DELETE FROM guides WHERE appid = ?` |
+| remove a guide | `DELETE FROM guides WHERE appid = ?` |
 | add a game Steam doesn't list | Dashboard "添加新游戏" box, or `insertGame(db, {appid, name, family: 1})` |
 | stop syncing a row (hand-maintained) | `setManualStatus` via the Dashboard's 🔒, or `insertGame(..., {status: 'Manual', syncLocked: 1})` — a **separate** decision from adding, see below |
 | change a row's label | `setGameField(db, appid, 'status', ...)` — remember `sync_locked` is a separate column |

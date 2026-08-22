@@ -33,9 +33,15 @@ import {
   splitFindings,
   buildFeedback,
   extractMarkdown,
+  collapseEmptyBreaks,
   stripLeadingHeader,
   buildHeader,
   joinBodies,
+  regroupBySections,
+  buildSectionPlanPrompt,
+  parseSectionPlan,
+  SECTION_PLAN_SYSTEM,
+  MAX_SECTIONS,
   guideFileName,
   buildAchievementList,
   buildSystemPrompt,
@@ -82,17 +88,57 @@ function freshEnv({ defs = DEFS } = {}) {
   return { db, config: { guidesDir: dir, ai: { maxAchievements: 100 } } };
 }
 
-/** 按顺序吐出预设回复,并记下每次发过去的 user 消息 */
-function fakeProvider(replies) {
+/**
+ * 分区表那一趟的挡板。**每个假供应商的 send 第一行都要过它。**
+ *
+ * 它走的是单独一条会话(system 是 `SECTION_PLAN_SYSTEM`),不该吃掉任何一个
+ * 脚本队列 —— 吃掉的表现是「回复用完了 / 脚本用完了」,报的位置和真正的原因
+ * 差着十万八千里,而且每写一个新的分段测试都会再踩一次。
+ *
+ * `sections` 传 null 就模拟「分区表没定成」,走降级路径(等于加这一趟之前的行为)。
+ */
+const PLAN_SECTIONS = ['主线', '支线', '收集', '杂项'];
+function sectionPlanReply(system, sections = PLAN_SECTIONS) {
+  if (system !== SECTION_PLAN_SYSTEM) return null;
+  const text = sections ? sections.map((x) => `- ${x}`).join('\n') : '这个游戏不用分区。';
+  return {
+    content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
+    usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
+    model: 'plan', continuations: 0, toolErrors: [], searchQueries: [],
+  };
+}
+
+/**
+ * 按顺序吐出预设回复,并记下每次发过去的 user 消息。
+ *
+ * **分区表那一趟不吃这个队列。** 它走的是单独一条会话(system 是
+ * `SECTION_PLAN_SYSTEM`),这里按 system 认出来单独作答 —— 否则每写一个分段测试
+ * 都得记着在队列最前面多塞一条分区表回复,而忘了塞的表现是「回复用完了」,
+ * 报的位置和真正的原因差着十万八千里。
+ *
+ * `sections` 给 null 就模拟「分区表没定成」,走降级路径(等于加这一趟之前的行为)。
+ */
+function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'] } = {}) {
   return {
     model: 'claude-opus-5',
     asked: [],
+    sectionAsks: 0,
+    sectionPrompt: null,
     // 联网工具由供应商自己声明,编排层只是转发。测试里不需要真的工具
     webTools: () => [],
-    async send({ messages }) {
+    async send({ system, messages }) {
+      const planned = sectionPlanReply(system, sections);
+      if (planned) {
+        this.sectionAsks++;
+        this.sectionPrompt = messages.at(-1).content;
+        return planned;
+      }
       this.asked.push(messages.at(-1).content);
       const text = replies[this.asked.length - 1];
       if (text === undefined) throw new Error('fakeProvider 的回复用完了');
+      return this.reply(text);
+    },
+    reply(text) {
       return {
         content: [{ type: 'text', text }],
         text,
@@ -237,6 +283,104 @@ describe('extractMarkdown', () => {
   });
   test('没有围栏就当整段都是正文', () => {
     assert.equal(extractMarkdown('# 标题\n- [ ] A'), '# 标题\n- [ ] A');
+  });
+});
+
+/**
+ * 成就行的格式是三段:`- [ ] **名字**<br>官方描述<br>心得`。
+ *
+ * **隐藏成就在 Steam 上没有描述** —— 接口返回空字符串,于是给模型的清单里那一条
+ * 写着「官方描述:(Steam 上是空的)」,模型照规则 4「原文照抄」抄了个空的,
+ * 中间那段就空了。`notionblocks.js` 把每个 `<br>` 转成一个 `\n`,两个连着就是
+ * 页面上成就名和心得之间一行突兀的空白。
+ *
+ * 实测《罗曼圣诞探案集》(926340):50 个成就 28 个是隐藏的,读回来的块长这样 ——
+ * `"扑朔迷离\n\n与艾尔耿对话,被问到…"`,而正常的那些是 `"初入酒馆\n欢迎光临白星酒馆\n序章…"`。
+ * 超过一半的条目带着这行空白。
+ */
+describe('空的官方描述不留空行', () => {
+  test('中间那段是空的就合掉', () => {
+    assert.equal(
+      collapseEmptyBreaks('- [ ] **扑朔迷离**<br><br>与艾尔耿对话时作答即解锁。'),
+      '- [ ] **扑朔迷离**<br>与艾尔耿对话时作答即解锁。'
+    );
+  });
+
+  test('**三段都有的一个字都不动**', () => {
+    const line = '- [ ] **初入酒馆**<br>欢迎光临白星酒馆<br>序章开场剧情自动解锁。';
+    assert.equal(collapseEmptyBreaks(line), line);
+  });
+
+  test('空白字符也算空段 —— 模型抄回来的常带一个空格', () => {
+    assert.equal(
+      collapseEmptyBreaks('- [ ] **名字**<br>   <br>心得'),
+      '- [ ] **名字**<br>心得'
+    );
+  });
+
+  test('末尾多出来的 <br> 一并去掉', () => {
+    assert.equal(collapseEmptyBreaks('- [ ] **名字**<br>描述<br>'), '- [ ] **名字**<br>描述');
+  });
+
+  test('`<br/>` 和 `<BR>` 都认', () => {
+    assert.equal(collapseEmptyBreaks('- [ ] **名字**<br/><BR />心得'), '- [ ] **名字**<br>心得');
+  });
+
+  test('缩进的子步骤同样处理', () => {
+    assert.equal(
+      collapseEmptyBreaks('  - [ ] **子步骤**<br><br>说明'),
+      '  - [ ] **子步骤**<br>说明'
+    );
+  });
+
+  test('**只动 checkbox 行** —— 正文段落里的连续 <br> 可能是作者真想空一行', () => {
+    const prose = '这是一段正文<br><br>下面接着写';
+    assert.equal(collapseEmptyBreaks(prose), prose);
+    assert.equal(collapseEmptyBreaks('## 主线\n\n' + prose), '## 主线\n\n' + prose);
+  });
+
+  test('整行都是空段的原样留着 —— 那是别的问题,交给 lint 去报', () => {
+    assert.equal(collapseEmptyBreaks('- [ ] <br><br>'), '- [ ] <br><br>');
+  });
+
+  test('多行里只改需要改的那几行,行数和顺序不变', () => {
+    const src = [
+      '## 序章',
+      '',
+      '- [ ] **初入酒馆**<br>欢迎光临白星酒馆<br>自动解锁。',
+      '- [ ] **扑朔迷离**<br><br>对话时作答即解锁。',
+      '- [ ] **食色性也**<br><br>把调查点全部点一遍。',
+    ].join('\n');
+    const out = collapseEmptyBreaks(src);
+    assert.equal(out.split('\n').length, src.split('\n').length);
+    assert.match(out, /扑朔迷离\*\*<br>对话时/);
+    assert.match(out, /食色性也\*\*<br>把调查点/);
+    assert.match(out, /初入酒馆\*\*<br>欢迎光临白星酒馆<br>自动解锁。/);
+    assert.doesNotMatch(out, /<br>\s*<br>/);
+  });
+
+  test('空输入不炸', () => {
+    assert.equal(collapseEmptyBreaks(''), '');
+    assert.equal(collapseEmptyBreaks(null), '');
+    assert.equal(collapseEmptyBreaks(undefined), '');
+  });
+
+  /**
+   * **两条落地路径都要过这一道。** 整篇生成和局部重写各自 `extractMarkdown` 一次,
+   * 只接一处的话,同一份攻略换个命令就又长出空行来 —— 而那种漂移一个测试都不会红。
+   */
+  test('整篇生成和局部重写都接上了', () => {
+    const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+    for (const f of ['lib/guidegen.js', 'lib/guidepatch.js']) {
+      const src = strip(readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
+      const calls = [...src.matchAll(/extractMarkdown\(reply\.text\)/g)];
+      assert.ok(calls.length >= 1, `${f} 里找不到 extractMarkdown(reply.text)`);
+      for (const m of calls) {
+        const line = src.slice(src.lastIndexOf('\n', m.index) + 1, src.indexOf('\n', m.index));
+        assert.match(line, /collapseEmptyBreaks\(/,
+          `${f} 有一处 extractMarkdown 没包 collapseEmptyBreaks:${line.trim()}`);
+      }
+    }
   });
 });
 
@@ -679,6 +823,90 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
     );
   });
 
+  // **处置表只对得上「标题」,对不上「内容」。** 规则一在表里写着「进了」,而它的
+  // 三个条件在 SKILL.md 和 RULES 里各存一份手抄 —— 改一边忘另一边,处置表一个字
+  // 都不会响,而两份不同口径的规则就是"文档和代码各说各话"的又一次。
+  // 苏丹的游戏「知识」那次改的正是条件 2,所以这条把三个条件都钉成同口径。
+  test('嵌套的三个条件,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /序号不是身份/, `${name} 少了条件 1`);
+      assert.match(text, /写得出做法/, `${name} 的条件 2 要拿"这一行有没有内容"当判据`);
+      assert.match(text, /互相替代/, `${name} 少了条件 3`);
+      assert.doesNotMatch(text, /游戏自己不替你数/,
+        `${name} 还留着旧判据 —— 有计数器就不嵌套,会把全收集类成就整类挡在门外`);
+    }
+  });
+
+  // 苏丹的游戏「创造」:613 字**一整段**。内容其实是对的,模型自己都写了
+  // "前置准备:…"和"流程:1)…6)",但全挤在同一个 <br> 段里 —— 结构一点没落到页面上,
+  // 读的人分不出哪句是准备、哪句是操作、哪句是雷。
+  //
+  // 规则里从来没说过心得段要分行:硬规则 1 只定了「名字<br>描述<br>心得」三段,
+  // 心得内部长什么样一个字没提,于是"写详细"被执行成了"写长"。
+  test('心得段的分行规矩,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /前置、步骤、警告分行写/, `${name} 少了分行规矩`);
+      assert.match(text, /一步一行/, `${name} 要说清步骤多了就一步一行`);
+      assert.match(text, /不是字数/,
+        `${name} 的判据要是"混没混进两种性质的东西" —— 卡字数会把该长的也砍短`);
+    }
+  });
+
+  // 同一条成就还暴露了第二件事:嵌套那一节从头到尾只举收集品的例子
+  //(神庙、配方、支线、词条),模型于是把它读成"收集品的写法",
+  // 而「创造」是个六阶段的长流程 —— 三个条件它其实全都满足。
+  test('步骤链也算嵌套的候选,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /把流程本身写成子 checkbox/, `${name} 没说长流程也可以嵌套`);
+      assert.match(text, /三步以内的写在心得里就够/,
+        `${name} 少了下限 —— 不设的话两步的成就也会被拆成子框`);
+      assert.match(text, /具体动作/,
+        `${name} 要挡住 步骤一/步骤二 那种没内容的拆法`);
+    }
+  });
+
+  // 「创造」重写完是 14 个子框,每一个都以「前置:」或「步骤:」开头 —— 同一个词
+  // 出现十四次,而它要说的事只有两件。分组标签该单独一行。
+  test('分组标签的写法,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /标签单独占一行/, `${name} 少了分组标签的规矩`);
+      assert.match(text, /不要在每一条前面重复/, `${name} 少了「别重复」这半句 —— 那才是这条规则要治的病`);
+      // **这一条是机制要求,不是风格**,所以两边都要把"为什么"写出来 ——
+      // 只写"要这么写"的规则,下一个人一嫌啰嗦就改了
+      assert.match(text, /不能写成普通 bullet/,
+        `${name} 没说标签行必须也是 checkbox —— 那是局部重写能不能定位的前提`);
+      assert.match(text, /五六条以内直接平铺/,
+        `${name} 少了下限,三条也套一层只会多两个空框`);
+    }
+  });
+
+  // 马特的寻猫游戏(找物游戏)的位置类成就:文字说不清「这 30 朵蘑菇在哪」,
+  // 而截图这条路是明确排除掉的(规则二的处置:模型给不出可靠的游戏内截图)。
+  // 实测把这几条重写一遍,模型自己找到的替代品是**带时间点的视频链接**
+  // (「对照 B站 BV1KFwzzCEsc 的 5-2 段落(01:56)」)—— 那就是该写进规则的东西。
+  test('位置类成就的兜底写法,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /时间点/, `${name} 少了「视频链接要带时间点」`);
+      assert.match(text, /留意角落/,
+        `${name} 要把万能话点名挡掉 —— 只说「写具体点」拦不住它`);
+    }
+    // **两边措辞不同,共用一个断言只能钉住最弱的那个。** 各自最要紧的那句分开钉 ——
+    // 「时间点」这三个字在两边都出现好几处,删掉任何一处它都还在
+    assert.match(rules, /写不出具体位置时/, 'RULES 少了这条规则本身');
+    assert.match(rules, /时间点是关键/, 'RULES 少了「只给视频号等于让人从头翻」');
+    assert.match(skill, /贴不了截图的时候/, 'SKILL.md 少了这一节');
+  });
+
   test('处置表里不能有 SKILL.md 已经删掉的条目', () => {
     const keys = skillRuleKeys();
     const stale = Object.keys(SKILL_RULE_DISPOSITION).filter((k) => !keys.has(k));
@@ -705,8 +933,36 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
     const p = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     assert.match(p, /子 checkbox 默认不写/, '默认不嵌套 —— 嵌套要给理由,不是反过来');
     assert.match(p, /序号不是身份/, '`第1天`/`第2天` 这种序号不构成子步骤');
-    assert.match(p, /游戏自己不替你数/, '游戏里已有计数器的(7 天、100 只)不该拆成子框');
+    // **不能直接 match 整段提示词。** 条件 1 里也写着 `第1天`,所以在整段上断言
+    // 「第1天」永远是绿的 —— 把条件 2 的例子整个删掉它也不会响。切到条件 2 自己那一段
+    const c2 = p.slice(p.indexOf('2. **这一行'), p.indexOf('3. **每一条都要做'));
+    assert.ok(c2.length > 20, '切到条件 2 —— 这条检查失去了目标,不是通过了');
+    assert.match(c2, /第7天/, '条件 2 要点名一个"不该嵌套"的具体例子');
     assert.match(p, /互相替代/, '互斥选项那条老规则不能在改写中丢掉');
+  });
+
+  // **反方向的事故,2026-08-21:苏丹的游戏「知识」= 集齐《百科全书》全部词条**,
+  // 每个词条入手方式都不一样。用户点名重写它、并且要求写具体步骤,拿回来的仍然是
+  // 一整段「条目会随剧情推进和角色入队逐步录入」——一个词条都没点名,等于没写。
+  //
+  // 原因不在模型,在规则:旧的条件 2 是「游戏自己不替你数」,而百科全书当然有计数器,
+  // 所以这一条把整类全收集成就挡在了门外。三条必须同时成立,挡一条就够。
+  //
+  // **而且那条判据本来就没在干活**:它自己举的三个例子(玩满 7 天、杀 100 只、
+  // 攒 5000 块)全都先被条件 1「序号不是身份」拦掉了 —— 它唯一独占的作用,
+  // 就是拦住合法的收集清单。它还和同一段的自检句直接矛盾:
+  // 「把那几行删掉,攻略少了什么信息吗?」——删掉三十个词条的入手方式,少的是全部。
+  test('但不能反过来把全收集类的成就也拦掉', () => {
+    const p = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    assert.doesNotMatch(p, /游戏自己不替你数/,
+      '这条判据挡不住该挡的(序号那类条件 1 已经挡了),只挡得住全收集清单');
+    assert.match(p, /写得出做法/, '判据要换成「这一行除了序号还有没有内容」');
+    const c2 = p.slice(p.indexOf('2. **这一行'), p.indexOf('3. **每一条都要做'));
+    assert.ok(c2.length > 20, '切到条件 2 —— 这条检查失去了目标,不是通过了');
+    assert.match(c2, /百科全书/,
+      '规则只给反例的话,模型学到的是「别嵌套」;该嵌套的那一面也要举一个');
+    assert.match(p, /长不是"不列"的理由/,
+      '「太长了」是把全收集写成一段话最常用的借口,要当场堵掉');
   });
 });
 
@@ -799,11 +1055,26 @@ describe('Dashboard 上的「生成」按钮', () => {
   // 连按钮都没有。GUI 上点一下比敲一行命令容易得多,所以闸门**不能比 CLI 松**:
   // 必须先预检、把"会失去什么"摆出来,再问。
   test('Dashboard 能重写已有攻略,而且闸门和 CLI 一样严', () => {
-    assert.match(html, /data-rewrite=/, '有攻略的行要有重写入口');
+    // **入口在行上,不在 ⋯ 菜单里。** 2026-08-20 收进过菜单又收回来了 —— 理由见
+    // Dashboard.html 里 `.row-actions` 那段:重写是主动要做的动作,进第二层等于
+    // 每次都多一次点击。这里钉的是**入口还在、而且跑起来之后会置灰**,
+    // 不钉它长什么样(上一版钉在 `data-rewrite` 属性上,那个属性没了)
+    assert.match(html, /class="guide-btn rewrite"/, '有攻略的行要有重写入口');
+    assert.match(html, /window\.rewriteGuide\(/);
     assert.match(html, /window\.rewriteGuide = async function/);
+    // 置灰状态是**渲染出来的**,不是 render 之后手动设回去的 —— 挂在按钮上会被
+    // 下一次后台同步的重画洗掉,而重写要跑两三分钟,中间必然撞上。
+    // 切到真锚点再匹配,不写死那一串字符:上一版把空格数写进正则,改一个空格就红
+    const rowActions = html.slice(
+      html.indexOf('<div class="row-actions">'),
+      html.indexOf('class="delete-btn"')
+    );
+    assert.ok(rowActions.length > 0 && rowActions.length < 4000, '切到的应该是 row-actions 那一段');
+    assert.match(rowActions, /guideBusy\.has\(String\(g\.appid\)\)/,
+      '重写按钮的置灰要从 guideBusy 渲染,不能挂在 DOM 上');
     // 先预检再问 —— 顺序反了就成了"不知道会失去什么的确认"
-    // 按**函数定义**切,不是按名字第一次出现切 —— 名字最早出现在按钮的 onclick 属性里,
-    // 那样切出来的是两个 onclick 之间的一小段,什么都匹配不到
+    // 按**函数定义**切,不是按名字第一次出现切 —— 名字最早出现在调用点上,
+    // 那样切出来的是两个调用之间的一小段,什么都匹配不到
     const fn = html.slice(
       html.indexOf('window.rewriteGuide = async function'),
       html.indexOf('window.migrateGuide = function')
@@ -850,6 +1121,7 @@ describe('Dashboard 上的「生成」按钮', () => {
     const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*(\*|\/\/).*$/gm, '');
     const JUDGEMENT = /cheapest|priciest|most expensive|best quality|最便宜|最贵|质量最好|有免费额度/i;
     const surfaces = ['../README.md', '../docs/guides.md', '../docs/configuration.md',
+      '../docs/cli.md',
       '../tracker.js', '../lib/config.js', '../lib/ai.js', '../Setup.html', '../Dashboard.html'];
     for (const rel of surfaces) {
       const text = strip(readFileSync(new URL(rel, import.meta.url), 'utf8'));
@@ -988,6 +1260,240 @@ describe('分段撰写', () => {
     });
   });
 
+  /**
+   * 分区表。**这一组钉的是一个真实事故**:《波西亚时光》91 个成就分两段写,
+   * 两段各自定各自的分区,并起来 17 个小节 —— 恋爱那件事被拆成六个,
+   * `## 主线剧情` 原样出现两次。每一段自己内部零重复,乱的只有并集。
+   */
+  describe('分区表', () => {
+    /** 一段正文:按 [[小节名, 成就[]], ...] 摆好。`seg` 把标题写死成「主线」,这里要能换 */
+    const body = (parts) =>
+      '```markdown\n' +
+      parts
+        .map(([h, items]) =>
+          `## ${h}\n\n` +
+          items.map((d) => `- [ ] **${d.name_cn}**<br>${d.description}<br>心得`).join('\n'))
+        .join('\n\n') +
+      '\n```';
+
+    describe('parseSectionPlan', () => {
+      test('认列表,不认列表前面那句解释', () => {
+        // **这是最要命的一条。** 模型很爱先写一句「以下是建议的分区」,那句话没有
+        // 终止标点、长度也不出格,靠过滤规则拦不住 —— 而它一旦混进表里,就变成一个
+        // 所有段都被要求一字不差照抄的假标题
+        const out = parseSectionPlan('以下是我建议的分区\n- 主线剧情\n- 工坊经营\n- 遗迹探索');
+        assert.deepEqual(out, ['主线剧情', '工坊经营', '遗迹探索']);
+      });
+
+      test('编号列表也算列表 —— 前言照样挡在外面', () => {
+        // **这一条是包内跑出来的。** 上面那条用的是纯 `- ` 列表,三行都命中闸门;
+        // 换成 `1. 2.` 编号之后只剩一行命中,闸门不开,前言直接混进表里 ——
+        // 而它会变成一个所有段都被要求一字不差照抄的假标题
+        assert.deepEqual(
+          parseSectionPlan('以下是建议的分区\n1. **主线剧情**\n2. ## 工坊经营\n- 遗迹探索'),
+          ['主线剧情', '工坊经营', '遗迹探索']
+        );
+      });
+
+      test('围栏、编号、井号、粗体都剥掉', () => {
+        assert.deepEqual(
+          parseSectionPlan('```\n1. **主线**\n2. ## 支线\n- 收集\n```'),
+          ['主线', '支线', '收集']
+        );
+      });
+
+      test('重复的只留一个,只差空格和大小写的也算重复', () => {
+        assert.deepEqual(parseSectionPlan('- 主线\n- 主 线\n- Boss\n- boss\n- 收集'),
+          ['主线', 'Boss', '收集']);
+      });
+
+      test('挑不出成形的表就返回空数组,让调用方降级', () => {
+        // **不能返回半成品。** 一份错的表会被所有段当成硬约束照抄,
+        // 比没有表糟得多 —— 没有表至少各段还能按内容自己分
+        assert.deepEqual(parseSectionPlan(''), []);
+        assert.deepEqual(parseSectionPlan('这个游戏的成就不太好分类。'), []);
+        assert.deepEqual(parseSectionPlan('- 全部'), [], '只有一个标题等于没分区');
+      });
+
+      test('长句和带终止标点的行不是标题', () => {
+        const long = '这一节收录了所有和主线剧情推进有关的成就';   // 20 字 = 40 格,超宽
+        const out = parseSectionPlan(`- 主线\n- ${long}\n- 收集`);
+        assert.deepEqual(out, ['主线', '收集']);
+      });
+
+      test('宽度按显示算 —— 英文标题不能被中文的尺子误伤', () => {
+        // 同一个字符数阈值对两种文字的松紧正好相反,见 MAX_TITLE_WIDTH
+        assert.deepEqual(parseSectionPlan('- Main Story & Side Quests\n- Collectibles'),
+          ['Main Story & Side Quests', 'Collectibles']);
+      });
+
+      test('再长的表也砍到 MAX_SECTIONS —— 那时它已经不是分区了', () => {
+        const many = Array.from({ length: 40 }, (_, i) => `- 第${i}节`).join('\n');
+        assert.equal(parseSectionPlan(many).length, MAX_SECTIONS);
+      });
+    });
+
+    describe('buildSectionPlanPrompt', () => {
+      test('给成就名,不给描述 —— 这一趟要的是骨架,描述只会把它变贵', () => {
+        const p = buildSectionPlanPrompt('测试游戏', DEFS);
+        assert.match(p, /第一步/, '成就名要在');
+        assert.match(p, /第二步/);
+        assert.doesNotMatch(p, /完成第一关/, '描述不该出现在这一趟里');
+      });
+
+      test('要几个分区跟着成就数走,不写死', () => {
+        const mk = (n) => Array.from({ length: n }, (_, i) => def('A' + i, 'n' + i, 'd'));
+        const hi = (t) => Number(t.match(/\*\*(\d+)[–-](\d+) 个\*\*/)[2]);
+        assert.ok(hi(buildSectionPlanPrompt('x', mk(300))) > hi(buildSectionPlanPrompt('x', mk(60))),
+          '300 个成就该比 60 个允许更多分区 —— 写死一个区间对两头都不合适');
+      });
+    });
+
+    describe('buildChunkMessage 带上分区表', () => {
+      const chunks = chunkDefs(BIG, 2);
+
+      test('有表就把标题钉死,并且把表原样列出来', () => {
+        const msg = buildChunkMessage(chunks, 0, ['主线剧情', '工坊经营']);
+        assert.match(msg, /一字不差地照抄/, '必须把话说死 —— 留一句「参考」模型就会改字');
+        assert.match(msg, /- 主线剧情/);
+        assert.match(msg, /- 工坊经营/);
+        assert.match(msg, /没有内容的小节\*\*整个不要写\*\*/,
+          '不说这句就会得到一堆空标题 —— 每段都照着表把所有标题开一遍');
+      });
+
+      test('没有表时,一个字都不变', () => {
+        // 降级路径必须和加这一趟之前**完全一样**,否则「分区表没定成」会变成
+        // 一种新的、没人测过的行为
+        assert.equal(buildChunkMessage(chunks, 0, []), buildChunkMessage(chunks, 0));
+        assert.match(buildChunkMessage(chunks, 0), /该开的小节标题就开/);
+      });
+
+      test('只有一段时,有没有表都不提分区', () => {
+        assert.equal(buildChunkMessage([BIG], 0, ['主线']), buildChunkMessage([BIG], 0));
+      });
+    });
+
+    describe('regroupBySections', () => {
+      test('离接缝很远的同名标题也合掉 —— joinBodies 够不着的正是这一个', () => {
+        // 《波西亚时光》的真实形状:第 1 段以「社交与恋爱」结尾,第 2 段的
+        // 「主线剧情」排在它自己的第 3 个位置。接缝两侧的标题**字面不等**,
+        // 所以 joinBodies 不合;而重复的那个离接缝十万八千里,它在结构上也够不着
+        const bodies = [
+          '## 主线剧情\n- [ ] **A**\n\n## 社交与恋爱\n- [ ] **B**',
+          '## 社交与恋爱\n- [ ] **C**\n\n## 收集\n- [ ] **D**\n\n## 主线剧情\n- [ ] **E**',
+        ];
+        const sections = ['主线剧情', '社交与恋爱', '收集'];
+        assert.equal(joinBodies(bodies).match(/## 主线剧情/g).length, 2, '前提:joinBodies 治不了它');
+        const out = regroupBySections(bodies, sections);
+        assert.equal(out.match(/## 主线剧情/g).length, 1, '合并之后只该有一个「主线剧情」');
+        assert.equal(out.match(/## 社交与恋爱/g).length, 1);
+        for (const n of ['A', 'B', 'C', 'D', 'E']) {
+          assert.match(out, new RegExp('\\*\\*' + n + '\\*\\*'), `成就 ${n} 不能在归并里丢掉`);
+        }
+      });
+
+      test('顺序按分区表走,不按谁先出现', () => {
+        const out = regroupBySections(['## 收集\n- [ ] **A**', '## 主线\n- [ ] **B**'], ['主线', '收集']);
+        assert.ok(out.indexOf('## 主线') < out.indexOf('## 收集'),
+          '表里主线在前,成品里就该主线在前');
+      });
+
+      test('表里没有的标题要留着 —— 底下挂着成就', () => {
+        // 模型没完全听话时,**宁可多一个计划外的小节,也不能吞掉它下面的条目**
+        const out = regroupBySections(['## 主线\n- [ ] **A**\n\n## 我自己想的\n- [ ] **B**'], ['主线']);
+        assert.match(out, /## 我自己想的/);
+        assert.match(out, /\*\*B\*\*/);
+      });
+
+    test('表里有、但没人写的小节不落地', () => {
+        const out = regroupBySections(['## 主线\n- [ ] **A**'], ['主线', '支线', '收集']);
+        assert.doesNotMatch(out, /## 支线/, '空标题不该出现在成品里');
+        assert.doesNotMatch(out, /## 收集/);
+      });
+
+      test('模型开了标题却没往里写东西的,也不落地', () => {
+        // 和上一条**不是同一条路**:上一条那个小节压根没进过 bucket,被按表过滤掉了;
+        // 这一条是模型真的写了 `## 支线` 然后底下什么都没有 —— 只有正文为空这一步
+        // 拦得住它。少了那一步,成品里会出现一个孤零零的标题
+        const out = regroupBySections(['## 主线\n- [ ] **A**\n\n## 支线\n\n'], ['主线', '支线']);
+        assert.doesNotMatch(out, /## 支线/, '开了但没写东西的标题不该落地');
+        assert.match(out, /\*\*A\*\*/);
+      });
+
+      test('没有表就原样退回 joinBodies', () => {
+        const bodies = ['## 主线\n- [ ] **A**', '## 主线\n- [ ] **B**'];
+        assert.equal(regroupBySections(bodies, []), joinBodies(bodies));
+        assert.equal(regroupBySections(bodies, null), joinBodies(bodies));
+        assert.equal(regroupBySections([null, null], ['主线']), '');
+      });
+
+      test('第一个标题之前的东西留在最前面', () => {
+        const out = regroupBySections(['开场白\n\n## 主线\n- [ ] **A**'], ['主线']);
+        assert.ok(out.startsWith('开场白'), '不该被塞进某个小节里');
+      });
+    });
+
+    test('端到端:两段各开一次同名小节,成品里只有一个', async () => {
+      // 上面几条验的是零件。**这一条验的是这些零件真的接在生成流程上** ——
+      // 分区表问没问、有没有传进分段提示词、拼接走没走归并,漏掉任何一环
+      // 都不会报错,只会让成品重新长出重复的小节
+      // **形状照抄《波西亚时光》**:重复的「主线」落在第 2 段的**末尾**,
+      // 而接缝两侧是「社交」。接缝那一对 joinBodies 自己就能合,所以拿它当端到端
+      // 断言等于什么都没验 —— 真正只有归并治得了的,是离接缝远的那一个
+      const { db, config } = envFor(3); // 5 个成就切成 3 + 2
+      const provider = fakeProvider(
+        [
+          body([['主线', BIG.slice(0, 2)], ['社交', [BIG[2]]]]),
+          body([['社交', [BIG[3]]], ['主线', [BIG[4]]]]),
+        ],
+        { sections: ['主线', '社交'] }
+      );
+      const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
+      assert.equal(provider.sectionAsks, 1, '分区表只问一趟,不是每段问一次');
+      assert.match(provider.sectionPrompt, /并发/, '问的确实是分区表那一趟');
+      assert.match(provider.asked[0], /一字不差地照抄/, '表要传进分段提示词');
+      const text = readFileSync(res.path, 'utf8');
+      assert.equal(text.match(/## 主线/g).length, 1, '「主线」被两段各开了一次,成品里只该有一个');
+      assert.equal(text.match(/## 社交/g).length, 1);
+      assert.ok(text.indexOf('## 主线') < text.indexOf('## 社交'), '顺序按分区表走');
+      assert.equal((text.match(/- \[ \]/g) ?? []).length, 5, '5 个成就一个都不能少');
+    });
+
+    test('两个界面都要报「正在定分区」和「没定成」', () => {
+      // **两个消费者都是 if/else if 链,不认识的 phase 静默落地。**
+      // 不加分支的表现有两个,都不报错:定分区那几十秒里进度条一动不动(看着像卡死),
+      // 以及降级悄悄发生 —— 后者正是这个项目最防的那种退化,而它在成品上是看得见的
+      // (小节标题重复),用户只会觉得"这次生成的分区怎么乱七八糟"。
+      //
+      // **先剥行注释再剥块注释**(见 CLAUDE.md):反过来的话,注释里出现的 `/*`
+      // 会把下面的代码一起吃掉,于是断言被喂饱,代码删了它照样绿
+      const strip = (src) =>
+        src.replace(/(^|[^:])\/\/[^\n]*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+      const read = (f) => strip(readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
+      for (const f of ['tracker.js', 'lib/server.js']) {
+        const src = read(f);
+        assert.ok(src.includes("=== 'sections'"), `${f} 没处理 sections —— 那几十秒界面上什么都不动`);
+        assert.ok(src.includes("'sections-done'"), `${f} 没报分区定好了`);
+        assert.ok(src.includes("'sections-failed'"), `${f} 没报降级 —— 静默退化`);
+      }
+    });
+
+    test('分区表问不出来时降级,不中断生成', async () => {
+      const { db, config } = envFor(3);
+      const provider = fakeProvider([seg(BIG.slice(0, 3)), seg(BIG.slice(3))], { sections: null });
+      const events = [];
+      const res = await generateGuide(db, {
+        db, config, provider, steam: bigSteam(), appid: '1',
+        onProgress: (e) => events.push(e),
+      });
+      assert.ok(res.path, '正文是用户已经等了几分钟的东西,不能因为骨架没定成就整份作废');
+      assert.equal((readFileSync(res.path, 'utf8').match(/- \[ \]/g) ?? []).length, 5);
+      // **降级要出声。** 悄悄发生的退化正是这个项目最防的那种
+      assert.ok(events.some((e) => e.phase === 'sections-failed'),
+        '降级了就要报一条 sections-failed');
+    });
+  });
+
   test('chunksNeedingRewrite 按 apiName 把问题定位到具体那一段', () => {
     const chunks = chunkDefs(BIG, 2);
     const blocking = [{ code: 'missing-checkbox', apiName: 'E', message: 'x' }];
@@ -1024,7 +1530,9 @@ describe('分段撰写', () => {
         asked: [],
         seen: [],
         webTools: () => [],
-        async send({ messages }) {
+        async send({ system, messages }) {
+          const planned = sectionPlanReply(system);
+          if (planned) return planned;
           this.seen.push(JSON.stringify(messages));
           this.asked.push(messages.at(-1).content);
           const step = script[this.asked.length - 1];
@@ -1482,7 +1990,9 @@ describe('分段撰写', () => {
         const late = Object.assign(new Error('第 1 段后炸'), { code: 'first-shard' });
         const provider = {
           model: 'x', asked: [], webTools: () => [],
-          async send({ messages }) {
+          async send({ system, messages }) {
+            const planned = sectionPlanReply(system);
+            if (planned) return planned;
             const msg = messages.at(-1).content;
             this.asked.push(msg);
             const from = Number(msg.match(/第 (\d+)–/)?.[1] ?? 0);

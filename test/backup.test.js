@@ -168,6 +168,65 @@ describe('备份 / 恢复', () => {
     }
   });
 
+  /**
+   * **反斜杠是同一个洞的另一种拼法,而上面那条测不到它。**
+   *
+   * zip 规范说条目名用正斜杠 —— 但那是规范,不是校验器,攻击者手写一个
+   * `guides/..\..\x.md` 完全合法。守卫如果只 `split('/')`,`..\..` 整个是一个
+   * "文件名",过得了 `.includes('..')` 那一关,然后 Windows 上的 `join()` 把
+   * 反斜杠当分隔符解析成真正的上跳。实测能落到 `D:\GitHub\` 下。
+   *
+   * 第三条是**前缀相同的兄弟目录**:`guides-evil` 是 `guides` 的字符串前缀,
+   * 包含性检查漏掉分隔符就放行 —— 和 `resolveGuidePath`、`/fonts/` 那条路
+   * 同一个坑,这个项目里已经出现过三次。
+   */
+  const SLIP_CASES = [
+    ['反斜杠上跳', (m) => `guides/..\\..\\${m}`, (dst) => join(dst, '..', '..')],
+    ['正反混用', (m) => `guides/..\\../${m}`, (dst) => join(dst, '..', '..')],
+    ['前缀相同的兄弟目录', (m) => `guides/../guides-evil/${m}`, (dst) => join(dst, 'guides-evil')],
+    ['单点段', (m) => `guides/./../${m}`, (dst) => join(dst, '..')],
+  ];
+
+  for (const [label, entryName, landingDir] of SLIP_CASES) {
+    test(`zip-slip:${label} 同样挡在 guides/ 外面`, () => {
+      const marker = `sat-slip-${label.length}-${process.pid}-${Date.now()}.md`;
+      const dst = tmp('sat-bk-slip2-');
+      // 落点按各自的形状算,再加两个通用的兜底位置
+      const escaped = [
+        join(landingDir(dst), marker),
+        join(dst, marker),
+        join(tmpdir(), marker),
+      ];
+      try {
+        const src = tmp('sat-bk-seed2-');
+        mkdirSync(join(src, 'guides'), { recursive: true });
+        writeFileSync(join(src, 'guides', 'ok.md'), '# 正常攻略\n');
+        const db = seedDb(join(src, 'steam.db'));
+        const { zip } = createBackup({ db, configPath: null, guidesDir: join(src, 'guides') });
+        db.close();
+        rmSync(src, { recursive: true, force: true });
+
+        const entries = [...zipRead(zip)].map(([name, data]) => ({ name, data }));
+        entries.push({ name: entryName(marker), data: Buffer.from('x') });
+
+        const db2 = openDb(join(dst, 'steam.db'));
+        const r = applyBackup({
+          db: db2, buf: zipWrite(entries), configPath: null, guidesDir: join(dst, 'guides'),
+        });
+        db2.close();
+
+        for (const p of escaped) assert.equal(existsSync(p), false, `越界写到了 ${p}`);
+        assert.ok(existsSync(join(dst, 'guides', 'ok.md')), '越界被挡住了,但正常的攻略也没写进去');
+        // 数出来的也只能是那一个正常文件 —— 报告里把恶意条目算进去等于说了谎
+        assert.equal(r.guideFiles, 1, '恶意条目被算进"写了几个攻略文件"里了');
+      } finally {
+        for (const p of escaped) rmSync(p, { force: true });
+        rmSync(join(dst, '..', 'guides-evil'), { recursive: true, force: true });
+        rmSync(dst, { recursive: true, force: true });
+      }
+    });
+  }
+
   test('坏文件在碰数据库之前就要被拦下', () => {
     // 顺序很关键:先 DELETE 再发现 zip 读不动,用户的数据就没了而备份也没进来
     const dst = tmp('sat-bk-bad-');

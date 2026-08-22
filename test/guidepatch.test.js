@@ -27,12 +27,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { parseTodos, todoSpans, spliceLines } from '../lib/markdown.js';
-import { lintGuide } from '../lib/guidelint.js';
+import { lintGuide, computeCheckedKeys } from '../lib/guidelint.js';
 import {
   RARE_PCT, resolveScope, scopeEntries, classifyFindings,
 } from '../lib/guidescope.js';
 import {
-  parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback,
+  parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback, landPatchNotion,
 } from '../lib/guidepatch.js';
 import { patchPreflight, formatPatchPreflight } from '../lib/guidebackup.js';
 import { buildPatchMessage, buildAchievementList } from '../lib/guidegen.js';
@@ -591,6 +591,88 @@ describe('编排里那几条单测够不到的规矩', () => {
   });
 });
 
+// 提示词里那句「标签行必须也是 `- [ ]`,不能写成普通 bullet」不是风格偏好,
+// 是这里量出来的:`todoSpans` 只把**连续的、更深缩进的 checkbox 行**算进一条成就,
+// 中间夹一行非 checkbox 就当场截断。截断之后局部重写只替换成就那一行,
+// 底下的旧内容原样留着 —— 页面上是**重复**,而且不报错。
+describe('分组标签必须也是 checkbox', () => {
+  const P = '- [ ] **创造**<br>你可以创造一切。<br>心得';
+  const span1 = (md) => {
+    const s = todoSpans(md).get(0);
+    return s ? s.end - s.start + 1 : 0;
+  };
+
+  test('提示词教的那个形状,能被完整圈住', () => {
+    const md = [P,
+      '  - [ ] **前置**',
+      '    - [ ] 神之侧身像',
+      '    - [ ] 玛希尔入队',
+      '  - [ ] **步骤**',
+      '    - [ ] 寻思龙眼宝石',
+    ].join('\n');
+    assert.equal(span1(md), 6, '六行都要算进这条成就,否则重写会留下重复');
+    const todos = parseTodos(md);
+    assert.equal(todos.length, 6);
+    assert.equal(todos.filter((t) => t.parent != null).length, 5, '五条都要挂在上面');
+  });
+
+  test('标签写成普通 bullet 就会把范围截断', () => {
+    // 这条**不是在钉一个我们想要的行为**,是在钉一个约束的存在:
+    // 哪天 todoSpans 放宽了,提示词里那句"必须是 checkbox"的理由就没了,
+    // 这条会红,提醒去把规则一起改掉
+    const md = [P,
+      '  - 前置：',
+      '    - [ ] 神之侧身像',
+      '    - [ ] 玛希尔入队',
+    ].join('\n');
+    assert.equal(span1(md), 1,
+      '普通 bullet 一夹,成就就只剩自己一行 —— 提示词禁止这种写法的全部理由');
+  });
+});
+
+// 逗号是列表分隔符,而**成就名里本来就有逗号** —— 全库 10134 个成就里 302 个带逗号,
+// 其中 116 个属于已经写了攻略的游戏(马特的寻猫游戏的「拔掉插头,放松身心」就是一个)。
+// 不先把整串当一个名字试一次的话,它会被切成两半、两半都匹配不上,而报出来的是
+// 「这两条攻略里找不到」—— 指不到真正的原因。
+describe('--only 的名字里带逗号', () => {
+  const withComma = [
+    def('A', '第一步', '完成第一关。'),
+    def('X', '拔掉插头，放松身心', '关掉10块屏幕。'),
+    def('Y', '放松身心', '别的成就。'),
+  ];
+
+  test('整串正好是一个成就名时,不拆', () => {
+    const r = resolveScope({ selector: '拔掉插头，放松身心', defs: withComma });
+    assert.deepEqual(r.apiNames, ['X']);
+    assert.deepEqual(r.unresolved, []);
+  });
+
+  test('整串匹配不上时,照常按逗号拆', () => {
+    const r = resolveScope({ selector: '第一步,放松身心', defs: withComma });
+    assert.deepEqual(r.apiNames, ['A', 'Y']);
+  });
+
+  test('api_name 那条退路没被改坏', () => {
+    assert.deepEqual(resolveScope({ selector: 'X', defs: withComma }).apiNames, ['X']);
+    assert.deepEqual(resolveScope({ selector: 'A,X', defs: withComma }).apiNames, ['A', 'X']);
+  });
+
+  test('中文逗号真的能当分隔符 —— 原来那个字符类里是两个半角逗号', () => {
+    // `/[,,]/` 看着像「半角 + 全角」,实际是同一个 U+002C 写了两遍,而注释一直
+    // 说「中文逗号也认」。输入法给的就是 U+FF0C,所以这条路一直是断的,
+    // 而且断得很安静:整串匹配不上,报「攻略里找不到」
+    const r = resolveScope({ selector: '第一步，放松身心', defs: withComma });
+    assert.deepEqual(r.apiNames, ['A', 'Y']);
+    assert.deepEqual(r.unresolved, []);
+  });
+
+  test('两个名字都点不中的照旧报出来,不静默', () => {
+    const r = resolveScope({ selector: '不存在甲,不存在乙', defs: withComma });
+    assert.deepEqual(r.apiNames, []);
+    assert.deepEqual(r.unresolved, ['不存在甲', '不存在乙']);
+  });
+});
+
 describe('提示词', () => {
   test('把原文摆出来,并且明说别动别的', () => {
     const msg = buildPatchMessage(entriesFor(['B']), { instruction: '把互斥关系写清楚' });
@@ -608,6 +690,16 @@ describe('提示词', () => {
     const msg = buildPatchMessage(entriesFor(['B']), { instruction: '重新查', fresh: true });
     assert.match(msg, /接着打就行/, '原文永远给');
     assert.match(msg, /完成第二关。/, '官方描述也要给 —— 那是硬规则要照抄的东西');
+  });
+
+  test('不在用户刚提了要求的时候重申"默认不写"', () => {
+    // 点名重写某几条,多半正是因为那几条写得不够细 —— 苏丹的游戏「知识」就是这么来的:
+    // 用户明说"写出具体步骤",而这条消息同时在说"子步骤默认不写",两句话对着干。
+    // 指回规则就够了,嵌不嵌套让那三个条件去判
+    const msg = buildPatchMessage(entriesFor(['B']), { instruction: '写详细点' });
+    assert.match(msg, /子步骤/, '仍然要说清子步骤怎么摆');
+    assert.doesNotMatch(msg, /默认不写/, '不要在这里替那三个条件先给出答案');
+    assert.match(msg, /三个条件/, '指回规则,而不是自己下结论');
   });
 
   test('没给要求时说清楚是"重新写",不留空', () => {
@@ -682,5 +774,270 @@ describe('稀有的阈值只有一条线', () => {
     const hits = [...src.matchAll(/rarePct\)?\s*\|\|\s*(\d+)/g)].map((m) => Number(m[1]));
     assert.equal(hits.length, 2, '两处兜底都要被匹配到');
     for (const n of hits) assert.equal(n, RARE_PCT);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 勾选状态:校验之前必须先机械打勾
+// ---------------------------------------------------------------------------
+
+describe('局部重写的勾选状态', () => {
+  /**
+   * **这是一条真实的失败,不是假设。** 罗曼圣诞探案集(926340,46/50)重写一条
+   * 「初入酒馆」直接失败,报的就是 `checked-mismatch`。
+   *
+   * 链条是这样的:`applyPatchToTodos` 把重写过的成就标成 `checked: false`(**这是对的** ——
+   * 模型交回来的永远是 `- [ ]`,上面那条测试钉的就是它),落地时两个后端都会照
+   * `computeCheckedKeys` 重新勾一遍。但**校验跑在落地之前**,如果直接拿那份没勾的
+   * 去 lint,任何一条**已解锁**的成就都会报 `checked-mismatch` —— 而它不在
+   * `MODEL_FIXABLE` 里,于是 `patchGuide` 当场把整次改动判死。
+   *
+   * 也就是说这条路对**任何已解锁的成就都不能用**,而那是一份打了大半的攻略里的
+   * 绝大多数条目。`guidepatch.test.js` 全是纯函数测试(这是有意的),而这个 bug
+   * 长在把这些纯函数串起来的那一段上,所以整套测试一片绿。这里补的就是那一段。
+   */
+  const patchedThenTicked = (apiNames, found, unlocked) => {
+    const entries = entriesFor(apiNames);
+    let patched = applyPatchToTodos(TODOS, entries, found, { kind: 'notion' });
+    const wantChecked = new Set(
+      computeCheckedKeys({ todos: patched, defs: DEFS, unlockedApiNames: unlocked })
+    );
+    patched = patched.map((t) => (wantChecked.has(t.key) ? { ...t, checked: true } : t));
+    return { patched, wantChecked };
+  };
+
+  const rewriteA = new Map([['A', ['- [ ] **第一步**<br>完成第一关。<br>重写过的正文。']]]);
+  const errorsOf = (patched, unlocked) =>
+    lintGuide({ todos: patched, defs: DEFS, unlockedApiNames: unlocked, kind: 'notion' })
+      .findings.filter((f) => f.level === 'error');
+
+  test('重写一条已解锁的成就,校验不该报 checked-mismatch', () => {
+    const unlocked = new Set(['A']);
+    const { patched } = patchedThenTicked(['A'], rewriteA, unlocked);
+    assert.deepEqual(
+      errorsOf(patched, unlocked).map((f) => f.code), [],
+      '这正是罗曼圣诞探案集那次失败'
+    );
+  });
+
+  test('不先机械打勾就会报 —— 证明上面那条不是白测的', () => {
+    const unlocked = new Set(['A']);
+    const entries = entriesFor(['A']);
+    const raw = applyPatchToTodos(TODOS, entries, rewriteA, { kind: 'notion' });
+    assert.ok(
+      errorsOf(raw, unlocked).some((f) => f.code === 'checked-mismatch'),
+      '少了那一步,任何已解锁的成就都会把整次改动判死'
+    );
+  });
+
+  test('没解锁的成就重写完仍然是没勾的', () => {
+    const unlocked = new Set();
+    const { patched, wantChecked } = patchedThenTicked(['A'], rewriteA, unlocked);
+    const a = patched.find((t) => t.text.includes('第一步'));
+    assert.equal(a.checked, false, '没解锁就不该勾 —— 打勾只看数据库,不看模型');
+    assert.equal(wantChecked.size, 0);
+  });
+
+  test('算好的那份不能再算第二次 —— 会得到空集,然后把框取消勾选', () => {
+    const unlocked = new Set(['A']);
+    const { patched, wantChecked } = patchedThenTicked(['A'], rewriteA, unlocked);
+    assert.ok(wantChecked.size > 0, '第一次要算出东西来');
+    // computeCheckedKeys 跳过已经勾上的(「已经勾上的不用管」),所以对着勾好的
+    // 再算一遍是空的 —— Notion 落地那条路会拿它当 `checked: false` 写回去
+    const again = computeCheckedKeys({ todos: patched, defs: DEFS, unlockedApiNames: unlocked });
+    assert.deepEqual(again, [], '这就是为什么落地必须收下算好的集合,而不是自己再算');
+  });
+
+  test('没被点名的条目,勾选状态一个都没动', () => {
+    const unlocked = new Set(['A', 'B']);
+    const { patched } = patchedThenTicked(['A'], rewriteA, unlocked);
+    const boss = patched.find((t) => t.text === '打完第一个 Boss');
+    assert.equal(boss.checked, true, '手动勾上的子步骤不该被这次改动碰到');
+  });
+});
+
+describe('patchGuide 的接线(源码断言 —— 这一段没有网络就跑不到)', () => {
+  const src = readFileSync(new URL('../lib/guidepatch.js', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+  test('机械打勾排在 lintGuide 之前', () => {
+    const i = src.indexOf('wantChecked = new Set(computeCheckedKeys(');
+    const j = src.indexOf('lint = lintGuide(');
+    assert.ok(i > 0 && j > 0, '两处都得在');
+    assert.ok(i < j, '算在校验之后就等于没算');
+  });
+
+  // 上面那几条行为测试**自己把编排重跑了一遍**,所以它们证明的是「这套逻辑对」,
+  // 不是「生产代码真这么做」—— 把 lib 里那一行删掉,它们照样绿。变异测试当场抓到。
+  // 这一条补的就是那个缺口:算完必须写回去。
+  test('算出来的勾选要写回 patched —— 只算不写等于没算', () => {
+    const i = src.indexOf('wantChecked = new Set(computeCheckedKeys(');
+    const j = src.indexOf('lint = lintGuide(');
+    assert.ok(i > 0 && j > i);
+    const between = src.slice(i, j);
+    assert.match(between, /patched\s*=\s*patched\.map\(/,
+      '算好的集合要写回 patched,否则校验看到的还是那份没勾的');
+    assert.match(between, /checked:\s*true/);
+  });
+
+  test('Notion 落地收下算好的集合,不自己重算', () => {
+    const fn = src.slice(
+      src.indexOf('async function landPatchNotion'),
+      src.indexOf('await notion.setTodoRichText')
+    );
+    assert.ok(fn.length > 0 && fn.length < 2000);
+    assert.doesNotMatch(fn, /computeCheckedKeys\(/,
+      '重算会得到空集,然后把刚勾上的框取消勾选');
+    assert.match(fn, /wantChecked/, '要用传进来的那份');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Notion 落地 —— 这一段以前**一行都没执行过**
+// ---------------------------------------------------------------------------
+
+/**
+ * 这个 describe 是补一个洞,而那个洞连着放走了两个 bug。
+ *
+ * 这个文件开头写着「全是纯函数,不联网」,而 `landPatchNotion` 不是纯函数,于是它
+ * 一次都没被跑过 —— 连**函数体里有没有引用一个不存在的变量**都没人知道。实测:
+ * 修上一个 bug 时我把 `defs` / `unlocked` 从它的参数里删掉了,而回读校验那行还在用,
+ * 结果是运行时 `defs is not defined`。`node --check` 只看语法,整套测试跑不到这里,
+ * 于是它一路走进打包版,用户点一次「重写」才炸。
+ *
+ * **假的 Notion 不算联网。** `guidegen-notion.test.js` 早就是这么做的;这里照搬。
+ * 只要函数被真的执行一遍,这一类错误就没有藏身之处了。
+ */
+function fakeNotionPage() {
+  return {
+    written: [],
+    childrenCalls: [],
+    async setTodoRichText(blockId, richText, opts = {}) {
+      this.written.push({ blockId, checked: opts.checked, text: richText.map((r) => r.text.content).join('') });
+    },
+    async replaceTodoChildren(blockId, oldIds, blocks) {
+      this.childrenCalls.push({ blockId, oldIds, count: blocks.length });
+    },
+    // 回读:把原来的 todos 拿出来,并把这次改过的那几条换成写进去的样子
+    async fetchAllToDoBlocks() {
+      return TODOS.map((t) => {
+        const w = this.written.find((x) => x.blockId === t.key);
+        return w ? { key: t.key, text: w.text, checked: Boolean(w.checked), parent: t.parent } : t;
+      });
+    },
+  };
+}
+
+const patchPlan = () => ({
+  existing: { url: 'https://notion.so/3b91fee6252b811eaff4f382158bd7bc', kind: 'notion' },
+  game: '测试游戏',
+  unnameable: new Set(),
+});
+
+describe('landPatchNotion(假 Notion)', () => {
+  const entries = () => entriesFor(['A']);
+  const found = () => new Map([['A', ['- [ ] **第一步**<br>完成第一关。<br>重写过的正文。']]]);
+
+  test('跑得起来 —— 光这一条就能挡住「defs is not defined」那一类', async () => {
+    const notion = fakeNotionPage();
+    const es = entries();
+    const r = await landPatchNotion({
+      notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(['A']),
+      entries: es, found: found(), wantChecked: new Set([es[0].key]),
+    });
+    assert.equal(r.kind, 'notion');
+    assert.equal(r.changed, 1);
+  });
+
+  // 这一条是写上面那个测试时**不小心撞出来的**:我把「A 已解锁」和「别勾 A」
+  // 一起传了进去,回读当场把它抓了出来。那正是这段回读存在的理由 ——
+  // 上一个 bug 的翻面版本(落地自己重算 ⇒ 空集 ⇒ 把该勾的框写成没勾)
+  // 就长这个样子,所以它值得单独钉一条
+  test('说要勾却没勾上,回读会抓出来', async () => {
+    const notion = fakeNotionPage();
+    await assert.rejects(
+      () => landPatchNotion({
+        notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(['A']),
+        entries: entries(), found: found(), wantChecked: new Set(),
+      }),
+      /成就已解锁但框没勾/
+    );
+  });
+
+  test('勾选状态用传进来的那份,不自己重算', async () => {
+    const notion = fakeNotionPage();
+    const es = entries();
+    const key = es[0].key;
+    await landPatchNotion({
+      notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(['A']),
+      entries: es, found: found(), wantChecked: new Set([key]),
+    });
+    assert.equal(notion.written.length, 1);
+    assert.equal(notion.written[0].checked, true, '算好的说要勾,就得勾上');
+  });
+
+  // **这条钉的是「用户自己贴的东西能不能活下来」。**
+  // 马特的寻猫游戏这类找物游戏,位置得靠截图说清楚,而模型给不出可靠的游戏内截图
+  // (SKILL_RULE_DISPOSITION 的「规则二」写着为什么不做)。剩下的路是用户自己往
+  // 成就底下贴图 —— 那就必须保证局部重写不会顺手删掉它。
+  //
+  // 依据是 replaceTodoChildren 只收到 `e.subTodos` 的 id:图片/表格/标注这些
+  // 别的类型的子块根本不在删除名单里。**传成"这个块的全部子块"就会当场毁掉它们**,
+  // 而且不报错 —— 用户下次打开页面才发现图没了,还对不上是哪一步弄的。
+  test('只删这条成就自己的子 checkbox,手贴的图不在删除名单里', async () => {
+    const notion = fakeNotionPage();
+    const es = entriesFor(['B']);
+    assert.ok(es[0].subTodos.length > 0, 'B 要有子步骤,否则这条验不到东西');
+    await landPatchNotion({
+      notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(),
+      entries: es,
+      found: new Map([['B', ['- [ ] **第二步**<br>完成第二关。<br>重写过的正文。']]]),
+      wantChecked: new Set(),
+    });
+    const call = notion.childrenCalls.find((c) => c.blockId === es[0].key);
+    assert.ok(call, '应该调了一次 replaceTodoChildren');
+    assert.deepEqual(
+      call.oldIds, es[0].subTodos.map((x) => x.key),
+      '删除名单必须正好是子 checkbox 的 id —— 多收一个别的类型,手贴的块就跟着没了'
+    );
+  });
+
+  test('传进来说不勾,就不勾', async () => {
+    const notion = fakeNotionPage();
+    await landPatchNotion({
+      notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(),
+      entries: entries(), found: found(), wantChecked: new Set(),
+    });
+    assert.equal(notion.written[0].checked, false);
+  });
+
+  test('回读对不上就抛,而且只对这次改的那几条较真', async () => {
+    const notion = fakeNotionPage();
+    // 写进去的文字被换成别的东西 —— 这条成就的 checkbox 就没了
+    notion.setTodoRichText = async function (blockId) {
+      this.written.push({ blockId, checked: false, text: '完全不相干的一行字' });
+    };
+    await assert.rejects(
+      () => landPatchNotion({
+        notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(),
+        entries: entries(), found: found(), wantChecked: new Set(),
+      }),
+      /回读校验/
+    );
+  });
+
+  test('转不出 checkbox 就停下,不继续写坏后面的', async () => {
+    const notion = fakeNotionPage();
+    await assert.rejects(
+      () => landPatchNotion({
+        notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(),
+        entries: entries(),
+        found: new Map([['A', ['这一行不是 checkbox']]]),
+        wantChecked: new Set(),
+      }),
+      /转不出 checkbox/
+    );
+    assert.equal(notion.written.length, 0, '一个字都不该写出去');
   });
 });

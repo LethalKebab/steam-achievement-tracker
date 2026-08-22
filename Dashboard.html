@@ -48,10 +48,9 @@
 
       /* ---- 文字:三级 ---------------------------------------------------- */
       /* 三级都必须在**四个表面上**都过 WCAG AA(4.5:1)。这不是可选的润色:
-         上一版的 --text-3 (#6d7f95) 在 --bg 上 4.46、--surface 上 3.95、
-         --surface-2 上 3.43、--surface-3 上只有 2.94 —— 而它承载的不是
-         「占位、禁用、时间戳」,是表头、「无成就系统」这个数据值、攻略/重写
-         按钮的标签、以及 #gen-bar 的警告文字。**警告文字曾经是全页最不可读的一处。**
+         --text-3 承载的不是「占位、禁用、时间戳」,是表头、「无成就系统」这个数据值、
+         攻略/重写按钮的标签、以及 #gen-bar 的警告文字 —— 挑一个只在 --bg 上够用的
+         灰(比如 #6d7f95,在 --surface-3 上只有 2.94),最不可读的正好是那句警告。
 
          取值是在 OKLCH 里算的(色相 253.6),不是手调的十六进制:
          --surface-3 (L=0.333) 上要够 4.5:1,文字的 L 至少 0.698,而 --text 在
@@ -89,8 +88,8 @@
       --danger: #e0685e;
 
       /* ---- 字体 ----------------------------------------------------------
-         **自带字体,不再靠系统兜底。** 之前是 "Segoe UI" 打头再让系统接中文,
-         结果有两个,都是实测出来的:
+         **自带字体,不靠系统兜底。** 让 "Segoe UI" 打头、中文交给系统接的话,
+         有两个实测出来的后果:
 
            1. 中文到底用了哪个字体,说不准。这台机器上它既不是微软雅黑
               (墨量曲线对不上),也不是栈里明写的 Noto Sans SC —— 换台机器就是
@@ -222,14 +221,13 @@
        **层级由字重扛,颜色只标关键词。** 一句话分三个角色:平台名(STEAM,细、
        拉开、暗)、关键词(成就,强调色)、其余(追踪器)。
 
-       字重差是 2026-08-16 换自托管字体之后才成立的 —— 在那之前中文的
-       600/650/700 渲染出来是同一档(见 :root 的 --font-ui),想让 STEAM 退下去
-       只有「调暗」一条路,而调暗就撞对比度下限。现在 800 对 500 是真的三档差。
+       **字重差成立的前提是自托管字体**(见 :root 的 --font-ui):靠系统字体时中文的
+       600/650/700 渲染出来是同一档,想让 STEAM 退下去就只剩「调暗」一条路,而调暗
+       就撞对比度下限。800 对 500 是真的三档差。
 
-       **没有下划线,也不要再加回来。** 那道两笔 SVG 手绘线 2026-08-16 撤掉了:
-       字重差已经把主次说清楚了,再加一道装饰线就是同一件事说两遍,而且它是整个
-       顶栏唯一一处手绘图形 —— 旁边的图标全是 24 格规整描边,它跟谁都不像。
-       撤线之后 `.wm-text` 不再需要 position: relative(它只为那条绝对定位的线存在)。
+       **没有下划线,也不要加回来。** 字重差已经把主次说清楚了,再加一道装饰线就是
+       同一件事说两遍,而且它会是整个顶栏唯一一处手绘图形 —— 旁边的图标全是 24 格
+       规整描边,它跟谁都不像。(也因此 `.wm-text` 不需要 position: relative。)
 
        **不要再尝试「画」这个字标。** 手写体字体、手绘 SVG 字形、位图描边三次都失败过,
        原因和教训见 CLAUDE.md —— 一句话:字形的正确性属于字体,任何重画 CJK 笔画的
@@ -299,12 +297,11 @@
         var(--bg);
       margin: calc(var(--page-pad) * -1) calc(var(--page-pad) * -1) var(--s5);
       padding: var(--s5) var(--page-pad) var(--s4);
-      /* 底边就是一条分隔线,不再是读数。**这里曾经是整库完成率(AGCR)的进度条**,
-         2026-08-16 拆掉:那个数在一个几百款游戏的库里一天动不了零点几个百分点,
-         所以它永远是一条填了三分之一的槽 —— 一个不会变的进度条只会一直在说
-         「还没做完」,而它想表达的其实是「你已经打到这儿了」。读数没丢,
-         「平均完成率」在上面的 readout 里照常有数字版;
-         去掉的是那个把它画成"离满还差多远"的形状。**不要再把它做回进度条**。
+      /* 底边就是一条分隔线,**不要把它做回整库完成率(AGCR)的进度条**。
+         那个数在一个几百款游戏的库里一天动不了零点几个百分点,所以它永远是一条
+         填了三分之一的槽 —— 一个不会变的进度条只会一直在说「还没做完」,而它想
+         表达的其实是「你已经打到这儿了」。读数并不缺:「平均完成率」在上面的
+         readout 里有数字版,缺的只是把它画成"离满还差多远"的那个形状。
          边框而不是绝对定位的子元素:分隔线是顶栏的一部分,不是叠在它上面的东西,
          而且 offsetHeight 会算上边框,--topbar-h 因此自动跟着对。
          **令牌是 --line-3 而不是进度条那会儿的 --line-2**:三级线各有各的活,
@@ -478,7 +475,7 @@
     .icon-btn:disabled { opacity: 0.45; cursor: default; }
     .icon-glyph { display: inline-flex; }
 
-    /* 同步中,图标自己转。换成 SVG 之后转的是箭头本身,不再是 emoji 那块底板 */
+    /* 同步中,图标自己转。转的是 SVG 箭头本身 —— emoji 会连底板一起转 */
     @keyframes icon-spin { to { transform: rotate(360deg); } }
     .icon-btn.spinning .icon-glyph { animation: icon-spin 1.1s linear infinite; }
 
@@ -553,12 +550,11 @@
     }
 
     /* 筛选芯片:**一个控件三个状态** —— 中立 / 只看 / 排除。
-       上一版是勾选框,而勾选框只有开和关两格。这排控件真正要表达的是三件事:
-       「不管这个属性」「只留有这个属性的」「去掉有这个属性的」。两格装不下三件事,
-       于是上一版把它拆给了两种控件各管一半 —— 「只看喜爱」管前一半,「隐藏已完成」
-       管后一半。代价有两个:同一个属性想换个方向看就没有控件可点(想「只看已完成」
-       当奖杯墙?没有这个东西),而且每加一个属性都得先决定它是「只看型」还是「隐藏型」,
-       决定错了就得改标记。三态之后五个芯片是同一种东西,顺序也就只按常用度排。
+       **不能用勾选框**,它只有开和关两格,而这排控件要表达的是三件事:「不管这个
+       属性」「只留有这个属性的」「去掉有这个属性的」。两格装不下三件事,只能拆给两种
+       控件各管一半(「只看喜爱」+「隐藏已完成」),代价是同一个属性想换个方向看就没有
+       控件可点(想「只看已完成」当奖杯墙?没有这个东西),而且每加一个属性都得先决定
+       它是「只看型」还是「隐藏型」。三态之下五个芯片是同一种东西,顺序只按常用度排。
 
        **循环方向是 中立 → 只看 → 排除 → 中立,这是算出来的,别随手调。**
        三个状态排成一个环,中立只有一个前驱,所以只有一条路是一次点击。开局时
@@ -574,9 +570,14 @@
        专门用来表示状态的东西,读起来安静得多。所以三个状态的差别集中在同一个位置:
          中立   小圆点     + 常规底
          只看   圆点点亮   + 蓝底       —— 蓝在这一页里一直是「选中/收窄」
-         排除   横杠       + 凹陷底     —— 记号从圆变成一条杠,是减号的意思
+         排除   叉         + 凹陷底     —— 圆点裂成两笔对角线
+       **排除用叉,不用减号。** 一条横杠在勾选框那套约定里是「部分选中」—— HTML 的
+       indeterminate、各家系统的半选框,画的都是它。而这里要说的是「整个去掉」,
+       同一个字形背着两个相反的意思,读的人得先猜是哪一个。叉没有这个歧义。
+       (页面上 #i-close 也是叉,但那是 24px 的独立按钮;这里是 9px、不可点、后面
+       还跟着标签,认错的代价也只是多看一眼,不会误操作。)
        **形状是主信号,颜色是副的。** 颜色单独承载状态是无障碍红线,而且这一页四级
-       表面之间只有 15% 上下的明度差,小芯片上单靠底色分不出三档 —— 圆点 / 横杠这个
+       表面之间只有 15% 上下的明度差,小芯片上单靠底色分不出三档 —— 圆点 / 叉这个
        形状差灰度打印都还在。
        **排除态不用红。** 红在这一页是危险色(--danger),而排除是五个里有三个开局
        就在的常态,标红等于一直在喊。凹下去说的是「被推开了」,那才是它的意思。 */
@@ -599,28 +600,36 @@
     }
     .chip:hover { border-color: var(--line-3); color: var(--text); }
     .chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    /* 状态记号。**外框恒定 9×9,变的只有里面那一笔** —— 圆点 6px、横杠 9px,
-       直接改元素自己的宽度会让芯片跟着变宽 3px,而芯片是横排的,于是循环一次
-       整排都往右挪一下。空盒子当台子,布局就一动不动。
-       圆点变横杠是这一页唯一的形状变化,所以宽高和圆角都得进过渡 —— 只过渡颜色
-       的话形状会在两帧之间硬跳。 */
+    /* 状态记号。**外框恒定 9×9,变的只有里面那两笔** —— 直接改元素自己的宽度会让
+       芯片跟着变宽,而芯片是横排的,于是循环一次整排都往右挪一下。空盒子当台子,
+       两笔都绝对定位钉在盒子中心,布局就一动不动。
+       **两个伪元素,平时只看得见一个**:::before 是那个圆点,::after 宽度 0 所以
+       什么都不画。排除态两笔一起变成 9×2 的杠,一个转 +45°、一个转 -45°,合成一个叉。
+       圆点长成叉是这一页唯一的形状变化,所以宽高和 transform 都得进过渡 —— 只过渡
+       颜色的话形状会在两帧之间硬跳。圆角一直是 --r-full:6×6 时它渲染成圆、9×2 时
+       渲染成胶囊,同一个值两种长相,不用参与过渡。 */
     .chip-dot {
+      position: relative;
       width: 9px;
       height: 9px;
       flex-shrink: 0;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
     }
-    .chip-dot::before {
+    .chip-dot::before,
+    .chip-dot::after {
       content: '';
-      width: 6px;
-      height: 6px;
+      position: absolute;
+      top: 50%;
+      left: 50%;
       border-radius: var(--r-full);
       background: var(--line-3);
-      transition: background var(--dur-1), box-shadow var(--dur-1),
-                  width var(--dur-1), height var(--dur-1), border-radius var(--dur-1);
+      transform: translate(-50%, -50%);
+      transition: background var(--dur-1), box-shadow var(--dur-1), width var(--dur-1),
+                  height var(--dur-1), transform var(--dur-1);
     }
+    .chip-dot::before { width: 6px; height: 6px; }
+    /* **点亮态的光晕只能挂在 ::before 上。** box-shadow 的 spread 不管盒子有没有宽度
+       照样往外画,挂到这一笔上会在圆点边上凭空多出一小块 6×8 的圆角方块 */
+    .chip-dot::after { width: 0; height: 2px; }
     .chip[data-state="only"] {
       background: var(--accent-soft);
       border-color: rgba(102, 192, 244, 0.45);
@@ -638,16 +647,19 @@
       color: var(--text-3);
     }
     .chip[data-state="not"]:hover { color: var(--text-2); }
-    /* 横杠**比标签亮一档**(--text-2 对 --text-3)。整个芯片是暗的,而那一笔是
+    /* 叉**比标签亮一档**(--text-2 对 --text-3)。整个芯片是暗的,而那两笔是
        在说「这一格现在是排除」—— 让它成为芯片里最清楚的东西,视线就落在记号上,
-       不用去读字 */
-    .chip[data-state="not"] .chip-dot::before {
+       不用去读字。
+       两笔各 9×2,转 45° 之后叉的外接方框约 7.8×7.8,还在 9×9 的台子里 */
+    .chip[data-state="not"] .chip-dot::before,
+    .chip[data-state="not"] .chip-dot::after {
       width: 9px;
       height: 2px;
-      border-radius: 1px;
       background: var(--text-2);
       box-shadow: none;
     }
+    .chip[data-state="not"] .chip-dot::before { transform: translate(-50%, -50%) rotate(45deg); }
+    .chip[data-state="not"] .chip-dot::after  { transform: translate(-50%, -50%) rotate(-45deg); }
 
     input[type="text"] {
       background: var(--surface);
@@ -1074,13 +1086,11 @@
     .badge-played { background: var(--accent-soft); color: var(--accent); }
     .badge .ic, .badge-btn .ic { font-size: var(--fs-sm); }
 
-    /* **悬停不能让它变暗。** 这里原来是一条 `.badge-btn:hover { opacity: 0.85 }`,
-       对「已开启」的两档来说,唯一的 hover 效果就是**淡下去** —— 指到一个能点的
-       东西上,它反而更难看清了,方向是反的。(`-off` 那档还算凑合,因为另一条规则
-       把字提到了 --text-2,但仍要再乘 0.85。)
-       现在每档各给一个**加深底色**的 hover,一律往「更清楚」的方向走。
-       transition 也从 `all` 收敛成三个具体属性 —— `all` 会把后来加的任何属性
-       都卷进过渡,包括上面那条 :active 的 transform,按下去就会拖一下才落位。 */
+    /* **悬停不能让它变暗。** 一条 `.badge-btn:hover { opacity: 0.85 }` 对「已开启」
+       的两档来说,唯一的效果就是**淡下去** —— 指到一个能点的东西上,它反而更难看清,
+       方向是反的。每档各给一个**加深底色**的 hover,一律往「更清楚」的方向走。
+       transition 写三个具体属性而不是 `all` —— `all` 会把后来加的任何属性都卷进过渡,
+       包括上面那条 :active 的 transform,按下去就会拖一下才落位。 */
     .badge-btn {
       cursor: pointer;
       background: none;
@@ -1283,6 +1293,10 @@
        悬停时才显出警示色,免得一排 ♻ 把表格弄得像满屏警告 */
     .guide-btn.rewrite:hover:not(:disabled) { color: var(--warn); border-color: var(--warn); }
     .guide-btn.rewrite:disabled { opacity: 0.4; cursor: default; }
+    /* 备份是这一行上唯一**往回走**的动作,而且它只在真有备份时才出现 ——
+       所以它不需要抢眼,只需要在需要的时候在那儿。数字跟在标签后面降一级,
+       因为「有几份」是点不点它的理由,不是它的名字 */
+    .guide-btn.backups:hover { color: var(--text); border-color: var(--line-3); }
 
     /* ========================================================================
        图库视图
@@ -1292,11 +1306,11 @@
        缩成缩略图配一行说明 —— 那是表格已经在做的事。卡片最下沿那条进度线
        是这个工具唯一要说的事,所以它是卡上唯一的图形元素。
 
-       **竖版,按最小宽度铺满,不再是固定一排四个。**
-       竖版是 Steam 库里本来的形状,同样高度比横版能多塞一倍,而且不用把横图裁成
-       竖的 —— 这一条没变。变的是列数:原来写死四列,理由是「auto-fill 会随宽度在
-       3~5 列之间跳,而一排四个是这个视图的形状本身」。**那条理由只在卡片很大时成立。**
-       四列在 1440px 宽的窗口上意味着每张 336px、504px 高,一屏连两行都放不下 ——
+       **竖版,按最小宽度铺满,不写死列数。**
+       竖版是 Steam 库里本来的形状,同样高度比横版能多塞一倍,而且不用把横图裁成竖的。
+       写死四列的理由(「auto-fill 会随宽度在 3~5 列之间跳,而一排四个是这个视图的形状
+       本身」)**只在卡片很大时成立**:四列在 1440px 宽的窗口上意味着每张 336px、504px
+       高,一屏连两行都放不下 ——
        而这个视图的用处恰恰是「一眼扫过一整个库」,308 款游戏要翻几十屏。
        卡片缩到 168px 起之后,少一列只差 12% 宽度,跳动已经看不太出来,
        「尽量多放」反而成了它真正的形状。**改密度只动下面这一个值。**
@@ -1432,6 +1446,11 @@
       text-underline-offset: 3px;
     }
     #gen-bar .gen-link:disabled { opacity: 0.5; cursor: default; }
+    /* 删备份是这条进度条上唯一不可逆的动作。平时不抢戏(和别的动作一样是条下划线),
+       按下一次之后才变红 —— 一条永远红着的链接会让整屏读起来像出了错 */
+    #gen-bar .gen-link.danger { color: var(--text-2); }
+    #gen-bar .gen-link.danger:hover:not(:disabled) { color: var(--danger); }
+    #gen-bar .gen-link.armed { color: var(--danger); font-weight: 600; }
     /* 有任务在跑 = 只能收起;跑完了 = 才能关掉。两个按钮永远只露一个 */
     #gen-bar.live #genClose,
     #gen-bar:not(.live) #genToggle { display: none; }
@@ -1623,11 +1642,11 @@
     /**
      * 小节标题要**一眼区别于底下的条目**。
      *
-     * 上一版把方框和条目的复选框对齐到同一个左边距,理由是"看起来是同一种东西才
-     * 知道能点" —— 那条理由本身没错,但它把**层级**一起抹平了:同一个左边距、
-     * 同样大的方框,标题和条目读起来是一列平的东西。
+     * **不能让标题的方框和条目的复选框对齐到同一个左边距。** "看起来是同一种东西才
+     * 知道能点"这条理由本身没错,但那样会把**层级**一起抹平:同一个左边距、同样大的
+     * 方框,标题和条目读起来是一列平的东西。
      *
-     * 现在靠三样把它们分开,而方框仍然是方框(可点这件事没丢):
+     * 靠三样把它们分开,而方框仍然是方框(可点这件事不丢):
      *   1. **条目整体右缩**(.ask-pick-items 的 padding-left),标题留在最左
      *   2. 标题小一号、加粗、加字距,颜色更亮
      *   3. 标题底下一条淡线,把这一节的范围划出来
@@ -1796,6 +1815,69 @@
     .row-menu button.danger:hover { background: rgba(224, 104, 94, 0.14); }
 
     /* ========================================================================
+       攻略备份
+       ------------------------------------------------------------------------
+       **行不是卡片。** 一个游戏的历史版本可能有十几份;一行一个框会把这个弹框
+       变成格子纸。分隔交给一条 --line-1,和上面那张表同一个做法。
+
+       这一段的样式在 `Setup.html` 里有一份几乎一样的 —— 那边管的是「占多少地方 +
+       孤儿存档」,不是日常入口。两处保持同一套行的长相是**故意的**:
+       同一个东西在两个页面上不该长成两个样子。
+       ======================================================================== */
+    .arc-list { list-style: none; margin: 0; padding: 0; text-align: left; }
+    .arc { border-top: 1px solid var(--line-1); }
+    .arc-row { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; }
+    .arc-main { flex: 1; min-width: 0; }
+    .arc-main b {
+      display: block; color: var(--text); font-weight: 600; font-size: var(--fs-md);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .arc-meta { font-size: var(--fs-xs); color: var(--text-3); }
+    .arc-acts { display: flex; gap: var(--s2); flex-shrink: 0; }
+    .arc-acts button {
+      background: var(--surface-2);
+      color: var(--text);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-sm);
+      font-family: inherit;
+      font-size: var(--fs-xs);
+      padding: 4px 10px;
+      cursor: pointer;
+    }
+    .arc-acts button:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-3); }
+    .arc-acts button:disabled { opacity: 0.45; cursor: default; }
+    /* 待确认的那一下:**按钮自己变成后果那句话**,不再套一层框。
+       在一个已经是弹框的地方再弹一个框,「删哪一份」就彻底看不见了 */
+    .arc-acts button.armed { color: var(--danger); border-color: var(--danger); }
+    .arc.armed { background: var(--surface-2); }
+    .arc-body {
+      margin: 0 0 var(--s3);
+      padding: var(--s3);
+      border-radius: var(--r-md);
+      background: var(--surface-2);
+      border: 1px solid var(--line-2);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: var(--fs-xs);
+      color: var(--text-2);
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 260px;
+      overflow: auto;
+    }
+    /* 存档弹框比确认框宽也比它高:它是拿来**翻**的,不是拿来答一句是否的。
+       列表自己滚,框不跟着长 —— 十几份备份会把弹框顶出视口 */
+    .modal-box.arc-box { max-width: 560px; width: calc(100vw - var(--s6) * 2); text-align: left; }
+    .arc-scroll { max-height: min(52vh, 420px); overflow-y: auto; margin-top: var(--s3); }
+    /* 结果写在列表下面这一行,**不写进行里**:恢复会当场生成一份新存档,它比刚
+       恢复的那份还新、会排到最前面 —— 重画之后"哪一行是刚才那一行"已经不成立了。
+       空着的时候不占位,不然框底下永远挂着一条 20px 的空隙 */
+    .arc-msg { font-size: var(--fs-sm); margin-top: var(--s3); line-height: 1.5; }
+    .arc-msg:empty { display: none; }
+    .arc-msg.ok { color: var(--ok); }
+    .arc-msg.error { color: var(--danger); }
+
+    /* ========================================================================
        响应式与动效偏好
        ======================================================================== */
     /* 图库原来在这里有 760px / 520px 两个断点,把列数掰成 3 和 2 —— 那是「写死四列」
@@ -1825,7 +1907,10 @@
       .bar-fill { transition: none; }
       /* 占位行**不闪**,但要留着 —— 它不是装饰,是「在等 Steam 回话」这句话本身 */
       .game-search-result.skeleton { animation: none; opacity: 0.6; }
-      .filter-chips { transition: none; }
+      /* **过渡挂在 .chip 和两个伪元素上,不在容器上** —— 写 .filter-chips 等于
+         选了个本来就没有 transition 的元素。现在记号会转 45°,这正是关掉动效的人
+         要关掉的那种动作,所以必须选对 */
+      .chip, .chip-dot::before, .chip-dot::after { transition: none; }
     }
   </style>
 </head>
@@ -1966,7 +2051,7 @@
                 title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。"
                 aria-label="立即同步"><span class="icon-glyph"><svg class="ic"><use href="#i-sync"/></svg></span></button>
         <!-- 打包版没有地址栏,不给入口的话设置页在首次设置之后就再也打不开了 -->
-        <a class="icon-btn" href="/setup" id="settingsLink"
+        <a class="icon-btn" href="/setup"
            title="改 Steam 凭据、配置 AI 攻略生成和 Notion 攻略同步、备份与恢复"
            aria-label="设置"><span class="icon-glyph"><svg class="ic"><use href="#i-settings"/></svg></span></a>
         <span class="bell-wrap">
@@ -2023,7 +2108,7 @@
     </div>
 
     <!-- 「怎么看」「看什么」「看到多少」放同一行:三者说的都是下面这张表。
-         **筛选是 2026-08-17 从搜索框那一行搬过来的。** 搜索现在会绕开全部筛选
+         **筛选是  从搜索框那一行搬过来的。** 搜索现在会绕开全部筛选
          (见 hidingFilter),两者并排会读成「搜索是在这几个筛选之内找」——
          而那正好是反的。搬到计数旁边还顺带把因果放到了一起:改一个筛选,
          右边那个数字当场变。 -->
@@ -2042,8 +2127,8 @@
            **标记只写 data-state,不写 aria-label** —— 状态的中文说法只有 STATE_NAME
            一份,写在这儿等于抄第二份,改一处漏一处。开局由 setChipState 补齐。
 
-           **文字是光秃秃的名词。** 上一版叫「隐藏已完成」「只看喜爱」,那是把方向
-           焊进了名字里 —— 三态之后方向由芯片自己的状态说,名字再带方向就会读出
+           **文字是光秃秃的名词。** 「隐藏已完成」「只看喜爱」那种写法把方向焊进了
+           名字里 —— 三态下方向由芯片自己的状态说,名字再带方向就会读出
            「只看隐藏已完成」这种东西。 -->
       <div class="filter-chips" id="filterChips">
       <button type="button" class="chip" data-filter="fav" data-state="off"><span class="chip-dot"></span><span class="chip-label">喜爱</span></button>
@@ -2127,7 +2212,7 @@
         <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
         <!-- 计数和两个动作挨在一起:它们作用的正是旁边那个数,放在一处不用解释。
              **「全选」收下的是当前显示出来的那批**,所以它和上面的筛选片是一对 ——
-             筛出来、看一眼、一键收下。没有筛选时它就是全选整份,和以前那个按钮一样 -->
+             筛出来、看一眼、一键收下。没有筛选时它就是全选整份 -->
         <div class="ask-pick-foot">
           <span id="askPickCount" class="ask-pick-count" aria-live="polite"></span>
           <div class="ask-pick-acts">
@@ -2143,6 +2228,22 @@
       <div class="modal-btns">
         <button class="add-game-btn" id="askOkBtn">确认</button>
         <button class="add-game-btn btn-secondary" id="askCancelBtn">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 攻略备份。**自己一个框,不是 askConfirm 的一种模式** —— askConfirm 回的是
+       一个是/否,有六处调用点;这里是拿来翻的:看一份、恢复一份、删一份,可以做完
+       一件接着做下一件。硬塞进去等于让那六处跟着一个不相干的形状动。
+       (同理由见 lib/guidepatch.js 为什么不是 generateGuide 里的一个分支) -->
+  <div class="modal-overlay" id="archiveModal">
+    <div class="modal-box arc-box">
+      <div class="game-name" id="arcTitle"></div>
+      <div class="appid-hint" id="arcSum"></div>
+      <div class="arc-scroll"><ul class="arc-list" id="arcList"></ul></div>
+      <div class="arc-msg" id="arcMsg" role="status"></div>
+      <div class="modal-btns">
+        <button class="add-game-btn btn-secondary" id="arcCloseBtn">关闭</button>
       </div>
     </div>
   </div>
@@ -2169,7 +2270,7 @@
   <script>
     // 多久之内算"最近在玩"。徽章和置顶共用这一个窗口,不能各写各的,
     // 否则会出现"排在最上面但没有徽章说明为什么"的怪状态
-    const RECENT_PLAY_DAYS = 14;
+    const RECENT_PLAY_DAYS = 5;
     const isRecentlyPlayed = function(g) {
       return g.playedDaysAgo !== null && g.playedDaysAgo <= RECENT_PLAY_DAYS;
     };
@@ -2198,9 +2299,9 @@
      * CSS 里 `.chip` 那一段。这张表是**唯一的真源**:筛选走它,「被谁挡住了」那句话
      * 的用词也走它。加一个属性只要在这儿加一行,再在 HTML 里加一个芯片。
      *
-     * 上一版是四处各记一遍:HTML 一个勾选框、currentFilters 一行、hidingFilter 一行、
-     * 事件绑定的 id 数组里一个字符串。**漏掉最后一处的表现是「点了没反应」,不报错**
-     * —— 加 hideComplete 时就漏过一次。现在事件是委托的,id 数组没有了。
+     * **同一件事记在四处会漏**:HTML 一个勾选框、currentFilters 一行、hidingFilter
+     * 一行、事件绑定的 id 数组里一个字符串 —— 漏掉最后一处的表现是「点了没反应」,
+     * 不报错。事件用委托,id 数组因此不存在。
      */
     const FILTERS = [
       { key: 'fav',      label: '喜爱',   has: (g) => Boolean(g.favorite) },
@@ -2213,8 +2314,8 @@
     /** 点一下走到的下一格。**中立 → 只看 → 排除 → 中立,方向别随手调**(见 CSS .chip) */
     const NEXT_STATE = { off: 'only', only: 'not', not: 'off' };
 
-    /** 三态的中文说法。**只上无障碍树,不上屏** —— 屏幕上这三件事由圆点、横杠和
-     *  删除线说完了,再写一遍字是拿文字补一个本该一眼看出来的状态。
+    /** 三态的中文说法。**只上无障碍树,不上屏** —— 屏幕上这三件事由圆点、亮圆点
+     *  和叉说完了,再写一遍字是拿文字补一个本该一眼看出来的状态。
      *  它同时也是「被「只看喜爱」挡住了」那句话的前半截,所以只能有这一份 */
     const STATE_NAME = { off: '不筛选', only: '只看', not: '排除' };
 
@@ -2289,15 +2390,15 @@
     let expandedAppid = null;
     /**
      * 'table' | 'gallery'。**这是「怎么看」,不是「看什么」** —— 筛选条件由上面那排
-     * 控件决定,两个视图共用同一批结果。以前那套标签页把两件事混在一起(进行中/已完成
-     * 是筛选,喜爱既是筛选又是另一种排版),所以它拆成了筛选芯片 + 这个开关
+     * 控件决定,两个视图共用同一批结果。一套标签页会把两件事混在一起(进行中/已完成
+     * 是筛选,喜爱既是筛选又是另一种排版),所以是筛选芯片 + 这个开关
      */
     let viewMode = 'table';
     /**
      * 正在改数字的那一行。**编辑是一个要主动进入、会自己退出的模式**,不是锁定行的
-     * 常驻状态 —— 以前只要行锁着,两个输入框就一直摆在那儿,滚动时一次误触就能改掉
-     * 一个数字,而且没有任何提示。现在只有从菜单里选「编辑」才进,焦点一离开
-     * 这一行就退出;锁还在,数字变回普通文本。
+     * 常驻状态 —— 锁着就一直摆两个输入框的话,滚动时一次误触就能改掉一个数字,而且
+     * 没有任何提示。只有从菜单里选「编辑」才进,焦点一离开这一行就退出;锁还在,
+     * 数字变回普通文本。
      */
     let editingAppid = null;
     const missingAchCache = {};
@@ -2435,8 +2536,8 @@
       return 'https://cdn.akamai.steamstatic.com/steam/apps/' + appid + '/library_600x900.jpg';
     }
 
-    /* 心形以前在这儿自带一份 path,是整页唯一的 SVG。现在所有图标都在精灵表里,
-       它没有理由再单开一份 —— 留个转发,免得两处心形慢慢长得不一样 */
+    /* 所有图标都在精灵表里,心形没有理由单开一份 path —— 留个转发,免得两处
+       心形慢慢长得不一样 */
     function heartSvg(filled) {
       return icon('heart', filled);
     }
@@ -2630,9 +2731,9 @@
        * **除了 observer,还要在这两个时刻各量一次。**
        *
        * 上面那次同步测量发生在脚本执行的一刻,而那时布局还没定:自托管的中文字体
-       * 尚未换上,字宽不同 → 那排筛选芯片换行的位置不同 → 顶栏高度不同。
-       * 冻结区从一行长到四行之后,这个差额不再是几个像素的事 —— 量错一次,
-       * 表头就会停在一个空档下面,而且**在下一次窗口尺寸变化之前不会自己好**。
+       * 尚未换上,字宽不同 → 那排筛选芯片换行的位置不同 → 顶栏高度不同。冻结区有
+       * 四行,这个差额不是几个像素的事 —— 量错一次,表头就会停在一个空档下面,
+       * 而且**在下一次窗口尺寸变化之前不会自己好**。
        *
        * observer 本该接住字体换上引起的那次重排,但它只在页面**真的在渲染**时才有
        * 回调(这一点是实测撞到的:预览面板没显示时,连 observe() 那次首发回调都不来)。
@@ -2815,19 +2916,36 @@
           + '<img class="game-thumb" src="' + coverSrc(g) + '" loading="lazy"'
           + ' onerror="window.coverFailed(this, \'' + g.appid + '\')">'
           + '<div class="game-name-main">' + escapeHtml(g.name) + unvettedBadge + manualBadge + familyBadge + playedBadge + newAchBadge + '</div>'
+          // 行上摆的是**对这份攻略能做的四件事**,⋯ 里留的是对这一行游戏能做的两件。
+          // 分界是宾语,不是频次 —— 这一版之前试过按频次收(只留攻略 + ⋯,其余三个
+          // 进菜单),结论是收得太狠:打开、重写、搬去 Notion 都是**主动要做的动作**,
+          // 藏进第二层等于给每一个都加一次点击;而「备份」虽然稀有,却是出事时唯一
+          // 那条路,藏起来的代价最大。
+          //
+          // 「备份」只在真有的时候才出现 —— 行上摆一个灰的等于永久噪音。
+          // (菜单里相反,灰着才回答得了「这个游戏到底有没有」,那是两种上下文)
           + '<div class="row-actions">'
           + guideBtn
           // 已经有攻略的行原来只有「攻略」,没有任何入口能重写它 —— 覆盖只能敲命令行。
           // 闸门不在这个按钮上,在它弹出的确认框里(会先算清楚要失去什么),所以露出来是安全的
           + (g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0
-              ? '<button class="guide-btn rewrite" data-rewrite="' + g.appid + '" data-name="'
-                + escapeHtml(g.name) + '" title="让 AI 重新写一份,覆盖现在这份(会先备份原文)"'
-                + ' onclick="event.stopPropagation();window.rewriteGuide(this)">' + icon('rewrite') + '重写</button>'
+              ? '<button class="guide-btn rewrite" ' + (guideBusy.has(String(g.appid)) ? 'disabled ' : '')
+                + 'title="让 AI 重新写一份,覆盖现在这份(会先备份原文)"'
+                + ' onclick="event.stopPropagation();window.rewriteGuide(\'' + g.appid + '\',this.dataset.name)"'
+                + ' data-name="' + escapeHtml(g.name) + '">' + icon('rewrite') + '重写</button>'
               : '')
           + (g.guideKind === 'local' && notionReady
-              ? '<button class="guide-btn to-notion" data-migrate="' + g.appid + '" data-name="'
-                + escapeHtml(g.name) + '" title="把这份本地攻略搬到 Notion"'
-                + ' onclick="event.stopPropagation();window.migrateGuide(this)">' + icon('upload') + 'Notion</button>'
+              ? '<button class="guide-btn to-notion" ' + (guideBusy.has(String(g.appid)) ? 'disabled ' : '')
+                + 'title="把这份本地攻略搬到 Notion"'
+                + ' onclick="event.stopPropagation();window.migrateGuide(\'' + g.appid + '\',this.dataset.name)"'
+                + ' data-name="' + escapeHtml(g.name) + '">' + icon('upload') + 'Notion</button>'
+              : '')
+          + (archivesFor(g.appid).length
+              ? '<button class="guide-btn backups" data-backups="' + g.appid + '"'
+                + ' title="覆盖前的原文、搬去 Notion 时留下的原件、没过校验的草稿"'
+                + ' onclick="event.stopPropagation();window.openBackups(\'' + g.appid + '\',this.dataset.name)"'
+                + ' data-name="' + escapeHtml(g.name) + '">' + icon('clock')
+                + '备份 ' + archivesFor(g.appid).length + '</button>'
               : '')
           // 改数字和删除**合到一个入口**。它们原来是行上并排的两个按钮,而删除不可撤销 ——
           // 挨着一个日常会点的按钮,迟早点错。现在都藏在菜单第二层
@@ -3109,10 +3227,9 @@
     });
 
 
-    // **芯片用委托挂在容器上,不逐个挂。** 上一版是按 id 数组逐个挂,漏一个的表现是
-    // 「点了没反应」而不是报错 —— 加 hideComplete 时就漏过一次:默认值照常生效
-    // (首次渲染读得到状态),只有动它的时候才看得出来。委托之后这个坑不存在了:
-    // HTML 里加一个芯片就自动有反应,没有第二处要记得改
+    // **芯片用委托挂在容器上,不逐个挂。** 按 id 数组逐个挂的话,漏一个的表现是
+    // 「点了没反应」而不是报错,而且默认值照常生效(首次渲染读得到状态),只有动它
+    // 的时候才看得出来。委托之后 HTML 里加一个芯片就自动有反应,没有第二处要记得改
     document.getElementById('filterChips').addEventListener('click', function(e) {
       const chip = e.target.closest('.chip');
       if (!chip) return;
@@ -3214,24 +3331,273 @@
     const rowMenu = document.getElementById('rowEditMenu');
     const closeRowMenu = function() { rowMenu.hidden = true; };
 
+    // ========================================================================
+    // 攻略备份
+    // ------------------------------------------------------------------------
+    // 三个归档目录(`.backups/`、`.migrated/`、`.drafts/`)的取回入口在**每个游戏
+    // 那一行**上,因为要问的永远是「这个游戏的上一版哪去了」。设置页那个全局列表
+    // 只管两件事:总共占多少地方,和游戏已经被删掉、行上够不着的那些。
+    // ========================================================================
+
+    /**
+     * 正在跑重写 / 搬运的 appid。**状态挂在 appid 上,不挂在按钮上。**
+     *
+     * **不能写成 `btn.disabled = true`** —— 那个按钮每次 `render()` 都会被重新拼出来,
+     * 一次后台同步撞上一次两三分钟的重写,置灰就被洗掉了,按钮重新可点而任务还在跑。
+     * 按钮的 disabled 是**从这个集合渲染出来的**,所以重画多少次都还在。
+     *
+     * 改完要重画一次,否则跑完了按钮还是灰的。**编辑中不重画** —— `render()` 重建
+     * innerHTML,会把正在输入的那两个数字框连同焦点一起换掉。
+     */
+    const guideBusy = new Set();
+    function setGuideBusy(appid, busy) {
+      const id = String(appid);
+      if (busy) guideBusy.add(id); else guideBusy.delete(id);
+      if (editingAppid === null && allGames.length) render();
+    }
+
+    /**
+     * appid → 这个游戏的存档。**整表拉一次缓存在本地**,而不是每次开菜单查一次:
+     * 菜单要在按下的那一刻就说出有几份(计数是"这条能不能点"的理由),
+     * 而一次请求的往返足够让菜单先画出来再自己长出一个数字。
+     */
+    let archiveIndex = {};
+    function archivesFor(appid) {
+      return archiveIndex[String(appid)] || [];
+    }
+
+    /**
+     * 动过存档之后重画**两处**:弹框里的列表,和行尾那个「备份 N」。
+     *
+     * 少了第二处就是这个项目反复栽的那个形状——同一个数有两个渲染点,而只有一条
+     * 重画路径。实测过:删掉一份之后弹框写「1 份」,行上还写着「备份 2」,两个数在
+     * 同一屏上互相矛盾,而且不刷新页面永远不会自己对上。
+     */
+    async function refreshArchives() {
+      await loadArchiveIndex();
+      // 弹框没开就别画它 —— 这个函数也被重写/搬运跑完之后调用,那时候 arcAppid
+      // 还是上一次看过的那个游戏(或者 null),画出来是一份不相干的列表
+      if (arcModal.classList.contains('show')) paintArchive();
+      if (editingAppid === null && allGames.length) render();
+    }
+
+    async function loadArchiveIndex() {
+      const list = await new Promise(function (resolve) {
+        rpc.withSuccessHandler(resolve).withFailureHandler(function(){ resolve(null); })
+          .listGuideArchives(null);
+      });
+      if (!Array.isArray(list)) return; // 拉不到就沿用上一次的,菜单少个数字比整行消失强
+      const next = {};
+      for (const e of list) {
+        if (!e.appid) continue;
+        (next[e.appid] = next[e.appid] || []).push(e);
+      }
+      archiveIndex = next;
+    }
+
+    const arcModal = document.getElementById('archiveModal');
+    let arcAppid = null;
+    /** 待确认的那个按钮。同一时刻只留一个 */
+    let arcArmed = null;
+
+    function arcDisarm() {
+      if (!arcArmed) return;
+      arcArmed.btn.textContent = arcArmed.label;
+      arcArmed.btn.classList.remove('armed');
+      const row = arcArmed.btn.closest('.arc');
+      if (row) row.classList.remove('armed');
+      arcArmed = null;
+    }
+
+    /** 两下点:第一下把按钮换成**后果那句话**,第二下才真跑 */
+    function arcArm(btn, label, confirmLabel, run) {
+      btn.onclick = async function (e) {
+        e.stopPropagation();
+        if (arcArmed && arcArmed.btn === btn) {
+          arcDisarm();
+          btn.disabled = true;
+          // finally:run() 抛出来的话按钮会永远停在 disabled 上。同 Setup.html 的 arm()
+          try {
+            await run();
+          } finally {
+            btn.disabled = false;
+          }
+          return;
+        }
+        arcDisarm();
+        arcArmed = { btn: btn, label: label };
+        btn.textContent = confirmLabel;
+        btn.classList.add('armed');
+        const row = btn.closest('.arc');
+        if (row) row.classList.add('armed');
+      };
+    }
+
+    const arcKb = function(n){ return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B'; };
+    const arcWhen = function(iso) {
+      return new Date(iso).toLocaleString('zh-CN',
+        { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+    function setArcMsg(text, cls) {
+      const el = document.getElementById('arcMsg');
+      el.className = 'arc-msg' + (cls ? ' ' + cls : '');
+      el.textContent = text || '';
+    }
+
+    /**
+     * 一行存档。**用 DOM 拼不用 innerHTML** —— 文件名来自用户自己的目录。
+     *
+     * 这一行里 `label` 就是全部的身份(「覆盖前的原文」/「搬去 Notion 时留下的原件」/
+     * 「没过校验的草稿」)—— 弹框标题已经说了是哪个游戏,每行再写一遍游戏名
+     * 就是把同一句话印十遍
+     */
+    function arcRow(e) {
+      const li = document.createElement('li');
+      li.className = 'arc';
+      const row = document.createElement('div');
+      row.className = 'arc-row';
+
+      const main = document.createElement('div');
+      main.className = 'arc-main';
+      const name = document.createElement('b');
+      name.textContent = e.label;
+      const meta = document.createElement('span');
+      meta.className = 'arc-meta';
+      meta.textContent = arcWhen(e.savedAt) + ' · ' + arcKb(e.bytes)
+        + (e.kind === 'notion' ? ' · Notion 整页' : '');
+      main.appendChild(name);
+      main.appendChild(meta);
+
+      const acts = document.createElement('div');
+      acts.className = 'arc-acts';
+
+      // 「看」是唯一什么都不改的动作,所以它不需要第二下
+      const view = document.createElement('button');
+      view.type = 'button';
+      view.textContent = '查看';
+      view.onclick = async function (ev) {
+        ev.stopPropagation();
+        const open = li.querySelector('.arc-body');
+        if (open) { open.remove(); view.textContent = '查看'; return; }
+        view.disabled = true;
+        const r = await new Promise(function (resolve) {
+          rpc.withSuccessHandler(resolve).withFailureHandler(function(err){ resolve({ error: String(err) }); })
+            .readGuideArchive(e.id);
+        });
+        view.disabled = false;
+        const body = document.createElement('pre');
+        body.className = 'arc-body';
+        body.textContent = r && r.error ? r.error : ((r && r.text) || '(空的)');
+        li.appendChild(body);
+        view.textContent = '收起';
+      };
+
+      const restore = document.createElement('button');
+      restore.type = 'button';
+      restore.textContent = '覆盖';
+      arcArm(restore, '覆盖', e.kind === 'notion' ? '整页重写' : '覆盖本地文件', async function () {
+        setArcMsg('正在覆盖…');
+        const r = await new Promise(function (resolve) {
+          rpc.withSuccessHandler(resolve).withFailureHandler(function(err){ resolve({ error: String(err) }); })
+            .restoreGuideArchive(e.id);
+        });
+        if (!r || r.error) return setArcMsg((r && r.error) || '覆盖失败', 'error');
+        // **被顶掉的那份去哪了要说出来。** 恢复本身也是一次覆盖,刚生成的那份
+        // 备份就是它的后悔药 —— 不说等于又埋了一次同样的东西
+        setArcMsg(
+          (r.kind === 'notion' ? '整页写回 ' + r.count + ' 条' : '写回 ' + r.file)
+            + (r.unregisteredNotion ? ',Notion 那一页不再是登记的攻略' : '')
+            + (r.backedUpTo ? ';被顶掉的那份已存进这个列表' : ''),
+          'ok'
+        );
+        await refreshArchives();
+        loadDashboard(); // 登记可能从 notion 翻成了 local,行上的攻略链接要跟着换
+      });
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.textContent = '删除';
+      arcArm(del, '删除', '永久删除', async function () {
+        const r = await new Promise(function (resolve) {
+          rpc.withSuccessHandler(resolve).withFailureHandler(function(err){ resolve({ error: String(err) }); })
+            .deleteGuideArchive(e.id);
+        });
+        if (!r || r.error) return setArcMsg((r && r.error) || '删除失败', 'error');
+        setArcMsg('删了一份,腾出 ' + arcKb(r.bytes), 'ok');
+        await refreshArchives();
+      });
+
+      acts.appendChild(view);
+      acts.appendChild(restore);
+      acts.appendChild(del);
+      row.appendChild(main);
+      row.appendChild(acts);
+      li.appendChild(row);
+      return li;
+    }
+
+    function paintArchive() {
+      arcArmed = null;
+      const list = archivesFor(arcAppid);
+      const ul = document.getElementById('arcList');
+      ul.textContent = '';
+      for (const e of list) ul.appendChild(arcRow(e));
+      const bytes = list.reduce(function(n, e){ return n + e.bytes; }, 0);
+      document.getElementById('arcSum').textContent = list.length
+        ? list.length + ' 份 · ' + arcKb(bytes) + ' · 覆盖会先把现在那一份也存进来'
+        : '这个游戏没有备份了';
+    }
+
+    // 行上那个「备份 N」按钮的 onclick 走这里 —— 和 rewriteGuide / migrateGuide
+    // 一样挂在 window 上,因为按钮是 render() 拼出来的 HTML 字符串
+    window.openBackups = function (appid, name) {
+      arcAppid = String(appid);
+      document.getElementById('arcTitle').textContent = name || appid;
+      setArcMsg('');
+      paintArchive();
+      arcModal.classList.add('show');
+    };
+
+    function closeArchiveModal() {
+      arcDisarm();
+      arcModal.classList.remove('show');
+    }
+
+    document.getElementById('arcCloseBtn').addEventListener('click', closeArchiveModal);
+    // 点遮罩关掉,点框里不关 —— 和页面上另外两个 modal 一样
+    arcModal.addEventListener('click', function (e) {
+      if (e.target === arcModal) closeArchiveModal();
+      else if (arcArmed && !e.target.closest('.arc-acts')) arcDisarm();
+    });
+
     function openRowMenu(btn, appid) {
       const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
       if (!game) return;
       rowMenu.innerHTML = '';
-      const item = function(label, cls, title, fn) {
+      const item = function(o) {
         const b = document.createElement('button');
-        b.textContent = label;
-        if (cls) b.className = cls;
-        if (title) b.title = title;
-        b.addEventListener('click', function(e) { e.stopPropagation(); closeRowMenu(); fn(); });
+        b.textContent = o.label;
+        if (o.cls) b.className = o.cls;
+        if (o.title) b.title = o.title;
+        b.addEventListener('click', function(e) { e.stopPropagation(); closeRowMenu(); o.run(); });
         rowMenu.appendChild(b);
       };
+
       // **标签只写动作,不写宾语。** 菜单是从某一行的按钮弹出来的,「这一行」和
       // 「成就数量」都是当场看得见的上下文,写进标签就是把已经知道的事又说一遍。
       // 「会连带上锁」同理留在 title 里:锁图标当场亮起来已经说明了这件事
-      item('编辑', '', game.manual ? '' : '会同时锁定这一行(停止自动同步)',
-        function(){ startManualEdit(appid); });
-      item('删除', 'danger', '', function(){ deleteGameFlow(appid); });
+      //
+      // 分两组是因为菜单里现在装着两个不同的宾语:上面那组作用于**这份攻略**,
+      // 下面那组作用于**这一行游戏**。不分的话「删除」会有两种读法
+      // **这个菜单只装对「这一行游戏」做的事。** 对攻略做的四件(打开、重写、
+      // 搬去 Notion、备份)都在行上:那四个是主动要做的动作,收进第二层等于每一个
+      // 都多一次点击。分界是宾语,不是频次 —— 也因为只剩一个宾语,这里不需要分组标题
+      item({
+        label: '编辑',
+        title: game.manual ? '' : '会同时锁定这一行(停止自动同步)',
+        run: function(){ startManualEdit(appid); },
+      });
+      item({ label: '删除', cls: 'danger', run: function(){ deleteGameFlow(appid); } });
 
       rowMenu.hidden = false;
       const r = btn.getBoundingClientRect();
@@ -3254,7 +3620,14 @@
       }
     });
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && !rowMenu.hidden) closeRowMenu();
+      if (e.key !== 'Escape') return;
+      if (!rowMenu.hidden) return closeRowMenu();
+      // 存档弹框里 Esc 先撤销待确认的那一下,再按才关框 —— 举着「永久删除」的时候
+      // 按 Esc,想撤的是那一下,不是整个框
+      if (arcModal.classList.contains('show')) {
+        if (arcArmed) arcDisarm();
+        else closeArchiveModal();
+      }
     });
 
     /** 高亮停留多久。**CSS 里 row-flash / card-flash 的时长是同一个数**,改一个要一起改 */
@@ -3377,7 +3750,7 @@
       // 展开十行是 ~370px,而这一块住在冻结区里 —— 每次筛自己的库都被顶掉十行表格,
       // 换来的是一份用户多半没在找的补充结果。所以:库里没有 ⇒ 结果就是答案,摊开;
       // 库里有 ⇒ 折成一行,点开才展开。**那一行的作用是让「还能加」看得见** ——
-      // 上一版把这条路整个藏起来了,而藏起来的路和不存在的路没有区别
+      // 整个藏起来的话,藏起来的路和不存在的路没有区别
       if (steamItems.length && libHit && !steamExpanded) {
         extra.hidden = false;
         label.hidden = true;
@@ -3561,9 +3934,8 @@
         document.getElementById('askTitle').textContent = o.title;
         // 没有正文就整个收起来,不然留一块带 margin 的空白,框看着是坏的。
         //
-        // **正文是一句固定的话,不会跟着选择变。** 这里曾经收一个函数,按当前选中的
-        // 范围现算一句 —— 那是为重写那个框做的,而重写框的正文最后一句也删了
-        // (见下面调用点)。没有调用方的机制会漂,所以跟着一起删
+        // **正文是一句固定的话,不会跟着选择变** —— 不收函数,不按当前选中的范围
+        // 现算。没有调用方的机制会漂
         const bodyEl = document.getElementById('askBody');
         bodyEl.textContent = o.body || '';
         bodyEl.style.display = o.body ? '' : 'none';
@@ -3600,10 +3972,10 @@
             // 选中态要**说出来**,不能只靠底色 —— 只用 class 的话读屏用户读不到
             // 这一组里哪个是选中的(ui-ux-pro-max 把这条列为 Critical)
             b.setAttribute('aria-pressed', String(opt.value === g.value));
-            // **title 和 disabled 是两件事,别绑在一起。** 早先这行写在
-            // `if (opt.disabled)` 里面,因为那时 title 只用来解释"为什么灰着";
-            // 后来「稀有成就」把判据(全球解锁率 <10%)放进 title,而它是个
-            // **能点的**按钮 —— 于是提示一个字都不出现,而按钮看上去完全正常。
+            // **title 和 disabled 是两件事,别绑在一起。** 把这行写进
+            // `if (opt.disabled)` 里(理由是 title 只用来解释"为什么灰着")会让
+            // 「稀有成就」那种**能点的**按钮丢掉它的 title —— 判据(全球解锁率 <10%)
+            // 一个字都不出现,而按钮看上去完全正常。
             // 选不了的仍然要能说出为什么:一个写着「稀有 0」的灰按钮,和一个因为
             // Steam 没答话而算不出来的灰按钮,长得一样、含义相反
             if (opt.title) b.title = opt.title;
@@ -3765,8 +4137,8 @@
              *   方框 → 整节选中/取消
              *   其余 → 折叠/展开
              *
-             * 上一版把整行做成一个按钮、方框只是里面的一个 span,于是没地方放折叠。
-             * 拆开之后两个动作各有各的落点,而且都还是原生 `<button>` —— 键盘能 Tab
+             * 整行做成一个按钮、方框只当里面一个 span 的话,折叠就没地方放。拆成两个
+             * 之后两个动作各有各的落点,而且都还是原生 `<button>` —— 键盘能 Tab
              * 到、能回车触发,不用自己补一套按键处理。**不能嵌套**:按钮套按钮在
              * HTML 里是非法的,浏览器会把内层拎出去,行为随之不可预测。
              */
@@ -4015,6 +4387,10 @@
     }
 
     loadDashboard();
+    // 存档索引和表格并行拉,**不串在 loadDashboard 后面**:它只喂 ⋯ 菜单里的一个
+    // 计数,慢一点或者拿不到都不该拖住整张表。失败时 archiveIndex 保持上一次的值,
+    // 菜单少个数字比整行消失强(loadArchiveIndex 里那条 return 就是这个意思)
+    loadArchiveIndex();
 
     // ---- 「立即同步」按钮 ----------------------------------------------------
     // 这个按钮只负责"发起"。进度提示条、跑完后的就地刷新、新增成就提示,全都已经在
@@ -4148,10 +4524,10 @@
       notionReady = Boolean(s && s.hasNotionToken && s.notionDbId);
 
       // **只重绘,不重取。** `aiReady` / `notionReady` 只影响怎么画,不影响画什么,
-      // 而 `allGames` 这时已经在内存里了 —— 以前这里调的是 `loadDashboard()`,
-      // 为了翻一个布尔值把整个 dashboard 重新拉一遍。
+      // 而 `allGames` 这时已经在内存里了 —— 在这儿调 `loadDashboard()` 等于为了翻一个
+      // 布尔值把整个 dashboard 重新拉一遍。
       //
-      // 那让一个竞态变得看得见:`aiReady` 初值是 false,页面加载时那次
+      // 而那会让一个竞态变得看得见:`aiReady` 初值是 false,页面加载时那次
       // `loadDashboard()`(下面那行)就已经在跑了,所以按钮在不在,取决于
       // `getSettings`(内存里读个对象)和 `getDashboardData`(读整个库)谁先回来。
       // 平时前者稳赢。但**第一次设置完的那一下服务器正忙** —— startupJobs 的
@@ -4176,11 +4552,9 @@
      * 勾回原样,子步骤框匹配不到任何成就。这句话由服务端的 formatPreflight 生成,
      * 和 CLI 那边是同一份措辞。
      */
-    window.rewriteGuide = async function (btn) {
-      const appid = btn.getAttribute('data-rewrite');
-      const name = btn.getAttribute('data-name') || appid;
+    window.rewriteGuide = async function (appid, name) {
       genCollapsed = false;
-      btn.disabled = true;
+      setGuideBusy(appid, true);
       showGen('⏳ 检查《' + name + '》…', false, true);
 
       // **两次预检一起拿,而且两次的失败不是一回事。**
@@ -4204,7 +4578,7 @@
         }),
       ]);
       if (!p || p.error) {
-        btn.disabled = false;
+        setGuideBusy(appid, false);
         return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true, false);
       }
 
@@ -4342,7 +4716,7 @@
         picker: picker,
       });
       if (!ok) {
-        btn.disabled = false;
+        setGuideBusy(appid, false);
         genBar.style.display = 'none';
         return;
       }
@@ -4355,8 +4729,6 @@
        * 那条分支 —— 界面不需要自己的选择器种类。用 api_name 而不是成就名,是因为
        * 同名成就按名字点不动(库里真有 12 组同名)。
        *
-       * 这里曾经还有一个分支,把「稀有」之类的预设当选择器名发出去;那些预设搬进
-       * 挑选列表变成"勾上这一批"之后,发出去的就只剩这一种形状了。
        */
       const scope = scopeChoice.value === 'all'
         ? null
@@ -4365,14 +4737,14 @@
       rpc
         .withSuccessHandler(function (r) {
           if (r && r.error) {
-            btn.disabled = false;
+            setGuideBusy(appid, false);
             return showGen(GEN_WARN + ' ' + r.error, true, false);
           }
           showGen('⏳ 重写《' + name + '》…', false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
-          btn.disabled = false;
+          setGuideBusy(appid, false);
           showGen(GEN_WARN + ' ' + err, true, false);
         })
         .startGuideGen(appid, true, rewriteChoice.value, scope);
@@ -4402,16 +4774,14 @@
       };
     }
 
-    window.migrateGuide = function (btn) {
-      const appid = btn.getAttribute('data-migrate');
-      const name = btn.getAttribute('data-name') || appid;
+    window.migrateGuide = function (appid, name) {
       genCollapsed = false; // 自己点的搬运,进度条要露出来
-      btn.disabled = true;
+      setGuideBusy(appid, true);
       showGen('⏳ 检查《' + name + '》…', false, true);
       rpc
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
-            btn.disabled = false;
+            setGuideBusy(appid, false);
             return showGen(GEN_WARN + ' ' + ((p && p.error) || '预览失败'), true, false);
           }
           // 逐条核对、对不上就不动本地文件、页面带图标 —— 都是"我们怎么保证不出事",
@@ -4429,7 +4799,7 @@
             okText: '搬过去',
           });
           if (!goMigrate) {
-            btn.disabled = false;
+            setGuideBusy(appid, false);
             genBar.style.display = 'none';
             return;
           }
@@ -4437,7 +4807,7 @@
           rpc
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
-                btn.disabled = false;
+                setGuideBusy(appid, false);
                 return showGen(GEN_WARN + ' ' + ((r && r.error) || '搬运失败'), true, false);
               }
               showGen(
@@ -4446,16 +4816,21 @@
                   (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : ''),
                 false, false
               );
+              // 成功这条路原来什么都不解除 —— 靠 loadDashboard() 重画出一个新按钮
+              // 把置灰"洗"掉。置灰改成从 guideBusy 渲染之后那条路没了,不显式解除
+              // 就会永久卡住。搬运还刚把本地原件放进 `.migrated/`,备份数也变了
+              setGuideBusy(appid, false);
+              refreshArchives();
               loadDashboard();
             })
             .withFailureHandler(function (err) {
-              btn.disabled = false;
+              setGuideBusy(appid, false);
               showGen(GEN_WARN + ' ' + err, true, false);
             })
             .migrateGuideToNotion(appid);
         })
         .withFailureHandler(function (err) {
-          btn.disabled = false;
+          setGuideBusy(appid, false);
           showGen(GEN_WARN + ' ' + err, true, false);
         })
         .previewGuideToNotion(appid);
@@ -4519,6 +4894,83 @@
       // 「打开文件夹」是每次重写内容之后新长出来的节点,所以在这里统一挂 ——
       // 事件委托挂不上:整条 #gen-bar 在收起状态下自己就是个"点一下展开"的按钮,
       // 冒泡上去会顺手把浮窗折起来
+      // 删备份是**不可逆**的,所以和备份面板同一套:第一下把按钮换成后果那句话,
+      // 第二下才真删。这一条不弹框 —— 进度条本来就是个浮层,再叠一个就把
+      // 「删的是哪一份」推到看不见的地方
+      // 恢复是**另一次覆盖**,Notion 那边还会先删掉整页的块再写回去,所以走和
+      // 备份面板一样的两下点,第二下的标签直接说后果,不是「确定」
+      genMsg.querySelectorAll('[data-restore-backup]').forEach(function(b) {
+        const label = b.textContent;
+        let armed = false;
+        b.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (!armed) {
+            armed = true;
+            b.textContent = b.getAttribute('data-restore-label');
+            b.classList.add('armed');
+            return;
+          }
+          b.disabled = true;
+          rpc.withSuccessHandler(function(res) {
+            if (res && res.error) {
+              b.disabled = false;
+              armed = false;
+              b.classList.remove('armed');
+              b.textContent = label + '失败:' + res.error;
+              return;
+            }
+            // **被顶掉的那份去哪了要说出来。** 恢复本身也是一次覆盖,刚生成的这份
+            // 现在成了它的后悔药 —— 不说等于又埋了一次同样的东西
+            b.textContent = res && res.backedUpTo ? '已用回旧版,新的那份存成了备份' : '已用回旧版';
+            b.classList.remove('armed');
+            // 旁边那个「删除备份」现在指着的是**刚写回去的这份内容的来源**,
+            // 而想删的多半是刚被顶掉的新版。留着它只会删错一份,所以撤掉
+            const drop = genMsg.querySelector('[data-drop-backup]');
+            if (drop) drop.remove();
+            refreshArchives();  // 行尾那个「备份 N」变了
+            loadDashboard();    // 登记可能从 notion 翻回 local,行上的攻略链接要跟着换
+          }).withFailureHandler(function(err) {
+            b.disabled = false;
+            armed = false;
+            b.classList.remove('armed');
+            b.textContent = '恢复不了:' + err.message;
+          }).restoreGuideArchive(b.getAttribute('data-restore-backup'));
+        });
+      });
+
+      genMsg.querySelectorAll('[data-drop-backup]').forEach(function(b) {
+        const label = b.textContent;
+        let armed = false;
+        b.addEventListener('click', function(e) {
+          e.stopPropagation();
+          if (!armed) {
+            armed = true;
+            b.textContent = '永久删除';
+            b.classList.add('armed');
+            return;
+          }
+          b.disabled = true;
+          rpc.withSuccessHandler(function(res) {
+            if (res && res.error) {
+              b.disabled = false;
+              armed = false;
+              b.classList.remove('armed');
+              b.textContent = label + '失败:' + res.error;
+              return;
+            }
+            // 删完这个动作就没有对象了 —— 留一句结果,不留一个还能点的按钮
+            b.textContent = '备份已删';
+            b.classList.remove('armed');
+            refreshArchives(); // 行尾那个「备份 N」要跟着少一个
+          }).withFailureHandler(function(err) {
+            b.disabled = false;
+            armed = false;
+            b.classList.remove('armed');
+            b.textContent = '删不掉:' + err.message;
+          }).deleteGuideArchive(b.getAttribute('data-drop-backup'));
+        });
+      });
+
       genMsg.querySelectorAll('[data-reveal]').forEach(function(b) {
         b.addEventListener('click', function(e) {
           e.stopPropagation();
@@ -4578,7 +5030,13 @@
             clearInterval(genTimer);
             genTimer = null;
           }
-          if (s.error) return showGen(GEN_WARN + ' 生成失败:' + s.error + waiting, true, live);
+          if (s.error) {
+            // **失败这条路也要解除置灰** —— 漏了的症状和成功那条一样,只是没人会
+            // 去点一个刚刚失败的东西,所以更晚才被发现。`s.appid` 是服务端快照里
+            // 正在跑的那个,不是 result(失败时没有 result)
+            setGuideBusy(s.appid, false);
+            return showGen(GEN_WARN + ' 生成失败:' + s.error + waiting, true, live);
+          }
           const r = s.result;
           if (!r) { genLive = live; return (genBar.style.display = 'none'); }
 
@@ -4613,13 +5071,38 @@
           // 就够;本地那份经 /guide/ 出来是**纯文本 markdown 源码**(防 XSS,见
           // server.js),真要读还得用编辑器开文件 —— 所以本地多给一个「打开文件夹」。
           //
-          // 本地这条以前是一截**不可点的绝对路径**:同一份攻略,表格行里那个「📖 攻略」
-          // 按钮能点(走 /guide/<appid>),偏偏生成完这一刻不能点 —— 而那正是最想
-          // 立刻点进去看一眼的时刻
+          // 本地这条**不能写成一截不可点的绝对路径**:同一份攻略,表格行里那个
+          // 「📖 攻略」按钮能点(走 /guide/<appid>),偏偏生成完这一刻不能点 ——
+          // 而那正是最想立刻点进去看一眼的时刻
           const where = r.target === 'notion'
             ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开攻略</a>'
             : '<a href="/guide/' + encodeURIComponent(r.appid) + '" target="_blank" rel="noopener">打开攻略</a>'
               + ' · <button type="button" class="gen-link" data-reveal="' + escapeHtml(r.appid) + '">打开文件夹</button>';
+          // **「删除备份」就摆在「打开攻略」旁边**,因为那正是要用它的那一刻:
+          // 点开读一遍、确认这版可以,旧的那份就没用了 —— 换个地方就意味着
+          // 「等会儿再收拾」,而等会儿多半不会来。
+          //
+          // **「恢复备份」和「删除备份」是同一刻的两个答案。** 点开读一遍之后只有
+          // 两种结论:这版可以 → 旧的没用了;这版不如旧的 → 用回旧的。只给后半个
+          // 动作,等于在最可能想反悔的那一刻,唯一提供的按钮是**把反悔的本钱销毁**。
+          //
+          // 顺序是先恢复后删除:能挽回的排前面,不可逆的排最后。
+          //
+          // 第二下要说的后果**按后端算好挂在 data 上**,不在处理器里再判一次 ——
+          // 判两次早晚只改一处。覆盖只会写回攻略自己原来的后端(换后端是
+          // guide-to-notion 的事),所以 `r.target` 就是这份备份的后端
+          const restoreBackup = r.backup && r.backup.id
+            ? ' · <button type="button" class="gen-link" data-restore-backup="'
+              + escapeHtml(r.backup.id) + '" data-restore-label="'
+              + (r.target === 'notion' ? '整页重写' : '覆盖本地文件')
+              + '">恢复备份</button>'
+            : '';
+          // 只有覆盖和局部重写才有备份(整篇新生成没有旧的可存),`r.backup` 为空
+          // 时这个动作整个不出现 —— 一个永远点不动的按钮比没有更糟
+          const dropBackup = r.backup && r.backup.id
+            ? ' · <button type="button" class="gen-link danger" data-drop-backup="'
+              + escapeHtml(r.backup.id) + '">删除备份</button>'
+            : '';
           // **搜索次数和 token 移到悬停里。** 屏幕上留下的三样是:哪款游戏、覆盖了
           // 多少成就、去哪看。token 仍然报(这是唯一花钱的功能,数字必须能查到),
           // 但它是事后对账用的,不该和「成了没有」抢同一行。
@@ -4648,14 +5131,27 @@
               ' 条本来就有的校验问题,这次没碰</span>'
             : '';
           const headline = pat
-            ? GEN_OK + ' 《' + s.game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where
-            : GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where;
+            ? GEN_OK + ' 《' + s.game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where + restoreBackup + dropBackup
+            : GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where + restoreBackup + dropBackup;
           showGen(
             headline + noResearch + unsyncable + preExisting +
               '<br><span class="warn">内容需要你自己过一遍。</span>',
             false, live
           );
-          loadDashboard();  // 攻略已登记,刷新一下让「📖 攻略」链接出来
+          // **跑完必须把这三样都收拾干净,少一样就留下一个不会自愈的错状态。**
+          //
+          // `setGuideBusy(false)` —— 置灰是**渲染出来的**(见 setGuideBusy 的注释),
+          // 不会被别处的重画顺手清掉;这里不解除,那一行的「重写」「Notion」会一直灰
+          // 到下次刷新页面。
+          //
+          // `refreshArchives()` —— 这次重写刚把原文存进 `.backups/`,行尾那个
+          // 「备份 N」是从 archiveIndex 渲染的,不重新拉一次就看不见新增的那份:
+          // 「重写完想反悔」正是最需要它出现的时刻,而它偏偏要等到刷新页面才出来。
+          //
+          // `loadDashboard()` —— 攻略已登记,「📖 攻略」链接要出来
+          setGuideBusy(r.appid, false);
+          refreshArchives();
+          loadDashboard();
         })
         .withFailureHandler(function () {})
         .guideGenStatus();

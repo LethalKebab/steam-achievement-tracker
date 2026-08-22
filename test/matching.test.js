@@ -13,7 +13,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'nod
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement, collectSubStepTicks, mapAchievementGuides, stripGuideEcho } from '../lib/guides.js';
+import { normalizeText, extractTitleCandidates, matchAchievements, syncGameCheckboxes, findAmbiguousNames, resolveTodoToAchievement, collectSubStepTicks, mapAchievementGuides, stripGuideEcho, flatCompare } from '../lib/guides.js';
 import { loadTodos, applyChecks } from '../lib/markdown.js';
 import { toCsv, exportAll } from '../lib/csv.js';
 import { openDb, insertGame, markNoAchievements, updateGameStats } from '../lib/db.js';
@@ -769,5 +769,81 @@ describe('CRLF 的本地攻略必须照常工作', () => {
     const after = readFileSync(p, 'utf8');
     assert.match(after, /^- \[x\] \*\*甲\*\*\r\n/, '该勾的勾上了');
     assert.ok(!/[^\r]\n/.test(after), '不能混进裸 LF');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 比较用的归一化(flatCompare)
+// ---------------------------------------------------------------------------
+// 波西亚时光「好家长」:Steam 写的是弯引号「与孩子的关系达到“幸福的孩子”。」,
+// 攻略里抄成了直引号。同一句话,我们判成「改写过」,于是 audit 反查不动那个框。
+// 实测全库 791 条不匹配里 14 条是这一种,其余 777 条是作者真的改写了。
+describe('flatCompare:只折叠写法,不折叠内容', () => {
+  test('印刷体引号和直引号视为同一个字符', () => {
+    assert.equal(flatCompare('达到“幸福的孩子”。'), flatCompare('达到"幸福的孩子"。'));
+    assert.equal(flatCompare('it\u2019s'), flatCompare("it's"));
+  });
+
+  test('空格照旧折叠', () => {
+    assert.equal(flatCompare('a b\nc'), 'abc');
+  });
+
+  test('破折号和省略号故意不折 —— 没有证据说需要,而它们含义确实不同', () => {
+    assert.notEqual(flatCompare('1-2'), flatCompare('1\u20142'));
+    assert.notEqual(flatCompare('...'), flatCompare('\u2026'));
+  });
+
+  test('两段不同的描述不会被折成一样', () => {
+    assert.notEqual(flatCompare('杀死100只怪'), flatCompare('杀死200只怪'));
+    assert.notEqual(flatCompare('“甲”'), flatCompare('“乙”'));
+  });
+
+  test('audit 现在反查得动只差引号字形的框', () => {
+    const defs = [
+      { api_name: 'A', name_cn: '好家长', name_en: '', description: '与孩子的关系达到“幸福的孩子”。' },
+      { api_name: 'B', name_cn: '别的', name_en: '', description: '完全不同的描述。' },
+    ];
+    const hit = resolveTodoToAchievement('好家长<br>与孩子的关系达到"幸福的孩子"。<br>心得', defs);
+    assert.equal(hit?.def?.api_name, 'A');
+    assert.equal(hit?.via, 'description', '走的应该是描述那条路,不是撞上名字');
+  });
+
+  test('只差引号的两个成就,两个都不匹配 —— 安全的那一侧', () => {
+    // 折叠之后描述唯一性判定变成 2,于是描述那条路整个不走。
+    // 这个项目一贯选「宁可勾不上,不可勾错」
+    const defs = [
+      { api_name: 'A', name_cn: '甲', name_en: '', description: '拿到“钥匙”。' },
+      { api_name: 'B', name_cn: '乙', name_en: '', description: '拿到"钥匙"。' },
+    ];
+    assert.equal(resolveTodoToAchievement('随便写点<br>拿到"钥匙"。', defs), null);
+  });
+
+  test('两个提问方都走同一个函数,不许各写一份', () => {
+    // 原来 resolveTodoToAchievement 和 guidelint 各有一份一模一样的私有 flat。
+    // 改一份漏一份的表现是:linter 说「audit 反查不了这个框」,而 audit 其实反查得动。
+    //
+    // **guides.js 里还有第三份,那一份是故意不一样的**:`nameGroupAlreadySatisfied`
+    // 用的是宽松的包含匹配 + lowercase,而它只决定要不要打一行日志、从不决定写什么
+    // (见它自己的注释和 CLAUDE.md)。合并它等于抹掉那条边界,所以这里只钉写入侧的两处。
+    const strip = (src) => src
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    const guides = strip(readFileSync(new URL('../lib/guides.js', import.meta.url), 'utf8'));
+    const lint = strip(readFileSync(new URL('../lib/guidelint.js', import.meta.url), 'utf8'));
+
+    const at = guides.indexOf('export function resolveTodoToAchievement');
+    assert.ok(at > 0, '找不到 resolveTodoToAchievement —— 这条检查失去了目标');
+    const rta = guides.slice(at, guides.indexOf('\n}', at));
+    assert.ok(rta.length > 200, '切到的应该是整个函数');
+    // `\\s` 才是「一个反斜杠接一个 s」。写成 `\s` 是空白字符类,永远匹配不到源码里的
+    // `replace(/\s+/g` —— 这两条断言第一版就是那么写的,于是恒真,变异测试才抓出来
+    const INLINED = /replace\(\/\\s\+\/g/;
+    assert.doesNotMatch(rta, INLINED, 'audit 的判据必须走 flatCompare,不能自己再折一份');
+    assert.match(rta, /flatCompare/);
+
+    assert.doesNotMatch(lint, INLINED,
+      'linter 的判据必须走 flatCompare —— 它的措辞是「audit 反查不了」,就得拿 audit 的函数判');
+    // 只查 flatCompare 出现过是不够的:import 那一行就有它,把 flat 换成内联版照样绿
+    assert.match(lint, /const flat = flatCompare/, 'linter 的 flat 必须就是 flatCompare 本身');
   });
 });

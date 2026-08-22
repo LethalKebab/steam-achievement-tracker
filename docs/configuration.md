@@ -30,8 +30,13 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 
   "ai": {                     // only needed for AI guide generation; `init --ai` writes it
     "provider": "deepseek",   // "deepseek" | "anthropic" | "gemini" | "deepseek-openai"
-    "apiKey": "…",            // or DEEPSEEK_/ANTHROPIC_/GEMINI_API_KEY, picked by provider
-    "model": "",              // blank = that provider's own default; names aren't portable
+                              // ↑ which of the blocks below is active right now
+
+    "providers": {            // one block per vendor; keep several configured at once
+      "deepseek":  { "apiKey": "…", "model": "" },
+      "anthropic": { "apiKey": "…", "model": "" },
+      "gemini":    { "apiKey": "…", "model": "" }
+    },
     "effort": "high",         // low | medium | high | off — research depth; also settable per run
     "thinking": null,         // "adaptive" | "disabled" | "off"; blank = per-endpoint default
     "maxTokens": 32000,       // caps thinking AND prose together, not prose alone
@@ -57,6 +62,16 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 ```
 
 ## Notes on individual options
+
+**`ai.provider` and `ai.providers`** — `providers` holds one block per vendor and `provider` names which one is live. Switching between them is a one-word edit, and each vendor keeps its own `apiKey` and `model` across the switch.
+
+You do not have to edit the file by hand: the settings page (设置 → Step 2) writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· 已配置` in the dropdown, and the key field's 「已配置,留空则不改」 badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
+
+Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — and the reason is the same for all three: **more than one provider reads them, and the right value differs per vendor.** A model name is vendor-specific (`claude-*` / `gemini-*` / `deepseek-*`), so one shared `model` field has to be wiped every time you switch, which silently discards a version you pinned. `baseUrl` is read by both the Anthropic and DeepSeek paths, and one vendor's endpoint address is meaningless to the other. Everything else stays at the `ai.*` level: the budgets (`maxTokens`, `chunkSize`, `effort`, …) are correct at the same value for every vendor, and the single-vendor knobs (`geminiTools`, `webFetch`, `searchTool`, `anthropicExtras`, …) are only ever read by the one provider they belong to, so a leftover value is ignored rather than misapplied.
+
+The older flat `ai.apiKey` / `ai.model` still work and need no edit. They are treated as belonging to whatever `ai.provider` says in the file — so on load they are adopted into that vendor's block, and they are **never** offered to a different vendor. That refusal is the point: handing DeepSeek's key to `api.anthropic.com` produces a 401 whose message says to check `ANTHROPIC_API_KEY`, sending you after a variable that was set correctly all along. An empty key instead reports which vendor is unconfigured.
+
+Environment variables win over both, and they are looked up **by the vendor being asked for** rather than by the one written in the file.
 
 **`language`** — passed to Steam as the `l=` parameter, so it changes the names you see for games and achievements. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
 
@@ -88,7 +103,7 @@ Notion-kind guides only; local markdown has no status property. Set to `false` t
 
 **`sweepBudget` / `maxStatsAgeDays` / `perfectGameMaxAgeDays`** — these three control how much work the *automatic* sync does when you open the Dashboard. (`node tracker.js sync` ignores them and always checks everything; `sync --fast` uses them.)
 
-The auto-sync no longer walks the whole library. It checks a game when any of these is true:
+The auto-sync does not walk the whole library. It checks a game when any of these is true:
 
 1. **You played it** since the last check — Steam's `rtime_last_played` says so. Your unlocked count can't change without this, so this group is what keeps `achieved` exactly right.
 2. **It isn't in your `GetOwnedGames` list** — family-shared, delisted, or hand-added rows have no play timestamp to check, so they're refreshed every time.
@@ -162,7 +177,7 @@ For what you actually spent, read your provider's own dashboard. The token count
 node tracker.js ai-check --models
 ```
 
-**On Gemini's free tier, pick a `flash` model.** Measured on 2026-08-10: the Pro models return `limit: 0` for the free-tier quota — that is not "you used it up", it means the model isn't in that tier at all, and waiting for a reset will never help. The error message says so and doesn't retry. The default (`gemini-flash-latest`) is an alias rather than a version number, because a pinned version goes stale — that exact default was wrong within three months. Pin a concrete version if you want reproducible output.
+**On Gemini's free tier, pick a `flash` model.** The Pro models return `limit: 0` for the free-tier quota — that is not "you used it up", it means the model isn't in that tier at all, and waiting for a reset will never help. The error message says so and doesn't retry. The default (`gemini-flash-latest`) is an alias rather than a version number, because a pinned version goes stale — that exact default was wrong within three months. Pin a concrete version if you want reproducible output.
 
 **`geminiTools`** declares which server-side tools to hand Gemini; it's configurable rather than hard-coded because that provider was written without access to the API docs, so a renamed tool — or one your tier doesn't grant — is a config edit, not a code change. `google_search` alone is the default; adding `url_context` gets full page text rather than search results, at the risk of the whole request failing if your tier doesn't offer it. After any run, `ai-check` reports the search queries the model actually issued — declaring the tools and getting zero searches back is the real answer to "does my tier include grounding", and it's more reliable than any pricing page.
 
@@ -179,8 +194,9 @@ These override the file, which is useful for one-off runs or if you'd rather not
 | `NOTION_TOKEN` | `notion.token` |
 | `AI_PROVIDER` | `ai.provider` |
 | `AI_MODEL` | `ai.model` |
-| `ANTHROPIC_API_KEY` | `ai.apiKey`, when `ai.provider` is `anthropic` |
-| `GEMINI_API_KEY` | `ai.apiKey`, when `ai.provider` is `gemini` |
+| `ANTHROPIC_API_KEY` | the key used when the active provider is `anthropic` |
+| `GEMINI_API_KEY` | the key used when the active provider is `gemini` (or `google`) |
+| `DEEPSEEK_API_KEY` | the key used when the active provider is `deepseek` (either endpoint) |
 | `PORT` | `port` |
 
 ```bash

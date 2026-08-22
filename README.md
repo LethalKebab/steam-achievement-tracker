@@ -1,28 +1,14 @@
 # Steam Achievement Tracker
 
-Tracks Steam achievement progress across your library. It stores your games, achievement counts and completion percentage in a local SQLite database, and serves a web Dashboard for browsing them.
+Tracks Steam achievement progress across your library. It stores your games, achievement counts and completion percentage in a local SQLite database, and shows them in a Dashboard.
 
 Everything runs on your own machine: the database is a file next to the program, credentials sit in a config file beside it, and the Dashboard is served by a local HTTP server bound to `127.0.0.1`.
 
-> **Note:** the Dashboard UI is in Chinese (the language this project was built in). Setup and daily use don't require reading Chinese, but the on-screen text is Chinese.
+> **Note:** the Dashboard is in Chinese (the language this project was built in). Setup and daily use don't require reading Chinese, but the on-screen text is Chinese.
 
-## Requirements
+## Install
 
-Two ways to run this, with different requirements:
-
-- **The Windows app** — nothing to install; it bundles its own Node runtime.
-- **From source** — **Node.js 24 or newer**, check with `node --version`. The project uses Node built-ins only, so there are no packages to install.
-
-## Setup
-
-Either way, you'll need two things from Steam, both one-time:
-
-| | What | Where |
-|---|---|---|
-| ① | **Steam Web API Key** | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
-| ② | **SteamID64** | [steamid.io](https://steamid.io) — paste your profile URL |
-
-### The Windows app
+Windows. Nothing to install — the app bundles everything it needs.
 
 1. Download the `-win.zip` from [the latest release](https://github.com/LethalKebab/steam-achievement-tracker/releases/latest) (~133 MB)
 2. Unzip somewhere permanent — the database is created inside that folder, so moving or deleting the folder moves or deletes your data
@@ -30,119 +16,95 @@ Either way, you'll need two things from Steam, both one-time:
 
 The build is unsigned, so the first launch shows *"Windows protected your PC"*. Click **More info → Run anyway**; it doesn't appear on later launches.
 
-**The app lives in the tray.** Closing the window only hides it — syncing and guide generation keep running. To get the panel back, click the tray icon or simply run the exe again: a second launch raises the window that is already there instead of starting a second copy.
+## First run
 
-**Updating:** from 1.1.4 the app does it itself — it checks for a new version shortly after launch and then once a day, and offers to download, replace and restart. The prompt has a "don't remind me about this version" checkbox; to turn checking off entirely, put `"autoUpdate": false` in `local.config.json` next to the exe.
+You need two things from Steam, both one-time:
 
-Updating by hand still works and is the only way to make the jump *to* 1.1.4, since older builds have no updater in them: **quit from the tray icon** (closing the window only hides it, and Windows won't replace a running program), then unzip the new release into the same folder and replace files when asked.
-
-Either way your data is untouched — the zip contains program files only, and `config.json` and `data/` are not in it. Those two are the whole of your data if you want a copy first.
-
-Until credentials are saved, a form is served in place of the Dashboard: the same two fields above, checked against Steam before anything is written. Save it and the Dashboard opens, with the first sync running in the background. Every later launch goes straight to the Dashboard.
-
-### From source
-
-```bash
-node tracker.js init     # paste ① and ② when asked; checks them against Steam right away
-node tracker.js sync     # pulls your library (a few minutes the first time)
-node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
-```
-
-`init` writes your credentials to `config.json` (gitignored, readable only by you) and verifies them against Steam immediately, so a typo surfaces before the first sync rather than partway through it.
-
-### Optional, either way
-
-**Moving from another machine?** `node tracker.js backup` writes one zip holding the database, your guides and `config.json`; `node tracker.js restore <file.zip>` puts it back. The credentials travel with it, so the new machine opens straight to the Dashboard — the app offers the same two steps on its first-run screen and under the settings page's **备份** tab. The zip has your API keys in plain text unless you pass `--no-config`. See [docs/data.md](docs/data.md#backup-and-restore).
-
-**Guide checkboxes.** If you keep achievement guides as checklists (Notion pages or local markdown), this also ticks boxes for achievements you've unlocked. The setup form covers Notion (step 3) and stays reachable afterwards from the gear button in the Dashboard's top-right corner. From source:
-
-```bash
-node tracker.js init --notion --create   # builds the Notion database for you and saves its ID
-node tracker.js notion-check             # read-only: is that side actually working?
-node tracker.js guides                   # register your guide pages
-```
-
-Guides live in a Notion **database**, not a plain page. `--create` builds one under a page you pick, with the status options already right, so you never copy a database ID by hand — drop the flag and paste an ID instead if you already have one. Local markdown needs no setup at all.
-
-Details, and how matching works: [docs/guides.md](docs/guides.md).
-
-**Having guides written for you.** If you'd rather not write a guide from scratch, an AI can research the game online and draft one, which is then checked against your real achievement data before it lands. This is the only part of the project that costs money, and it's entirely optional — nothing else needs it.
-
-```bash
-node tracker.js init --ai            # pick a provider, paste a key; verified on the spot
-node tracker.js ai-check             # confirms web search actually works
-node tracker.js guide-gen <appid>    # asks once before it starts
-node tracker.js guide-gen <appid> --effort low   # fast, shallower research
-```
-
-Works with DeepSeek, Anthropic or Gemini. The same choice is offered in the Dashboard, in the confirmation before each run. The finished guide goes **into Notion** when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead. What the machine guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote. See [docs/guides.md](docs/guides.md#having-one-written-for-you).
-
-**Changing part of a guide instead of all of it.** Once a guide exists, `--only` rewrites just the entries you name and leaves every other byte exactly as it was — including passages you edited yourself:
-
-```bash
-node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
-node tracker.js guide-gen <appid> --only locked --dry-run   # see what it picked, spend nothing
-node tracker.js guide-gen <appid> --only "成就名A,成就名B"
-```
-
-`--only` takes `rare` (below 10% global unlock rate), `locked` (ones you haven't earned yet), `section:<heading>`, or a comma-separated list of achievement names. **Run it with `--dry-run` first** — that prints the entries it selected and the exact request, without sending anything. The Dashboard offers the same thing on the ♻ 重写 dialog, plus a per-achievement picker; the two surfaces deliberately offer the same set. Full reference: [docs/guides.md](docs/guides.md#having-one-written-for-you).
-
-## Everyday use
-
-This section is the source install. In the app, opening it does what `serve` does and **立即同步** does what `sync` does, which covers everyday use — the rest of the table is available by running the commands in the app's own folder.
-
-All commands are `node tracker.js <command>`. The **Network** column tells you which will be slow and which reach outside your machine.
-
-| Command | What it does | Network |
+| | What | Where |
 |---|---|---|
-| `serve` | Opens the Dashboard on `127.0.0.1:8777`, syncing first if the data is stale | Steam + Notion |
-| `sync` | Full refresh of the whole library | Steam |
-| `sync --fast` | Sampled refresh — the same work the Dashboard does | Steam |
-| `status` | Completion stats and AGCR | — |
-| `log 30` | The last 30 things written to a guide | — |
-| `guide-lint [appid]` | Checks guides for achievements with no checkbox, and for formatting that blocks syncing | Notion |
-| `checkbox-sync --dry-run` | Previews which guide checkboxes would be ticked, writes nothing | Steam + Notion |
-| `checkbox-sync` | Ticks them | Steam + Notion |
-| `guide-status` | Aligns guide page status with completion | Notion |
-| `audit` | Looks for boxes ticked while the achievement is still locked | Steam + Notion |
-| `notion-check` | Checks the Notion side: token, database, title property, status options, page count. Writes nothing unless you pass `--fix` (append missing options) or `--probe-write` (create + archive one page to prove write access) | Notion |
-| `ai-check` | Checks the AI provider and that its web search really works | AI provider |
-| `guide-gen <appid>` | Has an AI research and write a guide, then validates it and files it | AI + Steam (+ Notion) |
-| `guide-gen <appid> --overwrite` | Regenerates the **whole** guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |
-| `guide-gen <appid> --only <what>` | Rewrites **just the entries you name**; every other byte stays as it is. `--note "…"` says what to change | AI + Steam (+ Notion) |
-| `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, checking it arrived intact | Notion |
-| `drafts` | Lists what's piled up in `guides/.drafts/`; `--clean` removes it | — |
+| ① | **Steam Web API Key** | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
+| ② | **SteamID64** | [steamid.io](https://steamid.io) — paste your profile URL |
 
-`node tracker.js help` lists the rest.
+Until they're saved, the app serves a form in place of the Dashboard: those same two fields, checked against Steam before anything is written. Save it and the Dashboard opens, with the first sync running in the background — a few minutes the first time. Every later launch goes straight to the Dashboard.
+
+## Living in the tray
+
+**Closing the window only hides it.** Syncing and guide generation keep running. To get the panel back, click the tray icon, or simply run the exe again — a second launch raises the window that is already there instead of starting a second copy.
+
+To actually stop the program, quit from the tray icon.
+
+## Updating
+
+From 1.1.4 the app updates itself: it checks shortly after launch and then once a day, and offers to download, replace and restart. The prompt has a "don't remind me about this version" checkbox. To turn checking off entirely, put `"autoUpdate": false` in `local.config.json` next to the exe.
+
+Updating by hand still works, and is the only way to make the jump *to* 1.1.4, since older builds have no updater in them:
+
+1. **Quit from the tray icon** — closing the window only hides it, and Windows won't replace a running program
+2. Unzip the new release into the same folder, replacing files when asked
+
+Either way your data is untouched. The zip contains program files only; `config.json` and `data/` are not in it. Those two are the whole of your data if you want a copy first.
+
+## What you can do
+
+### Track your library
+
+The Dashboard lists your games with completion percentage, and **立即同步** refreshes from Steam on demand. Games you've played in the last 5 days are pinned to the top.
+
+### Tick guide checkboxes for you
+
+Optional. If you keep achievement guides as checklists — Notion pages or local markdown — the app can tick the boxes for achievements you've unlocked.
+
+Notion is set up on the first-run form (step 3), and stays reachable afterwards from the gear button in the Dashboard's top-right corner. It builds the Notion database for you, so you never copy a database ID by hand. Local markdown needs no setup at all.
+
+Details, and how matching works: [docs/guides.md](docs/guides.md). Step-by-step Notion authorisation, including the step most people miss: [docs/notion-setup.md](docs/notion-setup.md).
+
+### Have a guide written for you
+
+Optional. If you'd rather not write a guide from scratch, an AI can research the game online and draft one, which is then checked against your real achievement data before it lands.
+
+**This is the only part of the app that costs money**, and it's entirely optional — nothing else needs it. Works with DeepSeek, Anthropic or Gemini; you supply your own API key, and the app tells you what each run used.
+
+What the app guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote.
+
+### Rewrite part of a guide
+
+Once a guide exists, the ♻ 重写 dialog rewrites just the entries you pick and leaves every other byte exactly as it was, including passages you edited yourself. You can select rare achievements, ones you haven't earned yet, a single section, or pick achievements individually.
+
+### Go back to an earlier version
+
+Past versions of a guide — the copy taken before each overwrite, the local original left behind by a move to Notion, and failed drafts — sit behind the **备份** button at the end of that game's row, which appears only when there is something there. Any of them can be read, written back over the current guide, or deleted. Writing one back backs up what it replaces, so it is itself undoable.
+
+Settings → Step 4 has the same files sorted by size, for pruning. See [docs/guides.md](docs/guides.md#guide-archive).
+
+### Move to another machine
+
+The settings page's **备份** tab writes one zip holding the database, your guides and `config.json`, and restores from it. The credentials travel with it, so the new machine opens straight to the Dashboard — the first-run screen offers the same two steps.
+
+The zip has your API keys in plain text unless you exclude the config. See [docs/data.md](docs/data.md#backup-and-restore).
 
 ## What runs when
 
-**There is no scheduler, and nothing runs on a timer.** Everything is triggered by one of three things: starting `serve`, pressing **立即同步**, or running a command yourself. Nothing happens while your machine is asleep, and nothing happens while `serve` merely sits running — the Dashboard polls every 3 seconds, but only to redraw the progress bar, never to fetch anything.
+**There is no scheduler, and nothing runs on a timer.** Everything is triggered by opening the app or by pressing **立即同步**. Nothing happens while your machine is asleep, and nothing happens while the app merely sits in the tray — the Dashboard polls every 3 seconds, but only to redraw the progress bar, never to fetch anything.
 
-Opening the packaged app counts as starting `serve`: it runs the same server as a background process and stops it when you close the window. Everything below applies unchanged.
+| | Opening the app | 立即同步 |
+|---|---|---|
+| **Find new guide pages** | every time | — |
+| **Library + achievement counts + detail** | only if the data is stale | every press |
+| **Tick guide checkboxes** | after a sync, or if a new guide page turned up | after the sync |
+| **Update guide page status** | every time | after the sync |
 
-| | Starting `serve` | 立即同步 | Command line |
-|---|---|---|---|
-| **Find new guide pages** | every time | — | `guides` |
-| **Library + achievement counts + detail** | only if data is stale | every press | `sync`, `sync --fast` |
-| **Tick guide checkboxes** | after a sync, or if a new guide page turned up | after the sync | `checkbox-sync` |
-| **Update guide page status** | every time | after the sync | `guide-status` |
-
-Refreshing the browser does none of it — that re-reads the local database only. The staleness check runs once, when the **server starts**, against `syncStaleHours` (12h by default). So leaving `serve` running for days does not keep it fresh: press 立即同步, or restart.
-
-**The one gotcha:** `sync` never touches Notion — ticks and status changes only happen via `serve`, 立即同步, or `checkbox-sync` / `guide-status` run directly. Sampling, the guide jobs, and every config switch are covered in [docs/guides.md](docs/guides.md) and [docs/configuration.md](docs/configuration.md).
+The staleness check runs once, when the app **starts**, against a 12-hour threshold. Leaving the app open for days does not keep the data fresh — press 立即同步, or restart it. Refreshing the browser does none of the above; that re-reads the local database only.
 
 ## More
 
 | | |
 |---|---|
 | [docs/notion-setup.md](docs/notion-setup.md) | 连接 Notion 攻略库 —— 分步图解,含最容易漏的授权步骤和数据库 ID 的取法 |
-| [docs/configuration.md](docs/configuration.md) | every `config.json` option, environment variables, changing the port |
-| [docs/data.md](docs/data.md) | what's in the database, backup/restore, CSV export, what Steam can't tell us |
-| [docs/guides.md](docs/guides.md) | guide checkbox sync, Notion setup, how matching works |
-| [CLAUDE.md](CLAUDE.md) | architecture and conventions, for working on the code |
-| [launcher/README.md](launcher/README.md) | how the Windows app is built and packaged, for working on it |
-| [Releases](https://github.com/LethalKebab/steam-achievement-tracker/releases) | published builds and their notes |
+| [docs/guides.md](docs/guides.md) | Guide checkbox sync, how matching works, having one written for you |
+| [docs/data.md](docs/data.md) | What's in the database, backup and restore, CSV export, what Steam can't tell us |
+| [docs/configuration.md](docs/configuration.md) | Every setting, including changing the port |
+| [docs/cli.md](docs/cli.md) | Running from source, and the full command reference |
+| [Releases](https://github.com/LethalKebab/steam-achievement-tracker/releases) | Published builds and their notes |
 
 ## License
 
