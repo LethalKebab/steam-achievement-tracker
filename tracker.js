@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { stdin, stdout } from 'node:process';
 import { Writable } from 'node:stream';
 
-import { loadConfig, saveConfig, ROOT, DATA_ROOT, CONFIG_PATH } from './lib/config.js';
+import { loadConfig, saveConfig, switchAiProvider, ROOT, DATA_ROOT, CONFIG_PATH } from './lib/config.js';
 import {
   openDb, allGames, allGuides, countGames, getMeta, recentSyncLog,
   getGame, achievementsFor, appIdsWithAchievements,
@@ -80,7 +80,7 @@ function flagValue(name) {
  * 漏登记不会报错,只会让那个值被当成位置参数:`guide-gen --effort low 648800` 里
  * appid 变成 `low`,而报出来的是「找不到这个游戏」之类跟 `--effort` 毫无关系的话。
  *
- * `--key` / `--id` / `--older-than` 是补登记的(2026-08-18):它们一直是取值型,
+ * `--key` / `--id` / `--older-than` 是补登记的:它们一直是取值型,
  * 只是所在的命令(`init` / `drafts`)不收位置参数,所以没撞上过。留在表外等于
  * 「哪天这两个命令加了位置参数就悄悄坏掉」,而那不是个该留着的赌注
  */
@@ -118,12 +118,18 @@ function applyAiFlags(config) {
   const provider = flagValue('provider');
   const model = flagValue('model');
   if (provider) {
-    config.ai.provider = provider;
-    // 换了供应商却没指定模型:config.json 里那个是给上一家的(claude-* vs gemini-* vs
-    // deepseek-*),带过去必然报错。清掉,让新供应商用自己的默认值
-    if (!model) config.ai.model = '';
+    // **provider / key / model 三个一起换。** 这里原来只换了前后两个:key 留在原地,
+    // 于是 `--provider anthropic` 把上一家的 key 发去 api.anthropic.com,换回一句
+    // 「检查 ANTHROPIC_API_KEY」—— 而那个变量往往正是设对了的。指向反方向的报错
+    // 比没有报错更费时间。换 key 的规则(环境变量 → keys 槽位 → legacy 只归本家)
+    // 归 lib/config.js 的 resolveAiKey 一处管,设置页走的也是它
+    //
+    // model 不指定就清空:config.json 里那个是给上一家的(claude-* / gemini-* /
+    // deepseek-*),带过去必然撞上 assertModelMatchesProvider
+    config.ai = switchAiProvider(config.ai, provider, process.env, { model: model ?? '' });
+  } else if (model) {
+    config.ai.model = model;
   }
-  if (model) config.ai.model = model;
 
   // **`--effort` 是"这一次要多深"的选择,所以它属于 flag,不属于设置。**
   //
@@ -252,7 +258,7 @@ function makeSecretReader() {
  * `--create` 的交互部分:列页面 → 选一个 → 建库。
  *
  * **列表为空本身就是诊断**:token 有效却一个页面都看不到,只可能是 Connections
- * 那一步没做。以前这个处境只能靠一条和「数据库 ID 填错了」共用的报错去猜。
+ * 那一步没做 —— 而单靠一条和「数据库 ID 填错了」共用的报错是猜不出来的。
  */
 async function createGuideDbInteractively(io, probe) {
   stdout.write('正在看这个 integration 能访问哪些页面…');
@@ -343,7 +349,7 @@ async function cmdInitNotion() {
           console.log(`\r✅ 数据库可访问:里面有 ${pages.length} 个页面        `);
           dbOk = true;
         } catch (err) {
-          // 以前这里只提 Connections,于是「填的是页面 ID」的人会被赶去反复检查权限。
+          // **不能只提 Connections** —— 那样「填的是页面 ID」的人会被赶去反复检查权限。
           // 三种毛病,三种修法,一次说完
           console.log(`\r⚠️  数据库访问失败:${err.message}`);
           console.log('   token 本身是好的,所以问题在 ID 或权限:');
@@ -372,8 +378,8 @@ async function cmdInitNotion() {
  * 把「到底配好了没有」变成当场能看见答案的事,而不是等跑真流程时才炸。
  *
  * **一个字节都不写。** 存在的理由是这条链上的失败全都长得很像:token 不对、
- * ID 不是数据库、库没共享、状态选项缺一个 —— 前三个以前共用一句话,最后一个
- * 要等到第一次 `guide-gen` 才暴露。
+ * ID 不是数据库、库没共享、状态选项缺一个 —— 前三个很容易被并成一句话,最后一个
+ * 不查就要等到第一次 `guide-gen` 才暴露。
  */
 async function cmdNotionCheck() {
   const { config, db } = withSteam({ requireSteam: false });
@@ -387,9 +393,9 @@ async function cmdNotionCheck() {
   }
   const notion = new NotionClient(config);
 
-  // **判定来自 inspectGuideDb,和设置页共用一份。** 以前这条命令查得很全而设置页
-   // 几乎不查,两条路查的东西不一样正是那类"到上传时才现形"的 bug 的形状。
-  // 这里只负责把判定讲成一份人读的报告 —— 共享的是计算,不是措辞。
+  // **判定来自 inspectGuideDb,和设置页共用一份。** 两条路查的东西不一样,正是那类
+  // "到上传时才现形"的 bug 的形状。这里只负责把判定讲成一份人读的报告 ——
+  // 共享的是计算,不是措辞。
   //
   // `--probe-write` 要单独开:它会在库里建一页再立刻归档,而只读体检有权在默认路径上。
   const verdict = await inspectGuideDb(notion, dbId, { probeWrite: argv.includes('--probe-write') });
@@ -1030,9 +1036,9 @@ async function cmdAiCheck() {
  * **会花钱**,所以默认要人工确认一次(`--yes` 跳过),`--dry-run` 则只打印会发出去的
  * 提示词和落盘计划、一个请求都不发。
  *
- * 这里一度有一套花费上限(每次 / 每天,token 和美元各一组)和一张模型单价表,
- * 现在整套删了:单价我们核实不过来、搜索工具怎么计费也没实测,于是那些"上限"
- * 建立在一个连我们自己都不信的金额上。跑完只报 token 数 —— 那是 API 回的硬数字。
+ * **不要在这里加金额上限。** 单价我们核实不过来、搜索工具怎么计费也没实测,任何
+ * "上限"都会建立在一个连我们自己都不信的金额上。跑完只报 token 数 —— 那是 API
+ * 回的硬数字。
  */
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
@@ -1144,6 +1150,14 @@ async function cmdGuideGen() {
     onProgress(ev) {
       if (ev.phase === 'plan' && ev.chunks > 1) {
         p.done(`  ${ev.achievements} 个成就,一次写不完,分 ${ev.chunks} 段写`);
+      } else if (ev.phase === 'sections') {
+        p.update('  先把这份攻略的分区定下来…');
+      } else if (ev.phase === 'sections-done') {
+        p.done(`  分区定好了(${ev.count} 个):${ev.names.join(' · ')}`);
+      } else if (ev.phase === 'sections-failed') {
+        // **降级要出声。** 各段自己分的话小节标题会重复,而那是成品上看得见的退化 ——
+        // 不说的话用户只会觉得"这次生成的分区怎么乱七八糟"
+        p.done(`  ⚠️  分区没定成(${ev.reason}),改由各段自己分,小节标题可能重复`);
       } else if (ev.phase === 'rewrite') {
         p.done(`  校验没过,第 ${ev.round} 轮只重写其中 ${ev.chunks}/${ev.of} 段`);
       } else if (ev.phase === 'ask') {

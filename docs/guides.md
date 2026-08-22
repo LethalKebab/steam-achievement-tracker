@@ -43,11 +43,11 @@ node tracker.js notion-check --probe-write  # create a page and archive it: prov
 node tracker.js guides --notion   # finds pages not yet registered and links them up
 ```
 
-`notion-check` exists because every failure on this path looks like every other one: a bad token, an ID that isn't a database, a database that was never shared, a status option that's missing. The first three used to share one error message, and the fourth stayed invisible until the first `guide-gen`.
+`notion-check` exists because every failure on this path looks like every other one: a bad token, an ID that isn't a database, a database that was never shared, a status option that's missing.
 
-**The setup page now runs the same check when you connect a database**, so you no longer have to know this command exists to find out your database is unusable. Pasting an ID validates the whole schema, not just that the ID resolves; anything wrong is reported there and then, with a 帮我补上 button when it is the kind of problem the program can fix. It also creates one page and immediately archives it — that is the only way to tell a read-only integration from a working one, and a read-only token otherwise passes every check and fails at the first `guide-gen`.
+**The setup page runs the same check when you connect a database**, so you do not have to know this command exists to find out your database is unusable. Pasting an ID validates the whole schema, not just that the ID resolves; anything wrong is reported there and then, with a 帮我补上 button when it is the kind of problem the program can fix. It also creates one page and immediately archives it — that is the only way to tell a read-only integration from a working one, and a read-only token otherwise passes every check and fails at the first `guide-gen`.
 
-Appending options writes to your database, so it only ever happens from a button or `--fix`, never silently on save. Existing options are carried over untouched; nothing is renamed or removed. This was measured against the live API on 2026-08-14 and it works: a status property missing `Staged` had it added, and the existing options kept their colours. Whether it worked is still decided by reading the database back afterwards rather than by the API's response code, because Notion accepts *some* status-property edits with a 200 and changes nothing (option *groups* behave that way), and a repair that lies about succeeding is worse than one that admits it cannot. If that ever happens you get told exactly which options to add by hand.
+Appending options writes to your database, so it only ever happens from a button or `--fix`, never silently on save. Existing options are carried over untouched; nothing is renamed or removed. Measured against the live API: a status property missing `Staged` has it added, and the existing options keep their colours. Whether it worked is still decided by reading the database back afterwards rather than by the API's response code, because Notion accepts *some* status-property edits with a 200 and changes nothing (option *groups* behave that way), and a repair that lies about succeeding is worse than one that admits it cannot. If that ever happens you get told exactly which options to add by hand.
 
 Pages without an `appid:` line are skipped quietly every run — they're guides you haven't written yet, not errors.
 
@@ -122,6 +122,8 @@ re-ticked from your Steam data automatically, so their state comes back exactly;
 sub-steps match no achievement, so those come back unticked. If the backup fails, nothing
 is written. Add `--dry-run` to see all of that and stop there.
 
+To get one of those backups back, see [Guide archive](#guide-archive) below.
+
 The Dashboard offers the same thing: a game that already has a guide shows a **♻ 重写** button
 next to its 📖 攻略 link, and it runs the same preflight before anything is written.
 
@@ -131,9 +133,8 @@ on the command line, where blank simply means "research these again and rewrite 
 holds one width throughout, so nothing shifts under the cursor as you tick.
 
 **It has no body text at all.** Scope, count and instruction are each written on the control that
-carries them, and every sentence that was once above them turned out to be a restatement of
-something already on screen — including the loss note, which "rewrite" already implies and the
-backup already covers. That note is still printed in full on the command line: `--overwrite`
+carries them, and a sentence above them would only restate something already on screen —
+including the loss note, which "rewrite" already implies and the backup already covers. That note is still printed in full on the command line: `--overwrite`
 writes for someone who typed a flag and can afford the detail, a dialog cannot, and one wording
 forced to serve both is wrong in both places.
 
@@ -192,9 +193,9 @@ node tracker.js guide-gen <appid> --only locked --dry-run
 | `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
 | `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
 
-That list is deliberately the same set the Dashboard dialog offers. Three selectors were removed
-once it existed — `all` (whole-guide rewrite has its own flag, `--overwrite`), `thin` (its criterion
-needs its threshold explained before it means anything, which makes it unusable as a button),
+That list is deliberately the same set the Dashboard dialog offers, and three plausible selectors
+are deliberately absent — `all` (whole-guide rewrite has its own flag, `--overwrite`), `thin` (its
+criterion needs its threshold explained before it means anything, which makes it unusable as a button),
 `unlocked` (rewriting entries you have already earned was never something anyone asked for) and
 `failing` (in practice that set is almost always empty, and a button permanently reading `0` just
 makes you work out what the `0` means every time — `guide-lint <appid>` lists those properly).
@@ -273,6 +274,82 @@ The checkboxes are **not** written by the model. It only ever emits `- [ ]`; the
 What the machine checks is **format and data**: every achievement has its own checkbox row, no merged rows, names match Steam exactly, descriptions are quoted verbatim, ticks match reality. If that fails it feeds the specific errors back and asks for a rewrite, up to three times; still failing, the attempt is kept under `guides/.drafts/`, which guide discovery cannot see — so a draft that didn't pass can never end up ticking your notes.
 
 **What it cannot check is whether the guide is right.** Whether the steps work, whether a difficulty rating is fair, whether "easy to miss" is actually true — that's the whole value of a guide and no machine verifies it. Read what it wrote.
+
+## Guide archive
+
+Three directories under `guides/` accumulate past versions, and none of them is visible to
+guide discovery (it reads the directory non-recursively, so an archived file can never
+re-register itself and can never tick your boxes):
+
+| | what lands there |
+|---|---|
+| `.backups/` | the previous version, every time a guide is overwritten — a local `.md` copied as-is, a Notion page dumped as raw block JSON |
+| `.migrated/` | the local original, left behind when a guide moves to Notion. It is a move, never a delete |
+| `.drafts/` | an attempt that failed validation three times |
+
+### Getting one back
+
+On the Dashboard, a row that has archives carries a **备份 N** button at the end, next to
+攻略 / 重写 / Notion. It only appears when there is something there, so the count on it is
+also the answer to "is there anything to go back to". Clicking it lists that game's archives,
+newest first, each offering 查看 / 覆盖 / 删除.
+
+- **查看** renders the content. A Notion backup is block JSON, so it's rendered to plain text
+  for reading only — restoring always uses the raw blocks, because the readable rendering
+  is lossy and the backup's job is to go back, not to look good.
+- **覆盖** puts that version back: a `.md` to its local file, a `.json` to the Notion page it
+  came from. The verb is deliberate — it *is* an overwrite of whatever is there now. Which is
+  why **it backs up what it is about to replace first**, into the same `.backups/` directory:
+  the version you just displaced appears at the top of the same list, one click from coming
+  back in turn. The archive you overwrote *from* is copied, not consumed, so it stays too.
+- **删除** is permanent, and here it is one file at a time — this panel is about a single
+  game, where "all of them" is rarely what you mean. The bulk button lives in Settings.
+
+Both destructive actions take **two clicks**, and the second click's button says what will
+happen — 覆盖本地文件 / 整页重写 / 永久删除 — rather than 确定. There is no dialog on top of
+the dialog: adjacent rows here often differ only by a timestamp, so moving the question away
+from the row it is about is exactly the wrong thing to do. An armed button stays armed until
+you click elsewhere, press Escape, or close the panel — it does not time out.
+
+### Settings → Step 4 → 攻略备份
+
+The same files, sorted **biggest first**, with 查看 and 删除 — plus a **全部删除** at the foot
+of the list. This view answers a different question — what is taking up space, since every
+archive travels inside the backup zip and a Notion page dumps as ~120 KB — so it is sorted by
+size rather than by date, and it does not offer 覆盖: that belongs next to the game it is about.
+
+全部删除 takes the same two clicks, and the second one reads 永久删除 N 份 · X MB. Be clear on
+what that includes: `.backups/` holds the only remaining copy of every guide version you have
+ever overwritten, so this is the undo for every rewrite, not a pile of junk with a size
+attached. Only `.drafts/` is genuinely disposable. There is still no time-based sweep —
+nothing here deletes itself, and the button never fires without you naming the amount.
+
+It sits **below** the list rather than in the collapsed header on purpose: the header shows a
+total and nothing else, so a delete key there would fire against a set you cannot see. And it
+deletes exactly the files that were on screen when you armed it, not "whatever is in the
+directories" — a rewrite finishing in the background between the two clicks would otherwise
+take a backup you never saw along with them.
+
+Its other job is **orphans**: archives whose game is no longer in your library, which
+therefore have no row to carry a 备份 button. They are listed first regardless of size. Restoring one is not
+offered because it could not work — it would register a guide against a game the Dashboard
+does not show — so the way back is to add the game again first.
+
+Two consequences of restoring worth knowing:
+
+- Restoring a `.md` for a game whose guide now lives in Notion **re-registers it as local**.
+  The Notion page is not touched, but it stops being the registered guide, and the panel
+  says so. Use 「搬去 Notion」 to send it back.
+- Restoring a Notion backup deletes the page's current blocks before writing the old ones.
+  That order is deliberate: writing first would leave old and new side by side, and running
+  it again would triple them, while deleting first means a failure is fixed by simply
+  restoring again. Notion's delete is an archive to its own trash, recoverable for 30 days,
+  and the fresh backup is on disk either way. Blocks that cannot be recreated by an append
+  (`child_database`, `synced_block`, and similar — they point at other entities) are dropped
+  rather than failing the whole restore.
+
+The CLI has `node tracker.js drafts [--clean]` for `.drafts/` only; the other two are
+panel-only.
 
 ## Reading a guide from the Dashboard
 

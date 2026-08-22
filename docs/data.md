@@ -99,7 +99,7 @@ Three things about it are load-bearing, and each fails silently if changed:
 
 Restoring **replaces** the tables — it is a restore, not a merge, so rows on this machine that aren't in the backup are gone. Guide *files* are the exception: they are written over, never deleted, because losing a hand-written `.md` is unrecoverable while an extra unreferenced file costs nothing.
 
-`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides.
+`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides, and any of them can be written back from that game's 备份 button on the Dashboard, so they are worth carrying to a new machine. It also means the zip grows with every overwrite (a Notion page dumps as ~120 KB of block JSON); Settings → Step 4 → 攻略备份 lists them biggest-first for pruning, with a 全部删除 at the foot of the list.
 
 ## Exporting to a spreadsheet
 
@@ -110,12 +110,4 @@ node tracker.js export ~/Desktop  # or anywhere
 
 Writes `RAW DATA.csv`, `ACHIEVEMENTS.csv` and `GUIDES.csv`. Handy for sorting, filtering and charting the data in a spreadsheet.
 
-**This is one-way, and it is not a backup.** There is no import — the CSV path was removed on 2026-08-19 (see below), so nothing reads these files back. They also hold three tables and nothing else: your credentials in `config.json`, the local guide bodies under `guides/`, and `sync_log` are all absent. Use `node tracker.js backup` for anything you might need to restore.
-
-## Why there is no CSV import
-
-There used to be one — `node tracker.js import <folder>`, plus an optional folder field and three blank-template downloads on the setup page. It was written for a **single migration**: the author's own Google Sheet into this tool. That migration finished, and what remained was a path nobody walked and three templates that asked a new user to hand-type a few hundred rows of positional CSV, which was never going to happen.
-
-The columns it existed to carry — ♥, ★, the family flag, `Manual` rows and hand-entered counts — are still exactly the things Steam's API cannot supply. That has not changed. What changed is the answer for keeping them: `node tracker.js backup` moves the database itself, which is lossless by construction rather than by column-order discipline.
-
-The old implementation is in git if it is ever wanted back: `git log -- lib/csv.js`.
+**This is one-way, and it is not a backup.** There is no import, so nothing reads these files back. They also hold three tables and nothing else: your credentials in `config.json`, the local guide bodies under `guides/`, and `sync_log` are all absent. Use `node tracker.js backup` for anything you might need to restore.
