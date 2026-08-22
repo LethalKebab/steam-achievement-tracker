@@ -35,6 +35,9 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PAGES = ['Dashboard.html', 'Setup.html'];
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
 
+/** 拼接多段内联脚本用的分隔符 */
+const SEP = String.fromCharCode(10);
+
 // ---------------------------------------------------------------------------
 // 提取
 // ---------------------------------------------------------------------------
@@ -206,8 +209,17 @@ describe('CSS 里的类型选择器还有对应的标签', () => {
       const html = read(page);
       // 在**静态标记 + JS 拼的字符串**里找 `<tag` —— Dashboard 的 img/svg 只存在于脚本里
       const src = emittingSource(html).replace(/<style[^>]*>[\s\S]*?<\/style>/g, '');
+      // **第三种写法:`document.createElement('tag')`。** 少了这条,一个只由 DOM API
+      // 造出来的标签会被报成"规则静默失效",而它在页面上明明存在 —— 存档面板的
+      // `.arc-main b` 就是这么撞上的。以前没暴露纯属巧合:createElement 造的
+      // div/span/button/li 恰好在别处也以 `<tag` 出现过,`b` 是第一个没有的
+      const created = new Set(
+        [...src.matchAll(/createElement\(\s*['"]([a-zA-Z][a-zA-Z0-9-]*)['"]/g)].map((m) => m[1].toLowerCase())
+      );
       const orphans = [...cssTypeSelectors(styleBlocks(html).join('\n'))]
-        .filter((tag) => !TAG_WHITELIST.has(tag) && !new RegExp(`<${tag}[\\s>]`).test(src));
+        .filter((tag) => !TAG_WHITELIST.has(tag)
+          && !created.has(tag)
+          && !new RegExp(`<${tag}[\\s>]`).test(src));
       // 这一条是照着真事写的:<details> 换成 <section> 之后,details ol code 那条规则
       // 静默失效,页面上的行内 code 掉回浏览器默认样式,没有任何东西报错
       assert.deepEqual(orphans, [],
@@ -602,6 +614,109 @@ describe('搜索框一个人干两件事', () => {
   });
 });
 
+describe('最近在玩:徽章和置顶共用一个窗口', () => {
+  // **两者各写各的天数,是一种不会报错的坏。** 表现是某一行排到最上面,而行上
+  // 没有任何东西说明为什么 —— 用户只会觉得排序坏了。CLAUDE.md 把这条写成规矩,
+  // 但在这条测试之前没有任何东西拦着它。
+  const js = () => inlineScripts(read('Dashboard.html'))
+    .join(SEP)
+    .replace(/(^|[^:])\/\/[^\n]*/gm, '$1')   // **先行注释再块注释**,见 CLAUDE.md
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  /** 某个函数的函数体 */
+  const bodyOf = (src, name) => {
+    const i = src.indexOf('const ' + name + ' = ');
+    assert.ok(i > 0, `找不到 ${name} —— 这条检查失去了目标,不是通过了`);
+    return src.slice(i, src.indexOf('};', i));
+  };
+
+  test('窗口只有一个数,写在一个具名常量里', () => {
+    // 散在两处的字面量没法共用,而"共用"正是这一组要保的东西
+    assert.match(js(), /const RECENT_PLAY_DAYS = \d+;/, '窗口必须是一个具名常量');
+  });
+
+  test('徽章读的是那个常量,不是自己写的数字', () => {
+    assert.match(bodyOf(js(), 'isRecentlyPlayed'), /RECENT_PLAY_DAYS/);
+  });
+
+  test('置顶建立在徽章之上,不自己再算一遍天数', () => {
+    // **置顶可以多加条件,但不能另起一个窗口。** 多的那个条件(有成就可追)是
+    // 有意的不对称:有徽章没置顶讲得通,有置顶没徽章讲不通
+    const pin = bodyOf(js(), 'pinsToTop');
+    assert.match(pin, /isRecentlyPlayed\(/, '置顶必须走 isRecentlyPlayed');
+    assert.doesNotMatch(pin, /playedDaysAgo|RECENT_PLAY_DAYS/,
+      '置顶里不该再出现天数比较 —— 那就是第二个窗口');
+  });
+
+  test('置顶还要求真的有成就可追', () => {
+    // 只挡 'N/A' 等于没挡:"没进度可看"有三种长相(N/A、null、0),而 null
+    // 最常见 —— 刚加进库的游戏正好既是最近在玩、又还没同步到成就数
+    assert.match(bodyOf(js(), 'pinsToTop'), /typeof g\.total === 'number' && g\.total > 0/);
+  });
+});
+
+describe('筛选芯片的状态记号', () => {
+  // 三个状态的差别全靠这一个 9x9 的记号,而**改坏它不会有任何东西报错** ——
+  // 页面照常渲染,筛选照常工作,只是每天扫几十遍的那一行开始读错意思。
+  const css = () => styleBlocks(read('Dashboard.html')).join(SEP).replace(/\/\*[\s\S]*?\*\//g, '');
+  /** 记号那一段:从 .chip-dot 开始,到下一个不相干的规则为止 */
+  const markBlock = () => {
+    const s = css();
+    const from = s.indexOf('.chip-dot {');
+    const to = s.indexOf('input[type="text"] {', from);
+    assert.ok(from > 0 && to > from, '找不到记号那一段 —— 这条检查失去了目标,不是通过了');
+    return s.slice(from, to);
+  };
+
+  test('排除态是两笔反向的对角线,不是一条横杠', () => {
+    // **一条横杠是「部分选中」,不是「排除」。** HTML 的 indeterminate、各家系统的
+    // 半选框,画的都是一条杠;图标库里 minus 的语义也是 subtract/decrease ——
+    // 「减掉一部分」。而这一格要说的是「整个去掉」。同一个字形背两个相反的意思,
+    // 读的人得先猜是哪一个,于是改成叉。
+    // **退回横杠的方式很安静**:删掉 ::after 那半边规则就行,剩下的一笔正好是杠。
+    const b = markBlock();
+    const not = b.slice(b.indexOf('[data-state="not"]'));
+    assert.match(not, /rotate\(45deg\)/, '排除态要有一笔转 +45°');
+    assert.match(not, /rotate\(-45deg\)/, '排除态要有另一笔转 -45° —— 只有一笔就退回横杠了');
+    assert.match(not, /\.chip-dot::before/, '第一笔');
+    assert.match(not, /\.chip-dot::after/, '第二笔');
+  });
+
+  test('第二笔平时宽度为 0,否则中立态会多出一小块', () => {
+    // ::after 在中立和只看两态都不该看得见。0 宽的盒子什么都不画,是这里唯一
+    // 不用额外规则就能做到「不存在」的写法
+    const b = markBlock();
+    const base = b.slice(0, b.indexOf('[data-state='));
+    assert.match(base, /\.chip-dot::after\s*\{[^}]*width:\s*0\b/,
+      '::after 的初始宽度必须是 0');
+  });
+
+  test('点亮态的光晕只能挂在第一笔上', () => {
+    // **box-shadow 的 spread 不看盒子有没有宽度。** 挂到宽度为 0 的 ::after 上,
+    // 会在圆点边上凭空画出一块 6x8 的圆角方块 —— 只在「只看」这一态出现,
+    // 而且看起来像渲染 bug,不像写错的规则
+    const b = markBlock();
+    const rules = [...b.matchAll(/([^{}]+)\{([^}]*box-shadow:\s*0 0 0[^}]*)\}/g)];
+    assert.ok(rules.length >= 1, '找不到光晕那条规则 —— 这条检查失去了目标,不是通过了');
+    for (const [, sel] of rules) {
+      assert.doesNotMatch(sel, /::after/, '光晕不能挂到 ::after 上:' + sel.trim());
+    }
+  });
+
+  test('关掉动效时,记号不能还在转', () => {
+    // 记号现在会转 45°,这正是 prefers-reduced-motion 要关掉的那种动作。
+    // **上一版这条规则选的是 .filter-chips** —— 容器身上根本没有 transition,
+    // 那条规则从写下那天起就没生效过,而且它看起来完全正常
+    const s = css();
+    const rm = s.slice(s.indexOf('@media (prefers-reduced-motion'));
+    assert.ok(rm.length > 0, '找不到 reduced-motion 那一段');
+    assert.match(rm, /\.chip-dot::before/, '要关掉的是伪元素身上的过渡');
+    assert.match(rm, /\.chip-dot::after/, '两笔都要关');
+    // 反过来钉住:过渡确实挂在伪元素上,不在容器上 —— 否则上面两条又变成空转
+    assert.match(markBlock(), /\.chip-dot::before,\s*\n?\s*\.chip-dot::after\s*\{[^}]*transition:/,
+      '过渡必须挂在两个伪元素上');
+  });
+});
+
 describe('自托管字体', () => {
   const FONT_CSS = 'assets/fonts/noto-sans-sc.css';
 
@@ -863,4 +978,552 @@ describe('确认框里的推理强度', () => {
     const noBlockComments = js.replace(/\/\*[\s\S]*?\*\//g, '');
     assert.doesNotMatch(markup + noBlockComments, /约 \d[–-]\d 分钟/, '这句话在低档上会当场变错');
   });
+});
+
+/**
+ * 供应商切换:每家记自己的 key 和模型。
+ *
+ * 源码断言,理由和 `loadAiState` 那两条同源 —— 这段逻辑住在页面脚本里,零依赖没有
+ * DOM,单测够不着。两条都对着**静默**的失败:出错不报,只是把事情做成了另一件事。
+ */
+describe('AI 供应商切换', () => {
+  /** 只留代码:两种注释都剥,否则解释这条规则的注释就把断言喂饱了 */
+  const setupJs = () =>
+    inlineScripts(read('Setup.html'))
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  /** 切到 paintAiProvider 那个函数体。**用真锚点,不用字节数** —— 窗口会随内容长短悄悄挪 */
+  const paintBlock = () => {
+    const js = setupJs();
+    const i = js.indexOf('function paintAiProvider');
+    assert.ok(i > 0, '找不到 paintAiProvider');
+    const j = js.indexOf("$('ai-provider').addEventListener('change'", i);
+    assert.ok(j > i, '找不到 paintAiProvider 后面的 change 监听 —— 切块的下界没了');
+    return js.slice(i, j);
+  };
+
+  test('选项文案从 dataset.label 重画,不从当前 textContent', () => {
+    // 直接 `opt.textContent += ' · 已配置'` 第一次是对的,**第二次重画就叠上去**:
+    // 「DeepSeek · 已配置 · 已配置」。而重画每次切供应商都会发生,所以这是个
+    // 用两下就出现、却不报任何错的失败
+    const block = paintBlock();
+    assert.match(block, /opt\.dataset\.label/, '基础文案必须存在 dataset 里');
+    assert.match(block, /opt\.textContent = /, '重画是整个赋值,不是追加');
+    assert.doesNotMatch(block, /textContent\s*\+=/, '追加会让标记一次次叠上去');
+  });
+
+  test('每家自己的 model 画回输入框', () => {
+    // model 和 key 一样是一家一个值(见 lib/config.js 的 ai.providers)。不画的话
+    // 切回来时框里还是上一家的模型名,提交就写进了这一家的槽位 —— 而 claude-* 送去
+    // Gemini 会被 assertModelMatchesProvider 拦下,报的却是"模型和供应商对不上",
+    // 指不到"这个值是切换时留下的"
+    assert.match(paintBlock(), /\$\('ai-model'\)\.value = cur\?\.model/);
+  });
+
+  test('换一家先清掉已经打进去的 key', () => {
+    // **这条是这里唯一会写坏数据的。** 打了一半 Gemini 的 key 又切回 Anthropic,
+    // 不清的话那串字符会作为 Anthropic 的 key 存进去。它一定是错的,而报出来的是
+    // 一次验证失败,指不到"你刚才换了供应商"这个真因上
+    const js = setupJs();
+    const i = js.indexOf("$('ai-provider').addEventListener('change'");
+    assert.ok(i > 0, '找不到供应商下拉的 change 监听');
+    const block = js.slice(i, js.indexOf('});', i));
+    assert.match(block, /\$\('ai-key'\)\.value = ''/, '换一家必须清掉输入框里的 key');
+    assert.match(block, /paintAiProvider\(\)/, '清完还要重画,否则状态停在上一家');
+  });
+
+  test('步骤标题上的「已配置」问的是这一步办完没有,不是当前这家配了没', () => {
+    // 配好了 Anthropic 却停在 Gemini 上,这一步显然是办过的。写成
+    // `!cur?.hasKey` 的话,切到一家没配的就把整步标成没配 —— 看着像配置丢了
+    assert.match(paintBlock(), /\$\('ai-set'\)\.hidden = !Object\.values\(aiProviders\)/);
+  });
+});
+
+/**
+ * API Key 的占位符按供应商换。
+ *
+ * 三家共用一个输入框之后,「把 Anthropic 的 key 粘进 Gemini 那一栏」是这次改版**新造
+ * 出来**的失误,而一个写死的 `sk-...` 对其中两家都是错的 —— 它非但拦不住,还在替
+ * 那个错误背书。用户报的。
+ */
+describe('AI Key 占位符', () => {
+  const html = read('Setup.html');
+
+  test('静态标记里不写死任何一家的形状', () => {
+    // JS 起来之前那一瞬间宁可是空的,也不要是错的。写死一个就有两家在说谎
+    const step = stepBlock(html, 2);
+    const m = step.match(/<input[^>]*id="ai-key"[^>]*>/);
+    assert.ok(m, '找不到 ai-key 输入框');
+    assert.doesNotMatch(m[0], /placeholder=/, 'ai-key 的占位符由 paintAiProvider 按供应商填');
+  });
+
+  test('三家各有各的形状,而且互不相同', () => {
+    const js = inlineScripts(html)
+      .join('\n')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const i = js.indexOf('const AI_KEY_HINT');
+    assert.ok(i > 0, '找不到 AI_KEY_HINT');
+    const block = js.slice(i, js.indexOf('}', i));
+
+    const hints = [...block.matchAll(/(\w+):\s*'([^']+)'/g)].map((m) => [m[1], m[2]]);
+    assert.deepEqual(hints.map((h) => h[0]).sort(), ['anthropic', 'deepseek', 'gemini']);
+    assert.equal(
+      new Set(hints.map((h) => h[1])).size, hints.length,
+      '两家共用一个形状 —— 那正是这条测试要防的东西'
+    );
+    // Anthropic 的 key 是 sk-ant- 开头,DeepSeek 的只是 sk-。两者互为前缀,
+    // 所以「都以 sk- 开头」不算区分,必须是完整字符串不同
+    assert.equal(Object.fromEntries(hints).anthropic, 'sk-ant-...');
+    assert.equal(Object.fromEntries(hints).gemini, 'AIza...');
+  });
+
+  test('形状只是提示,任何地方都不拿它校验', () => {
+    // 认前缀 = 供应商下次改格式时把一把好 key 拒掉,而错误会说「key 无效」,
+    // 指向一个完全正确的东西。Notion 那一栏当年就是这么定的规矩
+    const all = read('Setup.html') + readFileSync(join(ROOT, 'lib', 'api.js'), 'utf8');
+    const noComments = all.replace(/\/\*[\s\S]*?\*\//g, '').replace(/<!--[\s\S]*?-->/g, '');
+    assert.doesNotMatch(
+      noComments,
+      /startsWith\(\s*'(sk-|AIza)/,
+      '按前缀校验 API Key —— 厂商改格式那天会把好 key 拒掉'
+    );
+  });
+});
+
+describe('攻略备份:同一个数只有一条重画路径', () => {
+  // 「备份 N」这个数在两处渲染:行尾那个按钮(`render()` 拼的 HTML 串)和弹框里
+  // 的摘要行(`paintArchive()`)。删掉一份之后只重画其中一处,两个数就在同一屏上
+  // 互相矛盾,而且不刷新页面永远不会自己对上 —— 实测撞到过,弹框写「1 份」,
+  // 行上还写着「备份 2」。
+  //
+  // 这是这个项目栽过的老毛病(见 CLAUDE.md 里 `paintCount` 那条:「已选 N 条」
+  // 曾经静默停在上一次全量重画的值)。所以两个动作都必须走同一个 refreshArchives。
+  //
+  // **注释要先剥掉** —— 上面那段注释里 `render()`、`paintArchive` 一个不少,
+  // 不剥的话把代码删光了断言照样过,这个文件本身就吃过这个亏
+  const src = read('Dashboard.html')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+  test('refreshArchives 三处都重画:索引、弹框、表格', () => {
+    const fn = src.slice(
+      src.indexOf('async function refreshArchives'),
+      src.indexOf('async function loadArchiveIndex')
+    );
+    assert.ok(fn.length > 0 && fn.length < 600, '切到的应该就是 refreshArchives 那一段');
+    assert.match(fn, /loadArchiveIndex\(\)/, '不重新拉索引,行上那个数还是旧的');
+    assert.match(fn, /paintArchive\(\)/, '不重画弹框,列表还是旧的');
+    assert.match(fn, /render\(\)/, '不重画表格,行尾那个「备份 N」还是旧的');
+  });
+
+  test('编辑中不重画 —— render() 会把正在输入的数字框连焦点一起换掉', () => {
+    const fn = src.slice(
+      src.indexOf('async function refreshArchives'),
+      src.indexOf('async function loadArchiveIndex')
+    );
+    assert.match(fn, /editingAppid === null/);
+  });
+
+  test('删和覆盖两个动作都走 refreshArchives,没有一个绕过去', () => {
+    const block = src.slice(src.indexOf('function arcRow'), src.indexOf('function paintArchive'));
+    assert.ok(block.length > 0, '切到的应该是 arcRow');
+    assert.equal(
+      (block.match(/refreshArchives\(\)/g) || []).length, 2,
+      '覆盖和删除各一次 —— 少一个,那条路上的两个数就会分家'
+    );
+    assert.doesNotMatch(block, /await loadArchiveIndex\(\);\s*paintArchive\(\)/,
+      '手写这两句就是绕开了 refreshArchives,表格不会跟着重画');
+  });
+
+  test('setGuideBusy 也重画 —— 置灰是渲染出来的,不改完就得重画', () => {
+    const fn = src.slice(
+      src.indexOf('function setGuideBusy'),
+      src.indexOf('async function refreshArchives')
+    );
+    assert.ok(fn.length > 0 && fn.length < 600);
+    assert.match(fn, /render\(\)/);
+    assert.match(fn, /editingAppid === null/);
+  });
+});
+
+describe('置灰和备份数:每一条出口都要收拾干净', () => {
+  // `guideBusy` 决定行上「重写」「Notion」灰不灰,而置灰是**渲染出来的**。
+  // 以前是 `btn.disabled = true` 挂在 DOM 节点上,`loadDashboard()` 重画一次就
+  // 顺手清掉了 —— 那条"自动清扫"的路随着改成渲染而消失了,于是任何一条不显式
+  // 解除的出口都会把那一行永久卡在灰色,直到刷新页面。成功那条路正是原来
+  // 没有解除的(它不需要),所以这个 bug 恰好长在最常走的那条路上。
+  //
+  // 同一批出口还各自刚生成了一份存档(重写存原文进 .backups/,搬运把原件放进
+  // .migrated/),所以行尾那个「备份 N」也要跟着重拉 —— 「重写完想反悔」正是
+  // 最需要它出现的时刻。
+  //
+  // **注释必须先剥掉**:上面这段和代码旁边那几段注释里,setGuideBusy /
+  // refreshArchives 一个不少,不剥的话代码删光了断言照样过
+  const src = read('Dashboard.html')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+  const fetchGen = () => {
+    const a = src.indexOf('function fetchGen()');
+    const b = src.indexOf('fetchGen();', a + 20);
+    assert.ok(a > 0 && b > a, '切不到 fetchGen');
+    return src.slice(a, b);
+  };
+
+  test('生成/重写跑完:解除置灰 + 重拉备份数', () => {
+    const fn = fetchGen();
+    assert.match(fn, /setGuideBusy\(r\.appid, false\)/,
+      '不解除的话那一行的重写按钮会一直灰到刷新页面');
+    assert.match(fn, /refreshArchives\(\)/,
+      '这次重写刚存了一份原文,行尾的「备份 N」要跟着出来');
+  });
+
+  test('生成/重写失败:也要解除置灰,而且 appid 取自快照不是 result', () => {
+    const fn = fetchGen();
+    assert.match(fn, /setGuideBusy\(s\.appid, false\)/,
+      '失败时没有 result,只能从服务端快照拿 appid');
+  });
+
+  test('搬去 Notion 成功:解除置灰 + 重拉备份数', () => {
+    // **切到 successHandler 里面,而且数个数。** 第一版切的是整个 rpc 链,
+    // 于是 failureHandler 里那句一模一样的 `setGuideBusy(appid, false)` 就把
+    // 断言喂饱了 —— 把成功路径那句删掉,测试照样绿。变异测试当场抓到,
+    // 这个文件反复产出的正是这种形状(见文件头那几条)
+    // migrate 是**两层嵌套的 rpc**(先 previewGuideToNotion,再 migrateGuideToNotion),
+    // 所以从里层那个调用往回找它自己的 successHandler,别从外层往后找
+    const call = src.indexOf('.migrateGuideToNotion(appid)');
+    const a = src.lastIndexOf('.withSuccessHandler(function (r)', call);
+    const fn = src.slice(a, src.indexOf('.withFailureHandler', a));
+    assert.ok(fn.length > 0 && fn.length < 3000, '切到的应该是 migrate 的成功处理');
+    assert.equal(
+      (fn.match(/setGuideBusy\(appid, false\)/g) || []).length, 2,
+      '两处:r.error 那条提前返回,和真正成功那条 —— 少一个就有一条路会把按钮卡在灰色'
+    );
+    assert.match(fn, /refreshArchives\(\)/, '搬运刚把原件放进 .migrated/,备份数变了');
+  });
+
+  test('弹框没开就不画它 —— refreshArchives 会被跑完的任务调用', () => {
+    const fn = src.slice(
+      src.indexOf('async function refreshArchives'),
+      src.indexOf('async function loadArchiveIndex')
+    );
+    assert.match(fn, /arcModal\.classList\.contains\('show'\)/,
+      '不判断的话,重写跑完会把弹框画成上一次看过的那个游戏的列表');
+  });
+});
+
+describe('生成成功那一屏的两个备份动作', () => {
+  // 「读一遍确认没问题」之后只有两种结论,所以这里必须有两个动作:这版可以 →
+  // 删掉旧的;这版不如旧的 → 用回旧的。**只留删除的话,最可能想反悔的那一刻,
+  // 屏幕上唯一的按钮是「把反悔的本钱销毁」。** 要用它们的那一刻就是刚点开攻略的
+  // 那一刻,所以它们摆在「打开攻略」旁边——摆到别处就等于「等会儿再收拾」,
+  // 而等会儿多半不会来。
+  //
+  // 注释先剥掉:下面这几段代码旁边的注释里 backup / deleteGuideArchive 一个不少
+  const src = read('Dashboard.html')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '');
+
+  test('没有备份就两个动作都不出现 —— 整篇新生成没有旧的可存', () => {
+    assert.equal((src.match(/r\.backup && r\.backup\.id/g) || []).length, 2,
+      '两个动作各要判一次;不判的话新生成那一屏会摆点了必然失败的按钮');
+  });
+
+  test('两个都跟着「打开攻略」进标题行,恢复在删除前面', () => {
+    // **两个分支都要拼上**:标题行有「局部重写」和「整篇生成」两种写法,
+    // 只断言出现过一次的话,删掉其中一个分支的拼接测试照样绿 —— 变异测试抓到过。
+    // 顺序也钉住:能挽回的排前面,不可逆的排最后
+    assert.equal(
+      (src.match(/where \+ restoreBackup \+ dropBackup/g) || []).length, 2,
+      '局部重写和整篇生成两条标题都要带上这两个,且恢复在删除之前'
+    );
+    const i = src.indexOf('const dropBackup');
+    const j = src.indexOf('where + restoreBackup + dropBackup');
+    assert.ok(i > 0 && j > i, '先算后用');
+    assert.ok(src.indexOf('const restoreBackup') < i, '恢复要先于删除算出来');
+  });
+
+  test('恢复也是两下点,第二下说的是后端相关的后果', () => {
+    const fn = src.slice(
+      src.indexOf("querySelectorAll('[data-restore-backup]')"),
+      src.indexOf("querySelectorAll('[data-drop-backup]')")
+    );
+    assert.ok(fn.length > 0 && fn.length < 3000, '切到的应该是那个处理器');
+    assert.match(fn, /if \(!armed\)/, '第一下只武装,不覆盖');
+    assert.match(fn, /data-restore-label/,
+      '第二下的标签要说后果,而且是渲染时按后端算好的 —— 处理器里再判一次早晚只改一处');
+    assert.match(fn, /restoreGuideArchive\(/);
+  });
+
+  test('后果那句话按后端分,Notion 要说「整页重写」', () => {
+    // Notion 那边是**先删掉整页的块再写回去**,和覆盖一个本地文件不是一回事,
+    // 说成一样的话用户按下去之前不知道自己批准的是什么
+    const i = src.indexOf('const restoreBackup');
+    const seg = src.slice(i, src.indexOf('const dropBackup'));
+    assert.match(seg, /整页重写/, 'Notion 分支');
+    assert.match(seg, /覆盖本地文件/, '本地分支');
+    assert.match(seg, /r\.target === 'notion'/, '按后端选,不是写死一句');
+  });
+
+  test('恢复完要撤掉「删除备份」—— 它指着的已经不是想删的那份了', () => {
+    // 恢复之后旧版成了线上内容的来源,而想删的多半是刚被顶掉的新版。
+    // 留着那个按钮只会删错一份
+    const fn = src.slice(
+      src.indexOf("querySelectorAll('[data-restore-backup]')"),
+      src.indexOf("querySelectorAll('[data-drop-backup]')")
+    );
+    assert.match(fn, /\[data-drop-backup\][\s\S]*?remove\(\)/);
+    assert.match(fn, /refreshArchives\(\)/, '行尾那个「备份 N」变了');
+    assert.match(fn, /loadDashboard\(\)/, '登记可能从 notion 翻回 local,链接要跟着换');
+  });
+
+  test('两下点:第一下换成后果那句话,第二下才真删', () => {
+    const fn = src.slice(
+      src.indexOf("querySelectorAll('[data-drop-backup]')"),
+      src.indexOf("querySelectorAll('[data-reveal]')")
+    );
+    assert.ok(fn.length > 0 && fn.length < 2500, '切到的应该是那个处理器');
+    assert.match(fn, /if \(!armed\)/, '第一下只武装,不删');
+    assert.match(fn, /'永久删除'/, '第二下的标签要说后果,不是「确定」');
+    assert.match(fn, /deleteGuideArchive\(/);
+  });
+
+  test('删完要重画 —— 行尾那个「备份 N」得跟着少一个', () => {
+    const fn = src.slice(
+      src.indexOf("querySelectorAll('[data-drop-backup]')"),
+      src.indexOf("querySelectorAll('[data-reveal]')")
+    );
+    assert.match(fn, /refreshArchives\(\)/,
+      '不重画的话,备份已经没了而行上还写着有');
+  });
+
+  test('删完不留一个还能点的按钮', () => {
+    const fn = src.slice(
+      src.indexOf("querySelectorAll('[data-drop-backup]')"),
+      src.indexOf("querySelectorAll('[data-reveal]')")
+    );
+    assert.match(fn, /'备份已删'/, '删完了它就没有对象了');
+  });
+});
+
+describe('设置页的攻略备份是折叠的', () => {
+  const html = read('Setup.html');
+  const css = styleBlocks(html).join('\n').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('整节是 <details>,默认收起', () => {
+    assert.match(html, /<details id="guide-archive" hidden>/,
+      '摊开来占掉整屏,把下面真正常用的东西挤没了');
+    assert.doesNotMatch(html, /<details id="guide-archive"[^>]*\sopen/, '默认不该是展开的');
+  });
+
+  // `<summary>` 的展开三角是靠 `display: list-item` 画的,换成 flex / block / grid
+  // 都会让它当场消失 —— 而这一页没有图标精灵可以顶上,三角没了就没有任何东西
+  // 表示"展没展开"。实测撞过一次:computed display 是 flex,marker 一起没了
+  test('.arc-head 不许改 display —— 那个三角就是状态标记', () => {
+    const block = css.slice(css.indexOf('.arc-head {'), css.indexOf('.arc-count'));
+    assert.ok(block.length > 0 && block.length < 900, '切到的应该是 .arc-head 那一段');
+    assert.doesNotMatch(block, /display\s*:/, 'summary 默认 list-item,动它三角就没了');
+  });
+
+  test('收起来也看得见有几份多大 —— 这一节就是回答"占多少地方"的', () => {
+    assert.match(html, /<span class="arc-count" id="arc-count">/);
+    assert.match(html, /\$\('arc-count'\)\.textContent/,
+      '数字要真的写进去,不然收起态是个空标题');
+  });
+
+  test('叫「攻略备份」,不叫「攻略存档」 —— 和行尾那个按钮同一个词', () => {
+    assert.match(html, /攻略备份/);
+    assert.doesNotMatch(html, /攻略存档/);
+    assert.doesNotMatch(read('Dashboard.html'), /攻略存档/);
+  });
+});
+
+describe('攻略备份那一节不解释自己', () => {
+  const html = read('Setup.html');
+  const js = html.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  // 删掉的那句是两半解释拼起来的:前半讲机制(备份会进 zip),后半讲另一个功能
+  // 在哪(去 Dashboard 行尾)。两样都是 docs 的活。列表本身已经说清了有什么、多大
+  test('不写「会跟着备份 zip 一起走」这类机制说明', () => {
+    assert.doesNotMatch(js, /备份 zip 一起走/);
+    assert.doesNotMatch(js, /去 Dashboard 上那个游戏行尾/);
+  });
+
+  test('孤儿那一句留着 —— 它是死路 + 出路,不是解释', () => {
+    assert.match(js, /行上够不着/);
+    assert.match(js, /先把游戏加回来/, '说了够不着就得说怎么办');
+  });
+
+  test('没有孤儿时那一行是空的,而且空了不占位', () => {
+    assert.match(js, /\$\('arc-sum'\)\.textContent = orphans\.length/,
+      '要是无条件写一句话,这一格就永远占着一条边距');
+    assert.match(styleBlocks(html).join('\n'), /#arc-sum:empty\s*\{\s*display:\s*none/);
+  });
+});
+
+/**
+ * 列表尾巴那个「全部删除」。
+ *
+ * 这一组全是源码断言 —— 零依赖、没 DOM,点击验不了(见文件头)。它们盯的三件事
+ * 都是**错了不报错**的:按钮位置不对、自己把自己拆了、删的范围比屏幕上大。
+ */
+describe('攻略备份的一键删', () => {
+  const html = read('Setup.html');
+  const js = inlineScripts(html)
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  test('按钮在列表**下面**,不在标题那一行', () => {
+    const wipe = html.indexOf('id="arc-wipe"');
+    const list = html.indexOf('id="arc-list"');
+    const summaryEnd = html.indexOf('</summary>');
+    assert.ok(wipe > 0, '找不到全部删除按钮');
+    assert.ok(wipe > list, '得先看见删的是哪几份,才轮到那个按钮');
+    // 在 `<summary>` 里的话:收起态就能删,而那一行只有一个总数;
+    // 而且点它会连带整节折叠一起翻
+    assert.ok(wipe > summaryEnd, '不能放进 <summary>');
+    assert.ok(html.indexOf('</details>') > wipe, '得在攻略备份这一节里');
+  });
+
+  test('第二下的按钮写后果 —— 删几份、多大,不是「确定」', () => {
+    const i = js.indexOf('arm(wipe,');
+    assert.ok(i > 0, '找不到 arm(wipe, ...)');
+    const call = js.slice(i, js.indexOf('\n', i));
+    assert.match(call, /永久删除/);
+    assert.match(call, /\$\{list\.length\} 份/, '要说删的是几份');
+    assert.match(call, /\$\{kb\(bytes\)\}/, '要说腾出多少');
+    assert.doesNotMatch(call, /确定/, '第二下写后果,不写「确定」');
+  });
+
+  /**
+   * 实打过的坑的同类:`#arc-wipe` 不在 `.arc-acts` 里(它是整个列表的尾巴)。
+   * 漏在那个选择器外面的话,第一下点完先跑 onclick 上好膛,冒泡到 document 上
+   * 立刻拆掉 —— 表现是**按钮看上去没反应、永远点不出第二下**,一行错都不会报
+   */
+  test('点它自己不算"点到外面",否则一上好膛就被拆了', () => {
+    const i = js.indexOf("document.addEventListener('click'");
+    assert.ok(i > 0);
+    const guard = js.slice(i, i + 200);
+    assert.match(guard, /closest\('\.arc-acts, #arc-wipe'\)/,
+      '撤销判断得把全部删除按钮也算进去');
+  });
+
+  /**
+   * **删的是屏幕上那一批。** 传编号表而不是让服务端"把目录清了":两者之间
+   * 隔着一次后台重写就能多出一份从没上过屏的备份。同一类错在这个项目里
+   * 反复出现过:一个值两个渲染器、一条重画路径。
+   */
+  test('传的是刚画出来那一批的编号', () => {
+    assert.match(js, /const ids = sorted\.map\(\(e\) => e\.id\)/,
+      '编号要在重画时定死');
+    assert.match(js, /call\('deleteGuideArchives', \[ids\]\)/);
+  });
+
+  test('重画后按钮要复位 —— 它跨重画活着,不像行那样重建', () => {
+    const i = js.indexOf("const wipe = $('arc-wipe')");
+    assert.ok(i > 0, '找不到 wipe 的定义');
+    const block = js.slice(i, js.indexOf('arm(wipe,', i));
+    assert.match(block, /wipe\.textContent = '全部删除'/, '不复位会停在"永久删除 N 份"上');
+    assert.match(block, /wipe\.classList\.remove\('armed'\)/);
+  });
+
+  test('服务端真有这个方法', () => {
+    const api = readFileSync(join(ROOT, 'lib', 'api.js'), 'utf8');
+    assert.match(api, /deleteGuideArchives\(ids\)/, '页面调的名字得真存在');
+  });
+});
+
+/**
+ * 恢复预览:正在被审查的那个文件,不能在预览它的时候执行
+ * ------------------------------------------------------------------
+ * `manifest.json` 是**上传上来那个 zip 里的文件**,`inspectBackup` 原样
+ * `JSON.parse` 之后交回页面。所以 `counts.games` 想写什么就是什么 ——
+ * 拼进 `innerHTML` 的话,一个 `<img src=x onerror=…>` 就在设置页里跑起来了,
+ * 而设置页调得动全部 38 个 `/api/*`(删游戏、改配置、发起要花钱的生成)。
+ *
+ * 这一屏存在的全部意义是「在覆盖数据之前先看看里面是什么」。看一眼就执行,
+ * 关卡是反着的。
+ */
+describe('恢复预览不执行备份文件里的内容', () => {
+  const js = inlineScripts(read('Setup.html')).join(SEP);
+
+  /**
+   * **注释要先剥掉,而且行注释要排在块注释前面。**
+   *
+   * 前半句是这个仓库的老规矩:这一段代码旁边就写着「拼进 innerHTML 就等于…」,
+   * 而下面那条断言恰恰在找 `innerHTML` 这个词 —— 不剥的话,解释这条规则的那句话
+   * 自己就让断言永远失败(反过来同样常见:注释让断言永远通过)。
+   *
+   * 后半句是**实测踩出来的**:同一段行注释里写着 `/api` 后面跟一个星号,而剥块注释的
+   * 正则会把那个「斜杠星号」当成块注释的开头,一路吃到几十行之后的第一个闭合标记 ——
+   * 中间的**代码**跟着一起没了。于是把 `appendChild` 改成 `innerHTML +=`,
+   * 断言照样通过。先按行剥掉 `//`,那个假开头就不存在了。
+   *
+   * (这条注释本身也不敢写出闭合标记 —— 写了就会把自己提前结束掉。)
+   */
+  const codeOnly = (s) => s
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\*.*$/gm, '');
+
+  test('**预览那几行不走 innerHTML**', () => {
+    const i = js.indexOf('async function previewFile');
+    assert.ok(i > 0, '找不到 previewFile —— 这条检查失去了目标');
+    const end = js.indexOf('function ', i + 30);
+    assert.ok(end > i, '找不到函数结尾,该重写而不是放宽');
+    const body = codeOnly(js.slice(i, end));
+    // **整块里连 `innerHTML` 这个词都不许出现。** 写成 `/\.innerHTML\s*=/` 漏掉
+    // `innerHTML +=` —— 而那正是"我只是往后拼一点"最容易长出来的形状
+    assert.doesNotMatch(body, /innerHTML/,
+      '预览又碰 innerHTML 了 —— manifest 来自还没被信任的那个文件');
+    assert.match(body, /bk-info/, '这条检查该看的是 bk-info 那一块');
+  });
+
+  test('数字过一遍数值检查,不是字符串直接摆上去', () => {
+    const i = js.indexOf('async function previewFile');
+    const body = js.slice(i, js.indexOf('function ', i + 30));
+    assert.match(body, /Number\.isFinite/,
+      'manifest 里的 counts 没验就显示 —— 里面可以是任何东西');
+    assert.match(body, /num\(c\.games\)/, 'games 没过 num()');
+    assert.match(body, /num\(c\.achievements\)/, 'achievements 没过 num()');
+  });
+
+  test('强调用真的 <b> 元素,不是拼标签', () => {
+    const i = js.indexOf('async function previewFile');
+    const body = js.slice(i, js.indexOf('function ', i + 30));
+    assert.match(body, /createElement\('b'\)/, '<b> 是拼出来的字符串就等于又开了一个口子');
+    assert.match(body, /textContent = text/, '文字要走 textContent');
+  });
+});
+
+/**
+ * 两下点的按钮:第二下抛异常之后必须还能再点
+ * ------------------------------------------------------------------
+ * `run()` 里的 `call()` / `rpc` 两个 await 都会抛(连接断了、回应不是 JSON),
+ * 而 `#arc-wipe` **跨重画活着** —— 顺着往下写 `btn.disabled = false` 的话,
+ * 抛一次就永远停在 disabled 上,只能刷新整页。偏偏最容易抛的时候
+ * 正是刚失败一次、想重试的时候。
+ */
+describe('两下点的按钮不会卡在置灰上', () => {
+  for (const [page, fn] of [['Setup.html', 'function arm('], ['Dashboard.html', 'function arcArm(']]) {
+    test(`${page}:置灰的复位在 finally 里`, () => {
+      const js = inlineScripts(read(page)).join(SEP);
+      const i = js.indexOf(fn);
+      assert.ok(i > 0, `找不到 ${fn} —— 这条检查失去了目标`);
+      const end = js.indexOf('\n    }', js.indexOf('btn.onclick', i));
+      assert.ok(end > i, '找不到 onclick 的结尾,该重写而不是放宽');
+      const body = js.slice(i, end);
+
+      assert.match(body, /btn\.disabled = true/, '第二下应该先把按钮置灰');
+      // finally 必须在 await run() 之后、并且里面就是那句复位
+      assert.match(
+        body, /try\s*\{\s*await run\(\);\s*\}\s*finally\s*\{\s*btn\.disabled = false;\s*\}/,
+        'run() 抛出来的话按钮就永远置灰了 —— 复位要放在 finally 里'
+      );
+    });
+  }
 });
