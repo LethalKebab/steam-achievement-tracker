@@ -1,111 +1,109 @@
 # Steam Achievement Tracker
 
-Tracks Steam achievement progress across your library. It stores your games, achievement counts and completion percentage in a local SQLite database, and shows them in a Dashboard.
+追踪你 Steam 库里每个游戏的成就进度。游戏、成就数量和完成度存在本地一个 SQLite 数据库里,在面板上看。
 
-Everything runs on your own machine: the database is a file next to the program, credentials sit in a config file beside it, and the Dashboard is served by a local HTTP server bound to `127.0.0.1`.
+所有东西都跑在你自己的机器上:数据库是程序旁边的一个文件,凭据放在同一个目录的配置文件里,面板由一个只绑 `127.0.0.1` 的本地 HTTP 服务提供。
 
-> **Note:** the Dashboard is in Chinese (the language this project was built in). Setup and daily use don't require reading Chinese, but the on-screen text is Chinese.
+## 安装
 
-## Install
+Windows。不需要另外装任何东西,程序自带全部依赖。
 
-Windows. Nothing to install — the app bundles everything it needs.
+1. 从[最新 release](https://github.com/LethalKebab/steam-achievement-tracker/releases/latest) 下载 `-win.zip`(约 133 MB)
+2. 解压到一个固定的地方 —— 数据库会建在那个文件夹里面,所以移动或删除文件夹就等于移动或删除你的数据
+3. 运行 `SteamAchievementTracker.exe`
 
-1. Download the `-win.zip` from [the latest release](https://github.com/LethalKebab/steam-achievement-tracker/releases/latest) (~133 MB)
-2. Unzip somewhere permanent — the database is created inside that folder, so moving or deleting the folder moves or deletes your data
-3. Run `SteamAchievementTracker.exe`
+安装包没有签名,所以第一次启动会弹「Windows 已保护你的电脑」。点**更多信息 → 仍要运行**,之后不会再出现。
 
-The build is unsigned, so the first launch shows *"Windows protected your PC"*. Click **More info → Run anyway**; it doesn't appear on later launches.
+## 首次运行
 
-## First run
+需要从 Steam 拿两样东西,都是一次性的:
 
-You need two things from Steam, both one-time:
-
-| | What | Where |
+| | 是什么 | 在哪拿 |
 |---|---|---|
 | ① | **Steam Web API Key** | [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey) |
-| ② | **SteamID64** | [steamid.io](https://steamid.io) — paste your profile URL |
+| ② | **SteamID64** | [steamid.io](https://steamid.io) —— 粘贴你的个人主页地址 |
 
-Until they're saved, the app serves a form in place of the Dashboard: those same two fields, checked against Steam before anything is written. Save it and the Dashboard opens, with the first sync running in the background — a few minutes the first time. Every later launch goes straight to the Dashboard.
+在这两样存好之前,程序会拿一个表单顶替面板:就是这两个字段,写入之前先拿去 Steam 验一遍,填错当场就能发现,而不是同步到一半才炸。存完面板就打开,第一次同步在后台跑 —— 头一回要几分钟。之后每次启动都直接进面板。
 
-## Living in the tray
+## 待在托盘里
 
-**Closing the window only hides it.** Syncing and guide generation keep running. To get the panel back, click the tray icon, or simply run the exe again — a second launch raises the window that is already there instead of starting a second copy.
+**关窗口只是把它藏起来。** 同步和攻略生成照常继续。要把面板叫回来,点托盘图标,或者干脆再运行一次 exe —— 第二次启动会把已经在的那个窗口举到前面,而不是再开一份。
 
-To actually stop the program, quit from the tray icon.
+真要停掉程序,从托盘图标退出。
 
-## Updating
+## 更新
 
-From 1.1.4 the app updates itself: it checks shortly after launch and then once a day, and offers to download, replace and restart. The prompt has a "don't remind me about this version" checkbox. To turn checking off entirely, put `"autoUpdate": false` in `local.config.json` next to the exe.
+从 1.1.4 起程序会自己更新:启动后不久检查一次,之后每天一次,查到新版会问你要不要下载、替换、重启。弹窗上有「这个版本别再提醒我」的勾选框。想彻底关掉检查,在 exe 旁边的 `local.config.json` 里写 `"autoUpdate": false`。
 
-Updating by hand still works, and is the only way to make the jump *to* 1.1.4, since older builds have no updater in them:
+手动更新照样可行,而且**升到 1.1.4 这一跳只能手动** —— 更早的版本里根本没有更新器:
 
-1. **Quit from the tray icon** — closing the window only hides it, and Windows won't replace a running program
-2. Unzip the new release into the same folder, replacing files when asked
+1. **从托盘退出** —— 关窗口只是藏起来,而 Windows 不会替换一个正在运行的程序
+2. 把新版解压进同一个文件夹,提示时选择覆盖
 
-Either way your data is untouched. The zip contains program files only; `config.json` and `data/` are not in it. Those two are the whole of your data if you want a copy first.
+两种方式都不会动你的数据。zip 里只有程序文件,`config.json` 和 `data/` 不在里面。想先留一份的话,这两样就是你数据的全部。
 
-## What you can do
+## 能做什么
 
-### Track your library
+### 追踪你的库
 
-The Dashboard lists your games with completion percentage, and **立即同步** refreshes from Steam on demand. Games you've played in the last 5 days are pinned to the top.
+面板列出你的游戏和完成度,**立即同步**按需从 Steam 拉一次。最近 5 天玩过的游戏会置顶。
 
-### Tick guide checkboxes for you
+### 替你勾攻略上的复选框
 
-Optional. If you keep achievement guides as checklists — Notion pages or local markdown — the app can tick the boxes for achievements you've unlocked.
+可选。如果你把成就攻略记成清单 —— Notion 页面或者本地 markdown —— 程序可以把你已经解锁的那些勾上。
 
-Notion is set up on the first-run form (step 3), and stays reachable afterwards from the gear button in the Dashboard's top-right corner. It builds the Notion database for you, so you never copy a database ID by hand. Local markdown needs no setup at all.
+Notion 在首次运行的表单里配置(第 3 步),之后从面板右上角的齿轮按钮进去改。攻略数据库由它替你建,所以你不用手抄任何数据库 ID。本地 markdown 完全不用配置。
 
-Details, and how matching works: [docs/guides.md](docs/guides.md). Step-by-step Notion authorisation, including the step most people miss: [docs/notion-setup.md](docs/notion-setup.md).
+细节和匹配规则:[docs/guides.md](docs/guides.md)。Notion 授权的分步图解,包括最容易漏的那一步:[docs/notion-setup.md](docs/notion-setup.md)。
 
-### Have a guide written for you
+### 让 AI 替你写一份攻略
 
-Optional. If you'd rather not write a guide from scratch, an AI can research the game online and draft one, which is then checked against your real achievement data before it lands.
+可选。不想从零写攻略的话,可以让 AI 上网查一遍再起草一份,落地之前会拿你真实的成就数据核对。
 
-**This is the only part of the app that costs money**, and it's entirely optional — nothing else needs it. Works with DeepSeek, Anthropic or Gemini; you supply your own API key, and the app tells you what each run used.
+**这是程序里唯一花钱的部分**,而且完全可选 —— 别的功能都不需要它。支持 DeepSeek、Anthropic 和 Gemini;key 由你自己提供,每跑完一次程序会告诉你这一趟用掉了多少。
 
-What the app guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote.
+程序保证的是**格式和数据**:一个成就一个复选框、名字和 Steam 一字不差、描述原样引用、勾选状态和你真实的解锁情况一致。**内容对不对没有核过,也核不了** —— 它写了什么,你自己读一遍。
 
-### Rewrite part of a guide
+### 只重写攻略的一部分
 
-Once a guide exists, the ♻ 重写 dialog rewrites just the entries you pick and leaves every other byte exactly as it was, including passages you edited yourself. You can select rare achievements, ones you haven't earned yet, a single section, or pick achievements individually.
+攻略存在之后,♻ 重写对话框只重写你挑中的那几条,其余每一个字节原样不动,包括你自己改过的段落。可以挑稀有成就、挑还没拿到的、挑某一个分区,也可以一条条点。
 
-### Go back to an earlier version
+### 回到早先的版本
 
-Past versions of a guide — the copy taken before each overwrite, the local original left behind by a move to Notion, and failed drafts — sit behind the **备份** button at the end of that game's row, which appears only when there is something there. Any of them can be read, written back over the current guide, or deleted. Writing one back backs up what it replaces, so it is itself undoable.
+一份攻略的历史版本 —— 每次覆盖之前留下的那份、搬去 Notion 之后留在本地的原件、以及失败的草稿 —— 都在那个游戏那一行末尾的**备份**按钮后面,有东西的时候按钮才出现。任何一份都可以读、写回当前攻略、或者删掉。写回的时候会先备份被它替掉的那份,所以这个动作本身也能反悔。
 
-Settings → Step 4 has the same files sorted by size, for pruning. See [docs/guides.md](docs/guides.md#guide-archive).
+设置页第 4 步有同一批文件,按体积排序,方便清理。见 [docs/guides.md](docs/guides.md#guide-archive)。
 
-### Move to another machine
+### 换一台机器
 
-The settings page's **备份** tab writes one zip holding the database, your guides and `config.json`, and restores from it. The credentials travel with it, so the new machine opens straight to the Dashboard — the first-run screen offers the same two steps.
+设置页的**备份**标签页会写出一个 zip,里面装着数据库、你的攻略和 `config.json`,也能从它还原。凭据跟着一起走,所以新机器直接进面板 —— 首次运行那一屏给的也是同样两步。
 
-The zip has your API keys in plain text unless you exclude the config. See [docs/data.md](docs/data.md#backup-and-restore).
+除非你把配置排除掉,否则那个 zip 里的 API key 是明文的。见 [docs/data.md](docs/data.md#backup-and-restore)。
 
-## What runs when
+## 什么时候会跑东西
 
-**There is no scheduler, and nothing runs on a timer.** Everything is triggered by opening the app or by pressing **立即同步**. Nothing happens while your machine is asleep, and nothing happens while the app merely sits in the tray — the Dashboard polls every 3 seconds, but only to redraw the progress bar, never to fetch anything.
+**没有调度器,没有任何东西按时间自己触发。** 一切都由「打开程序」或者按**立即同步**触发。机器睡着的时候什么都不会发生;程序单纯待在托盘里的时候也什么都不会发生 —— 面板每 3 秒轮询一次,但只是为了重画进度条,从不去拉任何东西。
 
-| | Opening the app | 立即同步 |
+| | 打开程序 | 立即同步 |
 |---|---|---|
-| **Find new guide pages** | every time | — |
-| **Library + achievement counts + detail** | only if the data is stale | every press |
-| **Tick guide checkboxes** | after a sync, or if a new guide page turned up | after the sync |
-| **Update guide page status** | every time | after the sync |
+| **发现新的攻略页** | 每次 | —— |
+| **游戏库 + 成就数 + 明细** | 只在数据过期时 | 每次按 |
+| **勾攻略复选框** | 同步之后,或者有新攻略页出现时 | 同步之后 |
+| **更新攻略页状态** | 每次 | 同步之后 |
 
-The staleness check runs once, when the app **starts**, against a 12-hour threshold. Leaving the app open for days does not keep the data fresh — press 立即同步, or restart it. Refreshing the browser does none of the above; that re-reads the local database only.
+过期判断只在程序**启动**那一刻做一次,阈值 12 小时。程序开着不关并不会让数据保持新鲜 —— 按立即同步,或者重启它。刷新浏览器不触发上面任何一条,那只是重读一遍本地数据库。
 
-## More
+## 更多
 
 | | |
 |---|---|
 | [docs/notion-setup.md](docs/notion-setup.md) | 连接 Notion 攻略库 —— 分步图解,含最容易漏的授权步骤和数据库 ID 的取法 |
-| [docs/guides.md](docs/guides.md) | Guide checkbox sync, how matching works, having one written for you |
-| [docs/data.md](docs/data.md) | What's in the database, backup and restore, CSV export, what Steam can't tell us |
-| [docs/configuration.md](docs/configuration.md) | Every setting, including changing the port |
-| [docs/cli.md](docs/cli.md) | Running from source, and the full command reference |
-| [Releases](https://github.com/LethalKebab/steam-achievement-tracker/releases) | Published builds and their notes |
+| [docs/guides.md](docs/guides.md) | 攻略复选框同步、匹配是怎么做的、让 AI 写一份(英文) |
+| [docs/data.md](docs/data.md) | 数据库里有什么、备份与还原、CSV 导出、Steam 给不了的东西(英文) |
+| [docs/configuration.md](docs/configuration.md) | 每一项设置,包括改端口(英文) |
+| [docs/cli.md](docs/cli.md) | 从源码运行,以及完整命令参考(英文) |
+| [Releases](https://github.com/LethalKebab/steam-achievement-tracker/releases) | 已发布的版本和它们的发布说明 |
 
-## License
+## 许可证
 
-MIT — see [LICENSE](LICENSE).
+MIT —— 见 [LICENSE](LICENSE)。
