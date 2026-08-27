@@ -219,7 +219,7 @@ There is no build, no push, no deploy. Editing a file and re-running the command
 - `guideStatusOnServe` (true) — keep a guide page's `Status` in step with completion in both directions, see "Guide page status".
 - `notion.token`, `notion.overviewDbId` — guide sync only. The DB ID lives in config, never in source.
 
-**Never hardcode credentials, and never commit `config.json` or `data/`.** Both are gitignored. The repo is public.
+**Never hardcode credentials, and never commit `config.json`, `data/` or `guides/`.** All three are gitignored. The repo is public, and `guides/` holds guide text written by the owner plus its history (`.drafts/` unvalidated AI output, `.migrated/` local copies left behind by a move to Notion, `.backups/` pre-overwrite originals) — none of it repo content.
 
 ## Data model (`games` table)
 
