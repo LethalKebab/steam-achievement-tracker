@@ -1408,8 +1408,11 @@ describe('攻略备份的一键删', () => {
     const i = js.indexOf("document.addEventListener('click'");
     assert.ok(i > 0);
     const guard = js.slice(i, i + 200);
-    assert.match(guard, /closest\('\.arc-acts, #arc-wipe'\)/,
-      '撤销判断得把全部删除按钮也算进去');
+    // 逐个断言,不钉整串:将来再多一个例外时这条检查不该拦路,少一个时必须响
+    for (const sel of ['.arc-acts', '#arc-wipe', '#back-btn']) {
+      assert.ok(guard.includes(sel),
+        `撤销判断漏了 ${sel} —— 那个按钮第一下上好膛就被冒泡拆掉,永远点不出第二下`);
+    }
   });
 
   /**
@@ -1524,6 +1527,128 @@ describe('两下点的按钮不会卡在置灰上', () => {
         body, /try\s*\{\s*await run\(\);\s*\}\s*finally\s*\{\s*btn\.disabled = false;\s*\}/,
         'run() 抛出来的话按钮就永远置灰了 —— 复位要放在 finally 里'
       );
+    });
+  }
+});
+
+
+/**
+ * 设置页的出口
+ * ------------------------------------------------------------------
+ * 打包版没有地址栏、没有后退键,托盘的「打开面板」只 show/focus
+ * (launcher/main.js 的 showWindow 不 loadURL)。所以 `#back-btn` 是进了 /setup
+ * 之后**唯一**一条不用保存也能回 Dashboard 的路 —— 没有它,改到一半想反悔的人
+ * 只能退出程序重开。
+ *
+ * 这一节钉的都是删掉不会报错的东西:按钮类型、出现的条件、撤销例外、以及它的
+ * 两句文案。撤销例外那一条在上面「攻略备份的一键删」里,和 `#arc-wipe` 一起验。
+ */
+describe('设置页的出口', () => {
+  const html = read('Setup.html');
+  const js = inlineScripts(html).join(SEP);
+  /** 先行注释再块注释 —— 下面几条断言找的词在解释它们的注释里都出现过 */
+  const codeOnly = (s) => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const code = codeOnly(js);
+  const tag = html.match(/<button[^>]*id="back-btn"[^>]*>([^<]*)<\/button>/);
+
+  test('是 type="button" —— 它就在 <form> 里,默认类型会把表单提交掉', () => {
+    assert.ok(tag, '找不到 #back-btn');
+    assert.match(tag[0], /type="button"/,
+      '默认 type 是 submit:点「返回」会触发一次保存,而那正是它要避开的事');
+  });
+
+  test('默认 hidden —— 首次设置时这一页是关卡,不该有出口', () => {
+    assert.match(tag[0], /\shidden\b/, '标记里就得是收起的');
+    const i = code.indexOf('if (isEditMode) {');
+    assert.ok(i > 0, '找不到设置模式那一支');
+    assert.match(code.slice(i, i + 400), /armBack\(\)/, '出口要挂在 isEditMode 里');
+    assert.equal([...code.matchAll(/back\.hidden = false/g)].length, 1,
+      '只该有一处把出口挂出来 —— 多一处就多一条绕过 isEditMode 的路');
+  });
+
+  test('文字说的是去哪,不是撤销什么', () => {
+    assert.match(tag[1], /Dashboard/, '按钮上要说明去哪儿');
+    assert.doesNotMatch(tag[1], /取消/,
+      '这一页有六个控件不等保存就生效(建 Notion 库当场存盘、立即备份、恢复、删存档),'
+      + '「取消」承诺的是整页回滚,而它收得回的只有几个输入框');
+  });
+
+  test('第二下写后果,不写「确定」', () => {
+    const i = code.indexOf('arm(back,');
+    assert.ok(i > 0, '找不到 arm(back, ...)');
+    const line = code.slice(i, code.indexOf('\n', i));
+    assert.match(line, /放弃未保存的修改/, '要说清楚丢的是什么');
+    assert.doesNotMatch(line, /确定/, '和存档那几个按钮同一条规矩');
+  });
+
+  test('没改过就直接走 —— 每次都拦会把确认训练成下意识点掉的东西', () => {
+    const i = code.indexOf('back.onclick = (e) =>');
+    assert.ok(i > 0, '找不到套在 arm() 外面那一层');
+    const body = code.slice(i, i + 220);
+    assert.match(body, /if \(isDirty\(\)\) return confirmClick\(e\)/, '脏了才走两下点');
+    assert.match(body, /location\.href = '\/'/, '干净就直接回 Dashboard');
+  });
+
+  test('建完 Notion 库只对那一栏 —— 整体重置会抹掉别处真的未保存修改', () => {
+    const i = code.indexOf('loadedNotionDb = r.id');
+    assert.ok(i > 0, '找不到建库之后的回填');
+    const after = code.slice(i, i + 200);
+    assert.match(after, /markSaved\('notion-db'\)/, '建库当场存盘,那一栏就不该再算脏');
+    assert.doesNotMatch(after, /markSaved\(\)/,
+      '整体重置会把同一时刻真的未保存修改(比如刚改一半的 SteamID)一并抹掉');
+  });
+
+  /**
+   * **提交时读的每一栏都必须在脏值检查里。** 漏一栏的表现是:改了它、点返回,
+   * 页面一声不响地走人,改动丢掉 —— 而这正是这个按钮存在的意义反过来咬一口。
+   * 照着 submit 那一段推,而不是手抄一份清单:新增一个设置项时这条会自己失败。
+   */
+  test('提交时读的每一栏都在脏值检查里,而且在标记里真的存在', () => {
+    const i = code.indexOf("form.addEventListener('submit'");
+    assert.ok(i > 0, '找不到提交处理');
+    const sub = code.slice(i, code.indexOf('btn.disabled = true', i));
+    const ids = [...new Set([...sub.matchAll(/\$\('([^']+)'\)\.value/g)].map((m) => m[1]))];
+    assert.ok(ids.length >= 7, `提交里只读到 ${ids.length} 栏,这条检查失去了目标`);
+
+    const m = code.match(/const DIRTY_FIELDS =\s*\[([^\]]*)\]/);
+    assert.ok(m, '找不到 DIRTY_FIELDS');
+    for (const id of ids) {
+      assert.ok(m[1].includes(`'${id}'`),
+        `${id} 会被保存却不在脏值检查里 —— 改了它点返回不会拦,改动静静丢掉`);
+      assert.ok(html.includes(`id="${id}"`), `${id} 在标记里不存在,$() 会拿到 null`);
+    }
+  });
+});
+
+
+/**
+ * 两下点的红色不能被悬停色盖掉
+ * ------------------------------------------------------------------
+ * `.armed` 是**两个类**(0,2,0),而各家的 `:hover:not(:disabled)` 是
+ * 一类加两个伪类(0,3,0)—— 悬停那条赢。而第一下点完,光标就正停在按钮上:
+ * 红色恰好在最该被看见的那一瞬被悬停色顶掉。
+ *
+ * 症状只有颜色不对,**没有任何东西会报错**,而且只在鼠标压着按钮时出现 ——
+ * 截图和肉眼扫一遍都容易漏。所以每条 armed 规则都必须自带 `:hover` 变体。
+ */
+describe('两下点的红色不能被悬停色盖掉', () => {
+  /** CSS 注释要先剥 —— 解释这条规则的话里就写着这几个选择器 */
+  const cssOf = (page) =>
+    styleBlocks(read(page)).join(SEP).replace(/\/\*[\s\S]*?\*\//g, '');
+
+  for (const [page, sels] of [
+    ['Setup.html', ['.back.armed', '.arc-acts .armed', '.arc-foot .armed']],
+    ['Dashboard.html', ['.arc-acts button.armed']],
+  ]) {
+    test(`${page}:每条 armed 规则都带 :hover 变体`, () => {
+      const css = cssOf(page);
+      for (const sel of sels) {
+        assert.ok(css.includes(sel),
+          `${sel} 不见了 —— 这条检查失去了目标,该跟着改而不是删掉`);
+        assert.ok(css.includes(`${sel}:hover:not(:disabled)`),
+          `${sel} 没有 :hover 变体 —— 光标停在按钮上时红色会被悬停色盖掉,`
+          + `而那正是第一下点完的状态`);
+      }
     });
   }
 });
