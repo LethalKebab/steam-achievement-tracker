@@ -106,6 +106,61 @@ describe('selectStatsTargets — 不在 owned 列表里的行', () => {
     assert.equal(r.unowned, 1);
     cleanup();
   });
+
+  test('已经 100% 的 → 不再每次都查,交给轮换扫描', () => {
+    const { db, cleanup } = freshDb();
+    seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 0, rate: 1 });
+    const r = selectStatsTargets(db, new Map(), SELECTION);
+    assert.deepEqual(names(r), [], 'achieved 已经到顶,玩得再多也涨不上去');
+    assert.equal(r.unowned, 0, '不该再算进「每次都查」那一组');
+    cleanup();
+  });
+
+  test('100% 的用的是 perfectGameMaxAgeDays(3 天),不是 7 天', () => {
+    const { db, cleanup } = freshDb();
+    seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 5, rate: 1 });
+    const r = selectStatsTargets(db, new Map(), SELECTION);
+    assert.deepEqual(names(r), ['77'], '5 天 > 3 天,该扫了');
+    assert.equal(r.swept, 1, '走的是 sweep,不是 unowned');
+    assert.equal(r.unowned, 0);
+    // 反过来:2 天还不到期
+    const { db: db2, cleanup: c2 } = freshDb();
+    seedGame(db2, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 2, rate: 1 });
+    assert.deepEqual(names(selectStatsTargets(db2, new Map(), SELECTION)), []);
+    cleanup(); c2();
+  });
+
+  test('100% 但没有 stats_checked_at → 照查,不会被这条规则漏掉', () => {
+    const { db, cleanup } = freshDb();
+    insertGame(db, { appid: '77', name: '没基线的' });
+    updateGameStats(db, '77', { achieved: 10, total: 10 });
+    const r = selectStatsTargets(db, new Map(), SELECTION);
+    assert.deepEqual(names(r), ['77'], 'ageDays(null) 是 Infinity,进池且排最前');
+    cleanup();
+  });
+
+  test('没满的照旧每次都查 —— achieved 还在动,rtime 又拿不到', () => {
+    const { db, cleanup } = freshDb();
+    seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 0, rate: 0.5 });
+    const r = selectStatsTargets(db, new Map(), SELECTION);
+    assert.deepEqual(names(r), ['77']);
+    assert.equal(r.unowned, 1);
+    cleanup();
+  });
+
+  // 跳过判断取两个条件里更严的那一侧:rate 万一是旧的,宁可白查几次,
+  // 也不能把一个还在动的 achieved 冻上三天
+  test('rate 说满了但 achieved !== total → 当作没满,留在每次都查里', () => {
+    const { db, cleanup } = freshDb();
+    insertGame(db, { appid: '77', name: 'rate 过时的' });
+    updateGameStats(db, '77', { achieved: 5, total: 10 });
+    // 只把 rate 改成 1,计数保持 5/10 —— setGameField 不让写 rate(注入闸门),走原始 SQL
+    db.prepare('UPDATE games SET rate = 1, stats_checked_at = ? WHERE appid = ?').run(agoIso(0), '77');
+    const r = selectStatsTargets(db, new Map(), SELECTION);
+    assert.deepEqual(names(r), ['77'], '两个条件不一致时走安全的那一边');
+    assert.equal(r.unowned, 1);
+    cleanup();
+  });
 });
 
 describe('selectStatsTargets — 轮换扫描(total 的兜底)', () => {

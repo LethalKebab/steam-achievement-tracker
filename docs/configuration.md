@@ -17,7 +17,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "checkboxSyncOnServeCascade": false,// let that also tick nested sub-steps; off on purpose
   "guideStatusOnServe": true,         // guide page Status ⇄ completion (Done / Staged)
   "requestDelayMs": 300,      // pause between Steam API calls
-  "sweepBudget": 40,          // how many "not played, but check anyway" games per auto-sync; 0 = off
+  "sweepBudget": 120,         // how many "not played, but check anyway" games per auto-sync; 0 = off
   "maxStatsAgeDays": 7,       // re-verify a game at least this often even if untouched
   "perfectGameMaxAgeDays": 3, // 100% games re-verified sooner — they're the ones that can drop
   "dbPath": "data/steam.db",  // relative to the project root
@@ -111,7 +111,11 @@ The auto-sync does not walk the whole library. It checks a game when any of thes
 
 On a 310-game library this takes a routine sync from **~160 s to ~8 s**, rising to ~25 s on syncs that include a full sweep batch.
 
-**The thresholds are targets, not guarantees** — `sweepBudget` is the real constraint. With the default 40 and the Dashboard opened about twice a day, 100% games get re-verified every ~3 days and the rest every ~7, as intended. Opening only once a day stretches that to roughly 5 and 11 days. If you want the stated cadence at once-a-day use, raise `sweepBudget` to about 67 (which costs ~34 s per sync instead of ~23 s). Setting it to `0` disables the sweep entirely — then a game that adds achievements is only noticed the next time you actually play it.
+**The thresholds are targets, not guarantees** — `sweepBudget` is the real constraint. How many rows fall due per day is the sum of `1 / each game's own deadline`, so it depends on how much of your library is finished: a 313-game library with 143 games at 100% needs about **72 rows a day**. The default of **120** covers that even if you open the Dashboard only once a day.
+
+In normal use the cap does not bind at all — once every game is inside its deadline there are only a few dozen rows due, so a sync checks them and stops. The cap matters after you have been away: it is what stops a fortnight's backlog from becoming one enormous sync, letting it drain over the next few instead. At roughly half a second per row, 120 is about a minute in the worst case, and it runs in the background — the Dashboard is usable immediately.
+
+Raising it further has diminishing returns and one real cost: if every sync clears the whole backlog, every game ends up last-checked at the same moment, so they all fall due together and the work arrives in spikes rather than spread out. Setting it to `0` disables the sweep entirely — then a game that adds achievements is only noticed the next time you actually play it.
 
 **`notion.overviewDbId`** — the Notion **database** holding your guide pages; a plain page will not work. Easiest route is `node tracker.js init --notion --create`, which builds one with the right properties and fills this in for you. To point at an existing database instead, open it as a full page and take the 32-character hex string from the URL, *before* the `?v=` (that part is the view ID, not the database). Its status property, if it has one, needs the options `Not started` / `In progress` / `Staged` / `Done`; `node tracker.js notion-check` tells you what's missing without writing anything. See [guides.md](guides.md).
 
