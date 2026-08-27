@@ -16,7 +16,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "checkboxSyncOnServe": true,        // also tick guide checkboxes for games that changed
   "checkboxSyncOnServeCascade": false,// let that also tick nested sub-steps; off on purpose
   "guideStatusOnServe": true,         // guide page Status ⇄ completion (Done / Staged)
-  "requestDelayMs": 300,      // pause between Steam API calls
+  "requestDelayMs": 100,      // pause between official Web API calls
+  "storeRequestDelayMs": 300, // pause between store calls (name lookup, cover art, search)
   "sweepBudget": 120,         // how many "not played, but check anyway" games per auto-sync; 0 = off
   "maxStatsAgeDays": 7,       // re-verify a game at least this often even if untouched
   "perfectGameMaxAgeDays": 3, // 100% games re-verified sooner — they're the ones that can drop
@@ -99,7 +100,13 @@ The directions are not equally aggressive, on purpose. Promotion overwrites anyt
 
 Notion-kind guides only; local markdown has no status property. Set to `false` to leave the property alone.
 
-**`requestDelayMs`** — the pause between Steam API calls. If a sync reports games "留待重试" (left for retry), you're being rate-limited: raise this to 500–800 and run again. Lowering it makes syncs faster but risks HTTP 429s.
+**`requestDelayMs` / `storeRequestDelayMs`** — how long to wait between calls to Steam. These are two separate settings because Steam has two very different services behind them.
+
+`requestDelayMs` (100 ms) paces the official Web API at `api.steampowered.com`, which is where almost every request in a sync goes: your library, achievement counts, achievement details. This one is generous — a measurement of 400 back-to-back requests with no pause at all, sustained at 11 per second for 36 seconds, produced no rate limiting whatsoever, so 100 ms leaves plenty of room.
+
+`storeRequestDelayMs` (300 ms) paces the store at `store.steampowered.com`, used only for looking up a game's Chinese name, fetching cover art, and searching. It is deliberately slower and **should not be lowered to match the other one**: the store is far more strictly limited, and exceeding it can get your IP blocked rather than merely throttling your API key. It is also a small share of any sync, so keeping it slow costs almost nothing.
+
+If a sync reports games as "留待重试" (left for retry) you are being rate-limited: raise `requestDelayMs` to 300–800 and run again.
 
 **`sweepBudget` / `maxStatsAgeDays` / `perfectGameMaxAgeDays`** — these three control how much work the *automatic* sync does when you open the Dashboard. (`node tracker.js sync` ignores them and always checks everything; `sync --fast` uses them.)
 
