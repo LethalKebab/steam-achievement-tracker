@@ -1,0 +1,48 @@
+# 每个 PR 和每次进 main 都跑一遍全套测试。
+#
+# **触发器是 `pull_request`,不是 `pull_request_target`,而这不是随手选的。**
+# 这个仓库是公开的,所以任何人都能从自己的 fork 提 PR。`pull_request_target`
+# 会用**基础分支**的 workflow 定义、带着一个**可写**的 token 运行,而如果它再
+# 去 checkout PR 那一侧的代码,就等于让陌生人的代码拿着你的写权限跑 —— 这是
+# 公开仓库被打穿最常见的一条路。`pull_request` 拿到的 token 对 fork PR 是只读的,
+# 也拿不到 secrets。这个 workflow 什么都不需要写,所以没有任何理由用另一个。
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 显式收窄。不写的话默认权限取决于仓库设置,而那是个会在别处被改掉的东西
+permissions:
+  contents: read
+
+# 同一个分支连推两次,前一次没跑完就取消 —— 没必要为一个已经过时的 commit 排队
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    # **windows-latest,不是 ubuntu。** 产品只在 Windows 上跑,而
+    # `selfupdate.test.js` 里那条「生成出来的是合法的 PowerShell」带着
+    # `skip: process.platform !== 'win32'`。换到 Linux 上它会被静静跳过 ——
+    # 而它是那个文件里唯一真的执行了生成物的检查,偏偏那段脚本运行在一个
+    # 没有控制台的进程里,语法错了没有任何人会看到。
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # `node:sqlite` 要 Node 24+,和 package.json 的 engines 一致
+          node-version: '24'
+
+      # **这里没有 `npm install`,而那个缺席本身就是一条断言。**
+      # 运行时零依赖是这个仓库的硬约束(见 CLAUDE.md「Stack constraints」),
+      # 哪天有人给运行时加了真依赖,这一步的缺席会让测试当场失败,
+      # 而不是悄悄地把约束丢掉。launcher/ 的 devDependencies 只在打包时用,
+      # 测试碰不到它们。
+      - name: 全套测试
+        run: node --test --test-reporter=dot
