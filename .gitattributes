@@ -1,0 +1,28 @@
+# 所有文本文件在**每一台机器上**都签出成 LF。
+#
+# 这不是风格偏好,是一条正确性约束。这个仓库大量使用**源码断言** —— 测试把
+# `lib/` 的源文件当字符串读进来,按锚点切片,再断言里面的规矩还在。八个测试文件
+# 的锚点里带着字面的 `\n`(`indexOf('  return {\n    ok,')` 这种),而 Windows 上
+# git 的默认 `core.autocrlf=true` 会在**签出时**把 LF 换成 CRLF —— 于是同一份提交,
+# 在作者机器上全绿,在一台默认配置的 Windows 上三条断言直接找不到锚点。
+#
+# 实测:仓库里存的是纯 LF,作者本机 `core.autocrlf=input`(签出不转换)所以一直是绿的;
+# GitHub 的 windows-latest runner 用默认的 `autocrlf=true`,CI 第一次跑就红了,
+# guidepatch.test.js 的三条。本地用 `git -c core.autocrlf=true clone` 复现了同一批失败。
+#
+# **这对一个公开仓库尤其要紧**:README 和 CLAUDE.md 承诺的是 `git clone` 之后
+# 直接 `node --test`(运行时零依赖,没有安装步骤)。默认配置的 Windows 上开局就红,
+# 对第一个来看的人来说这个仓库就是坏的。
+#
+# 修的是根因而不是那一个 helper:锚点带换行的测试有八个,今天只有三条断言撞上,
+# 而下一条随时会长出来。签出行为定死之后,这一类从构造上消失。
+* text=auto eol=lf
+
+# 二进制显式标出来。`text=auto` 自己也能认,但认错一次的后果是文件被
+# 行尾转换改坏 —— 而这几种恰恰是改坏了肉眼看不出来的:字体渲染不出来、
+# 图标变空白,都不会报错。
+*.woff2 binary
+*.ico   binary
+*.png   binary
+*.zip   binary
+*.lnk   binary
