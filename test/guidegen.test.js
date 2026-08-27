@@ -1118,13 +1118,24 @@ describe('Dashboard 上的「生成」按钮', () => {
   // 单价随时变、质量我们没有可比的测量 —— 写出来就是臆断,而用户会当事实照着选。
   // 只写可核实的:有没有联网搜索、key 在哪申请。
   test('任何面向用户的地方都不写对供应商的评价', () => {
-    const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*(\*|\/\/).*$/gm, '');
+    // markdown 和源码得分开剥。`^\s*\*` 在 .js/.html 里是块注释的续行,在 .md 里
+    // 是**加粗**或者列表项 —— 拿同一条规则去剥 markdown,会把整行正文一起吃掉,
+    // 断言就再也看不见那一行。量过一次:README、guides、configuration、cli
+    // 四个 md 面加起来 44 行对这条断言完全不可见。所以 .md 只剥 HTML 注释
+    const stripHtml = (s) => s.replace(/<!--[\s\S]*?-->/g, '');
+    const strip = (s, rel) => (rel.endsWith('.md')
+      ? stripHtml(s)
+      : stripHtml(s).replace(/^\s*(\*|\/\/).*$/gm, ''));
+    // 自查:.md 剥完之后加粗行必须还在。少了这一句,把 strip 改回统一那版
+    // 也是全绿 —— 这条断言会静默变成空的,而空断言比没有断言更糟
+    assert.match(strip('**x** 最便宜', '../x.md'), /最便宜/,
+      'markdown 的加粗行被剥掉了,下面整个循环等于没跑');
     const JUDGEMENT = /cheapest|priciest|most expensive|best quality|最便宜|最贵|质量最好|有免费额度/i;
     const surfaces = ['../README.md', '../docs/guides.md', '../docs/configuration.md',
       '../docs/cli.md',
       '../tracker.js', '../lib/config.js', '../lib/ai.js', '../Setup.html', '../Dashboard.html'];
     for (const rel of surfaces) {
-      const text = strip(readFileSync(new URL(rel, import.meta.url), 'utf8'));
+      const text = strip(readFileSync(new URL(rel, import.meta.url), 'utf8'), rel);
       const hit = text.match(JUDGEMENT);
       assert.equal(hit, null, `${rel} 里还有对供应商的评价:「${hit && hit[0]}」`);
     }
