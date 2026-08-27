@@ -246,6 +246,30 @@
   }
   .btn-outline:hover { border-color: var(--accent); background: var(--accent-soft); }
 
+  /* 「返回」是**出口,不是动作** —— 全局那条 `button` 规则会给它满宽实心蓝,而那是
+     「保存并验证」的形状。出口和主动作长得一样,人就得停下来分辨哪个是这一页该做的事。
+     所以剥回一行三级灰的面包屑:没有底、没有框、不占整行。
+     `:hover` 那一条必须把 `background` 也写上 —— `button:hover` 里的 `--accent-hi`
+     不压掉就会在悬停时冒出来,成一块突如其来的蓝底 */
+  .back {
+    width: auto;
+    margin: 0 0 var(--s3);
+    padding: 0;
+    background: none;
+    border: none;
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    transition: color var(--dur-1);
+  }
+  .back:hover:not(:disabled) { background: none; color: var(--text); }
+  /* 拦下来那一下换的是文字,颜色跟着走 —— 和存档那边「危险动作转 --danger」同一个约定。
+     **`:hover` 那一条必须一起写上。** 点完第一下光标就停在按钮上,而
+     `.back:hover:not(:disabled)`(0,3,0)压得过单独的 `.back.armed`(0,2,0)——
+     红色会被悬停色盖掉,偏偏就在最需要看见它的那一瞬 */
+  .back.armed,
+  .back.armed:hover:not(:disabled) { color: var(--danger); }
+
   /* ---- 首屏的岔路 ----------------------------------------------------
      程序分不出「第一次用」和「老用户换了台电脑」—— 两种情况下都是没有 config、
      没有数据。这是**唯一一件只能问的事**,所以它先于向导出现,而不是当作向导里
@@ -363,7 +387,11 @@
   .arc-acts .btn-sub { margin-top: 0; padding: 4px 10px; font-size: var(--fs-xs); }
   /* 待确认的那一下:**按钮自己变成后果那句话**,不弹框。弹框会把"删哪一个"
      从眼前挪走,而这一页上下相邻的两行长得几乎一样 */
-  .arc-acts .armed { color: var(--danger); border-color: var(--danger); }
+  /* **`:hover` 那一条必须一起写上。** 点完第一下光标就停在按钮上,而
+     `.btn-sub:hover:not(:disabled)` 压得过单独的 `.armed` —— 红框会被
+     悬停的边框色盖掉,偏偏就在最需要看见它的那一瞬 */
+  .arc-acts .armed,
+  .arc-acts .armed:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
   .arc.armed { background: var(--surface-2); }
   .arc-body {
     margin: 0 0 var(--s3);
@@ -390,7 +418,9 @@
     border-top: 1px solid var(--line-1);
   }
   .arc-foot .btn-sub { margin-top: 0; padding: 4px 10px; font-size: var(--fs-xs); }
-  .arc-foot .armed { color: var(--danger); border-color: var(--danger); }
+  /* 同上:悬停的边框色会盖掉红框,所以 `:hover` 那一条要一起写 */
+  .arc-foot .armed,
+  .arc-foot .armed:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 
   .check {
     display: flex; align-items: center; gap: 8px;
@@ -545,6 +575,17 @@
 </head>
 <body>
   <form class="card" id="setup-form">
+    <!-- **出口。** 打包版没有地址栏、没有后退键,托盘的「打开面板」也只是 show/focus
+         (launcher/main.js 的 showWindow 不 loadURL)—— 少了这个按钮,进了设置页就只能靠
+         「保存并验证」出去,改到一半想反悔的人得重启程序。
+
+         **它不叫「取消」。** 这一页上有六个控件不等保存就生效(建 Notion 库当场存盘、
+         立即备份、恢复、删存档),「取消」等于承诺整页能回滚,而它收得回的只有下面
+         那几个输入框。名字说的是去哪,不是撤销什么。
+
+         只在设置模式出现:首次设置时这一页是道关卡,凭据填好之前不该有出口。
+         `type="button"` 不能掉 —— 它就在 <form> 里,默认类型是 submit -->
+    <button type="button" class="back" id="back-btn" hidden>← 返回 Dashboard</button>
     <h1 id="page-title">初始设置</h1>
     <div class="subtitle" id="page-subtitle">只需要填一次,密钥都存在本机的 config.json 里</div>
     <!-- 首次设置的岔路。**问的不是「你是不是新用户」** —— 那要人先猜到这个程序
@@ -853,6 +894,7 @@
         $('notion-token').placeholder = '留空则沿用现在的';
       }
       if (isEditMode) {
+        armBack();
         $('page-title').textContent = '设置';
         $('page-subtitle').textContent = '点上面的标签跳到要改的那一节;没动的项目留空即可';
         document.title = '设置 · Steam 成就追踪器';
@@ -862,6 +904,42 @@
       }
       initSteps();
     })();
+
+    // ---- 出口 --------------------------------------------------------------
+    //
+    // **改过东西才拦一下。** 进来看一眼就走的人不该被问「要放弃吗」:那句话对他没有
+    // 意义,而每次都问会把它训练成一个下意识点掉的东西 —— 等到真有东西要丢的那次
+    // 也照点不误。
+    //
+    // **脏值逐栏记,不是一个总快照。** 建 Notion 库会当场把 ID 存盘,那一栏于是变回
+    // 干净的;而同一时刻用户可能刚改过 SteamID。一个总快照只能一起重置,那会把那个
+    // 真的未保存修改静静抹掉。
+    //
+    // 密钥那几栏在设置模式下**永远是空的**(只填占位符),所以空白就是「没动过」。
+    const DIRTY_FIELDS =
+      ['key', 'id', 'ai-provider', 'ai-key', 'ai-model', 'notion-token', 'notion-db'];
+    /** 每一栏「存过盘的那个值」。不传参就重新对一遍表 */
+    const saved = {};
+    const markSaved = (...ids) => {
+      for (const k of (ids.length ? ids : DIRTY_FIELDS)) saved[k] = $(k).value;
+    };
+    const isDirty = () => DIRTY_FIELDS.some((k) => $(k).value !== saved[k]);
+
+    function armBack() {
+      const back = $('back-btn');
+      // 标签从标记里读 —— 再写一遍就多了一处会对不上的地方(disarm 靠它复位)
+      const label = back.textContent;
+      markSaved();
+      back.hidden = false;
+      // arm() 装的是雷打不动的两下点,而这里只有脏了才该拦,所以在它外面套一层。
+      // 条件不塞进 arm():另外三个调用点都是删除,它们任何时候都得拦
+      arm(back, label, '放弃未保存的修改?', () => { location.href = '/'; });
+      const confirmClick = back.onclick;
+      back.onclick = (e) => {
+        if (isDirty()) return confirmClick(e);
+        location.href = '/';
+      };
+    }
 
     // ---- AI:每家记自己的 key 和模型 ---------------------------------------
     //
@@ -1107,6 +1185,9 @@
       // 服务端建完就存盘了。这里同步 loadedNotionDb,否则待会儿按「保存并验证」会为了
       // 同一个值再往 Notion 跑一趟(submit 那边靠和它比对来决定要不要调 saveNotionConfig)
       loadedNotionDb = r.id;
+      // 这个 ID 已经在盘上了,所以它不算「未保存的修改」。**只对这一栏** —— 整体重置
+      // 会把同一时刻真的未保存修改(比如刚改一半的 SteamID)一并抹掉
+      markSaved('notion-db');
       $('notion-create').hidden = true;
       setNotionMsg('建好了:「' + r.title + '」,状态选项 ' + r.options.join(' / ')
         + '。ID 已填好并存盘。', 'ok');
@@ -1287,11 +1368,12 @@
 
     // 点到这个列表以外的任何地方都撤销 —— 一个举着"永久删除"的按钮不该一直举着。
     //
-    // **`#arc-wipe` 必须写在这个选择器里。** 它不在 `.arc-acts` 内(它是整个列表的
-    // 尾巴,不属于任何一行),漏了的话第一下点完会先跑 onclick 上好膛,再冒泡到
-    // 这里当场拆掉 —— 按钮看上去根本没反应,而且永远点不出第二下
+    // **不在 `.arc-acts` 内的那几个必须逐个列在这个选择器里。** `#arc-wipe` 是整个列表
+    // 的尾巴、`#back-btn` 在页面最上面,两个都不属于任何一行。漏了哪个,那个按钮第一下
+    // 点完会先跑 onclick 上好膛,再冒泡到这里当场拆掉 —— 表现是按钮看上去根本没反应、
+    // 永远点不出第二下,而一行错都不会报
     document.addEventListener('click', (e) => {
-      if (armed && !e.target.closest('.arc-acts, #arc-wipe')) disarm();
+      if (armed && !e.target.closest('.arc-acts, #arc-wipe, #back-btn')) disarm();
     });
 
     const kb = (n) => (n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B');

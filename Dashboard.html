@@ -1851,7 +1851,11 @@
     .arc-acts button:disabled { opacity: 0.45; cursor: default; }
     /* 待确认的那一下:**按钮自己变成后果那句话**,不再套一层框。
        在一个已经是弹框的地方再弹一个框,「删哪一份」就彻底看不见了 */
-    .arc-acts button.armed { color: var(--danger); border-color: var(--danger); }
+    /* **`:hover` 那一条必须一起写上。** 点完第一下光标就停在按钮上,而
+       `.arc-acts button:hover:not(:disabled)` 压得过单独的 `.armed` —— 红框会被
+       悬停的边框色盖掉,偏偏就在最需要看见它的那一瞬 */
+    .arc-acts button.armed,
+    .arc-acts button.armed:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
     .arc.armed { background: var(--surface-2); }
     .arc-body {
       margin: 0 0 var(--s3);
