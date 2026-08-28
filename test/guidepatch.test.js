@@ -35,6 +35,7 @@ import {
   parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback, landPatchNotion,
 } from '../lib/guidepatch.js';
 import { patchPreflight, formatPatchPreflight } from '../lib/guidebackup.js';
+import { NotionClient } from '../lib/notion.js';
 import { buildPatchMessage, buildAchievementList } from '../lib/guidegen.js';
 
 // ---------------------------------------------------------------------------
@@ -916,8 +917,8 @@ function fakeNotionPage() {
     async setTodoRichText(blockId, richText, opts = {}) {
       this.written.push({ blockId, checked: opts.checked, text: richText.map((r) => r.text.content).join('') });
     },
-    async replaceTodoChildren(blockId, oldIds, blocks) {
-      this.childrenCalls.push({ blockId, oldIds, count: blocks.length });
+    async replaceTodoChildren(blockId, blocks) {
+      this.childrenCalls.push({ blockId, count: blocks.length });
     },
     // 回读:把原来的 todos 拿出来,并把这次改过的那几条换成写进去的样子
     async fetchAllToDoBlocks() {
@@ -982,25 +983,30 @@ describe('landPatchNotion(假 Notion)', () => {
   // (SKILL_RULE_DISPOSITION 的「规则二」写着为什么不做)。剩下的路是用户自己往
   // 成就底下贴图 —— 那就必须保证局部重写不会顺手删掉它。
   //
-  // 依据是 replaceTodoChildren 只收到 `e.subTodos` 的 id:图片/表格/标注这些
-  // 别的类型的子块根本不在删除名单里。**传成"这个块的全部子块"就会当场毁掉它们**,
-  // 而且不报错 —— 用户下次打开页面才发现图没了,还对不上是哪一步弄的。
-  test('只删这条成就自己的子 checkbox,手贴的图不在删除名单里', async () => {
-    const notion = fakeNotionPage();
-    const es = entriesFor(['B']);
-    assert.ok(es[0].subTodos.length > 0, 'B 要有子步骤,否则这条验不到东西');
-    await landPatchNotion({
-      notion, plan: patchPlan(), defs: DEFS, unlocked: new Set(),
-      entries: es,
-      found: new Map([['B', ['- [ ] **第二步**<br>完成第二关。<br>重写过的正文。']]]),
-      wantChecked: new Set(),
-    });
-    const call = notion.childrenCalls.find((c) => c.blockId === es[0].key);
-    assert.ok(call, '应该调了一次 replaceTodoChildren');
-    assert.deepEqual(
-      call.oldIds, es[0].subTodos.map((x) => x.key),
-      '删除名单必须正好是子 checkbox 的 id —— 多收一个别的类型,手贴的块就跟着没了'
-    );
+  // **判据搬过家了。** 原来靠「调用方只传 `e.subTodos` 的 id」,而分组标签是 toggle:
+  // 装在里面的子步骤删得掉、壳删不掉,于是重写完页面上留下空折叠(苏丹的游戏「创造」
+  // 实测:两个空壳 + 19 条子步骤没贴回去)。现在改成方法自己按**块类型**决定 ——
+  // `to_do`/`toggle` 是模型每次整份交回来的正文,删;别的类型是用户的东西,留。
+  // 所以这条测试跟着搬到真实现上,`landPatchNotion` 那层已经没有名单可验了。
+  test('replaceTodoChildren 只删正文块(to_do/toggle),手贴的图表留着', async () => {
+    const notion = new NotionClient({ notion: { token: 't' } });
+    notion.childBlockStubs = async () => [
+      { id: 'k1', type: 'to_do' },
+      { id: 'k2', type: 'toggle' },
+      { id: 'k3', type: 'image' },
+      { id: 'k4', type: 'table' },
+      { id: 'k5', type: 'paragraph' },
+    ];
+    const deleted = [];
+    notion.deleteBlock = async (id) => { deleted.push(id); };
+    let appended = 0;
+    notion.appendBlocks = async (_id, blocks) => { appended = blocks.length; };
+
+    await notion.replaceTodoChildren('parent', [{ object: 'block', type: 'to_do', to_do: {} }]);
+
+    assert.deepEqual(deleted, ['k1', 'k2'],
+      '只能删 to_do 和 toggle —— 多删一种,用户手贴的图就跟着没了,而且不报错');
+    assert.equal(appended, 1, '新正文还是要写进去');
   });
 
   test('传进来说不勾,就不勾', async () => {
@@ -1040,4 +1046,44 @@ describe('landPatchNotion(假 Notion)', () => {
     );
     assert.equal(notion.written.length, 0, '一个字都不该写出去');
   });
+});
+
+// 苏丹的游戏「创造」实测踩到的那个:模型照 groupLabelRule('notion') 写了三个
+// `<details>` 分组、共 19 条子步骤,而 `parsePatchReply` 用的 `todoSpans` 只认
+// checkbox 行,区间在第一个折叠行就断,子步骤一条都没被读进去。
+test('Notion 目标下,折叠里的子步骤要算进这条成就的区间', () => {
+  const md = [
+    '- [ ] **第二步**<br>完成第二关。<br>重写过的正文。',
+    '\t<details>',
+    '\t<summary>**前置** — 开局前先备齐</summary>',
+    '\t- [ ] 先拿到钥匙',
+    '\t- [ ] 再点亮灯',
+    '\t</details>',
+    '\t<details>',
+    '\t<summary>**注意** — 走岔就掉别的结局</summary>',
+    '\t- 别先开箱子',
+    '\t</details>',
+  ].join('\n');
+
+  const notion = parsePatchReply(md, DEFS, { kind: 'notion' }).found.get('B');
+  assert.equal(notion.length, 10, 'Notion 目标要把两个折叠整块吃进来');
+  assert.ok(notion.join('\n').includes('先拿到钥匙'), '子步骤丢了 —— 正是踩过的那个 bug');
+  assert.ok(notion.join('\n').includes('别先开箱子'), '注意那一组的 bullet 也要在');
+
+  // 本地那边**行为一个字不变**:`spliceIntoText` 按行区间回贴,多吃一行是静默删字,
+  // 而本地目标的提示词根本不会产出这个形状
+  const local = parsePatchReply(md, DEFS, { kind: 'local' }).found.get('B');
+  assert.equal(local.length, 1, '本地目标必须维持 todoSpans 的保守区间');
+});
+
+// 折叠没闭合(模型被截断时的典型残骸)不能一路吃到文末 —— 那会把后面别的成就吞掉
+test('折叠没有闭合标签时不猜,区间不往下吃', () => {
+  const md = [
+    '- [ ] **第二步**<br>完成第二关。<br>正文。',
+    '\t<details>',
+    '\t<summary>**前置**</summary>',
+    '\t- [ ] 先拿到钥匙',
+  ].join('\n');
+  const got = parsePatchReply(md, DEFS, { kind: 'notion' }).found.get('B');
+  assert.equal(got.length, 1, '没闭合就退回保守区间,少吃一行是看得见的失败');
 });

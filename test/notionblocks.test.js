@@ -1,6 +1,6 @@
-import test from 'node:test';
+import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { markdownToBlocks, toRichText, chunkBlocks, splitDeepChildren, blockDepth } from '../lib/notionblocks.js';
+import { markdownToBlocks, toRichText, chunkBlocks, splitDeepChildren, blockDepth, partitionForOverwrite, carriesPointer, sectionIntros, keepIntro } from '../lib/notionblocks.js';
 import { richTextToPlain, NotionClient } from '../lib/notion.js';
 
 /** 把 rich_text 拼回纯文本 —— 和同步脚本读 Notion 时走的是同一个函数 */
@@ -424,4 +424,150 @@ test('拿不到父块 id 就报错,不让折叠块静悄悄地空着', async () 
   const client = new NotionClient({ notion: { token: 't' } });
   client.request = async () => ({ results: [] }); // Notion 没回新块
   await assert.rejects(() => client.appendBlocks('PAGE', blocks), /没能补上|半篇攻略/);
+});
+
+// 分组标签(前置/步骤/注意)的形状:`- [ ] **成就**` 下面缩进几个 `<details>`。
+// 这是 guidegen 的 groupLabelRule 在 target='notion' 时**要求**模型写的形状,
+// 所以转换器认不认它不是"顺手支持",是这条规则能不能落地。
+test('缩进的 details 挂在上一个 checkbox 下面,而不是变成它的兄弟', () => {
+  const md = [
+    '- [ ] **创造**<br>你可以创造一切。',
+    '\t<details>',
+    '\t<summary>**前置** — 开局前先备齐</summary>',
+    '\t- [ ] 拿到龙眼宝石',
+    '\t- [ ] 玛希尔在队',
+    '\t</details>',
+    '\t<details>',
+    '\t<summary>**注意** — 走岔就掉别的结局</summary>',
+    '\t- 魔力熔炉别放人',
+    '\t</details>',
+    '- [ ] **知识**<br>收齐词条。',
+  ].join('\n');
+  const { blocks, unconverted } = markdownToBlocks(md);
+
+  // 顶层只有两个成就 —— 折叠不能站到顶层去
+  assert.deepEqual(blocks.map((b) => b.type), ['to_do', 'to_do']);
+  assert.deepEqual(unconverted, []);
+
+  const kids = blocks[0].to_do.children;
+  assert.deepEqual(kids.map((b) => b.type), ['toggle', 'toggle'],
+    '一条成就下面连着的两个折叠都要挂上去 —— 第二个不能掉回顶层');
+
+  // **折叠里的并列子项必须还是并列的。** 不 dedent 的话第二条会挂到第一条下面,
+  // 十条前置就成了十层嵌套。
+  const pre = kids[0].toggle.children;
+  assert.deepEqual(pre.map((b) => b.type), ['to_do', 'to_do'],
+    '折叠里两条并列的 checkbox 变成了嵌套');
+  assert.equal(pre[1].to_do.children, undefined, '第二条不该成为第一条的子块');
+
+  // 「注意」那一组是普通 bullet(警告不是任务),不能被转成 to_do
+  assert.deepEqual(kids[1].toggle.children.map((b) => b.type), ['bulleted_list_item']);
+});
+
+// 顶层的折叠(规则五的长清单)行为不能被上面那条改掉
+test('顶层的 details 仍然是顶层 toggle', () => {
+  const md = ['- [ ] **成就**', '<details>', '<summary>全结局对照</summary>', '- 一行', '</details>'].join('\n');
+  const { blocks } = markdownToBlocks(md);
+  assert.deepEqual(blocks.map((b) => b.type), ['to_do', 'toggle']);
+  assert.equal(blocks[0].to_do.children, undefined);
+});
+
+// 覆盖重写时哪些块该删、哪些该留。**判据是反过来定义的** ——
+// 列的是「生成器自己产的」，没列到的一律保留，因为猜错的方向应该是
+// 「多留一个块」而不是「删掉用户的东西」。
+describe('partitionForOverwrite', () => {
+  const rt = (s, link) => [{
+    plain_text: s,
+    text: { content: s, ...(link ? { link: { url: link } } : {}) },
+    ...(link ? { href: link } : {}),
+  }];
+  const resolve = (s) => ({ '成就甲': 'A', '成就乙': 'B' })[String(s).trim()] ?? null;
+
+  test('图片/嵌入留着，标题和 checkbox 删掉', () => {
+    const { drop, keep } = partitionForOverwrite([
+      { id: 'h', type: 'heading_2', heading_2: { rich_text: rt('主线') } },
+      { id: 't', type: 'to_do', to_do: { rich_text: rt('成就甲') } },
+      { id: 'i', type: 'image', image: {} },
+      { id: 'c', type: 'callout', callout: {} },
+    ], resolve);
+    assert.deepEqual(drop.map((x) => x.id), ['h', 't']);
+    assert.deepEqual(keep.map((x) => x.id), ['i', 'c']);
+    assert.equal(keep[0].afterApiName, 'A', '图要锤在它前面那条成就上');
+  });
+
+  // 小节开场说明是 paragraph，而生成器自己也写这种段落。全留会累积
+  // （这次留一段、模型又写一段，下次两段都留……），全不留又会丢掉
+  // 重新生成找不回来的外部指针。所以只留带指针的那部分。
+  test('带链接/BV 号的小节说明留着，纯文字的让它重生', () => {
+    const { drop, keep } = partitionForOverwrite([
+      { id: 'h', type: 'heading_2', heading_2: { rich_text: rt('指定关卡') } },
+      { id: 'link', type: 'paragraph', paragraph: { rich_text: rt('gamefaqs', 'https://gamefaqs.gamespot.com/x') } },
+      { id: 'bv', type: 'paragraph', paragraph: { rich_text: rt('对照 B站 BV1KFwzzCEsc 的5-2 段落') } },
+      { id: 'plain', type: 'paragraph', paragraph: { rich_text: rt('这一组都在指定关卡内完成。') } },
+      { id: 't', type: 'to_do', to_do: { rich_text: rt('成就甲') } },
+    ], resolve);
+    assert.deepEqual(keep.map((x) => x.id), ['link', 'bv'], '只有带指针的那两段留下');
+    assert.ok(drop.some((x) => x.id === 'plain'), '纯文字说明要让位给重新查过资料的新版');
+    assert.equal(keep[0].prefer, 'before', '开场说明在成就**前面**，锤点要用后一条成就');
+    assert.equal(keep[0].beforeApiName, 'A');
+  });
+
+  // 成就底下的段落不是小节开场说明 —— 那是心得正文，每次都重写
+  test('成就之后的段落不算小节说明，带链接也不留', () => {
+    const { keep } = partitionForOverwrite([
+      { id: 'h', type: 'heading_2', heading_2: { rich_text: rt('主线') } },
+      { id: 't', type: 'to_do', to_do: { rich_text: rt('成就甲') } },
+      { id: 'p', type: 'paragraph', paragraph: { rich_text: rt('参考', 'https://x.com') } },
+    ], resolve);
+    assert.deepEqual(keep, [], '已经进了成就列表就不再是开场说明');
+  });
+
+  test('carriesPointer 认链接、裸 URL 和 BV 号', () => {
+    assert.equal(carriesPointer(rt('没有指针')), false);
+    assert.equal(carriesPointer(rt('有链接', 'https://a.b')), true);
+    assert.equal(carriesPointer(rt('看 https://a.b/c 这里')), true);
+    assert.equal(carriesPointer(rt('对照 BV1KFwzzCEsc')), true);
+    assert.equal(carriesPointer(rt('BV 号太短 BV123')), false, '别把任意 BV 字样都当成视频号');
+  });
+});
+
+/**
+ * 小节开场说明是 `paragraph`，而生成器自己也写这种段落 ——
+ * **段落类型分不出作者，内容能。** 记下上一次我们写了什么，下次反查。
+ */
+describe('小节说明的 provenance', () => {
+  const rt = (s) => [{ plain_text: s, text: { content: s } }];
+  const md = [
+    '## 指定关卡',
+    '这一组都在指定关卡内完成。',
+    '- [ ] **移动游戏厅**<br>d',
+    '## 道具使用',
+    '关卡里会出现锤子。',
+    '- [ ] **开盒**<br>d',
+  ].join('\n');
+
+  test('sectionIntros 只抓标题之后、第一条 checkbox 之前的行', () => {
+    assert.deepEqual(sectionIntros(md), ['这一组都在指定关卡内完成。', '关卡里会出现锤子。']);
+  });
+
+  test('有记录时：我们写的让位，用户改过的留着', () => {
+    const mine = sectionIntros(md);
+    assert.equal(keepIntro(rt('这一组都在指定关卡内完成。'), mine), false,
+      '一字不差 ⇒ 是我们上次写的，该换成新查过资料的那版');
+    assert.equal(keepIntro(rt('这一组都在指定关卡内完成。我补了一句。'), mine), true,
+      '改过一个字就不再是我们的 ⇒ 留着');
+    assert.equal(keepIntro(rt('完全是用户自己写的一段'), mine), true);
+  });
+
+  test('空白差异不算修改 —— Notion 往返会动空格，不会动字', () => {
+    assert.equal(keepIntro(rt('  这一组都在指定关卡内完成。 '), sectionIntros(md)), false);
+  });
+
+  // **「没记录」和「记过、但是空的」是两回事。**
+  // 前者是老攻略（退回启发式），后者是上次真的一段说明都没写（那页面上的就全是用户的）
+  test('没有记录退回启发式，记过空数组则一律留着', () => {
+    assert.equal(keepIntro(rt('纯文字说明'), null), false, '没记录 ⇒ 只留带指针的');
+    assert.equal(keepIntro(rt('对照 BV1KFwzzCEsc'), null), true);
+    assert.equal(keepIntro(rt('纯文字说明'), []), true, '记过但上次一段没写 ⇒ 页上的全是用户的');
+  });
 });

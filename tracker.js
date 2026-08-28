@@ -49,7 +49,7 @@ import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideT
 import { lintAllGuides } from './lib/guidelint.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
 import {
-  generateGuide, planGuide, buildSystemPrompt, buildPatchMessage, DRAFTS_DIR,
+  generateGuide, planGuide, systemPromptFor, buildPatchMessage, DRAFTS_DIR,
 } from './lib/guidegen.js';
 import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
 import { planPatch, patchGuide, PATCH_ROUNDS } from './lib/guidepatch.js';
@@ -1119,7 +1119,7 @@ async function cmdGuideGen() {
   if (dryRun) {
     console.log('\n--dry-run:不发任何请求。会发过去的 system 提示词:\n');
     console.log('─'.repeat(70));
-    console.log(buildSystemPrompt(plan.game, String(appid), plan.defs, { canSearch: probe.canSearch !== false }));
+    console.log(systemPromptFor(plan, appid, { canSearch: probe.canSearch !== false }));
     console.log('─'.repeat(70));
     return;
   }
@@ -1150,14 +1150,21 @@ async function cmdGuideGen() {
     onProgress(ev) {
       if (ev.phase === 'plan' && ev.chunks > 1) {
         p.done(`  ${ev.achievements} 个成就,一次写不完,分 ${ev.chunks} 段写`);
-      } else if (ev.phase === 'sections') {
-        p.update('  先把这份攻略的分区定下来…');
-      } else if (ev.phase === 'sections-done') {
-        p.done(`  分区定好了(${ev.count} 个):${ev.names.join(' · ')}`);
-      } else if (ev.phase === 'sections-failed') {
-        // **降级要出声。** 各段自己分的话小节标题会重复,而那是成品上看得见的退化 ——
-        // 不说的话用户只会觉得"这次生成的分区怎么乱七八糟"
-        p.done(`  ⚠️  分区没定成(${ev.reason}),改由各段自己分,小节标题可能重复`);
+      } else if (ev.phase === 'regroup') {
+        p.update('  正文写完了,再统一一遍分区…');
+      } else if (ev.phase === 'regroup-done') {
+        p.done(`  分区统一好了(${ev.sections} 个,归了 ${ev.assigned}/${ev.of} 条)`);
+      } else if (ev.phase === 'regroup-failed') {
+        // **降级要出声。** 各段是自己开的标题,不统一的话同类成就会散在几个小节里,
+        // 而那是成品上看得见的退化 —— 不说的话用户只会觉得"这次的分区怎么乱七八糟"
+        p.done(`  ⚠️  分区没统一成(${ev.reason}),保留各段自己分的结果`);
+      } else if (ev.phase === 'regroup-merged') {
+        // 这是程序**改掉了模型给的分类**,而成品上看不出是谁改的。说清楚改了几处
+        p.done(`  ${ev.clusters} 组同类成就被劈开了,已并回一处(搬 ${ev.moved} 条 → ${ev.into.join('、')})`);
+      } else if (ev.phase === 'unwrapped-toggles') {
+        p.done(`  ${ev.titles.length} 个折叠里装的是成就,已摊开:${ev.titles.join('、')}`);
+      } else if (ev.phase === 'unwrap-failed') {
+        p.done(`  ⚠️  ${ev.reason},折叠保持原样`);
       } else if (ev.phase === 'rewrite') {
         p.done(`  校验没过,第 ${ev.round} 轮只重写其中 ${ev.chunks}/${ev.of} 段`);
       } else if (ev.phase === 'ask') {

@@ -314,3 +314,53 @@ describe('computeCheckedKeys(机械打勾)', () => {
     assert.deepEqual(keys, [1]);
   });
 });
+
+// 上面那条查的是「每个成就都有框」,查不到「每个顶层框都是成就」。
+// 《破晓传奇》生成完报的是「覆盖 58/58,0 条 warn」，而页面上有 70 个顶层
+// checkbox —— 多出来的 12 个是该嵌套却写成顶层的子步骤,它们永远勾不上。
+test('顶层 checkbox 认不出成就就报出来,嵌套的子步骤不算', () => {
+  const defs = [{ api_name: 'A', name_cn: '聊不完的话题', name_en: '', description: 'd', game_name: 'g', hidden: 0, icon: '' }];
+  const todos = [
+    { key: 0, text: '聊不完的话题\nd', checked: false, parent: null },
+    { key: 1, text: '「回归自我」', checked: false, parent: null },
+    { key: 2, text: '某个子步骤', checked: false, parent: 0 },
+  ];
+  const codes = lintGuide({ todos, defs, kind: 'notion' }).findings.map((f) => f.code);
+  assert.deepEqual(codes, ['orphan-todo'], '只该报那一条孤儿顶层框');
+  // **嵌套的子步骤是合法的**,报它会把每份带子步骤的攻略都洗成一片 warn
+  assert.ok(!codes.includes('orphan-todo') || todos[2].parent === 0);
+});
+
+// **它们和真孤儿在 `parent` 上长得一模一样。**
+// 顶层折叠（规则五的长清单）里的条目，`fetchAllToDoBlocks` 把容器当透明的、
+// `parent` 原样往下传，于是也是 `null` —— 光看 `parent` 分不出来。
+// 实测踩过：《破晓传奇》的 38 条猫头鹰位置被全部误报成孤儿，
+// **38 条假警报比没有检查更糟** —— 它会训练人忽略 warn。
+test('折叠里的 checkbox 不算孤儿，两个后端要给同一个答案', () => {
+  const defs = [{ api_name: 'A', name_cn: '聊不完的话题', name_en: '', description: 'd', game_name: 'g', hidden: 0, icon: '' }];
+  const mk = (key, text, container) => ({ key, text, checked: false, parent: null, container });
+
+  // Notion：靠 `container` 标记
+  const notion = lintGuide({
+    todos: [mk(0, '聊不完的话题', false), mk(1, '折叠里的位置', true), mk(2, '「回归自我」', false)],
+    defs, kind: 'notion',
+  }).findings.filter((f) => f.code === 'orphan-todo');
+  assert.equal(notion.length, 1, '只该报那一条真孤儿');
+  assert.match(notion[0].message, /「回归自我」/);
+
+  // 本地 md：只有文本，靠行号算哪些夹在 <details> 里
+  const text = [
+    '- [ ] 聊不完的话题',
+    '<details>',
+    '<summary>位置一览</summary>',
+    '- [ ] 折叠里的位置',
+    '</details>',
+    '- [ ] 「回归自我」',
+  ].join('\n');
+  const local = lintGuide({
+    todos: [mk(0, '聊不完的话题'), mk(3, '折叠里的位置'), mk(5, '「回归自我」')],
+    defs, text, kind: 'local',
+  }).findings.filter((f) => f.code === 'orphan-todo');
+  assert.equal(local.length, 1, '本地也只该报一条 —— 两个后端结论不一样就是 bug');
+  assert.match(local[0].message, /「回归自我」/);
+});
