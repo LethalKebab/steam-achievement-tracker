@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { openDb, insertGame, replaceAchievements, getGuide } from '../lib/db.js';
-import { landToNotion, DRAFTS_DIR } from '../lib/guidegen.js';
+import { landToNotion, DRAFTS_DIR, writeAroundKept } from '../lib/guidegen.js';
 // planNotionTarget 住在 notion.js 而不是 guidegen.js —— 它是"写 Notion 前该问什么",
 // 跟 AI 没有关系,搬家那条路(guidemigrate.js)也要用它
 import { planNotionTarget, newGuideStatus, GUIDE_STATUS_OPTIONS } from '../lib/notion.js';
@@ -344,5 +344,71 @@ describe('landToNotion —— 写进去,然后回读验一遍', () => {
     const notion = fakeNotion();
     notion.extractAppIdFromPageContent = async () => null; // 读不到
     await assert.rejects(land(db, config, draftPath, notion, {}), /没能从上面读出 appid/);
+  });
+});
+
+/**
+ * 覆盖重写时**只删生成器自己产的块**，图片/嵌入/bookmark 留着。
+ * 留下来的块**搬不动**（Notion API 明说 existing blocks cannot be moved），
+ * 所以是新正文绕着它们写 —— 这几条钉的就是那个绕法对不对。
+ */
+describe('writeAroundKept —— 新正文绕着保留块写', () => {
+  // **夹具要和现实一样吝啬。** 传给 writeAroundKept 的是我们**自己造**的块
+  // (`markdownToBlocks` → `toRichText`),只有 `text.content`,**没有 `plain_text`** ——
+  // 早先这里两个字段都给了,于是"用错了取文本的函数"这个 bug 一路绿灯溜进了线上:
+  // 锚点表全空,保留的 bookmark 落到了页首。
+  const todo = (name) => ({ type: 'to_do', to_do: { rich_text: [{ type: 'text', text: { content: name } }] } });
+  const head = (name) => ({ type: 'heading_2', heading_2: { rich_text: [{ type: 'text', text: { content: name } }] } });
+  const resolveApi = (s) => ({ '成就甲': 'A', '成就乙': 'B', '成就丙': 'C' })[String(s).trim()] ?? null;
+
+  // 删完之后页面上只剩保留块，顺序不变。把插入调用重放成最终顺序。
+  const fake = (keptIds) => ({
+    page: [...keptIds],
+    calls: [],
+    async appendBlocks(_pid, blocks, { after = null, atStart = false } = {}) {
+      this.calls.push({ n: blocks.length, after, atStart });
+      const names = blocks.map((b) => (b.type === 'to_do' || b.type === 'heading_2'
+        ? b[b.type].rich_text[0].text.content : b.type));
+      const at = after ? this.page.indexOf(after) + 1 : (atStart ? 0 : this.page.length);
+      this.page.splice(at, 0, ...names);
+      return { written: blocks.length, lastId: names[names.length - 1] };
+    },
+  });
+
+  test('保留块落回它原来跟着的那条成就后面', async () => {
+    const blocks = [head('主线'), todo('成就甲'), todo('成就乙'), todo('成就丙')];
+    const n = fake(['IMG']);
+    await writeAroundKept(n, 'p', blocks, [{ id: 'IMG', type: 'image', afterApiName: 'A' }], resolveApi);
+    assert.deepEqual(n.page, ['主线', '成就甲', 'IMG', '成就乙', '成就丙'],
+      '图要落在「成就甲」后面 —— 而不是页首或页尾');
+    assert.equal(n.calls[0].atStart, true, '第一段前面没有锤点块，必须插到页首');
+  });
+
+  test('多个保留块各自归位,不互相抢位', async () => {
+    const blocks = [todo('成就甲'), todo('成就乙'), todo('成就丙')];
+    const n = fake(['IMG', 'BM']);
+    await writeAroundKept(n, 'p', blocks, [
+      { id: 'IMG', type: 'image', afterApiName: 'A' },
+      { id: 'BM', type: 'bookmark', afterApiName: 'C' },
+    ], resolveApi);
+    assert.deepEqual(n.page, ['成就甲', 'IMG', '成就乙', '成就丙', 'BM']);
+  });
+
+  // 锤点那条成就这次被删了(比如 DLC 下架)—— **位置不理想远好过把用户的图删掉**
+  test('prefer=before 的插在锤点成就**之前**', async () => {
+    const blocks = [head('指定关卡'), todo('成就甲'), todo('成就乙')];
+    const n = fake(['LINK']);
+    await writeAroundKept(n, 'p', blocks,
+      [{ id: 'LINK', type: 'paragraph', prefer: 'before', afterApiName: null, beforeApiName: 'A' }], resolveApi);
+    assert.deepEqual(n.page, ['指定关卡', 'LINK', '成就甲', '成就乙'],
+      '小节说明要落在标题之后、第一条成就之前');
+  });
+
+  test('锤点在新正文里找不到了,保留块也不能丢', async () => {
+    const blocks = [todo('成就甲'), todo('成就乙')];
+    const n = fake(['IMG']);
+    await writeAroundKept(n, 'p', blocks, [{ id: 'IMG', type: 'image', afterApiName: 'ZZZ' }], resolveApi);
+    assert.ok(n.page.includes('IMG'), '锤点没了也不能把保留块弄没');
+    assert.equal(n.page.length, 3, '三个块都在');
   });
 });

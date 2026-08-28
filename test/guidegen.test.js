@@ -45,6 +45,9 @@ import {
   guideFileName,
   buildAchievementList,
   buildSystemPrompt,
+  systemPromptFor,
+  REGROUP_SYSTEM,
+  regroupByAssignment,
   chunkDefs,
   buildChunkMessage,
   buildChunkFeedback,
@@ -98,9 +101,20 @@ function freshEnv({ defs = DEFS } = {}) {
  * `sections` 传 null 就模拟「分区表没定成」,走降级路径(等于加这一趟之前的行为)。
  */
 const PLAN_SECTIONS = ['主线', '支线', '收集', '杂项'];
-function sectionPlanReply(system, sections = PLAN_SECTIONS) {
-  if (system !== SECTION_PLAN_SYSTEM) return null;
-  const text = sections ? sections.map((x) => `- ${x}`).join('\n') : '这个游戏不用分区。';
+function sectionPlanReply(system, sections = PLAN_SECTIONS, count = 5) {
+  // 分区表挪到正文写完之后了,所以这里认的是 REGROUP_SYSTEM。格式也跟着换成
+  // 「== 标题 / 编号」——`parseRegroupReply` 认的是那个,不是 `- 标题`
+  if (system !== REGROUP_SYSTEM) return null;
+  const text = sections
+    ? sections.map((x, i) => {
+      // 编号按顺序发下去,最后一节兜住剩下的,保证每个编号都出现一次
+      const from = Math.floor((i * count) / sections.length) + 1;
+      const to = i === sections.length - 1 ? count : Math.floor(((i + 1) * count) / sections.length);
+      const nums = [];
+      for (let n = from; n <= to; n++) nums.push(String(n));
+      return `== ${x}\n${nums.join('\n')}`;
+    }).join('\n')
+    : '这个游戏不用分区。';
   return {
     content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
     usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
@@ -127,7 +141,7 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
     // 联网工具由供应商自己声明,编排层只是转发。测试里不需要真的工具
     webTools: () => [],
     async send({ system, messages }) {
-      const planned = sectionPlanReply(system, sections);
+      const planned = sectionPlanReply(system, sections, replies.count ?? 5);
       if (planned) {
         this.sectionAsks++;
         this.sectionPrompt = messages.at(-1).content;
@@ -886,6 +900,62 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
       assert.match(text, /五六条以内直接平铺/,
         `${name} 少了下限,三条也套一层只会多两个空框`);
     }
+
+    // 两份手抄到这里分开,而且是故意的。RULES 不知道这份攻略
+    // 最后落哪个后端(`guidegen.js` 里那句注释),只能给两边都安全的
+    // checkbox 标签形;SKILL.md 是手改已知后端的页面用的,Notion 那一侧
+    // `fetchAllToDoBlocks` 把 toggle 当透明容器,折叠标签不会断开归属。
+    // **把分歧本身钉住**——否则下一个人要么把 Notion 那一段当矛盾删掉,
+    // 要么把它搬进 RULES,而后者会让本地 md 的 `todoSpans` 静默断掉。
+    assert.match(skill, /toggle \/ column 当\*\*透明容器\*\*/,
+      'SKILL.md 少了 Notion 侧的例外 —— 折叠标签在 Notion 上是安全的,这是理由');
+    assert.match(skill, /target. 传不到时退回 checkbox 标签版/,
+      'SKILL.md 少了兜底方向 —— 猜错的代价不对等,默认必须是 checkbox 标签');
+    // `rules` 这里没传 target,拿到的就是兜底版。**兜底必须是两边都能活的那一版。**
+    assert.match(rules, /标签行必须也是/,
+      'target 没传时 RULES 必须给 checkbox 标签形 —— 折叠写进本地 md 会静默断区间');
+  });
+
+  // 分组标签是提示词里唯一按后端分岔的规则。Notion 上 `fetchAllToDoBlocks` 把 toggle
+  // 当透明容器(`parent` 原样往下传),折叠标签不会断开归属;本地 md 的 `todoSpans`
+  // 遇到非 checkbox 行就截断区间。两边给同一版必然坑掉其中一个。
+  test('分组标签按后端分岔,兜底必须是两边都安全的那一版', () => {
+    const defs = [def('A', '第一步', '完成第一关。')];
+    const notion = buildSystemPrompt('测试游戏', '1', defs, { target: 'notion' });
+    const local = buildSystemPrompt('测试游戏', '1', defs, { target: 'local' });
+    const fallback = buildSystemPrompt('测试游戏', '1', defs);
+
+    assert.match(notion, /<summary>\*\*前置\*\*/, 'Notion 版没给折叠标签的写法');
+    assert.doesNotMatch(notion, /标签行必须也是/,
+      'Notion 版不该还要求标签行是 checkbox —— 那正是要治的毛病');
+    assert.match(notion, /也不要用 checkbox/,
+      'Notion 版少了「注意那一组降成普通 bullet」—— 警告勾不掉,还会被 --cascade 勾成假记录');
+
+    assert.match(local, /标签行必须也是/, '本地版必须保留 checkbox 标签的硬要求');
+    assert.doesNotMatch(local, /<summary>\*\*前置\*\*/,
+      '本地版不能推荐折叠做标签 —— todoSpans 会当场截断区间');
+
+    // **兜底方向是有代价差的,不是随便挑一个。** 折叠写进本地 md 是静默断区间(默默重复),
+    // checkbox 标签写进 Notion 只是丑一点。所以 target 缺失时必须退到本地版。
+    assert.equal(fallback, local,
+      'target 没传时必须等同本地版 —— 猜成 Notion 版会让本地 md 静默产生重复条目');
+
+    // 两边只在标签那一段分岔,别的规则不能跟着分
+    for (const [name, text] of [['notion', notion], ['local', local]]) {
+      assert.match(text, /标签单独占一行/, `${name} 版丢了分组标签的总规矩`);
+      assert.match(text, /五六条以内直接平铺/, `${name} 版丢了分组的下限`);
+    }
+  });
+
+  // 规则五原来只说"很长的清单"就折,没有数字 —— 分组标签那边有「五六条」的下限,
+  // 折叠这边没有,同一份攻略里两把尺子。三五行的表折起来只是把信息藏了。
+  test('折叠有行数下限,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /10 行/,
+        `${name} 少了折叠的下限 —— 不设的话三行的表也会被折起来,信息反而被藏了`);
+    }
   });
 
   // 马特的寻猫游戏(找物游戏)的位置类成就:文字说不清「这 30 朵蘑菇在哪」,
@@ -1460,9 +1530,10 @@ describe('分段撰写', () => {
         { sections: ['主线', '社交'] }
       );
       const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
-      assert.equal(provider.sectionAsks, 1, '分区表只问一趟,不是每段问一次');
-      assert.match(provider.sectionPrompt, /并发/, '问的确实是分区表那一趟');
-      assert.match(provider.asked[0], /一字不差地照抄/, '表要传进分段提示词');
+      assert.equal(provider.sectionAsks, 1, '分区只统一一趟,不是每段问一次');
+      assert.match(provider.sectionPrompt, /已经写完了/, '问的确实是「写完之后再分类」那一趟');
+      assert.match(provider.sectionPrompt, /现在在:/, '要把各段自己给的分节一起交上去 —— 那是这一趟比前置那趟多出来的信息');
+      assert.doesNotMatch(provider.asked[0], /一字不差地照抄/, '写正文时不该再钉死标题,各段自己开');
       const text = readFileSync(res.path, 'utf8');
       assert.equal(text.match(/## 主线/g).length, 1, '「主线」被两段各开了一次,成品里只该有一个');
       assert.equal(text.match(/## 社交/g).length, 1);
@@ -1470,7 +1541,7 @@ describe('分段撰写', () => {
       assert.equal((text.match(/- \[ \]/g) ?? []).length, 5, '5 个成就一个都不能少');
     });
 
-    test('两个界面都要报「正在定分区」和「没定成」', () => {
+    test('两个界面都要报「正在统一分区」和「没统一成」', () => {
       // **两个消费者都是 if/else if 链,不认识的 phase 静默落地。**
       // 不加分支的表现有两个,都不报错:定分区那几十秒里进度条一动不动(看着像卡死),
       // 以及降级悄悄发生 —— 后者正是这个项目最防的那种退化,而它在成品上是看得见的
@@ -1483,13 +1554,13 @@ describe('分段撰写', () => {
       const read = (f) => strip(readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
       for (const f of ['tracker.js', 'lib/server.js']) {
         const src = read(f);
-        assert.ok(src.includes("=== 'sections'"), `${f} 没处理 sections —— 那几十秒界面上什么都不动`);
-        assert.ok(src.includes("'sections-done'"), `${f} 没报分区定好了`);
-        assert.ok(src.includes("'sections-failed'"), `${f} 没报降级 —— 静默退化`);
+        assert.ok(src.includes("=== 'regroup'"), `${f} 没处理 regroup —— 那几十秒界面上什么都不动`);
+        assert.ok(src.includes("'regroup-done'"), `${f} 没报分区统一好了`);
+        assert.ok(src.includes("'regroup-failed'"), `${f} 没报降级 —— 静默退化`);
       }
     });
 
-    test('分区表问不出来时降级,不中断生成', async () => {
+    test('分区统一不出来时降级,不中断生成', async () => {
       const { db, config } = envFor(3);
       const provider = fakeProvider([seg(BIG.slice(0, 3)), seg(BIG.slice(3))], { sections: null });
       const events = [];
@@ -1500,8 +1571,10 @@ describe('分段撰写', () => {
       assert.ok(res.path, '正文是用户已经等了几分钟的东西,不能因为骨架没定成就整份作废');
       assert.equal((readFileSync(res.path, 'utf8').match(/- \[ \]/g) ?? []).length, 5);
       // **降级要出声。** 悄悄发生的退化正是这个项目最防的那种
-      assert.ok(events.some((e) => e.phase === 'sections-failed'),
-        '降级了就要报一条 sections-failed');
+      assert.ok(events.some((e) => e.phase === 'regroup-failed'),
+        '降级了就要报一条 regroup-failed');
+      // 降级 = 保留各段自己分的标题,而不是把正文推平成一节
+      assert.match(readFileSync(res.path, 'utf8'), /^## /m, '降级也要留着各段自己开的小节');
     });
   });
 
@@ -2159,5 +2232,163 @@ describe('分段撰写', () => {
     const m = buildChunkFeedback(findings, chunks, 0, new Set());
     assert.match(m, /成就2/);
     assert.doesNotMatch(m, /成就5/, '第 3 段的问题不该出现在第 1 段的打回清单里');
+  });
+});
+
+// `--dry-run` 存在的唯一理由是"让人看到会发过去什么"。它自己拼一遍参数就会和真正
+// 发出去的那份分叉 —— 实际踩到过:预演漏了 `rarity` 和 `target`,于是 ARK 的预演
+// 打印的是 checkbox 标签版,而真跑会发折叠版。**结构上只留一个入口**,分叉无处发生。
+test('提示词只有一个入口,预演和真发不会分叉', () => {
+  const plan = {
+    game: '测试游戏',
+    defs: [def('A', '第一步', '完成第一关。')],
+    rarity: null,
+    target: 'notion',
+  };
+  const viaPlan = systemPromptFor(plan, '1', { canSearch: true });
+  assert.match(viaPlan, /<summary>\*\*前置\*\*/,
+    'systemPromptFor 没把 plan.target 透下去 —— 预演就会印错版本');
+
+  // 三条路都必须走 systemPromptFor,不许自己调 buildSystemPrompt 拼参数
+  for (const f of ['../lib/guidegen.js', '../lib/guidepatch.js', '../tracker.js']) {
+    const src = readFileSync(new URL(f, import.meta.url), 'utf8');
+    const direct = src.split('\n').filter((l) =>
+      /\bbuildSystemPrompt\(/.test(l) && !/^export function buildSystemPrompt|return buildSystemPrompt/.test(l.trim()));
+    assert.deepEqual(direct, [],
+      `${f} 里还有直接调 buildSystemPrompt 的地方 —— 参数会跟另外两条路分叉`);
+  }
+});
+
+describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
+  const D = [
+    def('A', '喵界图鉴', '解锁所有吉祥物。'),
+    def('B', '狗狗上位', '将吉祥物替换成一条狗。'),
+    def('C', '宿敌登台', '将吉祥物替换为一只怪物。'),
+    def('E', '开盒', '使用各式钥匙打开30个宝箱。'),
+  ];
+  const map = (pairs) => new Map(pairs);
+
+  // 马特的寻猫游戏实际踩到的:四条同类吉祥物成就被劈进两个小节。前置分区表**结构上**
+  // 看不见这个劈开(劈开是它之后才发生的),而最后一趟看得见全文,所以能搬回来。
+  test('把劈到两处的同类成就搬到一起,小节说明跟着自己的小节走', () => {
+    const body = [
+      '## 商店',
+      '宝石是商店货币。',
+      '- [ ] **喵界图鉴**<br>解锁所有吉祥物。',
+      '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
+      '## 吉祥物替换',
+      '- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。',
+    ].join('\n');
+
+    const out = regroupByAssignment(body, {
+      defs: D,
+      assignment: map([['B', '吉祥物替换'], ['C', '吉祥物替换'], ['A', '商店']]),
+      sections: ['商店', '吉祥物替换'],
+    });
+
+    assert.match(out, /## 商店\n\n宝石是商店货币。/, '小节说明必须留在自己的小节下');
+    const mascot = out.slice(out.indexOf('## 吉祥物替换'));
+    assert.match(mascot, /狗狗上位/, '狗狗上位没搬过来');
+    assert.match(mascot, /宿敌登台/);
+    assert.doesNotMatch(out.slice(0, out.indexOf('## 吉祥物替换')), /狗狗上位/, '搬过去了就不能还留在原处');
+  });
+
+  // 模型漏给一条映射时,**原地不动**是唯一不制造新错误的处置 —— 丢掉是静默损失,
+  // 塞杂项是把一条分好的成就主动分错
+  test('映射没覆盖到的成就留在原来的小节', () => {
+    const body = ['## 商店', '- [ ] **喵界图鉴**<br>解锁所有吉祥物。', '- [ ] **开盒**<br>使用各式钥匙打开30个宝箱。'].join('\n');
+    const out = regroupByAssignment(body, { defs: D, assignment: map([['A', '商店']]), sections: ['商店'] });
+    assert.match(out, /开盒/, '没给映射的条目不能被丢掉');
+    assert.equal((out.match(/开盒/g) ?? []).length, 1, '也不能被复制一份');
+  });
+
+  // Notion 目标下一条成就的正文是「自己那行 + 几个 <details> 分组」。搬家必须整块搬,
+  // 只搬走第一行会把子步骤留在原小节 —— 那正是 todoSpans 只认 checkbox 行的老毛病
+  test('带 <details> 分组的成就整块搬走,子步骤不掉队', () => {
+    const body = [
+      '## 商店',
+      '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
+      '\t<details>',
+      '\t<summary>**前置**</summary>',
+      '\t- [ ] 先买下狗狗吉祥物',
+      '\t</details>',
+      '## 吉祥物替换',
+      '- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。',
+    ].join('\n');
+
+    const out = regroupByAssignment(body, {
+      defs: D, assignment: map([['B', '吉祥物替换'], ['C', '吉祥物替换']]), sections: ['吉祥物替换'],
+    });
+    const head = out.slice(0, out.indexOf('## 吉祥物替换'));
+    assert.doesNotMatch(head, /先买下狗狗吉祥物/, '子步骤被留在原小节了 —— 区间没吃到折叠');
+    assert.match(out.slice(out.indexOf('## 吉祥物替换')), /先买下狗狗吉祥物/);
+  });
+
+  // 一条成就都不剩、只剩开场说明的小节:留着是看得见的瑕疵,丢掉是看不见的损失
+  test('只剩开场说明的小节保留,不静默丢字', () => {
+    const body = ['## 商店', '这一节讲商店怎么用。', '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。'].join('\n');
+    const out = regroupByAssignment(body, { defs: D, assignment: map([['B', '吉祥物替换']]), sections: ['吉祥物替换'] });
+    assert.match(out, /这一节讲商店怎么用。/, '小节被搬空了,但它的说明不能跟着消失');
+  });
+
+  // 《破晓传奇》实测踩到的:小节级的长清单折叠(规则五)里面的 `- [ ]`,在
+  // `parseTodos` 眼里是顶层的(前面没有更浅的 checkbox 可挂)。不特判就会被当成
+  // 一条条独立成就搬走 —— 折叠剩个空壳、12 个条目散落在外面。
+  //
+  // **而前两条断言一条都没响**:一个字都没丢,丢的是结构。断言 3 是为此加的,
+  // 同样用故障注入验过(把这个分支改成 `if (false && ...)`,它当场抛
+  // 「重排把折叠块拆开了」)。
+  test('小节级的独立折叠整块跟着小节走,不被拆成一堆顶层条目', () => {
+    const body = [
+      '## 黎明之后',
+      '<details>',
+      '<summary>12 个个人支线一览</summary>',
+      '- [ ] 「回归自我」',
+      '- [ ] 「昨日重现」',
+      '</details>',
+      '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
+    ].join('\n');
+    const out = regroupByAssignment(body, {
+      defs: D, assignment: new Map([['B', '黎明之后']]), sections: ['黎明之后'],
+    });
+    assert.match(out, /<summary>12 个个人支线一览<\/summary>\n- \[ \] 「回归自我」/,
+      '折叠被掏空了 —— 条目必须留在它里面');
+    assert.doesNotMatch(out, /<\/details>\n\n- \[ \] 「回归自我」/,
+      '条目被搬到折叠外面去了');
+  });
+
+  // 《破晓传奇》实测踩到的：「羁绊」被搬空之后，页面上留下一个只有一段说明、
+  // 一条成就都没有的标题,紧跟在拿走了它全部条目的「羁绊与对话」后面。
+  // 原来的规则是「留着」,理由是没有规则能说清那段说明该跟谁走 ——
+  // 而「条目去得最多的那个小节」就是一个确定的判据,不用猜。
+  test('被搬空的小节,开场说明并到接收条目最多的那个小节', () => {
+    const body = ['## 商店', '商店怎么用的说明。', '- [ ] **狗狗上位**<br>x', '- [ ] **宿敌登台**<br>y'].join('\n');
+    const out = regroupByAssignment(body, {
+      defs: D, assignment: new Map([['B', '外观'], ['C', '外观']]), sections: ['外观'],
+    });
+    assert.doesNotMatch(out, /## 商店/, '被搬空的小节不该再留一个空标题');
+    assert.match(out, /商店怎么用的说明。/, '但它的说明一个字都不能丢');
+    assert.ok(out.indexOf('## 外观') < out.indexOf('商店怎么用的说明'), '说明要落在接收方那一节里');
+  });
+
+  // 本来就没有条目的纯说明小节没有「最多」可言,留着才是对的
+  test('本来就没条目的纯说明小节不动', () => {
+    const body = ['## 写在前面', '这游戏要通三遍。', '## 商店', '- [ ] **狗狗上位**<br>x'].join('\n');
+    const out = regroupByAssignment(body, { defs: D, assignment: new Map(), sections: [] });
+    assert.match(out, /## 写在前面/, '没条目可搬的小节不该被并掉');
+  });
+
+  // **断言不是摆设,是用故障注入验过的。** 把出口那行改成 `b.prose[0]`(只取开场说明的
+  // 第一行)之后,它当场抛出「重排丢了正文:「说明第二行。」进去 1 次、出来 0 次」。
+  // 这里留的是它的**反面**:正文里同一条成就出现两次是校验器的活,重排不该顺手"修"掉。
+  test('重复条目原样留着,由校验器去报,重排不自作主张', () => {
+    const dup = [
+      '## 商店',
+      '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
+      '## 别处',
+      '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
+    ].join('\n');
+    const out = regroupByAssignment(dup, { defs: D, assignment: new Map([['B', '商店']]), sections: ['商店'] });
+    assert.equal((out.match(/狗狗上位/g) ?? []).length, 2, '两条都要留着 —— 去重是校验器的职责,不是重排的');
   });
 });
