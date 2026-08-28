@@ -37,7 +37,6 @@ import {
   stripLeadingHeader,
   buildHeader,
   joinBodies,
-  regroupBySections,
   guideFileName,
   buildAchievementList,
   buildSystemPrompt,
@@ -1354,11 +1353,11 @@ describe('分段撰写', () => {
   });
 
   /**
-   * 分区表。**这一组钉的是一个真实事故**:《波西亚时光》91 个成就分两段写,
+   * 跨段分类。**这一组钉的是一个真实事故**:《波西亚时光》91 个成就分两段写,
    * 两段各自定各自的分区,并起来 17 个小节 —— 恋爱那件事被拆成六个,
    * `## 主线剧情` 原样出现两次。每一段自己内部零重复,乱的只有并集。
    */
-  describe('分区表', () => {
+  describe('跨段分类', () => {
     /** 一段正文:按 [[小节名, 成就[]], ...] 摆好。`seg` 把标题写死成「主线」,这里要能换 */
     const body = (parts) =>
       '```markdown\n' +
@@ -1369,94 +1368,9 @@ describe('分段撰写', () => {
         .join('\n\n') +
       '\n```';
 
-
-    describe('buildChunkMessage 带上分区表', () => {
-      const chunks = chunkDefs(BIG, 2);
-
-      test('有表就把标题钉死,并且把表原样列出来', () => {
-        const msg = buildChunkMessage(chunks, 0, ['主线剧情', '工坊经营']);
-        assert.match(msg, /一字不差地照抄/, '必须把话说死 —— 留一句「参考」模型就会改字');
-        assert.match(msg, /- 主线剧情/);
-        assert.match(msg, /- 工坊经营/);
-        assert.match(msg, /没有内容的小节\*\*整个不要写\*\*/,
-          '不说这句就会得到一堆空标题 —— 每段都照着表把所有标题开一遍');
-      });
-
-      test('没有表时,一个字都不变', () => {
-        // 降级路径必须和加这一趟之前**完全一样**,否则「分区表没定成」会变成
-        // 一种新的、没人测过的行为
-        assert.equal(buildChunkMessage(chunks, 0, []), buildChunkMessage(chunks, 0));
-        assert.match(buildChunkMessage(chunks, 0), /该开的小节标题就开/);
-      });
-
-      test('只有一段时,有没有表都不提分区', () => {
-        assert.equal(buildChunkMessage([BIG], 0, ['主线']), buildChunkMessage([BIG], 0));
-      });
-    });
-
-    describe('regroupBySections', () => {
-      test('离接缝很远的同名标题也合掉 —— joinBodies 够不着的正是这一个', () => {
-        // 《波西亚时光》的真实形状:第 1 段以「社交与恋爱」结尾,第 2 段的
-        // 「主线剧情」排在它自己的第 3 个位置。接缝两侧的标题**字面不等**,
-        // 所以 joinBodies 不合;而重复的那个离接缝十万八千里,它在结构上也够不着
-        const bodies = [
-          '## 主线剧情\n- [ ] **A**\n\n## 社交与恋爱\n- [ ] **B**',
-          '## 社交与恋爱\n- [ ] **C**\n\n## 收集\n- [ ] **D**\n\n## 主线剧情\n- [ ] **E**',
-        ];
-        const sections = ['主线剧情', '社交与恋爱', '收集'];
-        assert.equal(joinBodies(bodies).match(/## 主线剧情/g).length, 2, '前提:joinBodies 治不了它');
-        const out = regroupBySections(bodies, sections);
-        assert.equal(out.match(/## 主线剧情/g).length, 1, '合并之后只该有一个「主线剧情」');
-        assert.equal(out.match(/## 社交与恋爱/g).length, 1);
-        for (const n of ['A', 'B', 'C', 'D', 'E']) {
-          assert.match(out, new RegExp('\\*\\*' + n + '\\*\\*'), `成就 ${n} 不能在归并里丢掉`);
-        }
-      });
-
-      test('顺序按分区表走,不按谁先出现', () => {
-        const out = regroupBySections(['## 收集\n- [ ] **A**', '## 主线\n- [ ] **B**'], ['主线', '收集']);
-        assert.ok(out.indexOf('## 主线') < out.indexOf('## 收集'),
-          '表里主线在前,成品里就该主线在前');
-      });
-
-      test('表里没有的标题要留着 —— 底下挂着成就', () => {
-        // 模型没完全听话时,**宁可多一个计划外的小节,也不能吞掉它下面的条目**
-        const out = regroupBySections(['## 主线\n- [ ] **A**\n\n## 我自己想的\n- [ ] **B**'], ['主线']);
-        assert.match(out, /## 我自己想的/);
-        assert.match(out, /\*\*B\*\*/);
-      });
-
-    test('表里有、但没人写的小节不落地', () => {
-        const out = regroupBySections(['## 主线\n- [ ] **A**'], ['主线', '支线', '收集']);
-        assert.doesNotMatch(out, /## 支线/, '空标题不该出现在成品里');
-        assert.doesNotMatch(out, /## 收集/);
-      });
-
-      test('模型开了标题却没往里写东西的,也不落地', () => {
-        // 和上一条**不是同一条路**:上一条那个小节压根没进过 bucket,被按表过滤掉了;
-        // 这一条是模型真的写了 `## 支线` 然后底下什么都没有 —— 只有正文为空这一步
-        // 拦得住它。少了那一步,成品里会出现一个孤零零的标题
-        const out = regroupBySections(['## 主线\n- [ ] **A**\n\n## 支线\n\n'], ['主线', '支线']);
-        assert.doesNotMatch(out, /## 支线/, '开了但没写东西的标题不该落地');
-        assert.match(out, /\*\*A\*\*/);
-      });
-
-      test('没有表就原样退回 joinBodies', () => {
-        const bodies = ['## 主线\n- [ ] **A**', '## 主线\n- [ ] **B**'];
-        assert.equal(regroupBySections(bodies, []), joinBodies(bodies));
-        assert.equal(regroupBySections(bodies, null), joinBodies(bodies));
-        assert.equal(regroupBySections([null, null], ['主线']), '');
-      });
-
-      test('第一个标题之前的东西留在最前面', () => {
-        const out = regroupBySections(['开场白\n\n## 主线\n- [ ] **A**'], ['主线']);
-        assert.ok(out.startsWith('开场白'), '不该被塞进某个小节里');
-      });
-    });
-
     test('端到端:两段各开一次同名小节,成品里只有一个', async () => {
       // 上面几条验的是零件。**这一条验的是这些零件真的接在生成流程上** ——
-      // 分区表问没问、有没有传进分段提示词、拼接走没走归并,漏掉任何一环
+      // 分类问没问、映射有没有真的搬动条目、接缝重复合没合掉,漏掉任何一环
       // 都不会报错,只会让成品重新长出重复的小节
       // **形状照抄《波西亚时光》**:重复的「主线」落在第 2 段的**末尾**,
       // 而接缝两侧是「社交」。接缝那一对 joinBodies 自己就能合,所以拿它当端到端
@@ -1477,7 +1391,7 @@ describe('分段撰写', () => {
       const text = readFileSync(res.path, 'utf8');
       assert.equal(text.match(/## 主线/g).length, 1, '「主线」被两段各开了一次,成品里只该有一个');
       assert.equal(text.match(/## 社交/g).length, 1);
-      assert.ok(text.indexOf('## 主线') < text.indexOf('## 社交'), '顺序按分区表走');
+      assert.ok(text.indexOf('## 主线') < text.indexOf('## 社交'), '顺序按分类结果走');
       assert.equal((text.match(/- \[ \]/g) ?? []).length, 5, '5 个成就一个都不能少');
     });
 
@@ -1514,7 +1428,14 @@ describe('分段撰写', () => {
       assert.ok(events.some((e) => e.phase === 'regroup-failed'),
         '降级了就要报一条 regroup-failed');
       // 降级 = 保留各段自己分的标题,而不是把正文推平成一节
-      assert.match(readFileSync(res.path, 'utf8'), /^## /m, '降级也要留着各段自己开的小节');
+      const degraded = readFileSync(res.path, 'utf8');
+      assert.match(degraded, /^## /m, '降级也要留着各段自己开的小节');
+      // **接缝合并只有在这条路上才看得出来。** 分类那一趟成功时它会按标题重新分桶,
+      // 顺手把重复的合掉,于是拼接处漏没漏合一点痕迹都不留;降级之后没人兜底了,
+      // 两段各开的 `## 主线` 会原样留成两个。实测:把落盘那句换成裸拼接,
+      // 全套测试一条都不红 —— 这条断言就是拿来堵那个洞的
+      assert.equal((degraded.match(/^## 主线$/gm) ?? []).length, 1,
+        '两段都以「主线」开头,joinBodies 要在接缝上合掉重复的那一行');
     });
   });
 
@@ -2234,7 +2155,7 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
       '速查在前、备注在后 —— 两边都按原文那一侧留着');
   });
 
-  // 马特的寻猫游戏实际踩到的:四条同类吉祥物成就被劈进两个小节。前置分区表**结构上**
+  // 马特的寻猫游戏实际踩到的:四条同类吉祥物成就被劈进两个小节。写正文之前那一趟**结构上**
   // 看不见这个劈开(劈开是它之后才发生的),而最后一趟看得见全文,所以能搬回来。
   test('把劈到两处的同类成就搬到一起,小节说明跟着自己的小节走', () => {
     const body = [
