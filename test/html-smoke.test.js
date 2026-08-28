@@ -614,6 +614,79 @@ describe('搜索框一个人干两件事', () => {
   });
 });
 
+/**
+ * 搜索框里的清除叉
+ * ------------------------------------------------
+ * 这一组守的是**按下去什么都不发生**:叉画出来了、点得到、value 也清了,而屏幕上
+ * 一个字没变。页面不报错,叉看起来是好的。
+ *
+ * 两条各守一头,都是静默的:
+ *
+ * - **露不露面这一头是纯 CSS 的。** `:placeholder-shown` 是「框里没字」唯一的判据,
+ *   它要求框一直有 placeholder —— 谁把 placeholder 换成一个可见 label(这个页面
+ *   别处正是这么做的),叉就永远挂在空框上,按了没反应。
+ * - **清空那一头是 JS 的。** 搜索框上挂着两条 input 监听,弹框里那个筛选框挂的是
+ *   它自己的 oninput,只把 value 抹掉一条都不会跑:表格还是搜索结果、Steam 那块
+ *   还开着,而输入框已经空了。
+ */
+describe('搜索框里的清除叉', () => {
+  const page = () => read('Dashboard.html');
+  /** 去掉两种注释的内联脚本 —— 注释里正好写着这些词,不去会把断言喂饱 */
+  const js = () => inlineScripts(page())
+    .join('\n')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  test('.search-field 里的输入框都留着 placeholder,叉也都在', () => {
+    const fields = [...markupNoComments(page()).matchAll(/<div class="search-field">([\s\S]*?)<\/div>/g)];
+    assert.ok(fields.length >= 2, '找不到 .search-field —— 这条检查失去了目标,不是通过了');
+    for (const [, inner] of fields) {
+      const input = inner.match(/<input[^>]*>/);
+      assert.ok(input, '.search-field 里必须有一个 input');
+      assert.match(input[0], /\splaceholder="[^"]+"/,
+        '叉的显隐靠 :placeholder-shown,没有 placeholder 它会一直挂在空框上');
+      assert.match(inner, /class="field-clear"/, '.search-field 里必须有那个叉');
+    }
+  });
+
+  test('叉是压在框里的,不是排在框后面', () => {
+    // 排在后面的话它一出现一消失就把右边推一下,而搜索框在冻结区里、每敲一个字符
+    // 都要重算一次高度。**内缩也必须是常留的**:只在有字时才留位置,打下第一个
+    // 字符的瞬间已经打出来的字会自己往左跳一格
+    const css = styleBlocks(page()).join(SEP).replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.match(css, /\.search-field\s*\{[^}]*position:\s*relative/, '.search-field 要当定位参照');
+    assert.match(css, /\.field-clear\s*\{[^}]*position:\s*absolute/, '叉要绝对定位');
+    const pad = css.match(/\.search-field input\s*\{([^}]*)\}/);
+    assert.ok(pad, '找不到给叉腾位置那条规则 —— 这条检查失去了目标,不是通过了');
+    assert.match(pad[1], /padding-right:/, '输入框右侧要常留出叉的位置');
+  });
+
+  /** 那一处绑定的整段:从 forEach 开头切到它自己的收尾,两头都是真锚点 */
+  const bindBlock = () => {
+    const src = js();
+    const from = src.indexOf("document.querySelectorAll('.search-field').forEach");
+    assert.ok(from > 0, '找不到清除叉那段绑定 —— 这条检查失去了目标,不是通过了');
+    const to = src.indexOf('\n    });', from);
+    assert.ok(to > from, '切不到那一段的收尾');
+    return src.slice(from, to);
+  };
+
+  test('清完要派 input 事件,不能只把 value 抹掉', () => {
+    assert.match(bindBlock(), /dispatchEvent\(\s*new Event\('input'/,
+      '清完必须派 input 事件 —— 点名调用那几个处理函数,漏一条就是「清空了但结果还在」');
+  });
+
+  test('Esc 只在框里有字时才拦,没字要放给弹框去关', () => {
+    // 弹框里那个筛选框上,Esc 的另一层意思是关掉整个弹框。无条件 stopPropagation
+    // 的话,空着的筛选框会把弹框的出口吃掉 —— 按 Esc 没反应,而且看不出为什么
+    const block = bindBlock();
+    const guard = block.indexOf("input.value === ''");
+    const stop = block.indexOf('stopPropagation');
+    assert.ok(guard > 0, 'Esc 那条守卫必须同时判键名和「框里有没有字」');
+    assert.ok(stop > guard, '先判有没有字,有字才拦下这次 Esc');
+  });
+});
+
 describe('最近在玩:徽章和置顶共用一个窗口', () => {
   // **两者各写各的天数,是一种不会报错的坏。** 表现是某一行排到最上面,而行上
   // 没有任何东西说明为什么 —— 用户只会觉得排序坏了。CLAUDE.md 把这条写成规矩,

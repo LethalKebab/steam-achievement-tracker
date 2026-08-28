@@ -682,6 +682,58 @@
     /* 一个框干两件事,给它比原来两个都宽一点 —— 游戏全名比一个筛选标签长得多 */
     #searchBox { width: 280px; }
 
+    /* ---- 输入框里的清除叉 ---- */
+    /**
+     * **叉压在输入框的内缩里,不排在它后面。** 排在后面的话,它一出现一消失就把
+     * 右边的东西推一下,而搜索框正好在冻结区里、每敲一个字符都要重算一次高度
+     * (measureTopbar);压在里面,整行的几何从头到尾不变。
+     *
+     * **露不露面交给 `:placeholder-shown`,不另外记一份状态。** 框里有没有字这件事
+     * 输入框自己知道,再拿一个变量或一个 class 跟着它走就是第二份真相 —— 而这两个
+     * 框都有被代码直接改 `value` 的路径(弹框每次打开都把上一次的筛选词清掉),
+     * 直接赋值不触发 input 事件,跟着走的那份当场就对不上,表现是一个按下去什么
+     * 都不发生的叉。
+     * 代价是一条硬约束:**这两个框必须一直留着 placeholder**。没有 placeholder 就
+     * 永远匹配不上 `:placeholder-shown`,叉会连空框上都挂着。
+     *
+     * 用 `visibility` 而不是 `opacity`:看不见的时候它也不该能被点到、被 Tab 到、
+     * 被读屏念到。
+     */
+    .search-field { position: relative; display: flex; }
+    /* 给叉腾的位置**常留**。只在有字的时候才加内缩的话,打下第一个字符的瞬间
+       已经打出来的字会自己往左跳一格 */
+    .search-field input { padding-right: 30px; }
+    .search-field input:placeholder-shown + .field-clear { visibility: hidden; }
+    /* `type=search` 留着是为了语义。浏览器给这种输入框自带的清除叉是关掉的:
+       这一格的叉由上面那条规则画,自带的那个来不来由浏览器决定,留着就等于
+       把「有几个叉」交给运行环境 */
+    .search-field input[type="search"]::-webkit-search-cancel-button { display: none; }
+    .field-clear {
+      position: absolute;
+      right: 4px;
+      top: 50%;
+      transform: translateY(-50%);
+      /* 24×24 是 WCAG 2.2 给指针目标定的下限,而里面那笔叉是 --fs-lg(和
+         #gen-bar 的关闭叉同一个尺寸)—— 台子比记号大是有意的:叉跟着画大
+         会盖过旁边的字 */
+      width: 24px;
+      height: 24px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: var(--text-3);
+      font-size: var(--fs-lg);
+      border-radius: var(--r-sm);
+      transition: color var(--dur-1), background var(--dur-1);
+    }
+    .field-clear:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+    /* 内描边:叉贴着输入框的内壁,画在外面会压出框外一圈 */
+    .field-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
     /* 只在搜索时出现,所以外边距也跟着它走:平时整块 hidden,不留空档。
        （全局 `[hidden] { display:none !important }` 压得住这里的 display:flex —— 那条
         规则存在的理由正是「作者写的 display 会悄悄把 hidden 属性降级成装饰」）*/
@@ -1603,7 +1655,10 @@
      */
     .modal-box.ask-wide { width: 520px; max-width: 100%; }
     #askPickWrap { margin-top: var(--s4); text-align: left; }
-    #askPickFilter { width: 100%; margin-bottom: var(--s2); }
+    /* 间距挂在外面那层而不是输入框自己身上:叉是按 .search-field 的高度居中的,
+       margin 留在输入框上会把那一层撑高一截,叉就跟着往下偏半个 margin */
+    #askPickWrap .search-field { margin-bottom: var(--s2); }
+    #askPickFilter { width: 100%; }
     /* 快捷选择那一排。**做得比范围那一行轻** —— 它们不是决定,是省几十次点击的捷径,
        份量压过下面的列表就本末倒置了 */
     #askPickQuick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--s2); }
@@ -2092,9 +2147,15 @@
            所以合成一个:先在库里找,库里没有才去 Steam 找,找到就能加。
            aria-label 比 placeholder 更能说清它现在干两件事;不放可见 label 是因为
            这里在冻结区里,多一行标题正好抵掉这次合并省下来的高度(见 --topbar-h) -->
-      <input type="text" id="searchBox" placeholder="搜索游戏名…"
-             aria-label="搜索游戏。库里没有的会去 Steam 上找,可以直接添加"
-             autocomplete="off">
+      <div class="search-field">
+        <input type="text" id="searchBox" placeholder="搜索游戏名…"
+               aria-label="搜索游戏。库里没有的会去 Steam 上找,可以直接添加"
+               autocomplete="off">
+        <!-- 叉只在框里有字的时候在(规则在 CSS 的 :placeholder-shown 那条)。
+             不给 title:一个长在搜索框里的叉不需要一句话解释,而 aria-label 已经
+             把读屏那边说清楚了 -->
+        <button type="button" class="field-clear" aria-label="清除搜索"><svg class="ic"><use href="#i-close"/></svg></button>
+      </div>
     </div>
 
     <!-- 搜索框下面这一块**只在搜索时出现**,平时不占地方。它按顺序回答两个问题:
@@ -2215,7 +2276,12 @@
              **它们只改"显示什么",一个字都不碰选择** —— 这是这一格改过两轮才落到的形状,
              理由见 js 里那段长注释 -->
         <div id="askPickQuick" role="group" aria-label="筛选"></div>
-        <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就">
+        <!-- 和搜索框同一个形状:叉在框里,不在框外 —— 旁边那个「清空」清的是选择,
+             两个清除动作长得一样会读成同一件事 -->
+        <div class="search-field">
+          <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就">
+          <button type="button" class="field-clear" aria-label="清除搜索"><svg class="ic"><use href="#i-close"/></svg></button>
+        </div>
         <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
         <!-- 计数和两个动作挨在一起:它们作用的正是旁边那个数,放在一处不用解释。
              **「全选」收下的是当前显示出来的那批**,所以它和上面的筛选片是一对 ——
@@ -3253,6 +3319,34 @@
     // render 是纯粹的重画,谁改了筛选都要跑;这一条只属于搜索框,混进 render 里
     // 等于每次点一下「已完成」都去想要不要发网络请求
     document.getElementById('searchBox').addEventListener('input', onSearchInput);
+
+    /**
+     * 输入框里那个叉:按它 = 把框清空。**一处绑定管住页面上所有的搜索框**,新加一个
+     * 只要照 .search-field 的形状写标记,不用回来补一行。
+     *
+     * **清完派一个 input 事件,不挨个去调那些处理函数。** 搜索框上挂着 render 和
+     * onSearchInput 两条,弹框里那个筛选框挂的是它自己的 oninput —— 点名调用的写法
+     * 每多一条监听就要来这里补一次,而漏掉一条的表现是「清空了,结果还留在屏幕上」。
+     *
+     * **Esc 是这个按钮的键盘等价物,并且只在框里有字的时候拦。** 弹框里那个框,
+     * Esc 的另一层意思是关掉整个弹框:有字先清字、没字才关框,和存档弹框
+     * 「先撤销待确认的那一下,再按才关框」是同一条规矩。
+     */
+    document.querySelectorAll('.search-field').forEach(function(field) {
+      const input = field.querySelector('input');
+      function clearField() {
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        // 清完接着打下一个词是最常见的用法,焦点不该掉回页面
+        input.focus();
+      }
+      field.querySelector('.field-clear').addEventListener('click', clearField);
+      input.addEventListener('keydown', function(e) {
+        if (e.key !== 'Escape' || input.value === '') return;
+        e.stopPropagation();
+        clearField();
+      });
+    });
 
     document.querySelectorAll('.view-toggle button').forEach(function(btn) {
       btn.addEventListener('click', function() {
