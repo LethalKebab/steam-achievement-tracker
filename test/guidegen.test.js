@@ -38,10 +38,6 @@ import {
   buildHeader,
   joinBodies,
   regroupBySections,
-  buildSectionPlanPrompt,
-  parseSectionPlan,
-  SECTION_PLAN_SYSTEM,
-  MAX_SECTIONS,
   guideFileName,
   buildAchievementList,
   buildSystemPrompt,
@@ -54,6 +50,7 @@ import {
   chunksNeedingRewrite,
   SKILL_RULE_DISPOSITION,
   DRAFTS_DIR,
+  unwrapAchievementToggles,
 } from '../lib/guidegen.js';
 
 // ---------------------------------------------------------------------------
@@ -92,18 +89,17 @@ function freshEnv({ defs = DEFS } = {}) {
 }
 
 /**
- * 分区表那一趟的挡板。**每个假供应商的 send 第一行都要过它。**
+ * 分类那一趟的挡板。**每个假供应商的 send 第一行都要过它。**
  *
- * 它走的是单独一条会话(system 是 `SECTION_PLAN_SYSTEM`),不该吃掉任何一个
- * 脚本队列 —— 吃掉的表现是「回复用完了 / 脚本用完了」,报的位置和真正的原因
- * 差着十万八千里,而且每写一个新的分段测试都会再踩一次。
+ * 那一趟走的是单独一条会话(system 是 `REGROUP_SYSTEM`),不该吃掉任何一个脚本
+ * 队列 —— 吃掉的表现是「回复用完了 / 脚本用完了」,报的位置和真正的原因差着十万
+ * 八千里,而且每写一个新的分段测试都会再踩一次。
  *
- * `sections` 传 null 就模拟「分区表没定成」,走降级路径(等于加这一趟之前的行为)。
+ * `sections` 传 null 就模拟「分类没成」,走降级路径(等于加这一趟之前的行为)。
  */
-const PLAN_SECTIONS = ['主线', '支线', '收集', '杂项'];
-function sectionPlanReply(system, sections = PLAN_SECTIONS, count = 5) {
-  // 分区表挪到正文写完之后了,所以这里认的是 REGROUP_SYSTEM。格式也跟着换成
-  // 「== 标题 / 编号」——`parseRegroupReply` 认的是那个,不是 `- 标题`
+const REGROUP_SECTIONS = ['主线', '支线', '收集', '杂项'];
+function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
+  // 认 REGROUP_SYSTEM,格式是「== 标题 / 编号」——`parseRegroupReply` 认的就是那个
   if (system !== REGROUP_SYSTEM) return null;
   const text = sections
     ? sections.map((x, i) => {
@@ -125,26 +121,25 @@ function sectionPlanReply(system, sections = PLAN_SECTIONS, count = 5) {
 /**
  * 按顺序吐出预设回复,并记下每次发过去的 user 消息。
  *
- * **分区表那一趟不吃这个队列。** 它走的是单独一条会话(system 是
- * `SECTION_PLAN_SYSTEM`),这里按 system 认出来单独作答 —— 否则每写一个分段测试
- * 都得记着在队列最前面多塞一条分区表回复,而忘了塞的表现是「回复用完了」,
- * 报的位置和真正的原因差着十万八千里。
+ * **分类那一趟不吃这个队列。** 它走的是单独一条会话(system 是 `REGROUP_SYSTEM`),
+ * 这里按 system 认出来单独作答 —— 否则每写一个分段测试都得记着在队列最前面多塞一条
+ * 分类回复,而忘了塞的表现是「回复用完了」,报的位置和真正的原因差着十万八千里。
  *
- * `sections` 给 null 就模拟「分区表没定成」,走降级路径(等于加这一趟之前的行为)。
+ * `sections` 给 null 就模拟「分类没成」,走降级路径(等于加这一趟之前的行为)。
  */
 function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'] } = {}) {
   return {
     model: 'claude-opus-5',
     asked: [],
-    sectionAsks: 0,
-    sectionPrompt: null,
+    regroupAsks: 0,
+    regroupPrompt: null,
     // 联网工具由供应商自己声明,编排层只是转发。测试里不需要真的工具
     webTools: () => [],
     async send({ system, messages }) {
-      const planned = sectionPlanReply(system, sections, replies.count ?? 5);
+      const planned = regroupReply(system, sections, replies.count ?? 5);
       if (planned) {
-        this.sectionAsks++;
-        this.sectionPrompt = messages.at(-1).content;
+        this.regroupAsks++;
+        this.regroupPrompt = messages.at(-1).content;
         return planned;
       }
       this.asked.push(messages.at(-1).content);
@@ -958,6 +953,23 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
     }
   });
 
+  /**
+   * 行数下限只回答「折不折」,不回答「折什么」。少了这一条,整节成就会被打包进一个
+   * 折叠里(实测马特 `## 世界全清` 的 13 条),那一节在 Notion 上点开是空的。
+   * `unwrapAchievementToggles` 会把它拆开,但**提示词这一条不能因此省掉** ——
+   * 程序兜底是最后一道,不是第一道。
+   */
+  test('成就本身不进折叠,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    assert.match(rules, /成就本身那一行永远不进折叠/, 'RULES 少了这一条');
+    assert.match(skill, /成就那一行永远不进折叠/, 'SKILL.md 少了这一条');
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /折叠装的是.{0,12}辅料/,
+        `${name} 要说清折叠装的是什么 —— 只说「不许折成就」,模型分不出辅料算不算成就`);
+    }
+  });
+
   // 马特的寻猫游戏(找物游戏)的位置类成就:文字说不清「这 30 朵蘑菇在哪」,
   // 而截图这条路是明确排除掉的(规则二的处置:模型给不出可靠的游戏内截图)。
   // 实测把这几条重写一遍,模型自己找到的替代品是**带时间点的视频链接**
@@ -1357,78 +1369,6 @@ describe('分段撰写', () => {
         .join('\n\n') +
       '\n```';
 
-    describe('parseSectionPlan', () => {
-      test('认列表,不认列表前面那句解释', () => {
-        // **这是最要命的一条。** 模型很爱先写一句「以下是建议的分区」,那句话没有
-        // 终止标点、长度也不出格,靠过滤规则拦不住 —— 而它一旦混进表里,就变成一个
-        // 所有段都被要求一字不差照抄的假标题
-        const out = parseSectionPlan('以下是我建议的分区\n- 主线剧情\n- 工坊经营\n- 遗迹探索');
-        assert.deepEqual(out, ['主线剧情', '工坊经营', '遗迹探索']);
-      });
-
-      test('编号列表也算列表 —— 前言照样挡在外面', () => {
-        // **这一条是包内跑出来的。** 上面那条用的是纯 `- ` 列表,三行都命中闸门;
-        // 换成 `1. 2.` 编号之后只剩一行命中,闸门不开,前言直接混进表里 ——
-        // 而它会变成一个所有段都被要求一字不差照抄的假标题
-        assert.deepEqual(
-          parseSectionPlan('以下是建议的分区\n1. **主线剧情**\n2. ## 工坊经营\n- 遗迹探索'),
-          ['主线剧情', '工坊经营', '遗迹探索']
-        );
-      });
-
-      test('围栏、编号、井号、粗体都剥掉', () => {
-        assert.deepEqual(
-          parseSectionPlan('```\n1. **主线**\n2. ## 支线\n- 收集\n```'),
-          ['主线', '支线', '收集']
-        );
-      });
-
-      test('重复的只留一个,只差空格和大小写的也算重复', () => {
-        assert.deepEqual(parseSectionPlan('- 主线\n- 主 线\n- Boss\n- boss\n- 收集'),
-          ['主线', 'Boss', '收集']);
-      });
-
-      test('挑不出成形的表就返回空数组,让调用方降级', () => {
-        // **不能返回半成品。** 一份错的表会被所有段当成硬约束照抄,
-        // 比没有表糟得多 —— 没有表至少各段还能按内容自己分
-        assert.deepEqual(parseSectionPlan(''), []);
-        assert.deepEqual(parseSectionPlan('这个游戏的成就不太好分类。'), []);
-        assert.deepEqual(parseSectionPlan('- 全部'), [], '只有一个标题等于没分区');
-      });
-
-      test('长句和带终止标点的行不是标题', () => {
-        const long = '这一节收录了所有和主线剧情推进有关的成就';   // 20 字 = 40 格,超宽
-        const out = parseSectionPlan(`- 主线\n- ${long}\n- 收集`);
-        assert.deepEqual(out, ['主线', '收集']);
-      });
-
-      test('宽度按显示算 —— 英文标题不能被中文的尺子误伤', () => {
-        // 同一个字符数阈值对两种文字的松紧正好相反,见 MAX_TITLE_WIDTH
-        assert.deepEqual(parseSectionPlan('- Main Story & Side Quests\n- Collectibles'),
-          ['Main Story & Side Quests', 'Collectibles']);
-      });
-
-      test('再长的表也砍到 MAX_SECTIONS —— 那时它已经不是分区了', () => {
-        const many = Array.from({ length: 40 }, (_, i) => `- 第${i}节`).join('\n');
-        assert.equal(parseSectionPlan(many).length, MAX_SECTIONS);
-      });
-    });
-
-    describe('buildSectionPlanPrompt', () => {
-      test('给成就名,不给描述 —— 这一趟要的是骨架,描述只会把它变贵', () => {
-        const p = buildSectionPlanPrompt('测试游戏', DEFS);
-        assert.match(p, /第一步/, '成就名要在');
-        assert.match(p, /第二步/);
-        assert.doesNotMatch(p, /完成第一关/, '描述不该出现在这一趟里');
-      });
-
-      test('要几个分区跟着成就数走,不写死', () => {
-        const mk = (n) => Array.from({ length: n }, (_, i) => def('A' + i, 'n' + i, 'd'));
-        const hi = (t) => Number(t.match(/\*\*(\d+)[–-](\d+) 个\*\*/)[2]);
-        assert.ok(hi(buildSectionPlanPrompt('x', mk(300))) > hi(buildSectionPlanPrompt('x', mk(60))),
-          '300 个成就该比 60 个允许更多分区 —— 写死一个区间对两头都不合适');
-      });
-    });
 
     describe('buildChunkMessage 带上分区表', () => {
       const chunks = chunkDefs(BIG, 2);
@@ -1530,9 +1470,9 @@ describe('分段撰写', () => {
         { sections: ['主线', '社交'] }
       );
       const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
-      assert.equal(provider.sectionAsks, 1, '分区只统一一趟,不是每段问一次');
-      assert.match(provider.sectionPrompt, /已经写完了/, '问的确实是「写完之后再分类」那一趟');
-      assert.match(provider.sectionPrompt, /现在在:/, '要把各段自己给的分节一起交上去 —— 那是这一趟比前置那趟多出来的信息');
+      assert.equal(provider.regroupAsks, 1, '分区只统一一趟,不是每段问一次');
+      assert.match(provider.regroupPrompt, /已经写完了/, '问的确实是「写完之后再分类」那一趟');
+      assert.match(provider.regroupPrompt, /现在在:/, '要把各段自己给的分节一起交上去 —— 那是这一趟比前置那趟多出来的信息');
       assert.doesNotMatch(provider.asked[0], /一字不差地照抄/, '写正文时不该再钉死标题,各段自己开');
       const text = readFileSync(res.path, 'utf8');
       assert.equal(text.match(/## 主线/g).length, 1, '「主线」被两段各开了一次,成品里只该有一个');
@@ -1615,7 +1555,7 @@ describe('分段撰写', () => {
         seen: [],
         webTools: () => [],
         async send({ system, messages }) {
-          const planned = sectionPlanReply(system);
+          const planned = regroupReply(system);
           if (planned) return planned;
           this.seen.push(JSON.stringify(messages));
           this.asked.push(messages.at(-1).content);
@@ -2075,7 +2015,7 @@ describe('分段撰写', () => {
         const provider = {
           model: 'x', asked: [], webTools: () => [],
           async send({ system, messages }) {
-            const planned = sectionPlanReply(system);
+            const planned = regroupReply(system);
             if (planned) return planned;
             const msg = messages.at(-1).content;
             this.asked.push(msg);
@@ -2268,6 +2208,32 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
   ];
   const map = (pairs) => new Map(pairs);
 
+  /**
+   * 分类那一趟**只列装成就的小节**,纯说明小节它一个字都不会提 —— 而没被提到的一律
+   * 接在后面。于是规则 3.5 的「机制速查」会从列表前面被搬到全篇末尾,吊在最后一条成就
+   * 下面;那是给人在读列表之前看的东西,挪到末尾等于没写。
+   *
+   * 《马特的寻猫游戏》重写之后确实是这个结果,不过草稿已经删了,没法证明是重排搬的还是
+   * 模型本来就写在末尾。**两种情况下这条规则都对**,所以按规则写,不按猜测写。
+   */
+  test('分类名单没提到的纯说明小节,留在成就列表原来那一侧', () => {
+    const body = [
+      '## 机制速查',
+      '- 提示条随时间恢复,分三档。',
+      '## 商店',
+      '- [ ] **喵界图鉴**<br>解锁所有吉祥物。',
+      '## 备注',
+      '- 数据截至 1.2 版本。',
+    ].join('\n');
+
+    const out = regroupByAssignment(body, {
+      defs: D, assignment: map([['A', '商店']]), sections: ['商店'],
+    });
+    const heads = out.split('\n').filter((l) => l.startsWith('## ')).map((l) => l.slice(3));
+    assert.deepEqual(heads, ['机制速查', '商店', '备注'],
+      '速查在前、备注在后 —— 两边都按原文那一侧留着');
+  });
+
   // 马特的寻猫游戏实际踩到的:四条同类吉祥物成就被劈进两个小节。前置分区表**结构上**
   // 看不见这个劈开(劈开是它之后才发生的),而最后一趟看得见全文,所以能搬回来。
   test('把劈到两处的同类成就搬到一起,小节说明跟着自己的小节走', () => {
@@ -2390,5 +2356,140 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
     ].join('\n');
     const out = regroupByAssignment(dup, { defs: D, assignment: new Map([['B', '商店']]), sections: ['商店'] });
     assert.equal((out.match(/狗狗上位/g) ?? []).length, 2, '两条都要留着 —— 去重是校验器的职责,不是重排的');
+  });
+});
+
+/**
+ * 规则五的折叠是给长内容用的,不是给成就列表用的 —— 但规则五只写了「到 10 行才折」,
+ * 没写「成就本身永远不折」。实测《马特的寻猫游戏》整节 `## 世界全清` 的 13 条成就被
+ * 塞进一个折叠里,那一节在 Notion 上显示 0 条。
+ */
+describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
+  const D = [
+    def('W1', '快乐露营者', '以100%完成度通关世界1的所有关卡。'),
+    def('W2', '老练水手', '以100%完成度通关世界2的所有关卡。'),
+    def('S', '宿敌登台', '将吉祥物替换为一只怪物。'),
+  ];
+
+  test('顶层折叠里装着成就 —— 拆开,标题降成一行加粗', () => {
+    const md = [
+      '## 世界全清',
+      '<details>',
+      '<summary>**世界 1~12 全清与通关**</summary>',
+      '',
+      '- [ ] **快乐露营者**<br>以100%完成度通关世界1的所有关卡。<br>心得',
+      '- [ ] **老练水手**<br>以100%完成度通关世界2的所有关卡。<br>心得',
+      '</details>',
+    ].join('\n');
+    const { text, unwrapped } = unwrapAchievementToggles(md, D);
+    assert.deepEqual(unwrapped, ['世界 1~12 全清与通关']);
+    assert.doesNotMatch(text, /<\/?details|<\/?summary/i, '外壳一点不留');
+    assert.match(text, /^\*\*世界 1~12 全清与通关\*\*$/m, '标签留着 —— 它是这一组的名字');
+    for (const t of ['快乐露营者', '老练水手']) assert.match(text, new RegExp(t));
+  });
+
+  test('缩进的成就掏出来之后回到顶格 —— 不然 parseTodos 把它们当子步骤', () => {
+    const md = [
+      '## 世界全清',
+      '<details>',
+      '<summary>全清一览</summary>',
+      '\t- [ ] **快乐露营者**<br>以100%完成度通关世界1的所有关卡。',
+      '\t- [ ] **老练水手**<br>以100%完成度通关世界2的所有关卡。',
+      '</details>',
+    ].join('\n');
+    const { text } = unwrapAchievementToggles(md, D);
+    for (const line of text.split('\n').filter((l) => l.includes('- [ ]'))) {
+      assert.equal(line, line.trimStart(), `还缩着:${line}`);
+    }
+  });
+
+  /**
+   * **这一条是防误伤的那一半。** 规则一要求 Notion 目标下把前置/步骤/注意写成缩进的
+   * `<details>` 分组标签,那种折叠里装的是子步骤,不是成就 —— 拆了就把规则一毁了。
+   */
+  test('挂在成就底下的分组标签折叠不许碰', () => {
+    const md = [
+      '## 吉祥物',
+      '- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。<br>心得',
+      '\t<details>',
+      '\t<summary>**前置** —— 开局前先备齐</summary>',
+      '\t- [ ] 命运商店花 40 点数买「祸之侍身像」',
+      '\t</details>',
+    ].join('\n');
+    const { text, unwrapped } = unwrapAchievementToggles(md, D);
+    assert.deepEqual(unwrapped, []);
+    assert.equal(text, md, '一个字都不该动');
+  });
+
+  /**
+   * **缩进这一条是独立的一道闸,不能靠「里面有没有成就」代替。**
+   *
+   * 分组折叠里的子步骤通常反查不到成就(整句话不等于成就名,`resolveTodoToAchievement`
+   * 要的是精确相等),所以多数时候两道闸看起来是一回事。但「前置」这一组**天然会把
+   * 别的成就一条一行列出来**,那种行是精确相等的,反查得到 —— 那时候只剩缩进能说明
+   * 这是挂在别人底下的辅料,而不是一节成就列表。拆了它,规则一的分组标签就毁了,
+   * 而且那几条子步骤会变成顶层条目,读起来像重复的成就。
+   */
+  test('缩进折叠里逐条列出的前置成就,也不许拆', () => {
+    const md = [
+      '## 世界全清',
+      '- [ ] **快乐露营者**<br>以100%完成度通关世界1的所有关卡。<br>心得',
+      '\t<details>',
+      '\t<summary>**前置** —— 这两条先做掉</summary>',
+      '\t- [ ] **宿敌登台**',
+      '\t- [ ] **老练水手**',
+      '\t</details>',
+    ].join('\n');
+    const { text, unwrapped } = unwrapAchievementToggles(md, D);
+    assert.deepEqual(unwrapped, [], '缩进说明它是辅料,里面提到成就不改变这一点');
+    assert.equal(text, md);
+  });
+
+  test('装的不是成就的顶层折叠也不碰 —— 全结局对照表那种', () => {
+    const md = [
+      '## 收集',
+      '<details>',
+      '<summary>全结局对照表</summary>',
+      '- [ ] 结局 A:第 3 章选左边',
+      '- [ ] 结局 B:第 3 章选右边',
+      '</details>',
+    ].join('\n');
+    const { text, unwrapped } = unwrapAchievementToggles(md, D);
+    assert.deepEqual(unwrapped, []);
+    assert.equal(text, md);
+  });
+
+  // 模型被截断时正好留下一个没关的 <details>,一路吃到文末会吞掉后面所有成就
+  test('折叠没闭合就不动它', () => {
+    const md = [
+      '## 世界全清',
+      '<details>',
+      '<summary>全清一览</summary>',
+      '- [ ] **快乐露营者**<br>以100%完成度通关世界1的所有关卡。',
+    ].join('\n');
+    const { text, unwrapped } = unwrapAchievementToggles(md, D);
+    assert.deepEqual(unwrapped, []);
+    assert.equal(text, md);
+  });
+
+  test('开合标签各占一行的 summary 也认', () => {
+    const md = [
+      '## 世界全清',
+      '<details>',
+      '<summary>',
+      '世界 1~12 全清',
+      '</summary>',
+      '- [ ] **快乐露营者**<br>以100%完成度通关世界1的所有关卡。',
+      '- [ ] **老练水手**<br>以100%完成度通关世界2的所有关卡。',
+      '</details>',
+    ].join('\n');
+    const { text, unwrapped } = unwrapAchievementToggles(md, D);
+    assert.deepEqual(unwrapped, ['世界 1~12 全清']);
+    assert.doesNotMatch(text, /<\/?summary/i, '裸的 summary 标签不许留在正文里');
+  });
+
+  test('没有折叠的正文原样返回', () => {
+    const md = '## 一节\n\n- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。';
+    assert.deepEqual(unwrapAchievementToggles(md, D), { text: md, unwrapped: [] });
   });
 });

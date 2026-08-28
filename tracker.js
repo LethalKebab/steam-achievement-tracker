@@ -1158,6 +1158,13 @@ async function cmdGuideGen() {
         // **降级要出声。** 各段是自己开的标题,不统一的话同类成就会散在几个小节里,
         // 而那是成品上看得见的退化 —— 不说的话用户只会觉得"这次的分区怎么乱七八糟"
         p.done(`  ⚠️  分区没统一成(${ev.reason}),保留各段自己分的结果`);
+      } else if (ev.phase === 'regroup-merged') {
+        // 这是程序**改掉了模型给的分类**,而成品上看不出是谁改的。说清楚改了几处
+        p.done(`  ${ev.clusters} 组同类成就被劈开了,已并回一处(搬 ${ev.moved} 条 → ${ev.into.join('、')})`);
+      } else if (ev.phase === 'unwrapped-toggles') {
+        p.done(`  ${ev.titles.length} 个折叠里装的是成就,已摊开:${ev.titles.join('、')}`);
+      } else if (ev.phase === 'unwrap-failed') {
+        p.done(`  ⚠️  ${ev.reason},折叠保持原样`);
       } else if (ev.phase === 'rewrite') {
         p.done(`  校验没过,第 ${ev.round} 轮只重写其中 ${ev.chunks}/${ev.of} 段`);
       } else if (ev.phase === 'ask') {
