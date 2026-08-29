@@ -1,6 +1,6 @@
 {
   "name": "steam-achievement-tracker-launcher",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Electron launcher shell for steam-achievement-tracker",
   "type": "module",
