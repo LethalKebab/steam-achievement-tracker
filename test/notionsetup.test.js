@@ -165,7 +165,7 @@ describe('createNotionGuideDb 的护栏 —— 全都在发请求之前拦下', 
 
   test('没 token → 拒绝', async () => {
     const r = await apiWith({}).createNotionGuideDb('', 'p1', 'x');
-    assert.match(r.error, /Integration Secret/);
+    assert.match(r.error, /Access token/);
   });
 
   test('没选父页面 → 拒绝', async () => {

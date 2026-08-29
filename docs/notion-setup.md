@@ -9,30 +9,32 @@
 
 ```mermaid
 flowchart LR
-    A["① 建 integration<br/>在 Notion 网站上"] --> B["② 授权页面<br/>最容易漏的一步"]
+    A["① 建 connection<br/>在 Notion 网站上"] --> B["② 授权页面<br/>最容易漏的一步"]
     B --> C["③ 填进程序<br/>设置 → Notion"]
     C --> D["④ 保存并验证<br/>当场告诉你结果"]
     style B stroke-width:3px
 ```
 
-第 ② 步单独标出来,是因为绝大多数「连不上」都出在那里 —— 建了 integration,但没把页面授权给它。
+第 ② 步单独标出来,是因为绝大多数「连不上」都出在那里 —— 建了 connection,但没把页面授权给它。
 
 ---
 
-## ① 在 Notion 建一个 integration
+## ① 在 Notion 建一个 connection
 
-打开 [notion.so/my-integrations](https://www.notion.so/my-integrations) → **New integration**。
+打开 [开发者页面](https://app.notion.com/developers/connections) → **New connection**。
 
 - **Name** 随便填,比如 `Steam 攻略`
 - **Type** 选 **Internal**
 - **Associated workspace** 选你放攻略的那个工作区
 
-建好之后页面上会有一串 **Internal Integration Secret**,`ntn_` 或 `secret_` 开头。点 **Show** → **Copy**,先存到记事本里,第 ③ 步要用。
+建好之后进 **Configuration** 标签页,里面有一串 **Access token**,`ntn_` 或 `secret_` 开头。点 **Show** → **Copy**,先存到记事本里,第 ③ 步要用。
 
-> **如果你的 Notion 把 integration 叫成 connection**:是同一个东西。Notion 的开发者文档已经改用
-> `connection` 这套词(密钥叫 *installation access token*,在 **Configuration** 标签页里),但产品界面
-> 上的按钮仍然写着 **New integration**。哪边的字和这里对不上,按你屏幕上的走 —— 程序两种都收,
-> 它不认前缀也不认叫法。
+> **老界面上这几个字不一样**:`New connection` 写作 `New integration`,`Access token` 写作
+> `Internal Integration Secret`(建完就直接显示在页面上,不在 Configuration 标签页里),开发者页面
+> 在 `notion.so/my-integrations`。指的是同一套东西。
+>
+> Notion 这几个名字改过不止一轮,所以**屏幕上的字和这里对不上就按屏幕走**。程序不认叫法也不认
+> 前缀,`ntn_` 和 `secret_` 都收。
 
 > **这串东西等于你 Notion 的钥匙**,别发给别人、别贴到聊天里。程序只把它存在你自己电脑上的 `config.json`(权限 600)。
 
@@ -40,20 +42,20 @@ flowchart LR
 
 ## ② 把页面授权给它
 
-**这一步漏了,后面一定连不上。** 刚建好的 integration 默认**什么都看不见** —— 哪怕它属于你自己的工作区。你得明确告诉 Notion「这个 integration 可以碰这一页」。
+**这一步漏了,后面一定连不上。** 刚建好的 connection 默认**什么都看不见** —— 哪怕它属于你自己的工作区。你得明确告诉 Notion「这个 connection 可以碰这一页」。
 
 在 Notion 里打开你打算放攻略的那一页,然后:
 
 ```
 页面右上角
    ••• (更多)
-      └─ 连接 / Connections
+      └─ Add connections / 添加连接
             └─ 搜你第 ① 步起的名字 → 选中
 ```
 
 有的 Notion 版本要先点「+ 添加连接」。
 
-**怎么知道成功了**:那一页的 `•••` 菜单里会出现你这个 integration 的名字。
+**怎么知道成功了**:那一页的 `•••` 菜单里会出现你这个 connection 的名字。
 
 **授权父页面之后,它底下所有子页面都跟着授权了** —— 所以选一个够高的页面授权一次就够,不用一页页点。
 
@@ -63,11 +65,11 @@ flowchart LR
 
 打开程序 → 右上角 **⚙️ 设置** → 上面的步骤条点到 **Notion** 这一步。
 
-把第 ① 步复制的密钥贴进 **Integration Secret**。接下来有两条路:
+把第 ① 步复制的密钥贴进 **Access token**。接下来有两条路:
 
 ```mermaid
 flowchart TD
-    S["贴好 Integration Secret"] --> L["没有现成的库<br/>▸ 点「＋ 新建一个攻略数据库」<br/>▸ 选父页面 → 起名字 → 建立<br/>ID 自动填好,属性也配好了"]
+    S["贴好 Access token"] --> L["没有现成的库<br/>▸ 点「＋ 新建一个攻略数据库」<br/>▸ 选父页面 → 起名字 → 建立<br/>ID 自动填好,属性也配好了"]
     S --> R["已经有攻略数据库<br/>▸ 手动填「攻略数据库 ID」<br/>要从网址里抠 32 位,见下"]
     style L stroke-width:3px
 ```
@@ -93,7 +95,7 @@ https://notion.so/我的攻略库-3bd1fee6252b816da1ccf9c50b8e91c2?v=8a2f...
 | `?v=` 后面那段 | 那是**视图** ID,不是数据库 ID |
 | 页面 ID | 数据库嵌在页面里时容易抄成外层页面的 ID |
 
-填错了不用担心:保存时程序会分别告诉你是「这不是一个数据库」还是「还没授权给 integration」—— 这两件事修法完全不同,所以它不会合成一句含糊的话。
+填错了不用担心:保存时程序会分别告诉你是「这不是一个数据库」还是「还没授权给 connection」—— 这两件事修法完全不同,所以它不会合成一句含糊的话。
 
 ---
 
@@ -111,7 +113,7 @@ https://notion.so/我的攻略库-3bd1fee6252b816da1ccf9c50b8e91c2?v=8a2f...
 
 全都通过就会自动跳回 Dashboard。有问题的话页面会**停在这里**把问题列出来,不会跳走 —— 每一条都写了具体怎么修。
 
-> 最后一项值得单说:只读的检查查不出「这个 integration 只有读权限」,而那恰好能一路绿灯到第一次生成攻略才 403。所以这里会真的建一页再立刻归档掉。
+> 最后一项值得单说:只读的检查查不出「这个 connection 只有读权限」,而那恰好能一路绿灯到第一次生成攻略才 403。所以这里会真的建一页再立刻归档掉。
 
 ### 关于状态选项
 

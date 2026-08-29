@@ -238,19 +238,44 @@ describe('踩过的坑,钉住', () => {
   });
 
   /**
-   * 用户实报(2026-08-17):照着设置页第 3 步去 Notion,页面上找不到「Internal Integration」。
-   * 因为 Notion 上根本没这几个字 —— 按钮叫 `New integration`,`Internal` 是里面 Type 那栏的值。
+   * 用户实报两次,同一条规则:**说明步骤里出现的英文必须是控件上此刻的原字。**
    *
-   * 钉的是**规则**不是措辞:说明步骤里出现的英文必须是控件上的原字。概念名读起来对,
-   * 照着找的人却找不到,而这种错不会报任何东西 —— 它只是让人卡在那儿。
+   * 2026-08-17 —— 照着第 3 步去 Notion,屏幕上找不到「Internal Integration」,因为那是
+   * 概念名,Notion 上一处都没有。2026-08-29 —— 同一段话又对不上了,这次是 Notion 自己
+   * 改的:按钮从 `New integration` 变成 `New connection`,密钥从 `Integration Secret`
+   * 变成 `Access token`,开发者页面也从 `notion.so/my-integrations` 挪走了。
+   *
+   * 两次的症状一样:照着找的人卡在那儿,而**这种错什么都不会报**。
+   *
+   * 断言切的是那份 `<ol>`,不是整个 step —— 步骤下面留了一行老界面的对照,里面正大光明
+   * 地写着旧的那几个词。对整个 step 匹配的话,那一行就会把断言喂饱:改了指引也照样绿。
+   * (第一版就是这么写的,改完 `New connection` 之后测试一声没吭。)
    */
-  test('Notion 那一步引的是界面原字,不是「Internal Integration」这种概念名', () => {
+  const notionSteps = (html) => {
+    const step = stepBlock(html, 3);
+    const a = step.indexOf('<ol>');
+    const b = step.indexOf('</ol>', a);
+    assert.ok(a > 0 && b > a, '切不到第 3 步的步骤列表');
+    return step.slice(a, b);
+  };
+
+  test('Notion 那一步引的是界面此刻的原字', () => {
+    const ol = notionSteps(read('Setup.html'));
+    assert.match(ol, /New connection/, '按钮的原字。用户是照着这段话在屏幕上找东西的');
+    assert.match(ol, /Access token/, '密钥那一栏的原字');
+    assert.doesNotMatch(ol, /Internal\s+Integration/i,
+      '「Internal Integration」是概念名,Notion 上一处都没有 —— 等于让人去找一个不存在的标签');
+    assert.doesNotMatch(ol, /my-integrations/,
+      '开发者页面已经不在这个地址了');
+  });
+
+  test('老界面的对照留在步骤外面,而且只留一行', () => {
+    // 有人的 Notion 还是旧版,`New connection` 在他屏幕上不存在 —— 那是真的死胡同,
+    // 值得留一句。但它必须待在 <ol> 外面:混进步骤里,照着做的人会不知道该认哪一个
     const step = stepBlock(read('Setup.html'), 3);
-    assert.match(step, /New integration/,
-      '要给出 Notion 上那个按钮的原字。用户是照着这段话在屏幕上找东西的');
-    assert.doesNotMatch(step, /Internal\s+Integration/i,
-      'Notion 界面上没有「Internal Integration」这个东西:New integration 是按钮,'
-      + 'Internal 是 Type 那一栏的选项。合成一个词组就等于让人去找一个不存在的标签');
+    const ol = notionSteps(read('Setup.html'));
+    assert.match(step, /New integration/, '老界面对照没了,旧版用户会卡在第一步');
+    assert.doesNotMatch(ol, /New integration/, '对照不能混进步骤里');
   });
 
   test('设置页要有走查入口,而且它指的那份文档还在', () => {

@@ -648,20 +648,23 @@
 
     <section class="step" data-step="3" hidden>
       <h2 class="step-title">Step 3 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
-      <!-- **每个 <code> 里是 Notion 界面上的原字**,不是这件东西的叫法。
-           原来第 1 步写的是「建一个 Internal Integration」—— 而 Notion 上没有任何一处
-           写着这五个字:按钮叫 New integration,Internal 是里面 Type 那一栏的选项。
-           于是照着找的人在屏幕上找不到我们说的东西(用户实报)。说明步骤里出现的
-           英文一律照抄控件本身,别用概念名 -->
+      <!-- **每个 <code> 里是 Notion 界面上的原字**,不是这件东西的叫法 —— 照着做的人
+           是在屏幕上按字面找的,概念名(「Internal Integration」这类)在界面上一个字
+           都搜不到。
+           这几个字 Notion 改过不止一轮:integration 改叫 connection,密钥改叫
+           access token,开发者页面也从 notion.so/my-integrations 挪到了
+           app.notion.com/developers/connections。所以下面留了一行老界面的对照 ——
+           还会再改,而一行对照的成本远低于让人对着一个不存在的按钮找 -->
       <ol>
-        <li>在 <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a> 点 <code>New integration</code>,Type 选 <code>Internal</code>,复制密钥</li>
-        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>连接 / Connections</code> → 选中它</li>
+        <li>在 <a href="https://app.notion.com/developers/connections" target="_blank" rel="noopener">Notion 开发者页面</a> 点 <code>New connection</code>,再从 <code>Configuration</code> 里复制 <code>Access token</code></li>
+        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>Add connections</code> → 选中它</li>
       </ol>
+      <p class="hint">老界面上这两处叫 <code>New integration</code> 和 <code>Integration Secret</code>,是同一个东西。</p>
       <!-- 走查页面一直都在(docs/notion-setup.md),只是 UI 上没有入口 —— 用户报的
            「能不能让我打开说明跟着走」缺的就是这一行。指向 GitHub 上渲染好的那份而不是
            自己再抄一遍:重抄一份的下场就是上面那条注释 -->
       <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener">详细步骤 ↗</a></p>
-      <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空就不改</span></label>
+      <label for="notion-token">Access token<span class="configured" id="token-set" hidden>已配置,留空就不改</span></label>
       <!-- 现在新建的密钥是 ntn_ 开头。老的 secret_ 仍然有效,所以这里只是换掉占位符
            给出的样子,验证那一侧不认前缀(认前缀就会在 Notion 下次改名时把好 token 拒了) -->
       <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="ntn_...">
@@ -889,13 +892,13 @@
       if (s.hasSteamKey) {
         // required 属性已经不用了(分步之后隐藏的必填控件会让浏览器静默拒绝提交),
         // 校验走 stepOneOk;这里只改提示文案
-        $('key').placeholder = '留空则沿用现在的';
+        $('key').placeholder = '留空就不改';
         $('key-set').hidden = false;
       }
       if (s.hasNotionToken) {
         $('token-set').hidden = false;
         $('notion-set').hidden = false;
-        $('notion-token').placeholder = '留空则沿用现在的';
+        $('notion-token').placeholder = '留空就不改';
       }
       if (isEditMode) {
         armBack();
@@ -980,7 +983,7 @@
       const cur = aiProviders[sel.value];
       $('ai-key-set').hidden = !cur?.hasKey;
       // 认不出的供应商(自建端点、代理)给空的,不猜一个形状出来
-      $('ai-key').placeholder = cur?.hasKey ? '留空则沿用现在的' : (AI_KEY_HINT[sel.value] ?? '');
+      $('ai-key').placeholder = cur?.hasKey ? '留空就不改' : (AI_KEY_HINT[sel.value] ?? '');
       $('ai-model').value = cur?.model ?? '';
       // 步骤标题上那个「已配置」问的是"这一步办完了没有",而不是"当前这家配了没" ——
       // 配好了 Anthropic 却停在 Gemini 上,这一步显然是办过的
