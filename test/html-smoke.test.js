@@ -247,9 +247,10 @@ describe('踩过的坑,钉住', () => {
    *
    * 两次的症状一样:照着找的人卡在那儿,而**这种错什么都不会报**。
    *
-   * 断言切的是那份 `<ol>`,不是整个 step —— 步骤下面留了一行老界面的对照,里面正大光明
-   * 地写着旧的那几个词。对整个 step 匹配的话,那一行就会把断言喂饱:改了指引也照样绿。
-   * (第一版就是这么写的,改完 `New connection` 之后测试一声没吭。)
+   * 断言切的是那份 `<ol>`,不是整个 step。**步骤里出现旧名字才算错,step 里出现不算** ——
+   * 这一步随时可能长出别的句子,而只要那句话里带着旧词,对整个 step 的匹配就会被喂饱,
+   * 指引改错了也照样绿。这不是假想:第一版正是对整个 step 匹配的,改成 `New connection`
+   * 之后测试一声没吭,因为当时步骤下面挂着一行写有旧名字的对照。
    */
   const notionSteps = (html) => {
     const step = stepBlock(html, 3);
@@ -269,13 +270,12 @@ describe('踩过的坑,钉住', () => {
       '开发者页面已经不在这个地址了');
   });
 
-  test('老界面的对照留在步骤外面,而且只留一行', () => {
-    // 有人的 Notion 还是旧版,`New connection` 在他屏幕上不存在 —— 那是真的死胡同,
-    // 值得留一句。但它必须待在 <ol> 外面:混进步骤里,照着做的人会不知道该认哪一个
+  // 这一步上不放旧名字的对照 —— 步骤统共两条,旁边挂一行同义词,读的人得先分辨
+  // 哪一组是给自己看的。旧名字留在 docs/notion-setup.md 里
+  test('这一步不并排摆新旧两套叫法', () => {
     const step = stepBlock(read('Setup.html'), 3);
-    const ol = notionSteps(read('Setup.html'));
-    assert.match(step, /New integration/, '老界面对照没了,旧版用户会卡在第一步');
-    assert.doesNotMatch(ol, /New integration/, '对照不能混进步骤里');
+    assert.doesNotMatch(step, /New integration|Integration Secret/,
+      '旧叫法属于走查文档,不属于这两行步骤');
   });
 
   test('设置页要有走查入口,而且它指的那份文档还在', () => {

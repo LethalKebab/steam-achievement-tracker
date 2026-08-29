@@ -650,16 +650,16 @@
       <h2 class="step-title">Step 3 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
       <!-- **每个 <code> 里是 Notion 界面上的原字**,不是这件东西的叫法 —— 照着做的人
            是在屏幕上按字面找的,概念名(「Internal Integration」这类)在界面上一个字
-           都搜不到。
-           这几个字 Notion 改过不止一轮:integration 改叫 connection,密钥改叫
-           access token,开发者页面也从 notion.so/my-integrations 挪到了
-           app.notion.com/developers/connections。所以下面留了一行老界面的对照 ——
-           还会再改,而一行对照的成本远低于让人对着一个不存在的按钮找 -->
+           都搜不到。Notion 改过不止一轮(integration 改叫 connection、密钥改叫
+           access token、页面也换了地址),所以照抄之前先去看一眼当下那一版。
+
+           **不要在这里加一行「老界面上叫 X」的对照。** 加过一次,当场被判定多余:
+           步骤统共两条,旁边再挂一行同义词,读的人得先分辨哪一组是给自己看的。
+           旧名字留在 docs/notion-setup.md 里 —— 会去翻走查的人才需要它 -->
       <ol>
         <li>在 <a href="https://app.notion.com/developers/connections" target="_blank" rel="noopener">Notion 开发者页面</a> 点 <code>New connection</code>,再从 <code>Configuration</code> 里复制 <code>Access token</code></li>
         <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>Add connections</code> → 选中它</li>
       </ol>
-      <p class="hint">老界面上这两处叫 <code>New integration</code> 和 <code>Integration Secret</code>,是同一个东西。</p>
       <!-- 走查页面一直都在(docs/notion-setup.md),只是 UI 上没有入口 —— 用户报的
            「能不能让我打开说明跟着走」缺的就是这一行。指向 GitHub 上渲染好的那份而不是
            自己再抄一遍:重抄一份的下场就是上面那条注释 -->
@@ -892,13 +892,11 @@
       if (s.hasSteamKey) {
         // required 属性已经不用了(分步之后隐藏的必填控件会让浏览器静默拒绝提交),
         // 校验走 stepOneOk;这里只改提示文案
-        $('key').placeholder = '留空就不改';
         $('key-set').hidden = false;
       }
       if (s.hasNotionToken) {
         $('token-set').hidden = false;
         $('notion-set').hidden = false;
-        $('notion-token').placeholder = '留空就不改';
       }
       if (isEditMode) {
         armBack();
@@ -983,7 +981,7 @@
       const cur = aiProviders[sel.value];
       $('ai-key-set').hidden = !cur?.hasKey;
       // 认不出的供应商(自建端点、代理)给空的,不猜一个形状出来
-      $('ai-key').placeholder = cur?.hasKey ? '留空就不改' : (AI_KEY_HINT[sel.value] ?? '');
+      $('ai-key').placeholder = AI_KEY_HINT[sel.value] ?? '';
       $('ai-model').value = cur?.model ?? '';
       // 步骤标题上那个「已配置」问的是"这一步办完了没有",而不是"当前这家配了没" ——
       // 配好了 Anthropic 却停在 Gemini 上,这一步显然是办过的
