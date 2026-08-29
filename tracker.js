@@ -302,11 +302,12 @@ async function cmdInitNotion() {
   try {
     const cfg = loadConfig();
     console.log('\n配置 Notion 攻略同步\n');
-    // 英文一律照抄 Notion 界面上的原字(New integration / Internal),不用「Internal
-    // Integration」这种概念名 —— 那五个字在 Notion 上一处都没有,照着找的人找不到
-    console.log('token 从哪来:打开 https://www.notion.so/my-integrations,点 New integration,');
-    console.log('Type 选 Internal,复制生成的密钥(ntn_ 开头)。然后把攻略页面(或它们共同的');
-    console.log('父页面)授权给它:Notion 页面右上角 ••• → 连接 / Connections → 选中它,');
+    // 英文一律照抄 Notion 界面上的原字,不用「Internal Integration」这种概念名 ——
+    // 那五个字在 Notion 上一处都没有,照着找的人找不到。Notion 改过不止一轮
+    // (以前叫 New integration / Internal Integration Secret),所以照抄的是当下这一版
+    console.log('token 从哪来:打开 https://app.notion.com/developers/connections,点 New connection,');
+    console.log('在它的 Configuration 标签页里复制 Access token(ntn_ 开头)。然后把攻略页面(或它们');
+    console.log('共同的父页面)授权给它:Notion 页面右上角 ••• → Add connections → 选中它,');
     console.log('否则 API 会返回 404。\n');
     console.log('带图的完整步骤:docs/notion-setup.md\n');
 

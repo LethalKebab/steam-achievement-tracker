@@ -42,10 +42,10 @@ The design deliberately prefers a missed checkbox (no match found) over a wrong 
 
 **Notion backend** (needs a token — this is the only part of the project that talks to a third party):
 
-1. At notion.so/my-integrations press **New integration**, set Type to **Internal**, name it (e.g. "Steam Achievement Sync"), copy the key (`ntn_…`). Quote those labels verbatim when writing instructions — "Internal Integration" is the concept, not anything printed on Notion's screen.
+1. At app.notion.com/developers/connections press **New connection**, name it (e.g. "Steam Achievement Sync"), then copy the **Access token** from its **Configuration** tab (`ntn_…`). Quote those labels verbatim when writing instructions — "Internal Integration" is a concept name, not anything printed on Notion's screen. Notion renames these periodically (this step read **New integration** / **Internal Integration Secret** at `notion.so/my-integrations` until recently), so re-check the screen before quoting.
 2. Put it in `config.json` as `notion.token`, or export `NOTION_TOKEN`. **Never in source** — the repo is public.
 3. Also set `notion.overviewDbId` to the database holding your guide pages (open it in Notion; the 32-hex chunk in the URL).
-4. In Notion, open the shared parent page of all guide pages (e.g. "Entertainment") → `•••` → Connections → add the integration once; child pages inherit access. Without this, the API returns 404/no-permission.
+4. In Notion, open the shared parent page of all guide pages (e.g. "Entertainment") → `•••` → Add connections → add the connection once; child pages inherit access. Without this, the API returns 404/no-permission.
 
 **Local markdown backend**: no token, no setup. Drop a `.md` file in `guides/` with an `appid: NNNNNN` line near the top and run `node tracker.js guides --local`.
 

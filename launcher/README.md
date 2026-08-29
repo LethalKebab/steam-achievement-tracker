@@ -234,7 +234,7 @@ None of this exists on a friend's machine — no file in any of the three locati
 ## Known scope limitations (deliberate, not oversights)
 
 - **Windows only.** No macOS/Linux build target configured.
-- **Turning Notion sync back off** needs `config.json` — the settings page treats an empty Integration Secret as "keep the current one", the same rule the Steam API Key follows, so that changing a SteamID can't silently wipe a token. Everything else about Notion is configurable in the app.
+- **Turning Notion sync back off** needs `config.json` — the settings page treats an empty Access token as "keep the current one", the same rule the Steam API Key follows, so that changing a SteamID can't silently wipe a token. Everything else about Notion is configurable in the app.
 - **Port 8777 is hardcoded**, matching the project's default. If that port is already taken on someone's machine, the launcher fails to start rather than picking another one — it now says *why* in the error box instead of reporting a bare exit code, but it still will not move. The app's own second instance is not one of those occupants — see the single-instance lock above.
 - **No code signing.** Windows SmartScreen will show an "Unknown Publisher" warning on first run — expected, not a bug. Warn recipients in advance.
 - **Updating from ≤1.1.3 leaves stale files once.** Those builds shipped no manifest, so the first self-update off them is a plain overwrite — anything a later version deleted stays on disk until the *next* update, which has a manifest to work from. Deliberate: see "Self-update" above, and never replace it with a guess about which files are program files.
