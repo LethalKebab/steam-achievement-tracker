@@ -1,18 +1,21 @@
 /**
- * 自动 checkbox 勾选的候选规则 + gained 标记
+ * The automatic checkbox pass's candidate rules + the gained flag
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 锁的是"打开 Dashboard 那次自动勾选会去读哪些攻略页"。这一层两个方向都会静默出错,
- * 而且都不报异常:
+ * What is pinned is "which guide pages the automatic tick pass reads when the Dashboard is
+ * opened". This layer fails silently in both directions, and neither raises an exception:
  *
- * - **放宽** → 每次打开 Dashboard 白烧几十次 Notion 页面读 + 几十次 Steam 调用。
- *   功能看起来完全正常,只是慢、只是费,不看日志根本发现不了。
- * - **收紧** → 该勾的框不勾,而 checkbox 同步本来就只勾不取消,漏掉就一直漏着。
+ * - **Too loose** → every Dashboard open burns dozens of Notion page reads plus dozens of
+ *   Steam calls for nothing. The feature looks entirely normal, it is merely slow and
+ *   expensive, and without reading the log it is undiscoverable.
+ * - **Too tight** → boxes that should be ticked are not, and since the checkbox sync only
+ *   ever ticks and never unticks, a miss stays missed.
  *
- * 最要命的一条是 `appids: []`:空数组必须表示"一款都不跑"。任何把它当成 falsy
- * 退回全量的写法(`appids?.length ? … : 全部`)都会把最常见的情况——这次打开
- * 什么都没变——翻译成全量扫描,定向同步直接失效。
+ * The most critical of all is `appids: []`: an empty array has to mean "run nothing". Any
+ * form that treats it as falsy and falls back to everything
+ * (`appids?.length ? … : everything`) translates the most common case — nothing changed
+ * this time — into a full scan, and the targeted sync stops working outright.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,14 +26,14 @@ import { selectCheckboxCandidates } from '../lib/guides.js';
 
 const freshDb = () => openDb(':memory:');
 
-/** 一行"有攻略、有成就系统、还没打满"的普通候选 */
+/** An ordinary candidate row: has a guide, has an achievement system, not yet complete */
 function seedGame(db, { appid, name = 'G' + appid, achieved = 5, total = 10, guide = true }) {
   insertGame(db, { appid, name });
   if (total !== null) updateGameStats(db, appid, { achieved, total });
   if (guide) upsertGuide(db, { appid, name, url: 'https://notion.so/' + appid, kind: 'notion' });
 }
 
-/** 给某个 appid 塞一条成就详情(100% 游戏要靠它才可能进候选) */
+/** Puts one achievement definition under an appid (a 100% game needs it to be a candidate at all) */
 function seedAchievement(db, appid) {
   replaceAchievements(db, appid, [
     {
@@ -42,22 +45,22 @@ function seedAchievement(db, appid) {
 
 const ids = (db, opts) => selectCheckboxCandidates(db, opts).games.map((g) => g.appid).sort();
 
-describe('selectCheckboxCandidates — 基础条件', () => {
-  test('没登记攻略的游戏不进候选', () => {
+describe('selectCheckboxCandidates — the basic conditions', () => {
+  test('a game with no registered guide is not a candidate', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2', guide: false });
     assert.deepEqual(ids(db), ['1']);
   });
 
-  test('没有成就系统的游戏不进候选(total 是 NULL)', () => {
+  test('a game with no achievement system is not a candidate (total is NULL)', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2', total: null });
     assert.deepEqual(ids(db), ['1']);
   });
 
-  test('已经 100% 的游戏:不联动子步骤时直接跳过', () => {
+  test('a game already at 100%: skipped outright when sub-steps do not cascade', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2', achieved: 10, total: 10 });
@@ -65,62 +68,63 @@ describe('selectCheckboxCandidates — 基础条件', () => {
     assert.deepEqual(ids(db, { cascade: false }), ['1']);
   });
 
-  test('已经 100% 且有成就详情:联动开着时进候选(子步骤可能还空着)', () => {
+  test('already at 100% with achievement detail: a candidate when cascade is on (sub-steps may still be empty)', () => {
     const db = freshDb();
     seedGame(db, { appid: '2', achieved: 10, total: 10 });
     seedAchievement(db, '2');
     assert.deepEqual(ids(db, { cascade: true }), ['2']);
   });
 
-  test('已经 100% 但没有成就详情:联动开着也不进——认不出父成就,读了也白读', () => {
+  test('already at 100% with no achievement detail: not a candidate even with cascade on — the parent achievement cannot be recognised, so reading it achieves nothing', () => {
     const db = freshDb();
     seedGame(db, { appid: '2', achieved: 10, total: 10 });
     assert.deepEqual(ids(db, { cascade: true }), []);
   });
 });
 
-describe('selectCheckboxCandidates — 刚刚打满的游戏', () => {
-  // 这一组锁的是一个很容易漏的洞:"让游戏通关的那个成就",它的框如果只靠
-  // 100%-跳过规则来判断,就**永远**勾不上——等下一轮来看时游戏已经是 100%,
-  // 直接被挡在候选之外。点名进来(appids 白名单)意味着"这一行这轮刚变过",
-  // 那它就是刚打满的,最后几个框八成还空着。
-  test('这轮点名进来的 100% 游戏:不联动子步骤也要进(最后那个成就的框还空着)', () => {
+describe('selectCheckboxCandidates — a game that just hit 100%', () => {
+  // This group pins a hole that is very easy to miss: "the achievement that completed the
+  // game" — if its box relies solely on the 100%-skip rule, it can **never** be ticked,
+  // because by the next round the game is already at 100% and is blocked from being a
+  // candidate at all. Being named (the appids whitelist) means "this row changed this
+  // round", and that means it just completed, so the last few boxes are most likely empty.
+  test('a 100% game named this round: a candidate even without cascade (the last achievement\'s box is still empty)', () => {
     const db = freshDb();
     seedGame(db, { appid: '1', achieved: 10, total: 10 });
     seedAchievement(db, '1');
     assert.deepEqual(ids(db, { appids: ['1'], cascade: false }), ['1']);
   });
 
-  test('没点名的 100% 游戏,不联动时照旧跳过(CLI 全量 --no-cascade 的行为不变)', () => {
+  test('an unnamed 100% game is still skipped without cascade (the CLI\'s full --no-cascade behaviour is unchanged)', () => {
     const db = freshDb();
     seedGame(db, { appid: '1', achieved: 10, total: 10 });
     seedAchievement(db, '1');
     assert.deepEqual(ids(db, { appids: null, cascade: false }), []);
   });
 
-  test('点名了但没有成就详情:还是不进——55/55 那批白读的闸门不能被绕过', () => {
+  test('named but with no achievement detail: still not a candidate — the gate that stops the 55/55 batch of wasted reads must not be bypassed', () => {
     const db = freshDb();
     seedGame(db, { appid: '1', achieved: 10, total: 10 });
     assert.deepEqual(ids(db, { appids: ['1'], cascade: false }), []);
   });
 });
 
-describe('selectCheckboxCandidates — appids 白名单(serve 的定向勾选)', () => {
-  test('不传 appids(null)→ 不限制,所有符合条件的都进', () => {
+describe('selectCheckboxCandidates — the appids whitelist (serve\'s targeted ticking)', () => {
+  test('no appids (null) → no restriction, and everything qualifying is a candidate', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2' });
     assert.deepEqual(ids(db, { appids: null }), ['1', '2']);
   });
 
-  test('**空数组 = 一款都不跑**,不是"不限制" —— 这次打开没有变化就该零外部调用', () => {
+  test('**an empty array = run nothing**, not "no restriction" — with nothing changed this open, there should be zero external calls', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2' });
     assert.deepEqual(ids(db, { appids: [] }), []);
   });
 
-  test('只跑白名单里的行', () => {
+  test('only the rows in the whitelist are run', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2' });
@@ -128,19 +132,19 @@ describe('selectCheckboxCandidates — appids 白名单(serve 的定向勾选)',
     assert.deepEqual(ids(db, { appids: ['1', '3'] }), ['1', '3']);
   });
 
-  test('白名单里的数字 appid 也认(appid 列是 TEXT,来源不一定是字符串)', () => {
+  test('a numeric appid in the whitelist is recognised too (the appid column is TEXT and the source is not necessarily a string)', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     assert.deepEqual(ids(db, { appids: [1] }), ['1']);
   });
 
-  test('白名单不能绕过基础条件:没攻略的行进了白名单也不读', () => {
+  test('the whitelist cannot bypass the basic conditions: a row with no guide is not read even when whitelisted', () => {
     const db = freshDb();
     seedGame(db, { appid: '1', guide: false });
     assert.deepEqual(ids(db, { appids: ['1'] }), []);
   });
 
-  test('CLI 的单个 appid 参数照旧有效,和 appids 互不干扰', () => {
+  test('the CLI\'s single-appid argument still works and does not interfere with appids', () => {
     const db = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2' });
@@ -148,8 +152,8 @@ describe('selectCheckboxCandidates — appids 白名单(serve 的定向勾选)',
   });
 });
 
-describe('updateGameStats — gained 标记(定向勾选的输入)', () => {
-  test('解锁数变多 → gained', () => {
+describe('updateGameStats — the gained flag (the targeted pass\'s input)', () => {
+  test('the unlock count rose → gained', () => {
     const db = freshDb();
     insertGame(db, { appid: '1', name: 'G' });
     updateGameStats(db, '1', { achieved: 3, total: 10 });
@@ -158,22 +162,23 @@ describe('updateGameStats — gained 标记(定向勾选的输入)', () => {
     assert.equal(r.bumped, false);
   });
 
-  test('解锁数没变 → 不是候选', () => {
+  test('the unlock count did not change → not a candidate', () => {
     const db = freshDb();
     insertGame(db, { appid: '1', name: 'G' });
     updateGameStats(db, '1', { achieved: 3, total: 10 });
     assert.equal(updateGameStats(db, '1', { achieved: 3, total: 10 }).gained, false);
   });
 
-  test('第一次同步这一行(没有基线)→ gained 是 false', () => {
-    // 这条是防止定向勾选退化成全量的关键:首次同步时整库每一行的 achieved 都是
-    // NULL→数字,当成"变多了"的话几百行会一起变成候选,把省下来的调用又全花回去
+  test('the first sync of this row (no baseline) → gained is false', () => {
+    // This is the key to stopping the targeted pass degenerating into a full one: on a first
+    // sync every row in the library goes NULL→a number for achieved, and treating that as "it
+    // rose" would make several hundred rows candidates at once, spending back every call saved
     const db = freshDb();
     insertGame(db, { appid: '1', name: 'G' });
     assert.equal(updateGameStats(db, '1', { achieved: 7, total: 10 }).gained, false);
   });
 
-  test('只有 total 变多(开发者加了新成就)→ bumped,但没新解锁', () => {
+  test('only total rose (a developer added achievements) → bumped, with nothing newly unlocked', () => {
     const db = freshDb();
     insertGame(db, { appid: '1', name: 'G' });
     updateGameStats(db, '1', { achieved: 10, total: 10 });
