@@ -1,24 +1,29 @@
 /**
- * 攻略备份(列出 / 看 / 恢复 / 删)的测试
+ * Guide archives (list / view / restore / delete)
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这三个归档目录在这个模块出现之前是**只进不出**的,所以这里守的失败类有两个方向,
- * 而且它们的严重程度不一样:
+ * Before this module existed the three archive directories were **write-only**, so the failure
+ * class here has two directions, and they are not equally severe:
  *
- *  1. **恢复把东西弄丢了。** 恢复本身是一次覆盖 —— 它覆盖的还常常是用户手写的攻略。
- *     所以"覆盖前必须先备份""存档本身不许被恢复消耗掉""回读对不上要拦下来"
- *     这三条各有测试。少了第一条,一次点错的恢复就是不可逆的删除。
+ *  1. **Restore loses something.** A restore is itself an overwrite — and what it overwrites is
+ *     often a guide the user wrote by hand. So "back up before overwriting", "the archive must
+ *     not be consumed by the restore" and "a read-back that does not match has to be stopped"
+ *     each have their own test. Without the first, one misclicked restore is an irreversible
+ *     delete.
  *
- *  2. **存档编号是从浏览器来的字符串。** 它最后会变成一个 `readFileSync` /
- *     `rmSync` 的路径。这里的越界测试不是走形式:`.backups/../../config.json`
- *     这一条如果放过去,设置页上就有一个任意文件删除按钮。
+ *  2. **The archive id is a string from the browser.** It ends up as a `readFileSync` /
+ *     `rmSync` path. The containment tests here are not a formality: let
+ *     `.backups/../../config.json` through and the setup page carries an arbitrary-file-delete
+ *     button.
  *
- * 另外单独盯一件容易"看着成了"的事:Notion 备份里子块挂在顶层 `children`,写回去时
- * 必须嵌进 `[type].children`。搞错了页面能写成、块数也对,只是**所有子步骤都升级成了
- * 成就** —— 而 checkbox 同步正是靠嵌套深度分辨这两者的。
+ * One more thing is watched separately because it "looks like it worked": in a Notion backup
+ * child blocks hang off a top-level `children`, and writing them back has to nest them into
+ * `[type].children`. Get it wrong and the page writes fine with the right block count, only
+ * **every sub-step has been promoted to an achievement** — and nesting depth is exactly how
+ * checkbox syncing tells those two apart.
  *
- * 不联网:Notion 是假的。
+ * No network: Notion is fake.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -41,7 +46,7 @@ import {
 } from '../lib/guidearchive.js';
 
 // ---------------------------------------------------------------------------
-// 脚手架
+// Scaffolding
 // ---------------------------------------------------------------------------
 
 const GUIDE = [
@@ -55,10 +60,10 @@ const GUIDE = [
   '',
 ].join('\n');
 
-/** Notion 的 rich_text。`plain_text` 是必须的 —— richTextToPlain 只认这个字段 */
+/** Notion rich_text. `plain_text` is required — richTextToPlain reads only that field */
 const rt = (s) => [{ type: 'text', text: { content: s }, plain_text: s }];
 
-/** 一个读回来的原样块(顶层 children,只读字段齐全),就是备份里存的那种形状 */
+/** A block exactly as read back (top-level children, every read-only field present), the shape a backup stores */
 const raw = (type, text, extra = {}, children = null) => ({
   object: 'block',
   id: `id-${text}`,
@@ -93,9 +98,10 @@ function freshEnv({ guides = {}, archives = {}, kind = 'local', url = 'test_guid
 }
 
 /**
- * 假 Notion。**回读是从真写进去的块里还原的**,所以保真校验比的确实是这次写出去的那份。
- * 而且它按 append 的形状读子块(`[type].children`),不是备份的形状(顶层 `children`)——
- * 两种形状要是没转对,这里就会读出一个拍平的列表。
+ * Fake Notion. **The read-back is reconstructed from the blocks actually written**, so the
+ * fidelity check really does compare against the copy sent this time. It also reads child
+ * blocks in the append shape (`[type].children`) rather than the backup shape (top-level
+ * `children`) — get that conversion wrong and this reads back a flattened list.
  */
 function fakeNotion({ current = NOTION_BLOCKS } = {}) {
   return {
@@ -147,13 +153,13 @@ const backupJson = (blocks = NOTION_BLOCKS, over = {}) =>
   });
 
 // ---------------------------------------------------------------------------
-// 存档编号:这串东西是从浏览器来的
+// The archive id: this string comes from the browser
 // ---------------------------------------------------------------------------
 
-describe('存档编号', () => {
+describe('archive id', () => {
   const config = { guidesDir: join(tmpdir(), 'nowhere') };
 
-  test('认得三个归档目录里的普通文件名', () => {
+  test('an ordinary filename in each of the three archive directories is recognised', () => {
     for (const dir of ARCHIVE_DIRS) {
       const r = parseArchiveId(config, `${dir}/1-20260820-122121.md`);
       assert.equal(r.dir, dir);
@@ -161,7 +167,7 @@ describe('存档编号', () => {
     }
   });
 
-  // 放过任意一条,设置页上就有一个任意文件读写按钮
+  // Let any one of these through and the setup page carries an arbitrary-file read/write button
   for (const bad of [
     '.backups/../../config.json',
     '.backups/..\\..\\config.json',
@@ -178,40 +184,43 @@ describe('存档编号', () => {
     '',
     null,
   ]) {
-    test(`挡住 ${JSON.stringify(bad)}`, () => {
+    test(`blocks ${JSON.stringify(bad)}`, () => {
       assert.throws(() => parseArchiveId(config, bad), /存档编号/);
     });
   }
 
-  test('挡住藏了 NUL 的文件名', () => {
+  test('blocks a filename hiding a NUL', () => {
     assert.throws(() => parseArchiveId(config, '.backups/x\0.md'), /存档编号/);
   });
 
-  // Windows 上这些名字有特殊含义,而它们都不带分隔符 —— 只靠"不许有 / 和 \"是放过去的
+  // These names have special meanings on Windows, and none of them carries a separator — a rule
+  // of "no / and no \" alone lets them all through
   for (const bad of ['.backups/C:', '.backups/nul', '.backups/COM1', '.backups/....', '.backups/x.txt']) {
-    test(`挡住 ${JSON.stringify(bad)} —— 列不出来的就不该点得动`, () => {
+    test(`blocks ${JSON.stringify(bad)} — what cannot be listed should not be clickable`, () => {
       assert.throws(() => parseArchiveId(config, bad), /存档编号/);
     });
   }
 
-  test('放行中文文件名 —— 手工命名的攻略搬走之后也得恢复得回来', () => {
+  test('allows a Chinese filename — a hand-named guide has to be restorable after being moved away', () => {
     const r = parseArchiveId(config, '.migrated/中文攻略_achievements.md');
     assert.equal(r.file, '中文攻略_achievements.md');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 列表
+// Listing
 // ---------------------------------------------------------------------------
 
-describe('列出存档', () => {
-  // 目录之间是混排的,不是分段。要找的多半是刚被覆盖掉的那一份,而它在哪个
-  // 目录里取决于当时的后端 —— 按目录分段等于让人先答对一道题才能开始找
-  test('三个目录混在一起按时间倒序,不分段', () => {
+describe('listing archives', () => {
+  // The directories are interleaved rather than sectioned. What is being looked for is usually
+  // the copy that was just overwritten, and which directory it is in depends on the backend at
+  // the time — sectioning by directory means answering a question correctly before the search
+  // can even start
+  test('the three directories are interleaved newest first, not sectioned', () => {
     const { db, config } = freshEnv({
       archives: {
         '.backups': { '1-20250810-100000.md': GUIDE, '1-20260820-100000.json': backupJson() },
-        '.migrated': { 'old_guide.md': GUIDE }, // 刚写出来,mtime 就是现在,所以它最新
+        '.migrated': { 'old_guide.md': GUIDE }, // just written, so its mtime is now and it is the newest
       },
     });
     assert.deepEqual(
@@ -220,20 +229,21 @@ describe('列出存档', () => {
     );
   });
 
-  test('.backups 的 appid 和时间取自文件名,不是 mtime', () => {
+  test('for .backups the appid and time come from the filename, not the mtime', () => {
     const { db, config } = freshEnv({
       archives: { '.backups': { '1-20250102-030405.md': GUIDE } },
     });
     const [e] = listArchives(db, config);
     assert.equal(e.appid, '1');
-    assert.equal(e.game, '测试游戏', 'appid 要能查回游戏名');
-    // 文件刚写出来,mtime 是现在;取到 2025 才说明读的是文件名
+    assert.equal(e.game, '测试游戏', 'the appid has to resolve back to a game name');
+    // The file was just written, so its mtime is now; landing on 2025 is what proves the
+    // filename is what was read
     assert.equal(new Date(e.savedAt).getFullYear(), 2025);
     assert.equal(new Date(e.savedAt).getMonth(), 0);
     assert.equal(new Date(e.savedAt).getDate(), 2);
   });
 
-  test('.md 是本地攻略,.json 是 Notion 整页', () => {
+  test('.md is a local guide, .json is a whole Notion page', () => {
     const { db, config } = freshEnv({
       archives: { '.backups': { '1-20260820-100000.md': GUIDE, '1-20260820-100001.json': backupJson() } },
     });
@@ -242,25 +252,25 @@ describe('列出存档', () => {
     assert.equal(byFile['1-20260820-100001.json'], 'notion');
   });
 
-  test('.migrated / .drafts 的 appid 从正文里读', () => {
+  test('for .migrated / .drafts the appid is read out of the body', () => {
     const { db, config } = freshEnv({
       archives: { '.drafts': { 'whatever_name.md': GUIDE } },
     });
     const [e] = listArchives(db, config);
-    assert.equal(e.appid, '1', '文件名里没有 appid,只能从 `appid:` 行拿');
+    assert.equal(e.appid, '1', 'there is no appid in the filename, so it can only come from the `appid:` line');
     assert.equal(e.game, '测试游戏');
   });
 
-  test('列表里不带正文 —— 一份备份是十几万字节', () => {
+  test('the listing carries no body text — one backup is hundreds of thousands of bytes', () => {
     const { db, config } = freshEnv({
       archives: { '.backups': { '1-20260820-100000.json': backupJson() } },
     });
     const [e] = listArchives(db, config);
     assert.equal(e.text, undefined);
-    assert.ok(e.bytes > 0, '但大小要有 —— 列表上就靠它判断值不值得点开');
+    assert.ok(e.bytes > 0, 'but the size has to be there — it is what the listing uses to judge whether opening it is worth it');
   });
 
-  test('不是 .md / .json 的东西不列,子目录也不列', () => {
+  test('anything that is not .md / .json is not listed, and neither are subdirectories', () => {
     const { db, config } = freshEnv({
       archives: { '.backups': { '1-20260820-100000.md': GUIDE, 'notes.txt': 'x', '.DS_Store': 'x' } },
     });
@@ -268,14 +278,15 @@ describe('列出存档', () => {
     assert.deepEqual(listArchives(db, config).map((e) => e.file), ['1-20260820-100000.md']);
   });
 
-  test('目录不存在不是错误,当成空的', () => {
+  test('a missing directory is not an error, it counts as empty', () => {
     const { db, config } = freshEnv();
     assert.deepEqual(listArchives(db, config), []);
   });
 
-  // 按游戏过滤是**主用法** —— 入口在 Dashboard 每一行的 ⋯ 菜单里,问的永远是
-  // 「这一个游戏的上一版哪去了」。不带 appid 的全量列表只剩总占地和孤儿两件事
-  describe('按 appid 过滤', () => {
+  // Filtering by game is the **main usage** — the entry point is the ⋯ menu on every Dashboard
+  // row, and the question is always "where did the previous version of this one game go". The
+  // unfiltered listing is left with only two jobs: total footprint and orphans
+  describe('filtering by appid', () => {
     const env = () =>
       freshEnv({
         archives: {
@@ -284,51 +295,52 @@ describe('列出存档', () => {
         },
       });
 
-    test('只给这个游戏的', () => {
+    test('only this game is returned', () => {
       const { db, config } = env();
       assert.deepEqual(listArchives(db, config, { appid: '1' }).map((e) => e.file),
         ['1-20260820-100000.md']);
       assert.equal(listArchives(db, config, { appid: '2' }).length, 2);
     });
 
-    test('数字和字符串的 appid 是同一个游戏', () => {
+    test('a numeric and a string appid are the same game', () => {
       const { db, config } = env();
-      assert.equal(listArchives(db, config, { appid: 1 }).length, 1, 'rpc 传下来的可能是数字');
+      assert.equal(listArchives(db, config, { appid: 1 }).length, 1, 'what rpc passes down may be a number');
     });
 
-    test('没有存档的游戏给空数组,不是全部', () => {
+    test('a game with no archives gets an empty array, not everything', () => {
       const { db, config } = env();
       assert.deepEqual(listArchives(db, config, { appid: '999' }), [],
-        '过滤失灵会让菜单上每个游戏都显示同一批存档');
+        'a broken filter makes every game in the menu show the same set of archives');
     });
 
-    test('不传 appid 还是全量', () => {
+    test('without an appid it is still the full listing', () => {
       const { db, config } = env();
       assert.equal(listArchives(db, config).length, 3);
       assert.equal(listArchives(db, config, {}).length, 3);
     });
   });
 
-  // 孤儿是设置页那个全量列表**唯一**还必须存在的理由:游戏被删了,
-  // Dashboard 上没有它那一行,⋯ 菜单永远够不着这几份
-  describe('孤儿存档', () => {
-    test('游戏在库里就不是孤儿', () => {
+  // Orphans are the **only** remaining reason the full listing on the setup page has to exist:
+  // the game was deleted, there is no row for it on the Dashboard, and the ⋯ menu can never
+  // reach these
+  describe('orphaned archives', () => {
+    test('a game in the library is not an orphan', () => {
       const { db, config } = freshEnv({
         archives: { '.backups': { '1-20260820-100000.md': GUIDE } },
       });
       assert.equal(listArchives(db, config)[0].orphan, false);
     });
 
-    test('游戏不在库里就是孤儿', () => {
+    test('a game not in the library is an orphan', () => {
       const { db, config } = freshEnv({
         archives: { '.backups': { '777-20260820-100000.md': GUIDE } },
       });
       const [e] = listArchives(db, config);
       assert.equal(e.orphan, true);
-      assert.equal(e.game, 'AppID 777', '查不到名字就报 appid,不要留空');
+      assert.equal(e.game, 'AppID 777', 'with no name to look up, report the appid rather than leaving it blank');
     });
 
-    test('连 appid 行都没有的文件也算孤儿 —— 它答不出属于哪个游戏', () => {
+    test('a file without even an appid line is an orphan too — it cannot say which game it belongs to', () => {
       const { db, config } = freshEnv({
         archives: { '.drafts': { 'headless.md': '# 没头的\n\n- [ ] 一条\n' } },
       });
@@ -340,33 +352,33 @@ describe('列出存档', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 预览
+// Preview
 // ---------------------------------------------------------------------------
 
-describe('看一份存档', () => {
-  test('本地存档给的是原文', () => {
+describe('viewing one archive', () => {
+  test('a local archive gives back the original text', () => {
     const { config } = freshEnv({ archives: { '.migrated': { 'g.md': GUIDE } } });
     const r = readArchive(config, '.migrated/g.md');
-    assert.equal(r.text, GUIDE, '一个字都不能改 —— 恢复写回去的就是这份');
+    assert.equal(r.text, GUIDE, 'not one character may change — this is what a restore writes back');
   });
 
-  test('Notion 存档渲染成纯文本,并报块数和条目数', () => {
+  test('a Notion archive renders to plain text and reports block and entry counts', () => {
     const { config } = freshEnv({ archives: { '.backups': { '1-20260820-100000.json': backupJson() } } });
     const r = readArchive(config, '.backups/1-20260820-100000.json');
     assert.equal(r.kind, 'notion');
-    assert.equal(r.blocks, 3, '顶层三块');
-    assert.equal(r.todos, 3, '两个成就 + 一个子步骤');
+    assert.equal(r.blocks, 3, 'three top-level blocks');
+    assert.equal(r.todos, 3, 'two achievements plus one sub-step');
     assert.match(r.text, /第一步/);
-    assert.match(r.text, /子步骤甲/, '嵌套的子块也要抠出来');
+    assert.match(r.text, /子步骤甲/, 'nested child blocks have to be pulled out too');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 恢复:本地
+// Restore: local
 // ---------------------------------------------------------------------------
 
-describe('恢复本地存档', () => {
-  test('.migrated 的文件按原文件名放回 guides/,并登记成 local', async () => {
+describe('restoring a local archive', () => {
+  test('a .migrated file goes back into guides/ under its original name and is registered as local', async () => {
     const { db, config, dir } = freshEnv({
       kind: 'notion',
       url: 'https://notion.so/abc',
@@ -378,31 +390,31 @@ describe('恢复本地存档', () => {
     assert.equal(readFileSync(join(dir, 'old_guide.md'), 'utf8'), GUIDE);
     assert.equal(getGuide(db, '1').kind, 'local');
     assert.equal(getGuide(db, '1').url, 'old_guide.md');
-    assert.equal(r.unregisteredNotion, 'https://notion.so/abc', 'Notion 那一页被顶下去了,必须说出来');
+    assert.equal(r.unregisteredNotion, 'https://notion.so/abc', 'the Notion page was displaced, which has to be said');
   });
 
-  test('恢复不消耗存档 —— 那一份还在原地', async () => {
+  test('a restore does not consume the archive — that copy is still where it was', async () => {
     const { db, config, dir } = freshEnv({
       archives: { '.migrated': { 'old_guide.md': GUIDE } },
       url: null,
     });
     await restoreArchive(db, { config, id: '.migrated/old_guide.md' });
-    assert.ok(existsSync(join(dir, '.migrated', 'old_guide.md')), '恢复是拷回去,不是搬回去');
+    assert.ok(existsSync(join(dir, '.migrated', 'old_guide.md')), 'a restore copies back, it does not move back');
   });
 
-  test('覆盖已有攻略之前先备份,备份进 .backups/', async () => {
+  test('back up before overwriting an existing guide, into .backups/', async () => {
     const { db, config, dir } = freshEnv({
       guides: { 'test_guide.md': '# 现在这份\nappid: 1\n\n- [ ] 手写的东西\n' },
       archives: { '.backups': { '1-20260820-100000.md': GUIDE } },
     });
     const r = await restoreArchive(db, { config, id: '.backups/1-20260820-100000.md' });
 
-    assert.ok(r.backedUpTo, '没有备份的覆盖就是不可逆的删除');
-    assert.match(readFileSync(r.backedUpTo, 'utf8'), /手写的东西/, '备份里必须是被顶掉的那一份');
+    assert.ok(r.backedUpTo, 'an overwrite with no backup is an irreversible delete');
+    assert.match(readFileSync(r.backedUpTo, 'utf8'), /手写的东西/, 'the backup has to hold the copy that was displaced');
     assert.equal(readFileSync(join(dir, 'test_guide.md'), 'utf8'), GUIDE);
   });
 
-  test('目标文件不存在就没有备份可做,也不该报错', async () => {
+  test('no target file means there is nothing to back up, and that must not be an error', async () => {
     const { db, config } = freshEnv({
       archives: { '.migrated': { 'brand_new.md': GUIDE } },
       url: null,
@@ -412,18 +424,18 @@ describe('恢复本地存档', () => {
     assert.equal(r.ok, true);
   });
 
-  test('.backups 的文件回到这个游戏现在登记的那个文件名', async () => {
+  test('a .backups file goes back to the filename this game is currently registered under', async () => {
     const { db, config, dir } = freshEnv({
       url: 'my_own_name.md',
       guides: { 'my_own_name.md': '# 旧的\nappid: 1\n' },
       archives: { '.backups': { '1-20260820-100000.md': GUIDE } },
     });
     const r = await restoreArchive(db, { config, id: '.backups/1-20260820-100000.md' });
-    assert.equal(r.file, 'my_own_name.md', '文件名是 `<appid>-<时间>.md`,那不是攻略名');
+    assert.equal(r.file, 'my_own_name.md', 'the filename is `<appid>-<time>.md`, which is not a guide name');
     assert.ok(existsSync(join(dir, 'my_own_name.md')));
   });
 
-  test('这个游戏还没有本地攻略时,现起一个文件名', async () => {
+  test('when this game has no local guide yet, a filename is made up on the spot', async () => {
     const { db, config } = freshEnv({
       kind: 'notion',
       url: 'https://notion.so/abc',
@@ -431,10 +443,10 @@ describe('恢复本地存档', () => {
     });
     const r = await restoreArchive(db, { config, id: '.backups/1-20260820-100000.md' });
     assert.match(r.file, /_achievements\.md$/);
-    assert.ok(!r.file.startsWith('1-'), '不能拿备份的文件名当攻略名');
+    assert.ok(!r.file.startsWith('1-'), 'the backup filename must not be used as the guide name');
   });
 
-  test('没有 appid 行的存档拒绝恢复,并说清楚为什么', async () => {
+  test('an archive with no appid line is refused, with the reason stated plainly', async () => {
     const { db, config } = freshEnv({
       archives: { '.drafts': { 'headless.md': '# 没头的\n\n- [ ] 一条\n' } },
       url: null,
@@ -442,11 +454,11 @@ describe('恢复本地存档', () => {
     await assert.rejects(
       () => restoreArchive(db, { config, id: '.drafts/headless.md' }),
       /appid/,
-      '恢复过去也不会被登记,等于放了个看不见的文件'
+      'restoring it would not register it either, which amounts to dropping an invisible file'
     );
   });
 
-  test('存档不在了要明说,不是静悄悄成功', async () => {
+  test('a missing archive has to be said out loud, not succeed quietly', async () => {
     const { db, config } = freshEnv();
     mkdirSync(join(config.guidesDir, '.backups'), { recursive: true });
     await assert.rejects(
@@ -457,10 +469,10 @@ describe('恢复本地存档', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 恢复:Notion
+// Restore: Notion
 // ---------------------------------------------------------------------------
 
-describe('恢复 Notion 存档', () => {
+describe('restoring a Notion archive', () => {
   const id = '.backups/1-20260820-100000.json';
   const env = () =>
     freshEnv({
@@ -469,53 +481,53 @@ describe('恢复 Notion 存档', () => {
       archives: { '.backups': { '1-20260820-100000.json': backupJson() } },
     });
 
-  test('先备份现在那一页,再删,再写', async () => {
+  test('back up the current page first, then delete, then write', async () => {
     const { db, config } = env();
     const notion = fakeNotion();
     const r = await restoreArchive(db, { config, notion, id });
 
-    assert.ok(r.backedUpTo, '恢复也是覆盖');
+    assert.ok(r.backedUpTo, 'a restore is an overwrite too');
     assert.ok(existsSync(r.backedUpTo));
     assert.deepEqual(
       notion.deleted,
       NOTION_BLOCKS.map((b) => b.id),
-      '删的必须正好是刚备份下来的那一批'
+      'what is deleted has to be exactly the batch that was just backed up'
     );
     assert.equal(notion.appended.length, 3);
   });
 
-  test('删掉的那批和备份下来的那批是同一次读回来的', async () => {
+  test('the batch deleted and the batch backed up come from the same read', async () => {
     const { db, config } = env();
     const notion = fakeNotion();
     await restoreArchive(db, { config, notion, id });
-    assert.equal(notion.fetched, 1, '读两次页面 = 给"备份的和删掉的不是同一批"留了条缝');
+    assert.equal(notion.fetched, 1, 'reading the page twice leaves a gap where the backed-up batch is not the deleted batch');
   });
 
-  test('子块写回去时嵌进 [type].children,不是拍平一层', async () => {
+  test('child blocks are nested into [type].children on write-back rather than flattened up a level', async () => {
     const { db, config } = env();
     const notion = fakeNotion();
     await restoreArchive(db, { config, notion, id });
 
     const second = notion.appended.find((b) => b.to_do?.rich_text?.[0]?.plain_text === '第二步');
-    assert.equal(second.to_do.children.length, 1, '拍平的话子步骤会全部升级成成就');
-    assert.equal(second.children, undefined, '顶层 children 是读回来的形状,写回去不认');
+    assert.equal(second.to_do.children.length, 1, 'flattened, every sub-step is promoted to an achievement');
+    assert.equal(second.children, undefined, 'top-level children is the read-back shape and is not accepted on write');
   });
 
-  test('只读字段不能跟着写回去', async () => {
+  test('read-only fields must not be written back', async () => {
     const { db, config } = env();
     const notion = fakeNotion();
     await restoreArchive(db, { config, notion, id });
     for (const b of notion.appended) {
       for (const f of ['id', 'created_time', 'last_edited_time', 'has_children', 'parent', 'archived']) {
-        assert.equal(b[f], undefined, `${f} 带过去就是一个 400`);
+        assert.equal(b[f], undefined, `carrying ${f} across is a 400`);
       }
     }
   });
 
-  test('回读对不上就抛,并且说出备份在哪', async () => {
+  test('a read-back that does not match throws, and says where the backup is', async () => {
     const { db, config } = env();
     const notion = fakeNotion();
-    // 写进去了,但少了一条 —— 页面看着满满当当,只是短了一截
+    // It was written, but one entry short — the page looks full, it is merely cut off
     notion.appendBlocks = async function (_id, blocks) {
       this.appended.push(...blocks.slice(0, 1));
       return 1;
@@ -526,7 +538,7 @@ describe('恢复 Notion 存档', () => {
     );
   });
 
-  test('没配 Notion 时拒绝动手,而且是在删任何东西之前', async () => {
+  test('with Notion unconfigured it refuses to act, and does so before anything is deleted', async () => {
     const { db, config } = env();
     const notion = fakeNotion();
     notion.configured = false;
@@ -535,7 +547,7 @@ describe('恢复 Notion 存档', () => {
     assert.equal(notion.fetched, 0);
   });
 
-  test('备份里没记页面地址就不猜', async () => {
+  test('a backup with no page address recorded is not guessed at', async () => {
     const { db, config } = freshEnv({
       archives: { '.backups': { '1-20260820-100000.json': backupJson(NOTION_BLOCKS, { url: '' }) } },
     });
@@ -544,7 +556,7 @@ describe('恢复 Notion 存档', () => {
     assert.deepEqual(notion.deleted, []);
   });
 
-  test('一个能写回去的块都没有时,那一页不动', async () => {
+  test('with not one writable block, the page is left alone', async () => {
     const { db, config } = freshEnv({
       archives: {
         '.backups': {
@@ -556,39 +568,39 @@ describe('恢复 Notion 存档', () => {
     });
     const notion = fakeNotion();
     await assert.rejects(() => restoreArchive(db, { config, notion, id }), /写回去的块/);
-    assert.deepEqual(notion.deleted, [], '删了就再也回不来了');
+    assert.deepEqual(notion.deleted, [], 'once deleted it never comes back');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 块形状转换
+// Block shape conversion
 // ---------------------------------------------------------------------------
 
 describe('blocksForAppend', () => {
-  test('只留 type 和它的载荷,其余一概不带', () => {
+  test('only the type and its payload survive, nothing else is carried', () => {
     const { blocks } = blocksForAppend([raw('paragraph', '一段')]);
     assert.deepEqual(Object.keys(blocks[0]).sort(), ['object', 'paragraph', 'type']);
   });
 
-  test('建不出来的块丢掉并记一笔,不是整篇失败', () => {
+  test('a block that cannot be created is dropped and recorded, rather than failing the whole page', () => {
     const { blocks, dropped } = blocksForAppend([
       raw('paragraph', '留着'),
       { object: 'block', id: 'a', type: 'child_database', child_database: {} },
       { object: 'block', id: 'b', type: 'unsupported', unsupported: {} },
       { object: 'block', id: 'c', type: 'child_database', child_database: {} },
     ]);
-    assert.equal(blocks.length, 1, '一个 child_database 不该让整篇攻略写不回去');
+    assert.equal(blocks.length, 1, 'one child_database should not make a whole guide unwritable');
     assert.deepEqual(dropped, { child_database: 2, unsupported: 1 });
   });
 
-  test('子块一层层往下转', () => {
+  test('child blocks are converted level by level', () => {
     const { blocks } = blocksForAppend([
       raw('to_do', '一', { checked: false }, [raw('to_do', '二', { checked: false }, [raw('to_do', '三', { checked: false })])]),
     ]);
     assert.equal(blocks[0].to_do.children[0].to_do.children[0].to_do.rich_text[0].plain_text, '三');
   });
 
-  test('表格的 table_width 这类建表必需的字段要留住', () => {
+  test('fields a table needs to be created, such as table_width, are kept', () => {
     const { blocks } = blocksForAppend([
       {
         object: 'block', id: 't', type: 'table', has_children: true,
@@ -602,25 +614,25 @@ describe('blocksForAppend', () => {
 });
 
 describe('todosFromBlocks', () => {
-  test('深度优先,顺序和 fetchAllToDoBlocks 一致', () => {
+  test('depth first, in the same order as fetchAllToDoBlocks', () => {
     assert.deepEqual(
       todosFromBlocks(NOTION_BLOCKS).map((t) => t.text),
       ['第一步', '第二步', '子步骤甲'],
-      '顺序错了,回读比对就全是噪音'
+      'in the wrong order the read-back comparison is all noise'
     );
   });
 
-  test('勾选状态跟着走', () => {
+  test('the checked state travels with it', () => {
     assert.deepEqual(todosFromBlocks(NOTION_BLOCKS).map((t) => t.checked), [true, false, false]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 删除
+// Deleting
 // ---------------------------------------------------------------------------
 
-describe('删存档', () => {
-  test('删掉,并报删了多大', () => {
+describe('deleting an archive', () => {
+  test('it is deleted, and the size deleted is reported', () => {
     const { db, config, dir } = freshEnv({ archives: { '.drafts': { 'g.md': GUIDE } } });
     const r = deleteArchive(config, '.drafts/g.md');
     assert.equal(r.ok, true);
@@ -629,20 +641,20 @@ describe('删存档', () => {
     assert.deepEqual(listArchives(db, config), []);
   });
 
-  test('已经不在了不算失败', () => {
+  test('already gone does not count as a failure', () => {
     const { config } = freshEnv({ archives: { '.drafts': {} } });
     const r = deleteArchive(config, '.drafts/gone.md');
     assert.equal(r.ok, true);
     assert.equal(r.alreadyGone, true);
   });
 
-  test('只删得到那三个目录里的东西', () => {
+  test('only things inside those three directories can be deleted', () => {
     const { config, dir } = freshEnv({ guides: { 'live_guide.md': GUIDE } });
     assert.throws(() => deleteArchive(config, '.backups/../live_guide.md'), /存档编号/);
-    assert.ok(existsSync(join(dir, 'live_guide.md')), '这是用户现在正用着的攻略');
+    assert.ok(existsSync(join(dir, 'live_guide.md')), 'this is the guide the user is using right now');
   });
 
-  test('删一份不动别的', () => {
+  test('deleting one leaves the others alone', () => {
     const { db, config } = freshEnv({
       archives: { '.drafts': { 'a.md': GUIDE, 'b.md': GUIDE } },
     });
@@ -652,11 +664,11 @@ describe('删存档', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 一键删 —— 设置页列表尾巴那个「全部删除」
+// Bulk delete — the 「全部删除」 at the end of the setup page listing
 // ---------------------------------------------------------------------------
 
-describe('批量删存档', () => {
-  test('一次删掉一批,份数和体积都报出来', () => {
+describe('deleting archives in bulk', () => {
+  test('a batch is deleted at once, with both the count and the size reported', () => {
     const { db, config } = freshEnv({
       archives: { '.drafts': { 'a.md': GUIDE, 'b.md': GUIDE }, '.backups': { 'c.md': GUIDE } },
     });
@@ -669,30 +681,32 @@ describe('批量删存档', () => {
   });
 
   /**
-   * 这条盯的是 **try 写在循环里面还是外面**。写外面的话,一个野编号
-   * 会把它后面没轮到的全部顶掉 —— 而屏幕上只会看到一句报错,剩下的文件
-   * 看起来就像"没选中",下一下还会再撞一次同一个坏编号。
+   * This one watches **whether the try is inside the loop or outside it**. Outside, one hostile
+   * id shields every id after it that had not been reached yet — while the screen shows one
+   * error and the remaining files simply look "not selected", so the next click hits the same
+   * bad id all over again.
    */
-  test('一个坏编号不拖累后面的', () => {
+  test('one bad id does not drag down the ones after it', () => {
     const { db, config, dir } = freshEnv({
       guides: { 'live_guide.md': GUIDE },
       archives: { '.drafts': { 'a.md': GUIDE, 'b.md': GUIDE } },
     });
     const r = deleteArchives(config, ['.backups/../live_guide.md', '.drafts/a.md', '.drafts/b.md']);
-    assert.equal(r.deleted, 2, '坏编号后面的两份要真删掉');
+    assert.equal(r.deleted, 2, 'the two after the bad id really have to be deleted');
     assert.equal(r.failed.length, 1);
     assert.match(r.failed[0].error, /存档编号/);
     assert.equal(r.failed[0].id, '.backups/../live_guide.md');
-    assert.ok(existsSync(join(dir, 'live_guide.md')), '越界那一条仍然得拦住');
+    assert.ok(existsSync(join(dir, 'live_guide.md')), 'the out-of-bounds one still has to be stopped');
     assert.deepEqual(listArchives(db, config), []);
   });
 
   /**
-   * **它删的是点名的那几份,不是"把目录清了"。** 区别在页面画完之后、
-   * 按钮点下去之前——后台刚跑完一次重写,`.backups/` 里就多一份没上过屏的。
-   * 清目录会把那份也吃掉
+   * **It deletes the copies named, not "clear the directories".** The difference lands between
+   * the page painting and the button being clicked — a rewrite just finished in the background
+   * and `.backups/` holds one more file that was never on screen. Clearing the directory eats
+   * that one too
    */
-  test('只删点名的,没点到的还在', () => {
+  test('only the named ones are deleted, the unnamed ones remain', () => {
     const { db, config } = freshEnv({
       archives: { '.drafts': { 'a.md': GUIDE, 'b.md': GUIDE } },
     });
@@ -701,7 +715,7 @@ describe('批量删存档', () => {
     assert.deepEqual(listArchives(db, config).map((e) => e.file), ['b.md']);
   });
 
-  test('没给编号就什么都不删', () => {
+  test('with no ids given, nothing is deleted', () => {
     const { db, config } = freshEnv({ archives: { '.drafts': { 'a.md': GUIDE } } });
     for (const ids of [[], null, undefined]) {
       const r = deleteArchives(config, ids);
@@ -713,40 +727,41 @@ describe('批量删存档', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 绝对路径 → 存档编号
+// Absolute path → archive id
 // ---------------------------------------------------------------------------
 
 describe('archiveIdOf', () => {
-  // 「生成成功」那一屏上的「删除备份」要拿这个编号去调 deleteGuideArchive。
-  // 存在的理由是**别在 server.js 里用字符串拼编号** —— 格式由 parseArchiveId
-  // 定义,两处各写一份的话,对不上的症状是按钮点了没反应,而不是一条报错
-  test('三个目录里的直接子文件都认得,而且能和解析器对上', () => {
+  // The 「删除备份」 on the "generation succeeded" screen takes this id to call
+  // deleteGuideArchive. It exists so that **server.js does not assemble an id by string
+  // concatenation** — the format is defined by parseArchiveId, and with a second copy written
+  // elsewhere the symptom of a mismatch is a button that does nothing, not an error
+  test('a direct child file in each of the three directories is recognised, and round-trips through the parser', () => {
     const { config } = freshEnv();
     for (const dir of ARCHIVE_DIRS) {
       const id = `${dir}/1-20260820-100000.md`;
       const { path } = parseArchiveId(config, id);
-      assert.equal(archiveIdOf(config, path), id, '往返必须闭环');
+      assert.equal(archiveIdOf(config, path), id, 'the round trip has to close');
     }
   });
 
-  test('归档目录之外的一律 null', () => {
+  test('anything outside the archive directories is null', () => {
     const { config, dir } = freshEnv();
-    assert.equal(archiveIdOf(config, join(dir, 'live_guide.md')), null, '正在用的攻略不是存档');
+    assert.equal(archiveIdOf(config, join(dir, 'live_guide.md')), null, 'a guide in use is not an archive');
     assert.equal(archiveIdOf(config, join(dir, '..', 'somewhere.md')), null);
     assert.equal(archiveIdOf(config, 'C:/Windows/win.ini'), null);
   });
 
-  test('再深一层的不认 —— 列表也只列直接子文件', () => {
+  test('one level deeper is not recognised — the listing only lists direct children too', () => {
     const { config, dir } = freshEnv();
     assert.equal(archiveIdOf(config, join(dir, '.backups', 'nested', 'x.md')), null);
   });
 
-  test('后缀不对的不认 —— 和列表的过滤条件是同一条', () => {
+  test('the wrong extension is not recognised — the same filter the listing uses', () => {
     const { config, dir } = freshEnv();
     assert.equal(archiveIdOf(config, join(dir, '.backups', 'notes.txt')), null);
   });
 
-  test('空值不炸', () => {
+  test('empty values do not blow up', () => {
     const { config } = freshEnv();
     assert.equal(archiveIdOf(config, null), null);
     assert.equal(archiveIdOf(config, ''), null);
