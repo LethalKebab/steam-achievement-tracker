@@ -1,32 +1,38 @@
 /**
- * 生成 icon.ico(托盘 + 应用图标)。
+ * Generates icon.ico (the tray and application icon).
  *
  *   node launcher/make-icon.mjs
  *
- * ## 它现在做什么
+ * ## What it does now
  *
- * 读 `icon-source.png`(552×552 RGBA,已裁好、四角已切成透明),等比缩到
- * 16/24/32/48/64/128/256 七档,打成一个 .ico。**只用 node:zlib**,和项目其余部分
- * 一样不引依赖。
+ * Reads `icon-source.png` (552×552 RGBA, already cropped, with the corners already cut to
+ * transparent), scales it proportionally to the seven sizes 16/24/32/48/64/128/256, and packs them
+ * into one .ico. **node:zlib only**, dependency-free like the rest of the project.
  *
- * ## 为什么从"纯代码画"改成"从一张图缩"
+ * ## Why it changed from "drawn purely in code" to "scaled from an image"
  *
- * 原来这里是用距离场直接画一个蓝底白勾 —— 好处是没有二进制资产,坏处是能画出来的
- * 东西极其有限。现在的图标(奖杯 + 光环 + 星)是设计出来的,不是几行 SDF 能表达的。
+ * This used to draw a blue background with a white tick directly from a distance field — the
+ * advantage being no binary asset, the disadvantage being that what can be drawn that way is
+ * extremely limited. The current icon (a trophy plus a halo and a star) was designed, and is not
+ * something a few lines of SDF can express.
  *
- * **但"可重新生成"这条原则保住了**,这是当初写这个脚本的全部理由:仓库里存的是
- * `icon-source.png` 这一个可读的源文件,`.ico` 由它派生。换图标 = 换那张 PNG 再跑一遍,
- * 不需要任何外部工具,也不会出现"一个没人能重做的 .ico"。
+ * **But "regenerable" is preserved**, which was the whole reason for writing this script: what the
+ * repository stores is one readable source file, `icon-source.png`, and the `.ico` is derived from
+ * it. Changing the icon = change that PNG and run this again, with no external tool required and no
+ * chance of ending up with a `.ico` nobody can reproduce.
  *
- * 源图必须是:**8 位、颜色类型 6(RGBA)、非隔行**。别的格式这里的解码器不认,
- * 而且会当场报错而不是默默画错 —— 见 decodePng 里的断言。
+ * The source image has to be **8-bit, colour type 6 (RGBA), non-interlaced**. The decoder here does
+ * not accept any other format, and it raises an error on the spot rather than quietly drawing the
+ * wrong thing — see the assertions in decodePng.
  *
- * ## 缩放为什么是面积平均而不是双线性
+ * ## Why the scaling is an area average rather than bilinear
  *
- * 从 552 缩到 16 是 34 倍下采样。双线性只看邻近 2×2,会漏掉绝大多数源像素,细节
- * 直接丢成噪点;面积平均(box)把目标像素覆盖到的所有源像素都算进去,这才是大比例
- * 缩小的正确做法。**而且必须在预乘 alpha 下平均** —— 不预乘的话,四角透明区域里
- * 那些 RGB 值(GDI+ 留下的黑)会被平均进边缘,圆角上会出现一圈脏边。
+ * Going from 552 to 16 is a 34× downsample. Bilinear looks only at the neighbouring 2×2 and misses
+ * the vast majority of source pixels, turning detail straight into noise; an area (box) average
+ * counts every source pixel the destination pixel covers, which is the correct approach for a large
+ * reduction. **And it has to average over premultiplied alpha** — without premultiplying, the RGB
+ * values in the transparent corners (the black GDI+ left behind) get averaged into the edge and
+ * produce a dirty fringe around the rounded corners.
  */
 import { deflateSync, inflateSync } from 'node:zlib';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -37,7 +43,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const SRC = join(HERE, 'icon-source.png');
 const OUT = join(HERE, 'icon.ico');
 
-// ---------- PNG 编码 ----------
+// ---------- PNG encoding ----------
 
 const CRC_TABLE = (() => {
   const t = new Int32Array(256);
@@ -64,16 +70,16 @@ function chunk(type, data) {
   return Buffer.concat([len, body, crc]);
 }
 
-/** rgba: Uint8Array,长度 = w*h*4 */
+/** rgba: a Uint8Array of length w*h*4 */
 function encodePng(w, h, rgba) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0);
   ihdr.writeUInt32BE(h, 4);
   ihdr[8] = 8; // bit depth
   ihdr[9] = 6; // color type: RGBA
-  // 10/11/12 = compression/filter/interlace,全 0
+  // 10/11/12 = compression/filter/interlace, all 0
 
-  // 每行前面加一个 filter 字节(0 = None)
+  // Each row is preceded by one filter byte (0 = None)
   const raw = Buffer.alloc(h * (w * 4 + 1));
   for (let y = 0; y < h; y++) {
     raw[y * (w * 4 + 1)] = 0;
@@ -88,11 +94,12 @@ function encodePng(w, h, rgba) {
   ]);
 }
 
-// ---------- PNG 解码 ----------
+// ---------- PNG decoding ----------
 
 /**
- * 只支持源图那一种格式,别的**当场抛错**。
- * 静默走一条错误的解码路径会得到一张看着像坏掉的图标,而不是一个能查的报错。
+ * Supports only the source image's format and **throws on the spot** for anything else.
+ * Quietly taking a wrong decoding path produces an icon that merely looks broken, rather than an
+ * error somebody can investigate.
  */
 function decodePng(buf) {
   const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -105,7 +112,7 @@ function decodePng(buf) {
   if (color !== 6) throw new Error(`只支持颜色类型 6(RGBA),源图是 ${color}`);
   if (interlace !== 0) throw new Error('不支持隔行 PNG');
 
-  // IDAT 可能被切成多块,要按顺序拼起来再解压
+  // IDAT may be split across several chunks, which have to be joined in order before inflating
   const parts = [];
   let off = 8;
   while (off < buf.length) {
@@ -117,7 +124,8 @@ function decodePng(buf) {
   }
   const raw = inflateSync(Buffer.concat(parts));
 
-  // 反滤波。每行开头一个 filter 字节,五种滤波器都要实现 —— 编码器爱用哪种用哪种
+  // Unfiltering. Each row starts with one filter byte, and all five filters have to be implemented —
+  // an encoder uses whichever it likes
   const stride = w * 4;
   const out = new Uint8Array(w * h * 4);
   let pos = 0;
@@ -146,9 +154,9 @@ function decodePng(buf) {
   return { w, h, rgba: out };
 }
 
-// ---------- 缩放 ----------
+// ---------- Scaling ----------
 
-/** 面积平均下采样,在预乘 alpha 下做 —— 理由见文件头 */
+/** Area-average downsampling, done over premultiplied alpha — the reasoning is in the file header */
 function resize(src, sw, sh, size) {
   const dst = new Uint8Array(size * size * 4);
   const sx = sw / size, sy = sh / size;
@@ -167,8 +175,8 @@ function resize(src, sw, sh, size) {
         }
       }
       const o = (y * size + x) * 4;
-      const am = a / n;                       // 平均后的 alpha
-      const un = am > 0 ? 255 / am : 0;       // 反预乘
+      const am = a / n;                       // the averaged alpha
+      const un = am > 0 ? 255 / am : 0;       // un-premultiply
       dst[o] = Math.round(Math.min(255, (r / n) * un));
       dst[o + 1] = Math.round(Math.min(255, (g / n) * un));
       dst[o + 2] = Math.round(Math.min(255, (b / n) * un));
@@ -178,10 +186,11 @@ function resize(src, sw, sh, size) {
   return dst;
 }
 
-// ---------- ICO 封装 ----------
+// ---------- ICO packing ----------
 
-// 16/32 是托盘实际用的;256 是 electron-builder 对应用图标的硬性下限。
-// 中间几档留着,免得 Windows 在高 DPI 下自己缩放出糊边。
+// 16/32 are what the tray actually uses; 256 is electron-builder's hard minimum for an application
+// icon.
+// The intermediate sizes stay so Windows does not produce blurry edges scaling on its own at high DPI.
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
 
 const src = decodePng(readFileSync(SRC));
@@ -197,9 +206,9 @@ header.writeUInt16LE(SIZES.length, 4);
 let offset = 6 + SIZES.length * 16;
 const entries = SIZES.map((s, i) => {
   const e = Buffer.alloc(16);
-  e[0] = s >= 256 ? 0 : s; // 0 表示 256
+  e[0] = s >= 256 ? 0 : s; // 0 means 256
   e[1] = s >= 256 ? 0 : s;
-  e[2] = 0; // 调色板色数
+  e[2] = 0; // number of palette colours
   e[3] = 0; // reserved
   e.writeUInt16LE(1, 4); // color planes
   e.writeUInt16LE(32, 6); // bits per pixel
