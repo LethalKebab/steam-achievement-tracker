@@ -1,15 +1,19 @@
 /**
- * 攻略页状态收敛(打满 → Done)的规则
+ * The guide page status convergence rules (complete → Done)
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这一层的设计要点是**按当前状态判断,不按"这一轮刚好打满"**。
- * 100% 那个瞬间只在 updateGameStats 写的那一下存在,任何一次没写成
- * (跑同步的机器没配 Notion、进程中断、token 过期)这条变化就永远补不回来了:
- * 下次再看,旧值和新值都是 100%,推不出任何东西。
+ * This layer's design point is that it **judges from the current state, never from "it just
+ * hit 100% this round"**.
+ * The instant of 100% exists only for as long as updateGameStats writes it, and any run
+ * that fails to write it (the machine running the sync has no Notion configured, the
+ * process is interrupted, the token expires) loses that change forever: next time round,
+ * both the old and the new value read 100% and nothing can be inferred.
  *
- * 所以下面每条用例都只喂"当前状态",不喂任何变化历史 —— 这本身就是在钉住那个设计。
- * 跑两次结果必须一样(幂等),否则重复打开 Dashboard 就会重复写 Notion。
+ * So every case below feeds only "the current state" and no change history at all — which
+ * is itself pinning that design.
+ * Running it twice has to give the same result (idempotence), or repeatedly opening the
+ * Dashboard would repeatedly write to Notion.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,7 +28,7 @@ import {
 const freshDb = () => openDb(':memory:');
 const PAGE = (n) => `3af1fee6252b8073883ecea59b4d83${String(n).padStart(2, '0')}`;
 
-/** 一行游戏 + 它的 Notion 攻略页 */
+/** One game row plus its Notion guide page */
 function seed(db, { appid, achieved, total, kind = 'notion', page = null }) {
   insertGame(db, { appid, name: 'G' + appid });
   if (total !== null) updateGameStats(db, appid, { achieved, total });
@@ -39,8 +43,8 @@ function seed(db, { appid, achieved, total, kind = 'notion', page = null }) {
 const pageRow = (n, status) => ({ id: PAGE(n), title: 'G' + n, url: 'https://app.notion.com/' + PAGE(n), status });
 const targets = (db, pages) => selectGuideStatusUpdates(db, pages).map((u) => u.appid).sort();
 
-describe('selectGuideStatusUpdates — 基本判据', () => {
-  test('打满了且还不是 Done → 要改', () => {
+describe('selectGuideStatusUpdates — the basic criteria', () => {
+  test('complete and not yet Done → has to change', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
     const r = selectGuideStatusUpdates(db, [pageRow('1', 'Staged')]);
@@ -49,28 +53,29 @@ describe('selectGuideStatusUpdates — 基本判据', () => {
     assert.equal(r[0].to, GUIDE_STATUS_DONE);
   });
 
-  test('还没打满 → 不动,哪怕只差一个成就', () => {
+  test('not yet complete → untouched, even one achievement short', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 9, total: 10 });
     assert.deepEqual(targets(db, [pageRow('1', 'In progress')]), []);
   });
 
-  test('已经是 Done → 不动(幂等:再跑一次不会重复写)', () => {
+  test('already Done → untouched (idempotent: another run does not write again)', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
     assert.deepEqual(targets(db, [pageRow('1', 'Done')]), []);
   });
 
-  test('状态是空的也照改', () => {
+  test('an empty status is changed too', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
     assert.deepEqual(targets(db, [pageRow('1', null)]), ['1']);
   });
 });
 
-describe('selectGuideStatusUpdates — 覆盖哪些状态', () => {
-  // 按用户的选择:除了 Done 本身,其余一律覆盖,包括 Notion 归在"完成"组里的 Differed。
-  // 判据是完成度,不是人工标记的工作流状态。
+describe('selectGuideStatusUpdates — which statuses are overwritten', () => {
+  // Per the user's choice: everything but Done itself is overwritten, including Differed,
+  // which Notion groups under "complete". The criterion is completion, not a hand-set
+  // workflow status.
   for (const from of ['Not started', 'Staged', 'In progress', 'Paused', 'Differed']) {
     test(`${from} → Done`, () => {
       const db = freshDb();
@@ -80,33 +85,33 @@ describe('selectGuideStatusUpdates — 覆盖哪些状态', () => {
   }
 });
 
-describe('selectGuideStatusUpdates — 不该碰的', () => {
-  test('没有成就系统的游戏(total 是 NULL)→ 不动', () => {
+describe('selectGuideStatusUpdates — what must not be touched', () => {
+  test('a game with no achievement system (total is NULL) → untouched', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: null, total: null });
     assert.deepEqual(targets(db, [pageRow('1', 'Paused')]), []);
   });
 
-  test('本地 markdown 攻略 → 不动(没有状态属性这回事)', () => {
+  test('a local markdown guide → untouched (there is no such thing as a status property)', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10, kind: 'local' });
     assert.deepEqual(targets(db, [pageRow('1', 'Paused')]), []);
   });
 
-  test('攻略页还没登记 appid(攻略没写完)→ 不动', () => {
+  test('a guide page with no registered appid yet (the guide is unwritten) → untouched', () => {
     const db = freshDb();
     assert.deepEqual(targets(db, [pageRow('99', 'Not started')]), []);
   });
 
-  test('页面身份按规范化 ID 比,URL 带标题 slug 也认得出', () => {
+  test('page identity is compared by normalised ID, so a URL with a title slug is still recognised', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
-    // Notion 有时会在 URL 里塞标题前缀,同一页两次查询拿到的文本不一样
+    // Notion sometimes prefixes a URL with the title, so the same page's text differs between two queries
     const slugged = { id: PAGE('1'), title: 'G1', url: 'https://app.notion.com/My-Game-' + PAGE('1'), status: 'Paused' };
     assert.deepEqual(targets(db, [slugged]), ['1']);
   });
 
-  test('多个页面时只挑该改的那些', () => {
+  test('with several pages, only the ones that should change are picked', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
     seed(db, { appid: '2', achieved: 5, total: 10 });
@@ -116,10 +121,10 @@ describe('selectGuideStatusUpdates — 不该碰的', () => {
   });
 });
 
-describe('selectGuideStatusUpdates — 掉出 100% 退回 Staged', () => {
-  // 开发者打补丁加新成就,会把满成就的游戏顶下 100%。这是唯一一种"你不玩也会发生"
-  // 的变化,页面停在 Done 就等于把它藏起来了。
-  test('Done 但已经不到 100% → 退回 Staged', () => {
+describe('selectGuideStatusUpdates — dropping below 100% goes back to Staged', () => {
+  // A developer patch adding achievements knocks a completed game below 100%. This is the
+  // one change that "happens without you playing", and a page left at Done hides it.
+  test('Done but no longer at 100% → back to Staged', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 28, total: 51 });
     const r = selectGuideStatusUpdates(db, [pageRow('1', 'Done')]);
@@ -129,32 +134,33 @@ describe('selectGuideStatusUpdates — 掉出 100% 退回 Staged', () => {
     assert.equal(r[0].reason, 'incomplete');
   });
 
-  test('退回之后再跑一次不再动它(幂等,不会和人来回改)', () => {
+  test('once demoted, another run leaves it alone (idempotent, with no tug of war with the user)', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 28, total: 51 });
     assert.deepEqual(targets(db, [pageRow('1', GUIDE_STATUS_STAGED)]), []);
   });
 
-  // 回退方向**只动 Done**。不到 100% 的其它状态都是人自己排的工作流,
-  // 每次打开 Dashboard 都覆盖一遍的话,人跟机器会一直互相改。
+  // The demotion direction **only touches Done**. Every other status below 100% is a
+  // workflow the person arranged themselves, and overwriting it on every Dashboard open
+  // would put them and the machine in a loop.
   for (const from of ['Not started', 'Staged', 'In progress', 'Paused', 'Differed']) {
-    test(`不到 100% 且状态是 ${from} → 不动`, () => {
+    test(`below 100% with status ${from} → untouched`, () => {
       const db = freshDb();
       seed(db, { appid: '1', achieved: 5, total: 10 });
       assert.deepEqual(targets(db, [pageRow('1', from)]), []);
     });
   }
 
-  test('total 被清成 NULL(Steam 说没有成就系统)→ 不动,不算掉出 100%', () => {
+  test('total cleared to NULL (Steam says there is no achievement system) → untouched, and not counted as dropping below 100%', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: null, total: null });
     assert.deepEqual(targets(db, [pageRow('1', 'Done')]), []);
   });
 
-  test('两个方向可以同一轮一起发生,互不干扰', () => {
+  test('both directions can happen in the same round without interfering', () => {
     const db = freshDb();
-    seed(db, { appid: '1', achieved: 10, total: 10 }); // 打满了,还是 Paused
-    seed(db, { appid: '2', achieved: 28, total: 51 }); // 掉出 100%,还挂着 Done
+    seed(db, { appid: '1', achieved: 10, total: 10 }); // complete and still Paused
+    seed(db, { appid: '2', achieved: 28, total: 51 }); // dropped below 100% and still Done
     const r = selectGuideStatusUpdates(db, [pageRow('1', 'Paused'), pageRow('2', 'Done')]);
     assert.deepEqual(
       r.map((u) => `${u.appid}:${u.from}→${u.to}`).sort(),
@@ -162,35 +168,39 @@ describe('selectGuideStatusUpdates — 掉出 100% 退回 Staged', () => {
     );
   });
 
-  test('两条规则互斥,同一页不可能同时命中(不会来回翻)', () => {
+  test('the two rules are mutually exclusive and one page can never hit both (so it cannot oscillate)', () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
-    // 打满 + 已经是 Done → 完全不动
+    // Complete and already Done → entirely untouched
     assert.deepEqual(targets(db, [pageRow('1', GUIDE_STATUS_DONE)]), []);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 网络那一半:数据库缺选项时,必须在写第一笔之前就停
+// The network half: with options missing from the database, it has to stop before the first write
 // ---------------------------------------------------------------------------
 
 /**
- * 上面全是纯函数。这一段守的是 `syncGuideStatuses` 里那道"缺哪个说哪个"的前置检查,
- * 而**它以前一条测试都没有** —— 整段删掉,全量测试依旧全绿(2026-08-14 变异验证抓到的)。
+ * Everything above is a pure function. This section guards the "say which one is missing"
+ * precheck inside `syncGuideStatuses`, and **it previously had not one test** — deleting the
+ * whole block left the full suite green (caught by mutation testing on 2026-08-14).
  *
- * 删掉不会有人报错,只会退化成:逐页去写、逐页拿一个很难读的 Notion 400,
- * 而那个 400 被这条路自己的 `catch` 收进 `sync_log` 就接着跑下一页。偏偏这条路是
- * **自动**的 —— 每次打开 Dashboard、每次点立即同步都跑一遍 —— 所以退化后的形态是
- * 「日志里天天堆一句读不懂的 400,界面上什么都看不出来」。
+ * Deleting it raises no error for anyone; it merely degrades into writing page by page and
+ * getting a barely readable Notion 400 per page, and that 400 is swept into `sync_log` by
+ * this path's own `catch` before carrying on to the next page. And this path happens to be
+ * **automatic** — it runs on every Dashboard open and every 立即同步 click — so the degraded
+ * form is 「日志里天天堆一句读不懂的 400,界面上什么都看不出来」.
  *
- * 这就是 2026-08-14 那份 1.1.2 报告的同一类失败:状态选项对不上,而错误信息不说人话。
- * 建页那条路(`planNotionTarget`)早就钉住了,收敛这条路之前是个缺口。
+ * This is the same failure class as the 1.1.2 report of 2026-08-14: the status options do not
+ * line up and the error message does not speak plainly. The page-creation path
+ * (`planNotionTarget`) has long been pinned; the convergence path was a gap.
  *
- * **正反两面都要钉。** 只钉"缺了要抛"的话,把判断条件写成恒真同样能通过 ——
- * 而恒真意味着配得好好的库也再不能用。
+ * **Both sides have to be pinned.** Pinning only "a missing option throws" would also pass
+ * with the condition written as always-true — and always-true means a properly configured
+ * database can never be used again.
  */
-describe('syncGuideStatuses — 缺选项要拦在写之前', () => {
-  /** 只实现这条路真正会调的三个方法;`writes` 收下每一次真写 */
+describe('syncGuideStatuses — a missing option has to be blocked before writing', () => {
+  /** Implements only the three methods this path actually calls; `writes` collects each real write */
   const stubNotion = (options) => {
     const writes = [];
     return {
@@ -201,7 +211,7 @@ describe('syncGuideStatuses — 缺选项要拦在写之前', () => {
     };
   };
 
-  /** 打满了、页面还挂着 Not started —— 也就是"确实有一笔要写" */
+  /** Complete while the page still reads Not started — that is, "there really is a write pending" */
   const dbWithPendingWrite = () => {
     const db = freshDb();
     seed(db, { appid: '1', achieved: 10, total: 10 });
@@ -209,34 +219,36 @@ describe('syncGuideStatuses — 缺选项要拦在写之前', () => {
   };
 
   for (const missing of [GUIDE_STATUS_DONE, GUIDE_STATUS_STAGED]) {
-    test(`选项里缺 ${missing} → 抛错点名它,而且一笔都没写`, async () => {
+    test(`${missing} missing from the options → throws naming it, and not one write happens`, async () => {
       const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done'].filter((o) => o !== missing));
       await assert.rejects(
         syncGuideStatuses(dbWithPendingWrite(), { notion }),
         (err) => err.message.includes(missing) && err.message.includes('缺少'),
-        `报错必须点名缺的是「${missing}」,不能只说"有问题"`
+        `the error has to name 「${missing}」 as the missing one rather than only saying "something is wrong"`
       );
-      // 检查得在**发请求之前**跑完。跑在后面的话,前几页已经写出去了,
-      // 而这条路正是自动跑的那条,用户不会看着它
-      assert.deepEqual(notion.writes, [], `缺 ${missing} 时不该写出任何一笔`);
+      // The check has to finish **before any request goes out**. Later, and the first few pages
+      // are already written — and this is the path that runs automatically, with nobody watching
+      assert.deepEqual(notion.writes, [], `nothing should be written when ${missing} is missing`);
     });
   }
 
-  test('缺 Staged 也拦 —— 哪怕这一轮要写的是 Done', async () => {
-    // 两个方向的选项都要提前查:只查"这次要写的那个",缺 Staged 的库会一路正常,
-    // 直到某天某个游戏掉出 100% 才第一次炸,而那时早就没人记得是设置没配好
+  test('a missing Staged blocks too — even when this round is writing Done', async () => {
+    // Both directions' options have to be checked up front: checking only "the one being written
+    // this time" leaves a database missing Staged working perfectly until the day some game
+    // drops below 100% and it blows up for the first time — by which point nobody remembers the
+    // setup was incomplete
     const notion = stubNotion(['Not started', 'In progress', 'Done']);
     await assert.rejects(syncGuideStatuses(dbWithPendingWrite(), { notion }), /Staged/);
     assert.deepEqual(notion.writes, []);
   });
 
-  test('选项齐全 → 正常写出去(反面:检查不能变成恒真)', async () => {
+  test('with every option present → it writes normally (the other side: the check must not become always-true)', async () => {
     const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done']);
     await syncGuideStatuses(dbWithPendingWrite(), { notion });
     assert.deepEqual(notion.writes, [GUIDE_STATUS_DONE]);
   });
 
-  test('dry-run 也不写', async () => {
+  test('a dry run writes nothing either', async () => {
     const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done']);
     await syncGuideStatuses(dbWithPendingWrite(), { notion, dryRun: true });
     assert.deepEqual(notion.writes, []);
