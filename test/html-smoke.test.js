@@ -1248,16 +1248,37 @@ describe('置灰和备份数:每一条出口都要收拾干净', () => {
 
   test('生成/重写跑完:解除置灰 + 重拉备份数', () => {
     const fn = fetchGen();
-    assert.match(fn, /setGuideBusy\(r\.appid, false\)/,
+    assert.match(fn, /setGuideBusy\(f\.appid, false\)/,
       '不解除的话那一行的重写按钮会一直灰到刷新页面');
     assert.match(fn, /refreshArchives\(\)/,
       '这次重写刚存了一份原文,行尾的「备份 N」要跟着出来');
+    assert.match(fn, /loadDashboard\(\)/,
+      '攻略已登记,「📖 攻略」链接要出来');
   });
 
-  test('生成/重写失败:也要解除置灰,而且 appid 取自快照不是 result', () => {
+  // 成功、失败、校验没过 —— 三条出口现在**收在同一处**:服务端把三种都堆进
+  // `finished`,页面照单收。原来是成功一处、失败一处各写一遍,而那正是这个
+  // describe 开头说的那种形状(两处迟早只改一处,漏的那条把行永久卡在灰色)
+  test('失败也解除置灰,而且收尾只能有一处', () => {
     const fn = fetchGen();
-    assert.match(fn, /setGuideBusy\(s\.appid, false\)/,
-      '失败时没有 result,只能从服务端快照拿 appid');
+    assert.equal((fn.match(/setGuideBusy\(/g) || []).length, 1,
+      '收尾分成两处写,迟早只改一处');
+    assert.match(fn, /fresh\.forEach\([\s\S]{0,80}setGuideBusy\(f\.appid, false\)/,
+      'appid 取自服务端快照里那一条 —— 失败时根本没有 result 可取');
+  });
+
+  // **这条是那个 bug 本身。** 排队生成时,一个跑完到下一个开跑之间只隔着一个微任务,
+  // 页面三秒才轮一次 —— 于是每次轮询看到的 running 都是 true。收尾写在
+  // `if (s.running)` 的 return 后面,就永远执行不到:表格不刷新、攻略链接不出现、
+  // 那一行一直灰着,看起来就是"第一个生成好了但界面没反应"
+  test('先收跑完的,再看现在在跑什么', () => {
+    const fn = fetchGen();
+    const drain = fn.indexOf('s.finished');
+    const running = fn.indexOf('if (s.running)');
+    assert.ok(drain > 0, '要从服务端快照里收 finished');
+    assert.ok(running > 0, '切到的应该是 fetchGen');
+    assert.ok(drain < running,
+      '排队时 running 一直是 true,收尾放在它后面就永远轮不到');
   });
 
   test('搬去 Notion 成功:解除置灰 + 重拉备份数', () => {
