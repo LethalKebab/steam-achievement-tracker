@@ -344,6 +344,76 @@ describe('begin 不会清掉队列', () => {
   });
 });
 
+describe('begin 也不能抹掉上一个的结果', () => {
+  /**
+   * 排队生成时,一个跑完到下一个 `begin()` 之间只隔着 `drainNext()` 和
+   * `createProvider()` 的一次动态 import(已缓存、不联网)—— 一个微任务。
+   * 页面三秒轮询一次,所以 `state.result` 里那份结果**基本不可能被看到**:
+   * 表现是排了五个,只有最后一个的结果露过面,前四个的攻略链接不出现、
+   * 那四行的按钮一直灰着,看起来像"生成完了但界面不刷新"。
+   *
+   * 所以跑完的结果必须活在 state 外面。和 queue 同一个理由,只是更硬 ——
+   * queue 少一个是"漏跑",这个少一条是"跑了但没人知道"。
+   */
+  test('下一个开跑之后,上一个的结果还在', () => {
+    const s = createGuideGenState();
+    s.begin('1', 'A', 3);
+    s.end(null, { ok: true, covered: 12, total: 12 });
+    s.begin('2', 'B', 3);
+    assert.equal(s.snapshot().result, null, 'state.result 本来就该被 begin 重置');
+    const done = s.snapshot().finished;
+    assert.equal(done.length, 1, 'begin() 把上一个的结果一起抹掉了');
+    assert.equal(done[0].game, 'A');
+    assert.equal(done[0].appid, '1');
+    assert.equal(done[0].result.covered, 12);
+  });
+
+  test('失败也要进去 —— 那一行同样要解除置灰', () => {
+    const s = createGuideGenState();
+    s.begin('1', 'A', 3);
+    s.end(new Error('供应商 500'));
+    s.begin('2', 'B', 3);
+    const done = s.snapshot().finished;
+    assert.equal(done.length, 1, '失败的那条漏掉,那一行会一直灰着');
+    assert.equal(done[0].appid, '1');
+    assert.match(done[0].error, /供应商 500/);
+  });
+
+  test('跑完还要留着的那几句跟着结果一起走', () => {
+    // warnings 说的是**成品缺了什么**(第 3 段没写出来),下一个 begin() 一开跑
+    // 就没了 —— 而它必须跟着那份结果一直留在屏幕上
+    const s = createGuideGenState();
+    s.begin('1', 'A', 3);
+    s.warn('第 3 段没写出来');
+    s.end(null, { ok: true });
+    s.begin('2', 'B', 3);
+    assert.deepEqual(s.snapshot().finished[0].warnings, ['第 3 段没写出来']);
+    assert.deepEqual(s.snapshot().warnings, [], 'begin 之后当前这轮不该带着上一轮的');
+  });
+
+  test('seq 单调递增 —— 页面靠它取增量', () => {
+    const s = createGuideGenState();
+    for (const id of ['1', '2', '3']) {
+      s.begin(id, 'G' + id, 3);
+      s.end(null, { ok: true });
+    }
+    const seqs = s.snapshot().finished.map((f) => f.seq);
+    assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b), '乱序的话页面会漏收');
+    assert.equal(new Set(seqs).size, 3, '重号会让页面把一条当成收过的');
+  });
+
+  test('有上限 —— 一次排几十个不能把快照撑爆', () => {
+    const s = createGuideGenState();
+    for (let i = 0; i < 25; i++) {
+      s.begin(String(i), 'G' + i, 3);
+      s.end(null, { ok: true });
+    }
+    const done = s.snapshot().finished;
+    assert.equal(done.length, 20);
+    assert.equal(done[done.length - 1].game, 'G24', '砍的必须是旧的那头');
+  });
+});
+
 describe('跑完那一屏要能拿到备份编号', () => {
   /**
    * 「生成成功」那一屏上的「删除备份」靠 `result.backup.id`。`generateGuide` 和

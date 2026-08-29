@@ -45,6 +45,7 @@ import {
   regroupByAssignment,
   chunkDefs,
   buildChunkMessage,
+  briefApiNames,
   buildChunkFeedback,
   chunksNeedingRewrite,
   SKILL_RULE_DISPOSITION,
@@ -2445,5 +2446,102 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
   test('没有折叠的正文原样返回', () => {
     const md = '## 一节\n\n- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。';
     assert.deepEqual(unwrapAchievementToggles(md, D), { text: md, unwrapped: [] });
+  });
+});
+
+/**
+ * 已经解锁的成就只写一行。
+ *
+ * 攻略是拿来照着做的,而已经做完的那几条不需要做法 —— 名字、官方描述、一个能勾的框
+ * 就是他还会用到的全部。省掉的是这几条的查资料和正文,也就是这个功能唯一花钱的地方。
+ */
+describe('已解锁的成就只写一行', () => {
+  describe('briefApiNames —— 谁进略写名单', () => {
+    const D = [def('A', '甲', '一'), def('B', '乙', '二'), def('C', '丙', '三')];
+
+    test('解锁了的进,没解锁的不进', () => {
+      assert.deepEqual([...briefApiNames(D, ['A', 'C'])], ['A', 'C']);
+    });
+
+    test('一个都没解锁 → 名单是空的', () => {
+      assert.deepEqual([...briefApiNames(D, [])], []);
+    });
+
+    // **全解锁的游戏一条都不省。** 省下来的就是整篇攻略 —— 剩下一串只有名字和官方
+    // 描述的行,而那份东西 Steam 页面上本来就有。会给 100% 的游戏生成攻略的人,
+    // 要的恰恰是内容
+    test('全解锁 → 名单是空的,不是全都进', () => {
+      assert.deepEqual([...briefApiNames(D, ['A', 'B', 'C'])], []);
+    });
+
+    test('没有成就时不炸', () => {
+      assert.deepEqual([...briefApiNames([], ['A'])], []);
+      assert.deepEqual([...briefApiNames(null, null)], []);
+    });
+  });
+
+  describe('buildChunkMessage —— 提示词里怎么说', () => {
+    const D = [def('A', '甲', '一'), def('B', '乙', '二'), def('C', '丙', '三'), def('D', '丁', '四')];
+
+    // 名单空的时候这句话必须**一个字都不多** —— 这是绝大多数攻略走的那条路
+    test('没有要略写的 → 和原来一字不差', () => {
+      assert.equal(buildChunkMessage([D], 0, new Set()),
+        '开始写吧。先联网查资料,再按规则写完整份攻略。');
+      assert.equal(buildChunkMessage([D], 0), '开始写吧。先联网查资料,再按规则写完整份攻略。');
+    });
+
+    test('略写的是少数 → 点名那几个', () => {
+      const m = buildChunkMessage([D], 0, briefApiNames(D, ['A']));
+      assert.match(m, /「甲」/);
+      assert.match(m, /一行就停/);
+      assert.doesNotMatch(m, /「乙」/, '要写完整的那些不该出现在略写名单里');
+    });
+
+    // 大部分游戏是"已经解锁了一大半",那时候列"要写详细的这几个"比列"要略写的
+    // 那四十个"短得多,而且正好是模型这一段真正要干的活
+    test('略写的是多数 → 反过来点名要写完整的那几个', () => {
+      const m = buildChunkMessage([D], 0, briefApiNames(D, ['A', 'B', 'C']));
+      assert.match(m, /只有这几个要按规则写完整/);
+      assert.match(m, /「丁」/);
+      assert.doesNotMatch(m, /「甲」/, '略写的是多数时不该再把它们一个个列出来');
+    });
+
+    test('分段时那句话跟着段走,不是全篇一份', () => {
+      const chunks = [D.slice(0, 2), D.slice(2)];
+      const brief = briefApiNames(D, ['A', 'D']);
+      assert.match(buildChunkMessage(chunks, 0, brief), /「甲」/);
+      assert.doesNotMatch(buildChunkMessage(chunks, 0, brief), /「丁」/, '第一段不该提别段的成就');
+      assert.match(buildChunkMessage(chunks, 1, brief), /「丁」/);
+    });
+  });
+
+  describe('端到端:generateGuide 真的这么问', () => {
+    test('解锁了一个 → 提示词里点名让它只写一行', async () => {
+      const { db, config } = freshEnv();
+      const provider = fakeProvider([GOOD]);
+      await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
+      assert.match(provider.asked[0], /「第一步」/, '已解锁的那条要被点名');
+      assert.match(provider.asked[0], /一行就停/);
+    });
+
+    test('全解锁 → 一条都不略,提示词回到原来那句', async () => {
+      const { db, config } = freshEnv();
+      const provider = fakeProvider([GOOD]);
+      await generateGuide(db, { config, provider, steam: fakeSteam(['A', 'B']), appid: '1' });
+      assert.doesNotMatch(provider.asked[0], /一行就停/,
+        '全解锁时省下来的就是整篇攻略,剩下的东西 Steam 页面上本来就有');
+    });
+
+    // **覆盖重写一条都不省。** 攻略里已经有花过钱写出来的正文,而"他后来把这条解锁了"
+    // 不是把那段字删掉的理由 —— 删掉之后没有任何地方找得回来
+    test('覆盖重写 → 不略写,已经写出来的正文不许被收成一行', async () => {
+      const { db, config } = freshEnv();
+      const provider = fakeProvider([GOOD]);
+      await generateGuide(db, {
+        config, provider, steam: fakeSteam(['A']), appid: '1', overwrite: true,
+      });
+      assert.doesNotMatch(provider.asked[0], /一行就停/,
+        '覆盖时略写等于把他付过钱的正文删掉');
+    });
   });
 });

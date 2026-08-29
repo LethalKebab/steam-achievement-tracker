@@ -1609,6 +1609,8 @@
       display: flex;
       align-items: center;
       justify-content: center;
+      /* 换行是给 .ask-hint 用的:它 flex-basis 100%,靠这个落到按钮下面自己一行 */
+      flex-wrap: wrap;
       gap: var(--s3);
       margin-top: var(--s4);
       font-size: var(--fs-sm);
@@ -1625,6 +1627,17 @@
     .ask-choice .view-toggle button:disabled {
       opacity: 0.35;
       cursor: default;
+    }
+    /* 当前这一档的说明,占满一行摆在按钮下面。
+       颜色用 --text-2 不用 --text-3:这句是**做选择要读的正文**,不是占位或时间戳,
+       而 --text-3 正好压在 4.5:1 的下限上。
+       min-height 占住一行的位置 —— 不留的话,切档位时对话框会跳一下 */
+    .ask-hint {
+      flex: 1 0 100%;
+      min-height: 1.4em;
+      text-align: center;
+      font-size: var(--fs-xs);
+      color: var(--text-2);
     }
     /* 一句话输入。沿用页面上输入控件的那套底色和描边,不为一个框新造一种外观 */
     .ask-input {
@@ -2262,7 +2275,7 @@
            花多深」问的是一件事,拆成两步等于让人先答应再挑。这一格平时是空的,只有
            调用方传了 choices 才长出来 —— 复用 .view-toggle(页面上已有的分段控件),
            而不是新造一个只在这里出现的形状。
-           每组一行,由 askConfirm 动态生成:重写那个框要问两件事(范围、推理强度),
+           每组一行,由 askConfirm 动态生成:重写那个框要问两件事(范围、写法),
            生成那个只问一件 —— 组数写死在 markup 里就得为多的那个留一格空的 -->
       <div id="askChoices"></div>
       <!-- 一句话的输入(局部重写的「重写要求」)。**标签是可见的、而且带 for** ——
@@ -4063,6 +4076,25 @@
           group.setAttribute('role', 'group');
           group.setAttribute('aria-label', g.label);
 
+          /**
+           * 当前这一档在按钮下面一行的说明。**不能写成 `title`** —— 悬停在触屏上
+           * 根本不存在,读屏也不会念,而这正是"没用过的人不知道该选哪个"的那种信息:
+           * 它必须在**选之前**就看得见。`aria-describedby` 把它挂到这一组上,
+           * 于是读屏读到这组按钮时会把当前那句一起念出来
+           */
+          const hasHints = g.options.some(function (o2) { return o2.hint; });
+          const hintEl = hasHints ? document.createElement('div') : null;
+          if (hintEl) {
+            hintEl.className = 'ask-hint';
+            hintEl.id = 'askHint-' + g.key;
+            group.setAttribute('aria-describedby', hintEl.id);
+          }
+          function paintHint() {
+            if (!hintEl) return;
+            const cur = g.options.filter(function (o2) { return o2.value === g.value; })[0];
+            hintEl.textContent = (cur && cur.hint) || '';
+          }
+
           g.options.forEach(function (opt) {
             const b = document.createElement('button');
             b.type = 'button';
@@ -4087,6 +4119,7 @@
                 c.classList.toggle('on', c === b);
                 c.setAttribute('aria-pressed', String(c === b));
               });
+              paintHint();
               syncInput();
               syncPicker();
             });
@@ -4095,6 +4128,10 @@
 
           row.appendChild(label);
           row.appendChild(group);
+          if (hintEl) {
+            paintHint();
+            row.appendChild(hintEl);
+          }
           choicesWrap.appendChild(row);
         });
 
@@ -4775,7 +4812,7 @@
          * 这一格的标签换过两次,两次都为了同一件事:让人不用猜这栏要填什么。
          *
          *   「要求」   —— 太抽象,三个字读完还是不知道要什么
-         *   「怎么改」 —— 具体了,但它是个**问句**,而旁边两行标签(范围、推理强度)
+         *   「怎么改」 —— 具体了,但它是个**问句**,而旁边两行标签(范围、写法)
          *                 都是名词短语。一群名词里混一个问句,读起来就随意 ——
          *                 和当初「挑几条」在一排名词里的毛病一模一样
          *   「重写要求」—— 名词短语,和这个框的标题(重写…)咬在一起,而且比光说
@@ -4797,7 +4834,7 @@
          * **这个框没有正文。** 四轮删下来一句不剩,每一句都是在复述屏幕上已有的东西:
          *
          *   「约 2–4 分钟」                      同样的输入实测 76/174/337 秒,
-         *                                        推理强度可调之后低档快八倍,写死就是错的
+         *                                        写法可选之后极速档快八倍,写死就是错的
          *   「现有 51 个 checkbox 会被整份替换」  「整篇」已经说了全部替换,51 只是数了一遍
          *   「只改选中的 27 条」                  列表底下那行「已选 27 条」就在旁边摆着
          *   「原文先备份」                        我们这边的保底措施,不是他要决定的事
@@ -4852,24 +4889,47 @@
     };
 
     /**
-     * 生成/重写共用的那一格。**默认 high**,而这个默认是量出来的不是拍的:
+     * 生成/重写共用的那一格。**默认「深度模式」**,而这个默认是量出来的不是拍的:
      * 同一款游戏同一套提示词,low 那份 16 条里有 9 条是「第 III 章全体查证正确即解锁」
-     * 这种套模板的句子,high 一条都没有。省下来的八倍时间买的是那批中等难度成就的内容。
+     * 这种套模板的句子,high 一条都没有。
      *
-     * 三档在效果上**不是等距的** —— 实测 high 和 medium 分不开(都是 0 条模板句,
-     * 时间差埋在噪声里),断崖在 medium 和 low 之间。所以用三个离散按钮而不是滑块:
-     * 滑块的形状本身在暗示均匀,而这里不均匀。
+     * **两档,不是三档。** 同一次测量里 high 和 medium 分不开 —— 都是 0 条模板句,
+     * 时间差埋在噪声里,断崖只在 medium 和 low 之间。摆三个按钮而其中两个量不出区别,
+     * 等于让人在一个并不存在的选择上停下来权衡;真要给它写一句说明,能写的也只有
+     * 「这两个一样」。medium 在 config.json 里照样收,只是不摆到屏幕上。
+     *
+     * 而且 medium 连便宜都算不上:262 秒对 high 的 280 秒,省下 6%。
+     *
+     * **那 9 条落在哪批成就上是有记录的**,见 CLAUDE.md 里 Obra Dinn 那次 A/B:
+     * high 多出来的搜索买的是**中等难度那一批的广度**(搜索日志里第五条查的是章节
+     * 列表),而单看最难的那一条,low 写得反而更好。所以低档亏的是中间那批,不是难的。
+     *
+     * **但这件事不写进屏幕上的文案。** 没人在生成之前会先把成就按难度分好类,
+     * 「中等难度的成就会变差」帮不了他做决定。文案说的是他真正要权衡的两头:
+     * 省多少、亏什么。难度那层留在这里和 CLAUDE.md 里。
+     *
+     * 全部结论压在一次测量上(一款游戏 16 条)—— 包括"三档不等距"那一条,
+     * 所以两档并不比三档更冒险,它们靠的是同一个数。要改结论,先重测。
+     *
+     * 用分段按钮不用滑块:两档的滑块根本不成立,而三档时它的形状还在暗示均匀。
      */
     function effortChoice() {
       return {
         // 组名。askConfirm 把每组的当前值按 key 收成一个对象交给正文函数,
         // 于是「选了什么范围」和「选了多深」在那句话里都取得到
         key: 'effort',
-        label: '推理强度',
+        /**
+         * 组名和档名都说**结果**,不说参数。API 上那个旋钮叫 effort、取值 low/high,
+         * 但屏幕要回答的是「选它会怎样」—— 照搬参数名的话,深会怎样、浅又会怎样一个字
+         * 都没有,第一次用的人只能照默认走,想省钱的人也不知道省掉的是什么。
+         *
+         * 每档一句,说的是选它会得到什么和失去什么 —— 两句都各说一头,不然读起来
+         * 像在劝人选其中一个。
+         */
+        label: '写法',
         options: [
-          { value: 'low', label: '低' },
-          { value: 'medium', label: '中' },
-          { value: 'high', label: '高' },
+          { value: 'low', label: '极速模式', hint: '便宜得多也快得多。最难的几条照样写得好,中间那批大多只剩一句模板。' },
+          { value: 'high', label: '深度模式', hint: '默认。每条成就都会真的去查一遍,更慢也更贵。' },
         ],
         value: 'high',
       };
@@ -5093,10 +5153,146 @@
     // 只在有任务在跑的时候轮询 —— 平时不给这个本地服务加一份常驻请求。
     // 页面加载时也查一次:另一个标签页(或上一次刷新前)发起的生成还在跑的话,这里要接上
     let genTimer = null;
+    /**
+     * 这一页已经收到过的最大 `seq`。`-1` = 刚打开、还没收过任何一次。
+     *
+     * 服务端把每个跑完的任务按序号堆在 `finished` 里,页面只取比这个大的那几条。
+     * **不能靠"这一刻 running 是不是 false"来判断有没有跑完一个** —— 队列里一个
+     * 跑完到下一个开跑之间只隔着一个微任务,而这里三秒才轮一次,那一瞬间抓不住
+     * (见 server.js 里 `finished` 的注释)
+     */
+    let genSeen = -1;
+    /**
+     * 这一轮里已经跑完的那几条,渲染好的 HTML。**要累积**:队列还在跑的时候,
+     * 屏幕上同时要有「现在在跑什么」和「刚才那几个跑完了、攻略在这儿」
+     */
+    let genDoneHtml = [];
+
     function pollGen() {
       if (genTimer) return;
       genTimer = setInterval(fetchGen, 3000);
       fetchGen();
+    }
+
+    /** 跑完还要留着的那几句(某一段没写出来之类),渲染成带样式的行 */
+    function warnLines(list) {
+      return (list || [])
+        .map(function (w) { return '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(w) + '</span>'; })
+        .join('');
+    }
+
+    /**
+     * 把一条**已经跑完**的任务渲染成屏幕上的一行。
+     *
+     * **抽成函数是因为它现在有两个调用点**:队列中途跑完的那些,和整条队列排空之后
+     * 留在屏幕上的最后一条。原来只有后者、直接写在 fetchGen 里,而前者压根没有代码
+     * 路径 —— 那正是「排队生成时,除了最后一个,每一个的结果都看不见」的另一半原因。
+     *
+     * 合成一份还有个更硬的理由:两份渲染器迟早只改一处,于是"中途跑完的那几条"会
+     * 悄悄少掉某个警告 —— 而少掉的那种警告(没联网、有几个框永远勾不上)恰恰是
+     * 只有攻略作者本人能补救的
+     */
+    function renderFinished(f) {
+      const game = escapeHtml(f.game || '');
+      if (f.error) {
+        return '<span class="warn">' + GEN_WARN + ' 《' + game + '》生成失败:' +
+          escapeHtml(f.error) + '</span>' + warnLines(f.warnings);
+      }
+      const r = f.result;
+      if (!r) return '';
+      if (!r.ok) {
+        // **病因写在症状前面。** 少一段的表象是几十条"缺 checkbox",而这里只放得下
+        // 五条 —— 全被同一句话占满的话,真正的原因("第 3 段没拿到结果")一个字
+        // 都露不出来,用户会以为模型忘了写
+        const failed = (r.chunkFailures || [])
+          .map(function (c) {
+            return '<br><span class="warn">第 ' + c.chunk + '/' + c.of + ' 段(' + c.count +
+              ' 个成就)没写出来:' + escapeHtml(String(c.reason).split('\n')[0]) + '</span>';
+          })
+          .join('');
+        return '<span class="warn">' + GEN_WARN + ' 《' + game +
+          '》校验没过,已存草稿,没写进攻略。</span>' + failed +
+          (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : '') +
+          warnLines(f.warnings);
+      }
+      // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 搜过就并进事实那一行,
+      // 没搜才单独警告(那是真会影响内容质量的一件事)
+      const searches = r.searchQueries ? r.searchQueries.length : 0;
+      const noResearch = !r.researched
+        ? '<br><span class="warn">' + GEN_WARN + ' 没联网,内容是模型凭已有知识写的。</span>'
+        : searches === 0
+          ? '<br><span class="warn">' + GEN_WARN + ' 一次都没搜,内容等同于凭记忆写的。</span>'
+          : '';
+      // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找。
+      //
+      // **两个后端给的不是同一组动作。** Notion 那份点开就是排好版的页面,一个链接
+      // 就够;本地那份经 /guide/ 出来是**纯文本 markdown 源码**(防 XSS,见
+      // server.js),真要读还得用编辑器开文件 —— 所以本地多给一个「打开文件夹」。
+      //
+      // 本地这条**不能写成一截不可点的绝对路径**:同一份攻略,表格行里那个
+      // 「📖 攻略」按钮能点(走 /guide/<appid>),偏偏生成完这一刻不能点 ——
+      // 而那正是最想立刻点进去看一眼的时刻
+      const where = r.target === 'notion'
+        ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开攻略</a>'
+        : '<a href="/guide/' + encodeURIComponent(f.appid) + '" target="_blank" rel="noopener">打开攻略</a>'
+          + ' · <button type="button" class="gen-link" data-reveal="' + escapeHtml(f.appid) + '">打开文件夹</button>';
+      // **「删除备份」就摆在「打开攻略」旁边**,因为那正是要用它的那一刻:
+      // 点开读一遍、确认这版可以,旧的那份就没用了 —— 换个地方就意味着
+      // 「等会儿再收拾」,而等会儿多半不会来。
+      //
+      // **「恢复备份」和「删除备份」是同一刻的两个答案。** 点开读一遍之后只有
+      // 两种结论:这版可以 → 旧的没用了;这版不如旧的 → 用回旧的。只给后半个
+      // 动作,等于在最可能想反悔的那一刻,唯一提供的按钮是**把反悔的本钱销毁**。
+      //
+      // 顺序是先恢复后删除:能挽回的排前面,不可逆的排最后。
+      //
+      // 第二下要说的后果**按后端算好挂在 data 上**,不在处理器里再判一次 ——
+      // 判两次早晚只改一处。覆盖只会写回攻略自己原来的后端(换后端是
+      // guide-to-notion 的事),所以 `r.target` 就是这份备份的后端
+      const restoreBackup = r.backup && r.backup.id
+        ? ' · <button type="button" class="gen-link" data-restore-backup="'
+          + escapeHtml(r.backup.id) + '" data-restore-label="'
+          + (r.target === 'notion' ? '整页重写' : '覆盖本地文件')
+          + '">恢复备份</button>'
+        : '';
+      // 只有覆盖和局部重写才有备份(整篇新生成没有旧的可存),`r.backup` 为空
+      // 时这个动作整个不出现 —— 一个永远点不动的按钮比没有更糟
+      const dropBackup = r.backup && r.backup.id
+        ? ' · <button type="button" class="gen-link danger" data-drop-backup="'
+          + escapeHtml(r.backup.id) + '">删除备份</button>'
+        : '';
+      // **搜索次数和 token 移到悬停里。** 屏幕上留下的三样是:哪款游戏、覆盖了
+      // 多少成就、去哪看。token 仍然报(这是唯一花钱的功能,数字必须能查到),
+      // 但它是事后对账用的,不该和「成了没有」抢同一行。
+      // 「内容自己过一遍」留着 —— 机器只保证格式和数据,内容对不对没有任何东西能验,
+      // 这是这个功能唯一必须每次都说的话
+      genBar.title = [
+        searches ? searches + ' 次搜索' : '没有联网搜索',
+        Math.round((r.tokens || 0) / 100) / 10 + 'k token',
+      ].join(' · ');
+      // 同名 + Steam 上描述是空的那几个:攻略写对了,但自动勾选**永远**认不出它们。
+      // 这不拦路(所以攻略已经落地了),可是不说出来的话,用户要等到某天注意到
+      // 有几个框一直没动才会发现 —— 那时候更像是同步坏了。名字列出来,才知道是哪几个
+      const unsyncable = (r.unsyncable || []).length
+        ? '<br><span class="warn">' + GEN_WARN + ' ' + r.unsyncable.length +
+          ' 个成就同名、Steam 上描述是空的,自动勾选认不出它们,要手动勾:' +
+          escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
+          (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
+        : '';
+      // 局部重写要说的是**另一件事**:改了几条、其余没动。说成「已生成 · 11/11
+      // 个成就」的话,一次只改了 5 条的操作看起来和整篇重写一模一样,而"没动的
+      // 那部分"正是他选局部的理由。旧问题也在这里报 —— 这次没碰、也没拦路,
+      // 但不说出来的话下次校验看到它们会以为是这次改坏的
+      const pat = r.patched;
+      const preExisting = pat && pat.preExisting
+        ? '<br><span class="warn">' + GEN_WARN + ' 攻略里还有 ' + pat.preExisting +
+          ' 条本来就有的校验问题,这次没碰</span>'
+        : '';
+      const headline = pat
+        ? GEN_OK + ' 《' + game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where + restoreBackup + dropBackup
+        : GEN_OK + ' 《' + game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where + restoreBackup + dropBackup;
+      return headline + noResearch + unsyncable + preExisting + warnLines(f.warnings) +
+        '<br><span class="warn">内容需要你自己过一遍。</span>';
     }
 
     function fetchGen() {
@@ -5110,17 +5306,47 @@
           // 而排队中把进度条关掉,后面那几个的进度就再也不会露面了 —— 那正是
           // 这次要修的毛病,只是换了个入口
           const live = Boolean(s.running) || Boolean(waiting);
-          // 跑到一半就已经知道出了岔子的事(某一段没写出来)。**和 note 分开显示** ——
-          // note 是"现在在干什么",三秒后就被下一个事件盖掉了,而这几句要一直留着
-          // 到结果出来为止,否则用户全程不知道这份攻略缺了一块
-          const warns = (s.warnings || [])
-            .map(function (w) { return '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(w) + '</span>'; })
-            .join('');
+
+          /**
+           * **先把跑完的收掉,再看现在在跑什么。** 排队的时候这两件事是同时成立的,
+           * 而原来的写法在 `if (s.running)` 那里就 return 了 —— 于是队列里除了最后
+           * 一个,每一个跑完的结果都没人收:表格不刷新(「📖 攻略」不出现)、那一行
+           * 一直灰着、结果也没在浮窗上留下过一行。用户看到的就是"第一个生成好了但
+           * 界面没反应,一直显示生成中"
+           */
+          const all = s.finished || [];
+          const fresh = all.filter(function (f) { return f.seq > genSeen; });
+          if (fresh.length) {
+            // **刚打开页面时只补最后一条。** 服务端留着最近 20 条,全倒出来的话
+            // 每次刷新页面都会糊上一屏历史结果 —— 而以前显示的就是最后那一条
+            // (`state.result`),这里保持一样
+            const first = genSeen < 0;
+            genSeen = all[all.length - 1].seq;
+            // 置灰**每一条**都要解除,和显示几条无关:漏一条那一行的按钮就一直灰着
+            fresh.forEach(function (f) { setGuideBusy(f.appid, false); });
+            genDoneHtml = genDoneHtml.concat(
+              (first ? fresh.slice(-1) : fresh).map(renderFinished).filter(Boolean)
+            );
+            if (!first) {
+              // `refreshArchives()` —— 覆盖/重写刚把原文存进 `.backups/`,行尾那个
+              // 「备份 N」是从 archiveIndex 渲染的,不重新拉一次就看不见新增的那份。
+              // `loadDashboard()` —— 攻略已登记,「📖 攻略」链接要出来。
+              // 刚打开页面时这两样本来就在初始化里跑过了,不必再来一遍
+              refreshArchives();
+              loadDashboard();
+            }
+          }
+          const doneTail = genDoneHtml.length ? '<br>' + genDoneHtml.join('<br>') : '';
+
           if (s.running) {
+            // 跑到一半就已经知道出了岔子的事(某一段没写出来)。**和 note 分开显示** ——
+            // note 是"现在在干什么",三秒后就被下一个事件盖掉了,而这几句要一直留着
+            // 到结果出来为止,否则用户全程不知道这份攻略缺了一块
+            const warns = warnLines(s.warnings);
             // 只有真在重写(第 2 轮起)才显示轮数 —— 一次过的时候写"第 1/3 轮"
             // 反而像出了什么事要重来三次
             const round = s.rounds && s.round > 1 ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
-            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting + warns, false, true);
+            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting + warns + doneTail, false, true);
             return;
           }
           // **队列没空就别停轮询。** 一个跑完到下一个真正开跑之间有一个空档
@@ -5131,128 +5357,12 @@
             clearInterval(genTimer);
             genTimer = null;
           }
-          if (s.error) {
-            // **失败这条路也要解除置灰** —— 漏了的症状和成功那条一样,只是没人会
-            // 去点一个刚刚失败的东西,所以更晚才被发现。`s.appid` 是服务端快照里
-            // 正在跑的那个,不是 result(失败时没有 result)
-            setGuideBusy(s.appid, false);
-            return showGen(GEN_WARN + ' 生成失败:' + s.error + waiting, true, live);
-          }
-          const r = s.result;
-          if (!r) { genLive = live; return (genBar.style.display = 'none'); }
-
-          if (!r.ok) {
-            // **病因写在症状前面。** 少一段的表象是几十条"缺 checkbox",而这里只放得下
-            // 五条 —— 全被同一句话占满的话,真正的原因("第 3 段没拿到结果")一个字
-            // 都露不出来,用户会以为模型忘了写
-            const failed = (r.chunkFailures || [])
-              .map(function (c) {
-                return '<br><span class="warn">第 ' + c.chunk + '/' + c.of + ' 段(' + c.count +
-                  ' 个成就)没写出来:' + escapeHtml(String(c.reason).split('\n')[0]) + '</span>';
-              })
-              .join('');
-            showGen(
-              GEN_WARN + ' 《' + s.game + '》校验没过,已存草稿,没写进攻略。' + failed +
-                (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : ''),
-              true, live
-            );
-            return;
-          }
-          // 「能搜」和「搜了」是两回事,而用户在页面上看不出来 —— 搜过就并进事实那一行,
-          // 没搜才单独警告(那是真会影响内容质量的一件事)
-          const searches = r.searchQueries ? r.searchQueries.length : 0;
-          const noResearch = !r.researched
-            ? '<br><span class="warn">' + GEN_WARN + ' 没联网,内容是模型凭已有知识写的。</span>'
-            : searches === 0
-              ? '<br><span class="warn">' + GEN_WARN + ' 一次都没搜,内容等同于凭记忆写的。</span>'
-              : '';
-          // 写去哪了要说清楚 —— 这是用户自己的笔记,不能让他到处找。
-          //
-          // **两个后端给的不是同一组动作。** Notion 那份点开就是排好版的页面,一个链接
-          // 就够;本地那份经 /guide/ 出来是**纯文本 markdown 源码**(防 XSS,见
-          // server.js),真要读还得用编辑器开文件 —— 所以本地多给一个「打开文件夹」。
-          //
-          // 本地这条**不能写成一截不可点的绝对路径**:同一份攻略,表格行里那个
-          // 「📖 攻略」按钮能点(走 /guide/<appid>),偏偏生成完这一刻不能点 ——
-          // 而那正是最想立刻点进去看一眼的时刻
-          const where = r.target === 'notion'
-            ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开攻略</a>'
-            : '<a href="/guide/' + encodeURIComponent(r.appid) + '" target="_blank" rel="noopener">打开攻略</a>'
-              + ' · <button type="button" class="gen-link" data-reveal="' + escapeHtml(r.appid) + '">打开文件夹</button>';
-          // **「删除备份」就摆在「打开攻略」旁边**,因为那正是要用它的那一刻:
-          // 点开读一遍、确认这版可以,旧的那份就没用了 —— 换个地方就意味着
-          // 「等会儿再收拾」,而等会儿多半不会来。
-          //
-          // **「恢复备份」和「删除备份」是同一刻的两个答案。** 点开读一遍之后只有
-          // 两种结论:这版可以 → 旧的没用了;这版不如旧的 → 用回旧的。只给后半个
-          // 动作,等于在最可能想反悔的那一刻,唯一提供的按钮是**把反悔的本钱销毁**。
-          //
-          // 顺序是先恢复后删除:能挽回的排前面,不可逆的排最后。
-          //
-          // 第二下要说的后果**按后端算好挂在 data 上**,不在处理器里再判一次 ——
-          // 判两次早晚只改一处。覆盖只会写回攻略自己原来的后端(换后端是
-          // guide-to-notion 的事),所以 `r.target` 就是这份备份的后端
-          const restoreBackup = r.backup && r.backup.id
-            ? ' · <button type="button" class="gen-link" data-restore-backup="'
-              + escapeHtml(r.backup.id) + '" data-restore-label="'
-              + (r.target === 'notion' ? '整页重写' : '覆盖本地文件')
-              + '">恢复备份</button>'
-            : '';
-          // 只有覆盖和局部重写才有备份(整篇新生成没有旧的可存),`r.backup` 为空
-          // 时这个动作整个不出现 —— 一个永远点不动的按钮比没有更糟
-          const dropBackup = r.backup && r.backup.id
-            ? ' · <button type="button" class="gen-link danger" data-drop-backup="'
-              + escapeHtml(r.backup.id) + '">删除备份</button>'
-            : '';
-          // **搜索次数和 token 移到悬停里。** 屏幕上留下的三样是:哪款游戏、覆盖了
-          // 多少成就、去哪看。token 仍然报(这是唯一花钱的功能,数字必须能查到),
-          // 但它是事后对账用的,不该和「成了没有」抢同一行。
-          // 「内容自己过一遍」留着 —— 机器只保证格式和数据,内容对不对没有任何东西能验,
-          // 这是这个功能唯一必须每次都说的话
-          genBar.title = [
-            searches ? searches + ' 次搜索' : '没有联网搜索',
-            Math.round((r.tokens || 0) / 100) / 10 + 'k token',
-          ].join(' · ');
-          // 同名 + Steam 上描述是空的那几个:攻略写对了,但自动勾选**永远**认不出它们。
-          // 这不拦路(所以攻略已经落地了),可是不说出来的话,用户要等到某天注意到
-          // 有几个框一直没动才会发现 —— 那时候更像是同步坏了。名字列出来,才知道是哪几个
-          const unsyncable = (r.unsyncable || []).length
-            ? '<br><span class="warn">' + GEN_WARN + ' ' + r.unsyncable.length +
-              ' 个成就同名、Steam 上描述是空的,自动勾选认不出它们,要手动勾:' +
-              escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
-              (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
-            : '';
-          // 局部重写要说的是**另一件事**:改了几条、其余没动。说成「已生成 · 11/11
-          // 个成就」的话,一次只改了 5 条的操作看起来和整篇重写一模一样,而"没动的
-          // 那部分"正是他选局部的理由。旧问题也在这里报 —— 这次没碰、也没拦路,
-          // 但不说出来的话下次校验看到它们会以为是这次改坏的
-          const pat = r.patched;
-          const preExisting = pat && pat.preExisting
-            ? '<br><span class="warn">' + GEN_WARN + ' 攻略里还有 ' + pat.preExisting +
-              ' 条本来就有的校验问题,这次没碰</span>'
-            : '';
-          const headline = pat
-            ? GEN_OK + ' 《' + s.game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where + restoreBackup + dropBackup
-            : GEN_OK + ' 《' + s.game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where + restoreBackup + dropBackup;
-          showGen(
-            headline + noResearch + unsyncable + preExisting +
-              '<br><span class="warn">内容需要你自己过一遍。</span>',
-            false, live
-          );
-          // **跑完必须把这三样都收拾干净,少一样就留下一个不会自愈的错状态。**
-          //
-          // `setGuideBusy(false)` —— 置灰是**渲染出来的**(见 setGuideBusy 的注释),
-          // 不会被别处的重画顺手清掉;这里不解除,那一行的「重写」「Notion」会一直灰
-          // 到下次刷新页面。
-          //
-          // `refreshArchives()` —— 这次重写刚把原文存进 `.backups/`,行尾那个
-          // 「备份 N」是从 archiveIndex 渲染的,不重新拉一次就看不见新增的那份:
-          // 「重写完想反悔」正是最需要它出现的时刻,而它偏偏要等到刷新页面才出来。
-          //
-          // `loadDashboard()` —— 攻略已登记,「📖 攻略」链接要出来
-          setGuideBusy(r.appid, false);
-          refreshArchives();
-          loadDashboard();
+          // 排空之后屏幕上留下的就是收上来的那几条。**不再单独读 `s.result` /
+          // `s.error`** —— 它们和 `finished` 里最后一条是同一份东西,两处各渲染一遍
+          // 迟早只改一处
+          if (doneTail) return showGen(genDoneHtml.join('<br>'), false, live);
+          genLive = live;
+          genBar.style.display = 'none';
         })
         .withFailureHandler(function () {})
         .guideGenStatus();

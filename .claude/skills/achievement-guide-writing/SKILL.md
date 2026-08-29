@@ -14,6 +14,8 @@ description: Use when writing, rewriting, or editing a Steam achievement guide f
 `- [ ] **成就名**` / `- [x] **成就名**`,绝对不能:
 - 把多个成就合并写在同一行(比如 `- [x] **A** / [x] **B**`)
 - 把"全部已达成、比较无聊"的一整组成就写成一段不带 checkbox 的说明文字
+
+**已达成的成就写短是可以的,写没是不行的。** 生成器对他已经解锁的那些只写 `- [ ] **名字** — 官方描述` 一行(见 `docs/ai-guide-writing.md`),那仍然满足这条规则:一条一个 checkbox,只是不写正文。这条禁的是把它们并成一段散文 —— 少了那一行,`checkbox-sync` 就再也勾不上它。
 - 把一整类成就(如"声望类共39个")写成纯文字总结
 
 **原因**:Notion markdown 里一行只有开头第一个 `[ ]`/`[x]` 会渲染成真正可交互的 checkbox,`/` 后面的会被转义成字面文本 `\[x\]`。而"把已解锁成就同步进攻略页 checkbox"这个日常任务(`node tracker.js checkbox-sync`,见 `steam-checkbox-sync` skill)是靠精确匹配 `- [ ] **成就中文名**` 这样的行首文字来打勾的——合并写或者纯文字总结的内容,同步脚本根本找不到。这也是为什么攻略统一用 checkbox 列表、不用 Notion 内嵌数据库(embedded database):内嵌数据库没法被同步脚本解析,而逐条写真实攻略文字的价值也比数据库表格更高(参考实现:CK3 那次 188 个成就从内嵌数据库改写成 checkbox 格式)。

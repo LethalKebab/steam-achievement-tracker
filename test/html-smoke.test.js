@@ -837,11 +837,11 @@ describe('自托管字体', () => {
 
 
 /**
- * 推理强度那一格。**默认必须是高** —— 低档实测把 16 条里的 9 条写成套模板的句子
- * (「第 III 章全体查证正确即解锁」),而那是攻略一半以上的条目。默认漂到低档不会
+ * 写法那一格。**默认必须是「深度模式」** —— 极速档实测把 16 条里的 9 条写成套模板的句子
+ * (「第 III 章全体查证正确即解锁」),而那是攻略一半以上的条目。默认漂到极速不会
  * 报任何错,只会让所有新攻略悄悄变薄。
  */
-describe('确认框里的推理强度', () => {
+describe('确认框里的写法', () => {
   const dash = read('Dashboard.html');
   const markup = markupNoComments(dash);
   const js = inlineScripts(dash).join('\n').replace(/\/\/[^\n]*/g, '');
@@ -856,12 +856,28 @@ describe('确认框里的推理强度', () => {
     return new Function(js.slice(at, end) + '; return effortChoice;')();
   })();
 
-  test('默认是高,而且三档齐全', () => {
+  test('默认是深度模式,而且只有两档', () => {
     assert.equal(effortChoice().value, 'high',
-      '低档会把一半以上的条目写成模板句 —— 默认漂过去不会报错,只会让攻略悄悄变薄');
-    assert.deepEqual(effortChoice().options.map((o) => o.value), ['low', 'medium', 'high'],
+      '极速档会把一半以上的条目写成模板句 —— 默认漂过去不会报错,只会让攻略悄悄变薄');
+    // **medium 不能回到屏幕上。** 同一次测量里它和 high 分不开(都是 0 条模板句,
+    // 时间差在噪声里),摆出来就是让人在一个量不出区别的选择上停下来权衡,
+    // 而唯一诚实的说明是「这两个一样」。config.json 里照样收,这里只管屏幕
+    assert.deepEqual(effortChoice().options.map((o) => o.value), ['low', 'high'],
       '顺序也是内容:从左到右是从省到深,反过来会让人按位置选错');
-    assert.equal(effortChoice().label, '推理强度');
+    assert.equal(effortChoice().label, '写法');
+  });
+
+  test('每一档都说清楚选它会失去什么', () => {
+    // 「极速模式/深度模式」这两个名字本身不解释任何东西 —— 没有这一句,想省钱的人不知道
+    // 省掉的是什么,而那正是这一格唯一要回答的问题
+    for (const o of effortChoice().options) {
+      assert.ok(o.hint && o.hint.length > 8, `${o.label} 没有说明`);
+    }
+    // 极速那句必须点到**模板句**。这是整次 A/B 里唯一测出来的代价(16 条里 9 条),
+    // 也是他选之前唯一需要知道的事;换成"内容差一点"之类的软话就等于没说
+    const low = effortChoice().options.find((o) => o.value === 'low');
+    assert.match(low.hint, /模板/,
+      '省下来的代价具体是"变成模板句" —— 说软了就帮不了人做决定');
   });
 
   test('选中态要报出来,而且两处都要写', () => {
@@ -1046,7 +1062,7 @@ describe('确认框里的推理强度', () => {
   });
 
   test('确认框不再写死时长', () => {
-    // 同样输入实测 76/174/337 秒,而且推理强度可调之后低档快八倍 —— 任何写死的
+    // 同样输入实测 76/174/337 秒,而且写法可选之后极速档快八倍 —— 任何写死的
     // 区间都是在承诺一个给不出的东西。时长看进度条
     const noBlockComments = js.replace(/\/\*[\s\S]*?\*\//g, '');
     assert.doesNotMatch(markup + noBlockComments, /约 \d[–-]\d 分钟/, '这句话在低档上会当场变错');
@@ -1248,16 +1264,37 @@ describe('置灰和备份数:每一条出口都要收拾干净', () => {
 
   test('生成/重写跑完:解除置灰 + 重拉备份数', () => {
     const fn = fetchGen();
-    assert.match(fn, /setGuideBusy\(r\.appid, false\)/,
+    assert.match(fn, /setGuideBusy\(f\.appid, false\)/,
       '不解除的话那一行的重写按钮会一直灰到刷新页面');
     assert.match(fn, /refreshArchives\(\)/,
       '这次重写刚存了一份原文,行尾的「备份 N」要跟着出来');
+    assert.match(fn, /loadDashboard\(\)/,
+      '攻略已登记,「📖 攻略」链接要出来');
   });
 
-  test('生成/重写失败:也要解除置灰,而且 appid 取自快照不是 result', () => {
+  // 成功、失败、校验没过 —— 三条出口现在**收在同一处**:服务端把三种都堆进
+  // `finished`,页面照单收。原来是成功一处、失败一处各写一遍,而那正是这个
+  // describe 开头说的那种形状(两处迟早只改一处,漏的那条把行永久卡在灰色)
+  test('失败也解除置灰,而且收尾只能有一处', () => {
     const fn = fetchGen();
-    assert.match(fn, /setGuideBusy\(s\.appid, false\)/,
-      '失败时没有 result,只能从服务端快照拿 appid');
+    assert.equal((fn.match(/setGuideBusy\(/g) || []).length, 1,
+      '收尾分成两处写,迟早只改一处');
+    assert.match(fn, /fresh\.forEach\([\s\S]{0,80}setGuideBusy\(f\.appid, false\)/,
+      'appid 取自服务端快照里那一条 —— 失败时根本没有 result 可取');
+  });
+
+  // **这条是那个 bug 本身。** 排队生成时,一个跑完到下一个开跑之间只隔着一个微任务,
+  // 页面三秒才轮一次 —— 于是每次轮询看到的 running 都是 true。收尾写在
+  // `if (s.running)` 的 return 后面,就永远执行不到:表格不刷新、攻略链接不出现、
+  // 那一行一直灰着,看起来就是"第一个生成好了但界面没反应"
+  test('先收跑完的,再看现在在跑什么', () => {
+    const fn = fetchGen();
+    const drain = fn.indexOf('s.finished');
+    const running = fn.indexOf('if (s.running)');
+    assert.ok(drain > 0, '要从服务端快照里收 finished');
+    assert.ok(running > 0, '切到的应该是 fetchGen');
+    assert.ok(drain < running,
+      '排队时 running 一直是 true,收尾放在它后面就永远轮不到');
   });
 
   test('搬去 Notion 成功:解除置灰 + 重拉备份数', () => {
