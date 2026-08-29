@@ -188,8 +188,8 @@ describe('maybeSync — the freshness gate must not be bypassed', () => {
     const r = api.maybeSync();
     assert.equal(stale, 1, 'maybeSync did not call maybeAutoSync');
     assert.equal(forced, 0,
-      'maybeSync went through startBackgroundSync — that one deliberately bypasses syncStaleHours, '
-      + 'so every switch back to the window runs a full sync');
+      'maybeSync went through startBackgroundSync — that one deliberately bypasses syncStaleHours, ' +
+      'so every switch back to the window runs a full sync');
     assert.deepEqual(r, { started: true });
   });
 

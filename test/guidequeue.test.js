@@ -287,8 +287,8 @@ describe('end to end: two simultaneous clicks on the same game', () => {
       const rs = await Promise.all([start(), start()]);
       assert.equal(
         dedupCount(rs), 1,
-        `${dedupCount(rs)} were blocked, there should be exactly 1 — 0 means the same game was let through twice `
-        + `(generated twice, paid for twice). A=${JSON.stringify(rs[0].result)} B=${JSON.stringify(rs[1].result)}`
+        `${dedupCount(rs)} were blocked, there should be exactly 1 — 0 means the same game was let through twice ` +
+        `(generated twice, paid for twice). A=${JSON.stringify(rs[0].result)} B=${JSON.stringify(rs[1].result)}`
       );
     } finally {
       cleanup();
