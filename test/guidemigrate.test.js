@@ -1,20 +1,24 @@
 /**
- * 本地攻略搬去 Notion 的测试
+ * Moving a local guide into Notion
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这个文件守的失败类是**搬家搬丢了东西,而两边都不报错**。搬的是用户自己写了很久的
- * 攻略,所以每一条都指向"东西没了但看着像成了":
+ * The failure class this file guards is **something is lost in the move and neither side
+ * reports it**. What is being moved is a guide the user spent a long time writing, so every
+ * case here points at "it is gone but it looks like it worked":
  *
- *  - 保真校验必须真的会失败。文字变了、条数变了、**勾选状态变了**都要拦下来 ——
- *    勾选被改是最隐蔽的一种:页面看着满满当当,只是有几个框莫名其妙自己勾上了
- *  - 校验没过时**本地文件必须原封不动**。搬家的前提是"原件还在",这一条塌了,
- *    前面所有的谨慎都白费
- *  - 归档是挪不是删,而且是最后一步
- *  - **不能拿 lintGuide 去卡**。手写攻略过不了闸门是常态(实测语料里 330 个成就
- *    没有能匹配的 checkbox),用它当门槛等于拒绝搬绝大多数真实攻略
+ *  - The fidelity check has to genuinely be able to fail. Changed text, a changed count and
+ *    **a changed checked state** all have to be stopped — the checked state is the most
+ *    hidden of the three: the page looks full, a few boxes have merely ticked themselves
+ *  - When the check does not pass, **the local file must be untouched**. "The original is
+ *    still there" is the premise of moving at all; lose that one and every other precaution
+ *    above was for nothing
+ *  - Archiving is a move, not a delete, and it is the last step
+ *  - **lintGuide must not be used as a gate.** A hand-written guide failing the gate is
+ *    normal (in the measured corpus 330 achievements had no matching checkbox), so using it
+ *    as a threshold means refusing to move the vast majority of real guides
  *
- * 不联网:Notion 是假的。
+ * No network: Notion is fake.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -33,7 +37,7 @@ import {
 } from '../lib/guidemigrate.js';
 
 // ---------------------------------------------------------------------------
-// 脚手架
+// Scaffolding
 // ---------------------------------------------------------------------------
 
 const GUIDE = [
@@ -64,12 +68,14 @@ function freshEnv({ text = GUIDE, file = 'test_guide.md', kind = 'local', achiev
 }
 
 /**
- * 假 Notion。回读**从真写进去的块里还原**,所以保真校验比的确实是"写出去的那份",
- * 不是另编一份数据。`corrupt` 用来模拟各种"写进去了但不对"的情况。
+ * Fake Notion. The read-back is **reconstructed from the blocks actually written**, so what
+ * the fidelity check compares really is "the copy that went out" rather than a separately
+ * invented set of data. `corrupt` models the various "it was written but it is wrong" cases.
  */
 /**
- * 假 Steam。搬家只用得到图标 hash 这一件事。
- * `img = null` 模拟"这游戏 Steam 那边没有图标",页面照样要建得出来。
+ * Fake Steam. Moving a guide needs exactly one thing from it: the icon hash.
+ * `img = null` models "Steam has no icon for this game", where the page still has to be
+ * creatable.
  */
 function fakeSteam(img = 'deadbeef') {
   return {
@@ -90,7 +96,8 @@ function fakeNotion({ pages = [], corrupt = null } = {}) {
       this.iconSets.push({ pageId, url });
     },
     async fetchGuideDbSchema() {
-      // 选项照抄真实攻略库,不然测试会在一个现实中不存在的库上通过
+      // Options copied from the real guide database, or the test would pass against a
+      // database that does not exist in reality
       return {
         titleProperty: 'Name',
         status: {
@@ -135,78 +142,78 @@ const run = (db, config, notion, steam = fakeSteam()) =>
 
 // ---------------------------------------------------------------------------
 
-describe('checkFidelity —— 纯比对', () => {
-  test('`**` 和 `<br>` 归一化之后,两边应该一模一样', () => {
+describe('checkFidelity — pure comparison', () => {
+  test('after `**` and `<br>` are normalised, the two sides should be identical', () => {
     assert.equal(normalizeForCompare('**名字**<br>描述'), '名字\n描述');
   });
 
-  test('完全一致 → ok', () => {
+  test('completely identical → ok', () => {
     const a = [{ text: '**甲**<br>描述', checked: true }];
     const b = [{ text: '甲\n描述', checked: true }];
     assert.equal(checkFidelity(a, b).ok, true);
   });
 
-  test('条数不一样 → 报出来', () => {
+  test('a different count → reported', () => {
     const r = checkFidelity([{ text: 'a' }, { text: 'b' }], [{ text: 'a' }]);
     assert.equal(r.ok, false);
     assert.match(r.problems[0], /条目数对不上/);
   });
 
-  test('文字变了 → 报出来,并且把两边都打出来', () => {
+  test('changed text → reported, with both sides printed', () => {
     const r = checkFidelity([{ text: '原来的字' }], [{ text: '变了的字' }]);
     assert.equal(r.ok, false);
     assert.match(r.problems[0], /原来的字[\s\S]*变了的字/);
   });
 
-  test('文字一样但勾选被改了 → 单独报,这是最隐蔽的一种破坏', () => {
+  test('same text but a changed checked state → reported separately, the most hidden kind of damage', () => {
     const r = checkFidelity([{ text: '甲', checked: false }], [{ text: '甲', checked: true }]);
     assert.equal(r.ok, false);
     assert.match(r.problems[0], /勾选状态被改了/);
   });
 
-  test('问题太多时截断,不把终端刷爆', () => {
+  test('too many problems are truncated rather than flooding the terminal', () => {
     const a = Array.from({ length: 50 }, (_, i) => ({ text: 'a' + i }));
     const b = Array.from({ length: 50 }, (_, i) => ({ text: 'b' + i }));
     assert.ok(checkFidelity(a, b).problems.length <= 11);
   });
 });
 
-describe('planMigration —— 写之前先看清楚', () => {
-  test('已经在 Notion 上的攻略不用搬', async () => {
+describe('planMigration — look before writing', () => {
+  test('a guide already on Notion does not need moving', async () => {
     const { db, config } = freshEnv({ kind: 'notion' });
     await assert.rejects(planMigration(db, { notion: fakeNotion(), config, appid: '1' }), /已经在 Notion/);
   });
 
-  test('没登记过攻略 → 拒绝', async () => {
+  test('no guide registered → refused', async () => {
     const { db, config } = freshEnv();
     await assert.rejects(planMigration(db, { notion: fakeNotion(), config, appid: '999' }), /没有登记/);
   });
 
-  test('没配 Notion → 说清楚去哪配', async () => {
+  test('Notion not configured → says plainly where to configure it', async () => {
     const { db, config } = freshEnv();
     const notion = { ...fakeNotion(), configured: false };
     await assert.rejects(planMigration(db, { notion, config, appid: '1' }), /还没配置 Notion/);
   });
 
-  test('一个 checkbox 都没有的文件 → 拒绝(多半搞错文件了)', async () => {
+  test('a file with not one checkbox → refused (most likely the wrong file)', async () => {
     const { db, config } = freshEnv({ text: 'appid: 1\n\n只是一段普通文字。\n' });
     await assert.rejects(planMigration(db, { notion: fakeNotion(), config, appid: '1' }), /一个 checkbox 都没有/);
   });
 
-  test('预览给出块类型统计和降级行,不写任何东西', async () => {
+  test('the preview gives block-type counts and degraded lines, and writes nothing', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion();
     const p = await planMigration(db, { notion, config, appid: '1' });
     assert.equal(p.todos.length, 3);
-    assert.equal(p.byType.table, 1, '表格该转成 table 块,不是三段文字');
+    assert.equal(p.byType.table, 1, 'a table should become a table block, not three paragraphs');
     assert.equal(p.byType.heading_2, 2);
-    assert.equal(notion.written.length, 0, '预览不能写东西');
+    assert.equal(notion.written.length, 0, 'a preview must not write anything');
     assert.equal(notion.created.length, 0);
   });
 });
 
-describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
-  test('一切正常:建页、写块、核对通过、翻成 notion、本地文件挪走', async () => {
+describe('migrateGuideToNotion — move, then check entry by entry', () => {
+  test('everything normal: create the page, write the blocks, pass the check, switch to notion, archive the local file', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion();
     const r = await run(db, config, notion);
@@ -214,13 +221,13 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
     assert.equal(r.count, 3);
     assert.equal(r.url, 'https://notion.so/new-page');
     assert.equal(notion.created[0].title, '测试游戏');
-    assert.equal(getGuide(db, '1').kind, 'notion', 'guides 表要从 local 翻成 notion');
-    assert.equal(existsSync(join(dir, file)), false, '原位置应该没有了');
-    assert.equal(existsSync(join(dir, MIGRATED_DIR, file)), true, '但必须还在 .migrated/ 里');
-    assert.equal(readFileSync(join(dir, MIGRATED_DIR, file), 'utf8'), GUIDE, '归档的是原文,不是改过的');
+    assert.equal(getGuide(db, '1').kind, 'notion', 'the guides table has to switch from local to notion');
+    assert.equal(existsSync(join(dir, file)), false, 'it should no longer be in its original place');
+    assert.equal(existsSync(join(dir, MIGRATED_DIR, file)), true, 'but it has to still be in .migrated/');
+    assert.equal(readFileSync(join(dir, MIGRATED_DIR, file), 'utf8'), GUIDE, 'what is archived is the original, not a modified copy');
   });
 
-  test('勾选状态原样带过去 —— 搬家不碰勾选', async () => {
+  test('the checked state carries over as is — moving does not touch checkboxes', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion();
     await run(db, config, notion);
@@ -228,31 +235,31 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
     assert.deepEqual(todos.map((t) => t.checked), [true, false, false]);
   });
 
-  test('回读文字对不上 → 抛,而且**本地文件一动不动**', async () => {
+  test('the read-back text does not match → throws, and **the local file does not move an inch**', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion({
       corrupt: (todos) => todos.map((t, i) => (i === 0 ? { ...t, text: '被改过的字' } : t)),
     });
     await assert.rejects(run(db, config, notion), /回读对不上/);
-    assert.equal(existsSync(join(dir, file)), true, '搬失败了原件必须还在');
-    assert.equal(getGuide(db, '1').kind, 'local', 'guides 表也不该改');
+    assert.equal(existsSync(join(dir, file)), true, 'a failed move has to leave the original in place');
+    assert.equal(getGuide(db, '1').kind, 'local', 'the guides table should not change either');
   });
 
-  test('回读少了一条 → 抛,本地文件还在', async () => {
+  test('the read-back is one entry short → throws, the local file is still there', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion({ corrupt: (todos) => todos.slice(1) });
     await assert.rejects(run(db, config, notion), /条目数对不上/);
     assert.equal(existsSync(join(dir, file)), true);
   });
 
-  test('回读把没勾的勾上了 → 抛,本地文件还在', async () => {
+  test('the read-back has ticked a box that was not ticked → throws, the local file is still there', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion({ corrupt: (todos) => todos.map((t) => ({ ...t, checked: true })) });
     await assert.rejects(run(db, config, notion), /勾选状态被改了/);
     assert.equal(existsSync(join(dir, file)), true);
   });
 
-  test('发现逻辑读不出 appid → 抛,本地文件还在', async () => {
+  test('discovery cannot read the appid → throws, the local file is still there', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion();
     notion.extractAppIdFromPageContent = async () => null;
@@ -260,8 +267,9 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
     assert.equal(existsSync(join(dir, file)), true);
   });
 
-  test('一份过不了 lint 的攻略照样搬得动 —— 搬家不评价攻略质量', async () => {
-    // 成就名对不上任何东西、描述也不是原文:lintGuide 会报一堆,但这不关搬家的事
+  test('a guide that cannot pass lint moves all the same — moving does not grade the guide', async () => {
+    // The achievement name matches nothing and the description is not the official text:
+    // lintGuide will report a pile of findings, but none of that is the move's business
     const { db, config } = freshEnv({
       text: 'appid: 1\n\n- [ ] 随便写的一行,根本不是成就名\n- [x] 另一行\n',
     });
@@ -270,7 +278,7 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
     assert.equal(getGuide(db, '1').kind, 'notion');
   });
 
-  test('同名的空页会被填进去,不新建第二页', async () => {
+  test('an empty same-titled page is filled in rather than a second page being created', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏' }] });
     const r = await run(db, config, notion);
@@ -278,7 +286,7 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
     assert.equal(r.url, 'u1');
   });
 
-  test('同名页有内容 → 拒绝,不往用户手写的东西后面追加', async () => {
+  test('a same-titled page with content → refused, nothing is appended after what the user hand-wrote', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏' }] });
     notion.countChildren = async () => 7;
@@ -288,27 +296,29 @@ describe('migrateGuideToNotion —— 搬,然后逐条核对', () => {
 });
 
 /**
- * 图标。搬过去的页面和 `guide-gen` 生成的页面躺在同一个攻略库里,一批有图标一批没有,
- * 看着就是搬运漏了东西 —— 这几条守的就是那个"少了一样东西"的静默失败:
- * 它不报错、回读校验也全绿,只有人打开 Notion 才看得见。
+ * The icon. Moved pages and pages generated by `guide-gen` sit in the same guide database,
+ * and one batch having icons while another does not simply looks like the move dropped
+ * something — these cases guard exactly that "one thing is missing" silent failure:
+ * it raises no error and the read-back check is entirely green; it is visible only when a
+ * person opens Notion.
  */
-describe('页面图标', () => {
-  test('新建的页面带上 Steam 图标', async () => {
+describe('page icon', () => {
+  test('a newly created page carries the Steam icon', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion();
     await run(db, config, notion);
     assert.match(notion.created[0].icon, /deadbeef\.jpg$/);
   });
 
-  test('Steam 没有图标 → 照常建页,不因为这个卡住', async () => {
+  test('Steam has no icon → the page is created as usual and is not blocked over it', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion();
     const r = await run(db, config, notion, fakeSteam(null));
     assert.equal(notion.created[0].icon, null);
-    assert.equal(r.count, 3, '图标拿不到不影响搬家本身');
+    assert.equal(r.count, 3, 'not getting an icon does not affect the move itself');
   });
 
-  test('Steam 接口挂了 → 照常建页', async () => {
+  test('the Steam endpoint is down → the page is created as usual', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion();
     const steam = { async fetchOwnedGames() { throw new Error('429'); } };
@@ -317,7 +327,7 @@ describe('页面图标', () => {
     assert.equal(r.count, 3);
   });
 
-  test('接管的空页原本没有图标 → 补上', async () => {
+  test('an adopted empty page had no icon → one is added', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion({ pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: null }] });
     await run(db, config, notion);
@@ -325,25 +335,25 @@ describe('页面图标', () => {
     assert.equal(notion.iconSets[0].pageId, 'p1');
   });
 
-  test('接管的空页已经有图标 → 一个字都不动(哪怕是个 emoji)', async () => {
+  test('an adopted empty page already has an icon → not one character is touched (even an emoji)', async () => {
     const { db, config } = freshEnv();
     const notion = fakeNotion({
       pages: [{ id: 'p1', url: 'u1', title: '测试游戏', icon: { type: 'emoji', emoji: '🌯' } }],
     });
     await run(db, config, notion);
-    assert.deepEqual(notion.iconSets, [], '用户自己挑的图标不是我们该"顺手改一下"的东西');
+    assert.deepEqual(notion.iconSets, [], 'an icon the user picked is not something for us to fix while we are here');
   });
 });
 
-describe('搬过去的内容本身', () => {
-  test('表格搬成 table 块,不是三行文字', () => {
+describe('the content that was moved', () => {
+  test('a table moves as a table block, not three lines of text', () => {
     const { blocks } = markdownToBlocks(GUIDE);
     const table = blocks.find((b) => b.type === 'table');
-    assert.ok(table, '表格丢了的话,速查表就得让人自己在文字里找列');
+    assert.ok(table, 'if the table is lost, the reference table becomes something to hunt for in prose');
     assert.equal(table.table.children.length, 2);
   });
 
-  test('嵌套子步骤仍然挂在父成就下面', () => {
+  test('nested sub-steps still hang under the parent achievement', () => {
     const { blocks } = markdownToBlocks(GUIDE);
     const todos = blocks.filter((b) => b.type === 'to_do');
     assert.equal(todos.length, 2);
@@ -351,7 +361,7 @@ describe('搬过去的内容本身', () => {
   });
 });
 
-describe('新页的状态按真实进度算', () => {
+describe('a new page takes its status from real progress', () => {
   const statusOf = async (achieved, total) => {
     const { db, config } = freshEnv({ achieved, total });
     const notion = fakeNotion();
@@ -359,19 +369,19 @@ describe('新页的状态按真实进度算', () => {
     return notion.created[0].status.value;
   };
 
-  test('解锁了一部分 → In progress(部落幸存者 50/51 就是这一档)', async () => {
+  test('some unlocked → In progress (50/51 is exactly this case)', async () => {
     assert.equal(await statusOf(50, 51), 'In progress');
   });
 
-  test('一个都没解锁 → Not started', async () => {
+  test('none unlocked → Not started', async () => {
     assert.equal(await statusOf(0, 51), 'Not started');
   });
 
-  test('满成就 → Done', async () => {
+  test('all achievements → Done', async () => {
     assert.equal(await statusOf(51, 51), 'Done');
   });
 
-  test('绝不会是 Staged —— 那一档的含义是"曾经满成就又被顶下来"', async () => {
+  test('never Staged — that value means "was complete and then got knocked below"', async () => {
     for (const [a, t] of [[0, 51], [50, 51], [51, 51]]) {
       assert.notEqual(await statusOf(a, t), 'Staged');
     }
@@ -379,12 +389,13 @@ describe('新页的状态按真实进度算', () => {
 });
 
 /**
- * 互斥标注(`<span underline="true">…</span>`)转成 Notion 的下划线注解之后,
- * **回读的文字里不再有标签** —— 而文件里有。保真校验要是不知道这件事,
- * 每一份带互斥标注的攻略都会在"回读对不上"这一步失败,而且失败得毫无道理:
- * 内容一个字没变,只是标记搬去了 annotations。`**` 早就是这么处理的。
+ * Once a mutual-exclusion note (`<span underline="true">…</span>`) becomes a Notion underline
+ * annotation, **the read-back text no longer contains the tag** — while the file does. If the
+ * fidelity check does not know that, every guide carrying such a note fails at "the read-back
+ * does not match", and fails for no discernible reason: not one character of content changed,
+ * the marking merely moved into annotations. `**` has been handled this way all along.
  */
-describe('互斥标注不该把保真校验搞崩', () => {
+describe('a mutual-exclusion note must not break the fidelity check', () => {
   const WITH_SPAN = [
     'appid: 1',
     '',
@@ -393,14 +404,14 @@ describe('互斥标注不该把保真校验搞崩', () => {
     '',
   ].join('\n');
 
-  test('归一化之后,文件里的标签和 Notion 读回来的纯文字相等', () => {
+  test('after normalisation, the tag in the file equals the plain text read back from Notion', () => {
     assert.equal(
       normalizeForCompare('心得。<span underline="true">互斥警告。</span>'),
       normalizeForCompare('心得。互斥警告。')
     );
   });
 
-  test('带互斥标注的攻略搬得过去,而且逐条核对通过', async () => {
+  test('a guide carrying a mutual-exclusion note moves across and passes the entry-by-entry check', async () => {
     const { db, config } = freshEnv({ text: WITH_SPAN });
     const notion = fakeNotion();
     const r = await run(db, config, notion);
@@ -408,7 +419,7 @@ describe('互斥标注不该把保真校验搞崩', () => {
     assert.equal(getGuide(db, '1').kind, 'notion');
   });
 
-  test('搬过去的那一条真的带了下划线注解,不是把标签当文字写进去', async () => {
+  test('the moved entry really carries an underline annotation rather than the tag being written as text', async () => {
     const { db, config } = freshEnv({ text: WITH_SPAN });
     const notion = fakeNotion();
     await run(db, config, notion);
@@ -418,7 +429,7 @@ describe('互斥标注不该把保真校验搞崩', () => {
     assert.equal(underlined[0].text.content, '如果选另一个则无法获得本成就。');
     assert.ok(
       !runs.some((x) => x.text.content.includes('<span')),
-      '标签不能作为字面文字写进 Notion —— 那正是这次要修的东西'
+      'the tag must not be written into Notion as literal text — that is exactly what was being fixed'
     );
   });
 });
