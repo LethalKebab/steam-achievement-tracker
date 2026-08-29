@@ -1,20 +1,26 @@
 /**
- * AI 攻略生成编排的测试
+ * AI guide generation orchestration
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这个文件守的失败类是**没验过的东西溜进用户的笔记**,以及几条结构性保证会不会被绕开。
- * 前面几个文件守的是"算得对不对",这里守的是"该拦住的有没有拦住":
+ * The failure class this file guards is **something unvalidated slipping into the user's notes**,
+ * plus whether a few structural guarantees can be bypassed. The earlier files guard "is the
+ * computation right"; this one guards "was what should have been stopped actually stopped":
  *
- *  - **草稿绝不能被攻略发现逻辑扫到**。扫到就登记进 guides 表,接着 checkbox-sync
- *    拿一份三轮都没过的攻略去勾用户的框——正是整个方案明令禁止的事
- *  - **`appid:` 行由程序写**。模型抄错一位数,攻略就登记到另一款游戏上,而两边都不会报错
- *  - **`checked-mismatch` 永远不回灌给模型**。回灌等于要求它写 `- [x]`,
- *    而"模型只写 `- [ ]`、程序按数据库打勾"是这套设计的地基
- *  - **名字撞车的成就豁免 checked-mismatch**,否则那 3 款中英文都同名的游戏永远过不了关;
- *    但豁免必须**按名字**算——中文名撞车、英文名唯一的照样勾得上,错误豁免会把真问题藏掉
+ *  - **A draft must never be picked up by guide discovery**. Picked up, it is registered in the
+ *    guides table, and checkbox-sync then takes a guide that failed three rounds and ticks the
+ *    user's boxes — precisely what the whole design forbids
+ *  - **The `appid:` line is written by the program**. One digit mistranscribed by the model
+ *    registers the guide against another game, with neither side reporting anything
+ *  - **`checked-mismatch` is never fed back to the model**. Feeding it back is asking it to write
+ *    `- [x]`, and "the model only writes `- [ ]` while the program ticks from the database" is the
+ *    foundation of this design
+ *  - **An achievement whose name collides is exempt from checked-mismatch**, or the 3 games whose
+ *    Chinese and English names both collide could never pass; but the exemption has to be
+ *    computed **per name** — one whose Chinese name collides while its English name is unique can
+ *    still be ticked, and a wrong exemption hides a real problem
  *
- * 不联网:供应商和 Steam 都是假的。
+ * No network: both the provider and Steam are fake.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -54,7 +60,7 @@ import {
 } from '../lib/guidegen.js';
 
 // ---------------------------------------------------------------------------
-// 脚手架
+// Scaffolding
 // ---------------------------------------------------------------------------
 
 const def = (apiName, nameCn, description = '', nameEn = '') => ({
@@ -69,7 +75,7 @@ const def = (apiName, nameCn, description = '', nameEn = '') => ({
 
 const DEFS = [def('A', '第一步', '完成第一关。'), def('B', '第二步', '完成第二关。')];
 
-/** achievements 表读出来是 snake_case,写进去要 camelCase —— 这里做一次转换 */
+/** The achievements table reads back in snake_case and is written in camelCase — this converts once */
 const toRow = (d) => ({
   apiName: d.api_name,
   gameName: d.game_name,
@@ -89,21 +95,24 @@ function freshEnv({ defs = DEFS } = {}) {
 }
 
 /**
- * 分类那一趟的挡板。**每个假供应商的 send 第一行都要过它。**
+ * The baffle for the classification pass. **The first line of every fake provider's send has to
+ * go through it.**
  *
- * 那一趟走的是单独一条会话(system 是 `REGROUP_SYSTEM`),不该吃掉任何一个脚本
- * 队列 —— 吃掉的表现是「回复用完了 / 脚本用完了」,报的位置和真正的原因差着十万
- * 八千里,而且每写一个新的分段测试都会再踩一次。
+ * That pass runs in its own session (its system is `REGROUP_SYSTEM`) and must not consume any
+ * scripted queue — consuming one presents as "the replies ran out / the script ran out", reported
+ * a very long way from the real cause, and every new sharding test would hit it again.
  *
- * `sections` 传 null 就模拟「分类没成」,走降级路径(等于加这一趟之前的行为)。
+ * Passing null for `sections` models "classification did not succeed" and takes the degraded path
+ * (equivalent to the behaviour before this pass was added).
  */
 const REGROUP_SECTIONS = ['主线', '支线', '收集', '杂项'];
 function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
-  // 认 REGROUP_SYSTEM,格式是「== 标题 / 编号」——`parseRegroupReply` 认的就是那个
+  // Recognised by REGROUP_SYSTEM; the format is 「== 标题 / 编号」 — what `parseRegroupReply` reads
   if (system !== REGROUP_SYSTEM) return null;
   const text = sections
     ? sections.map((x, i) => {
-      // 编号按顺序发下去,最后一节兜住剩下的,保证每个编号都出现一次
+      // Hand the numbers out in order, with the last section catching the remainder, so every
+      // number appears exactly once
       const from = Math.floor((i * count) / sections.length) + 1;
       const to = i === sections.length - 1 ? count : Math.floor(((i + 1) * count) / sections.length);
       const nums = [];
@@ -119,13 +128,15 @@ function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
 }
 
 /**
- * 按顺序吐出预设回复,并记下每次发过去的 user 消息。
+ * Yields the prepared replies in order and records the user message sent each time.
  *
- * **分类那一趟不吃这个队列。** 它走的是单独一条会话(system 是 `REGROUP_SYSTEM`),
- * 这里按 system 认出来单独作答 —— 否则每写一个分段测试都得记着在队列最前面多塞一条
- * 分类回复,而忘了塞的表现是「回复用完了」,报的位置和真正的原因差着十万八千里。
+ * **The classification pass does not consume this queue.** It runs in its own session (its system
+ * is `REGROUP_SYSTEM`) and is recognised by that here and answered separately — otherwise every
+ * new sharding test would have to remember to prepend a classification reply to the queue, and
+ * forgetting presents as "the replies ran out", reported a very long way from the real cause.
  *
- * `sections` 给 null 就模拟「分类没成」,走降级路径(等于加这一趟之前的行为)。
+ * Passing null for `sections` models "classification did not succeed" and takes the degraded path
+ * (equivalent to the behaviour before this pass was added).
  */
 function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'] } = {}) {
   return {
@@ -133,7 +144,8 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
     asked: [],
     regroupAsks: 0,
     regroupPrompt: null,
-    // 联网工具由供应商自己声明,编排层只是转发。测试里不需要真的工具
+    // Web tools are declared by the provider itself and the orchestration layer only forwards
+    // them. A test needs no real tools
     webTools: () => [],
     async send({ system, messages }) {
       const planned = regroupReply(system, sections, replies.count ?? 5);
@@ -144,7 +156,7 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
       }
       this.asked.push(messages.at(-1).content);
       const text = replies[this.asked.length - 1];
-      if (text === undefined) throw new Error('fakeProvider 的回复用完了');
+      if (text === undefined) throw new Error('fakeProvider ran out of replies');
       return this.reply(text);
     },
     reply(text) {
@@ -169,7 +181,7 @@ const fakeSteam = (unlocked = ['A'], rarity = null) => ({
   async fetchPlayerAchievements() {
     return { achievements: DEFS.map((d) => ({ apiname: d.api_name, achieved: unlocked.includes(d.api_name) ? 1 : 0 })) };
   },
-  // 全球解锁率是锦上添花的数据,拿不到就返回 null,流程照走
+  // Global unlock rates are a nice-to-have: return null when they cannot be fetched and the flow carries on
   async fetchGlobalAchievementPercentages() {
     return rarity;
   },
@@ -179,17 +191,18 @@ const GOOD = '```markdown\n## 主线\n\n- [ ] **第一步**<br>完成第一关�
 const MISSING_B = '```markdown\n## 主线\n\n- [ ] **第一步**<br>完成第一关。\n```';
 
 // ---------------------------------------------------------------------------
-// 名字撞车 → 机械打勾够不着
+// Colliding names → out of reach of mechanical ticking
 // ---------------------------------------------------------------------------
 
 describe('unnameableApiNames', () => {
-  test('中英文都撞车 → 两个都够不着', () => {
+  test('both the Chinese and the English collide → both are out of reach', () => {
     const defs = [def('A', '妙手空空', '偷 10 次', 'Skilled Thief'), def('B', '妙手空空', '偷 100 次', 'Skilled Thief')];
     assert.deepEqual([...unnameableApiNames(defs)].sort(), ['A', 'B']);
   });
 
-  test('只有中文名撞车、英文名唯一 → 照样勾得上,不能豁免', () => {
-    // 12 款同名游戏里有 9 款是这种(Steam 的本地化 bug)。错误豁免会把真问题藏起来
+  test('only the Chinese collides while the English is unique → still tickable, so no exemption', () => {
+    // 9 of the 12 games with colliding names are this kind (a Steam localisation bug). A wrong
+    // exemption hides a real problem
     const defs = [
       def('A', '亦敌亦友', '描述一', 'Frenemy'),
       def('B', '亦敌亦友', '描述二', 'Frenemies'),
@@ -197,7 +210,7 @@ describe('unnameableApiNames', () => {
     assert.equal(unnameableApiNames(defs).size, 0);
   });
 
-  test('名字全都唯一 → 空集', () => {
+  test('every name unique → an empty set', () => {
     assert.equal(unnameableApiNames(DEFS).size, 0);
   });
 });
@@ -205,18 +218,18 @@ describe('unnameableApiNames', () => {
 describe('splitFindings', () => {
   const mismatch = (apiName) => ({ level: 'error', code: 'checked-mismatch', apiName, message: 'x' });
 
-  test('撞车成就的 checked-mismatch 算预期内,不拦', () => {
+  test('checked-mismatch on a colliding achievement is expected and does not block', () => {
     const { blocking, expected } = splitFindings([mismatch('A')], new Set(['A']));
     assert.equal(blocking.length, 0);
     assert.equal(expected.length, 1);
   });
 
-  test('没撞车的 checked-mismatch 必须拦 —— 那是我们自己打勾出了错', () => {
+  test('checked-mismatch on a non-colliding one has to block — that means our own ticking went wrong', () => {
     const { blocking } = splitFindings([mismatch('Z')], new Set(['A']));
     assert.equal(blocking.length, 1);
   });
 
-  test('别的规则照拦 —— 豁免是逐条列出来的,不是一类', () => {
+  test('every other rule still blocks — the exemptions are listed one by one, not by class', () => {
     const { blocking } = splitFindings(
       [{ level: 'error', code: 'missing-checkbox', apiName: 'A', message: 'x' }],
       new Set(['A'])
@@ -224,135 +237,139 @@ describe('splitFindings', () => {
     assert.equal(blocking.length, 1);
   });
 
-  test('warn 不进 blocking', () => {
+  test('a warn does not go into blocking', () => {
     const { blocking } = splitFindings([{ level: 'warn', code: 'paraphrased-description', message: 'x' }], new Set());
     assert.equal(blocking.length, 0);
   });
 
   // -------------------------------------------------------------------------
-  // 同名 + Steam 描述是空的:够不着,但不该拦
+  // A colliding name plus an empty Steam description: out of reach, but it must not block
   // -------------------------------------------------------------------------
   const emptyDesc = (apiName, name = 'Proud Player') => ({
     level: 'error', code: 'ambiguous-empty-description', apiName, name, message: '注定同步不上',
   });
 
-  test('描述是空的同名成就算预期内,不拦', () => {
-    // 区分这两个成就的唯一凭据(描述原文)在 Steam 上就不存在,任何重写都满足不了。
-    // 拦下来的实际后果实测过:KINGDOM HEARTS 一份 197/197 全覆盖的攻略被 15 条
-    // 这种错误挡在门外,而它自己的消息就写着"不是攻略能修的"
+  test('a colliding achievement with an empty description is expected and does not block', () => {
+    // The only handle that separates these two achievements (the verbatim description) does not
+    // exist on Steam at all, so no rewrite can satisfy it. The actual consequence of blocking was
+    // measured: one complete 197/197 guide was kept out by 15 findings of this kind, while the
+    // message itself says it is not something a guide can fix
     const { blocking, expected } = splitFindings([emptyDesc('A')], new Set(['A']));
     assert.equal(blocking.length, 0);
     assert.equal(expected.length, 1);
   });
 
-  test('不看 unnameable —— 这条的触发前提本身就含"名字撞车"', () => {
-    // 和 checked-mismatch 那条不同:那一条对任何成就都会报,所以需要 unnameable 这道闸;
-    // 这一条比 unnameable 更窄。传个空集合照样要豁免,否则在 lint 单独跑的路径上会不一致
+  test('unnameable is not consulted — the trigger for this one already includes "the name collides"', () => {
+    // Unlike checked-mismatch: that one is reported for any achievement, so it needs the
+    // unnameable gate; this one is narrower than unnameable. It has to be exempt even given an
+    // empty set, or the path where lint runs on its own becomes inconsistent
     const { blocking, expected } = splitFindings([emptyDesc('A')], new Set());
     assert.equal(blocking.length, 0);
     assert.equal(expected.length, 1);
   });
 
-  test('描述**存在**只是没抄的那种必须继续拦 —— 那一种重写就能修', () => {
-    // 这是这次改动最容易做过头的地方:两种以前共用一个 code,一起放过等于
-    // 把"该抄没抄"也放过,而那正是同名成就唯一的救命绳
+  test('the kind where the description **exists** and merely was not copied has to keep blocking — a rewrite fixes that one', () => {
+    // This is where the change is most easily taken too far: the two used to share one code, and
+    // letting both through means letting "should have copied it and did not" through as well —
+    // which is the one lifeline a colliding achievement has
     const { blocking, expected } = splitFindings(
       [{ level: 'error', code: 'ambiguous-no-description', apiName: 'A', message: '没抄描述原文' }],
       new Set(['A'])
     );
-    assert.equal(blocking.length, 1, '有描述不抄是攻略的问题,不能豁免');
+    assert.equal(blocking.length, 1, 'having a description and not copying it is the guide problem and cannot be exempt');
     assert.equal(expected.length, 0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 回灌内容
+// What is fed back
 // ---------------------------------------------------------------------------
 
-test('回灌给模型的清单里绝不出现 checked-mismatch', () => {
+test('the list fed back to the model never contains checked-mismatch', () => {
   const fb = buildFeedback([
     { level: 'error', code: 'missing-checkbox', message: '成就没有对应的 checkbox 行:第二步' },
     { level: 'error', code: 'checked-mismatch', message: '成就已解锁但框没勾:第一步' },
   ]);
   assert.match(fb, /第二步/);
-  assert.doesNotMatch(fb, /已解锁但框没勾/, '让模型去改勾选状态,它就会开始瞎写 - [x]');
-  assert.match(fb, /完整的修改后全文/, '要全文,不然拼不回一份完整攻略');
+  assert.doesNotMatch(fb, /已解锁但框没勾/, 'ask the model to fix a checked state and it starts writing - [x] at random');
+  assert.match(fb, /完整的修改后全文/, 'the full text is needed, or a complete guide cannot be reassembled');
 });
 
 // ---------------------------------------------------------------------------
-// 文本处理
+// Text processing
 // ---------------------------------------------------------------------------
 
 describe('extractMarkdown', () => {
-  test('抠出围栏里的内容', () => {
+  test('takes what is inside the fence', () => {
     assert.equal(extractMarkdown('好的:\n```markdown\n# 标题\n```\n写完了'), '# 标题');
   });
-  test('多个围栏取最长的(正文一定比零碎示例长)', () => {
+  test('with several fences it takes the longest (the body is always longer than a fragmentary example)', () => {
     assert.equal(extractMarkdown('```\n短\n```\n中间\n```markdown\n很长很长的正文\n```'), '很长很长的正文');
   });
-  test('没有围栏就当整段都是正文', () => {
+  test('with no fence the whole thing is the body', () => {
     assert.equal(extractMarkdown('# 标题\n- [ ] A'), '# 标题\n- [ ] A');
   });
 });
 
 /**
- * 成就行的格式是三段:`- [ ] **名字**<br>官方描述<br>心得`。
+ * An achievement line has three segments: `- [ ] **名字**<br>官方描述<br>心得`.
  *
- * **隐藏成就在 Steam 上没有描述** —— 接口返回空字符串,于是给模型的清单里那一条
- * 写着「官方描述:(Steam 上是空的)」,模型照规则 4「原文照抄」抄了个空的,
- * 中间那段就空了。`notionblocks.js` 把每个 `<br>` 转成一个 `\n`,两个连着就是
- * 页面上成就名和心得之间一行突兀的空白。
+ * **A hidden achievement has no description on Steam** — the endpoint returns an empty string, so
+ * the list given to the model says 「官方描述:(Steam 上是空的)」 for that entry, the model copies
+ * an empty one following rule 4 (copy verbatim), and the middle segment is empty.
+ * `notionblocks.js` turns each `<br>` into one `\n`, and two in a row is a jarring blank line
+ * between the achievement name and the notes on the page.
  *
- * 实测《罗曼圣诞探案集》(926340):50 个成就 28 个是隐藏的,读回来的块长这样 ——
- * `"扑朔迷离\n\n与艾尔耿对话,被问到…"`,而正常的那些是 `"初入酒馆\n欢迎光临白星酒馆\n序章…"`。
- * 超过一半的条目带着这行空白。
+ * Measured on one game (926340): 28 of 50 achievements are hidden, and the blocks read back look
+ * like `"扑朔迷离\n\n与艾尔耿对话,被问到…"` while the normal ones look like
+ * `"初入酒馆\n欢迎光临白星酒馆\n序章…"`. More than half the entries carried that blank line.
  */
-describe('空的官方描述不留空行', () => {
-  test('中间那段是空的就合掉', () => {
+describe('an empty official description leaves no blank line', () => {
+  test('an empty middle segment is collapsed', () => {
     assert.equal(
       collapseEmptyBreaks('- [ ] **扑朔迷离**<br><br>与艾尔耿对话时作答即解锁。'),
       '- [ ] **扑朔迷离**<br>与艾尔耿对话时作答即解锁。'
     );
   });
 
-  test('**三段都有的一个字都不动**', () => {
+  test('**a line with all three segments is untouched**', () => {
     const line = '- [ ] **初入酒馆**<br>欢迎光临白星酒馆<br>序章开场剧情自动解锁。';
     assert.equal(collapseEmptyBreaks(line), line);
   });
 
-  test('空白字符也算空段 —— 模型抄回来的常带一个空格', () => {
+  test('whitespace counts as an empty segment — what the model copies back often carries a space', () => {
     assert.equal(
       collapseEmptyBreaks('- [ ] **名字**<br>   <br>心得'),
       '- [ ] **名字**<br>心得'
     );
   });
 
-  test('末尾多出来的 <br> 一并去掉', () => {
+  test('a trailing <br> is removed as well', () => {
     assert.equal(collapseEmptyBreaks('- [ ] **名字**<br>描述<br>'), '- [ ] **名字**<br>描述');
   });
 
-  test('`<br/>` 和 `<BR>` 都认', () => {
+  test('`<br/>` and `<BR>` are both recognised', () => {
     assert.equal(collapseEmptyBreaks('- [ ] **名字**<br/><BR />心得'), '- [ ] **名字**<br>心得');
   });
 
-  test('缩进的子步骤同样处理', () => {
+  test('an indented sub-step is handled the same way', () => {
     assert.equal(
       collapseEmptyBreaks('  - [ ] **子步骤**<br><br>说明'),
       '  - [ ] **子步骤**<br>说明'
     );
   });
 
-  test('**只动 checkbox 行** —— 正文段落里的连续 <br> 可能是作者真想空一行', () => {
+  test('**only checkbox lines are touched** — consecutive <br> in a prose paragraph may be a deliberate blank line', () => {
     const prose = '这是一段正文<br><br>下面接着写';
     assert.equal(collapseEmptyBreaks(prose), prose);
     assert.equal(collapseEmptyBreaks('## 主线\n\n' + prose), '## 主线\n\n' + prose);
   });
 
-  test('整行都是空段的原样留着 —— 那是别的问题,交给 lint 去报', () => {
+  test('a line that is entirely empty segments is left as it is — that is a different problem, for lint to report', () => {
     assert.equal(collapseEmptyBreaks('- [ ] <br><br>'), '- [ ] <br><br>');
   });
 
-  test('多行里只改需要改的那几行,行数和顺序不变', () => {
+  test('across many lines only the ones that need it change, with the count and order unchanged', () => {
     const src = [
       '## 序章',
       '',
@@ -368,34 +385,36 @@ describe('空的官方描述不留空行', () => {
     assert.doesNotMatch(out, /<br>\s*<br>/);
   });
 
-  test('空输入不炸', () => {
+  test('empty input does not blow up', () => {
     assert.equal(collapseEmptyBreaks(''), '');
     assert.equal(collapseEmptyBreaks(null), '');
     assert.equal(collapseEmptyBreaks(undefined), '');
   });
 
   /**
-   * **两条落地路径都要过这一道。** 整篇生成和局部重写各自 `extractMarkdown` 一次,
-   * 只接一处的话,同一份攻略换个命令就又长出空行来 —— 而那种漂移一个测试都不会红。
+   * **Both landing paths have to pass through this.** Full generation and partial rewrite each
+   * call `extractMarkdown` once, and wiring only one of them means the same guide grows blank
+   * lines again under a different command — a drift no test would turn red for.
    */
-  test('整篇生成和局部重写都接上了', () => {
+  test('both full generation and partial rewrite are wired up', () => {
     const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     for (const f of ['lib/guidegen.js', 'lib/guidepatch.js']) {
       const src = strip(readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
       const calls = [...src.matchAll(/extractMarkdown\(reply\.text\)/g)];
-      assert.ok(calls.length >= 1, `${f} 里找不到 extractMarkdown(reply.text)`);
+      assert.ok(calls.length >= 1, `cannot find extractMarkdown(reply.text) in ${f}`);
       for (const m of calls) {
         const line = src.slice(src.lastIndexOf('\n', m.index) + 1, src.indexOf('\n', m.index));
         assert.match(line, /collapseEmptyBreaks\(/,
-          `${f} 有一处 extractMarkdown 没包 collapseEmptyBreaks:${line.trim()}`);
+          `one extractMarkdown in ${f} is not wrapped in collapseEmptyBreaks: ${line.trim()}`);
       }
     }
   });
 });
 
-describe('程序写头两行,不让模型写', () => {
-  test('模型自己写的标题和 appid 行会被削掉', () => {
-    // appid 抄错一位,攻略就登记到另一款游戏上,而两边都不会报错
+describe('the program writes the first two lines, not the model', () => {
+  test('a title and appid line the model writes itself are stripped', () => {
+    // One digit mistranscribed in the appid registers the guide against another game, with
+    // neither side reporting anything
     const md = '# 别的游戏\n\nappid: 999999\n\n## 主线\n\n- [ ] **第一步**';
     const body = stripLeadingHeader(md);
     assert.equal(body, '## 主线\n\n- [ ] **第一步**');
@@ -404,11 +423,11 @@ describe('程序写头两行,不让模型写', () => {
     assert.doesNotMatch(full, /999999/);
   });
 
-  test('二级标题不会被误删', () => {
+  test('a level-two heading is not deleted by mistake', () => {
     assert.equal(stripLeadingHeader('## 主线成就\n\n- [ ] **A**'), '## 主线成就\n\n- [ ] **A**');
   });
 
-  test('生成的头能被 syncGuidesFromMarkdown 认出来', () => {
+  test('the generated header is recognised by syncGuidesFromMarkdown', () => {
     const head = buildHeader('测试游戏', '1');
     assert.match(head, /^appid:\s*1$/im);
     assert.match(head, /^#\s+测试游戏$/m);
@@ -416,28 +435,28 @@ describe('程序写头两行,不让模型写', () => {
 });
 
 describe('guideFileName', () => {
-  test('英文名削成 slug', () => {
+  test('an English name becomes a slug', () => {
     assert.equal(guideFileName("Sultan's Game", '1'), 'sultan_s_game_achievements.md');
   });
-  test('中文名削不出 ASCII 就退回 appid', () => {
+  test('a Chinese name yields no ASCII, so it falls back to the appid', () => {
     assert.equal(guideFileName('空之轨迹', '3447040'), 'app_3447040_achievements.md');
   });
 });
 
-test('成就清单给模型标出同名的那几条', () => {
+test('the achievement list marks the colliding entries for the model', () => {
   const defs = [def('A', '妙手空空', '偷 10 次'), def('B', '妙手空空', '偷 100 次'), def('C', '独一份', '别的')];
   const list = buildAchievementList('鬼谷八荒', '1', defs);
   assert.equal((list.match(/⚠️ 同名/g) ?? []).length, 2);
   assert.match(list, /共 3 个/);
-  assert.match(list, /偷 10 次/, '描述要给出去,不然模型没法照抄原文');
+  assert.match(list, /偷 10 次/, 'the description has to go out, or the model cannot copy it verbatim');
 });
 
 // ---------------------------------------------------------------------------
-// 前置检查:所有拒绝理由都要在花钱之前给出来
+// Preflight: every refusal reason has to be given before any money is spent
 // ---------------------------------------------------------------------------
 
-describe('planGuide 的闸门', () => {
-  test('库里没有这个 appid → 拒绝', async () => {
+describe('the planGuide gates', () => {
+  test('the appid is not in the library → refused', async () => {
     const { db, config } = freshEnv();
     await assert.rejects(
       planGuide(db, { config, steam: fakeSteam(), appid: '999' }),
@@ -446,14 +465,15 @@ describe('planGuide 的闸门', () => {
   });
 
   /**
-   * **缺成就详情不再是拒绝理由,而是当场去取。**
+   * **Missing achievement detail is no longer a refusal reason; it is fetched on the spot.**
    *
-   * 原来这里拒绝并附一句"先跑 `node tracker.js sync --schema`",而 Dashboard
-   * (尤其打包版)的用户根本没有终端 —— 那句话对他们是死胡同。而且这不是罕见情况:
-   * 刚添加的游戏还没轮到批量同步,已打满的游戏则被 syncAchievementSchema 有意跳过
-   * (`rate === 1`),对后者那堵墙是**永久**的,按多少次同步都没用。
+   * This used to refuse with "run `node tracker.js sync --schema` first", and a Dashboard user
+   * (especially in the packaged build) has no terminal at all — that sentence is a dead end for
+   * them. And it is not a rare case: a newly added game has not had its turn in the batch sync
+   * yet, while a completed game is deliberately skipped by syncAchievementSchema (`rate === 1`),
+   * so for the latter that wall is **permanent** no matter how many syncs are run.
    */
-  test('没有成就详情 → 当场去 Steam 取一次,不再要求先跑命令行', async () => {
+  test('no achievement detail → fetch once from Steam on the spot rather than demanding a command line', async () => {
     const { db, config } = freshEnv({ defs: [] });
     let asked = 0;
     const steam = {
@@ -464,11 +484,11 @@ describe('planGuide 的闸门', () => {
       },
     };
     const plan = await planGuide(db, { config, steam, appid: '1' });
-    assert.equal(plan.defs.length, 1, '取回来的成就要能直接用');
-    assert.ok(asked >= 1, '应该真的去问了 Steam');
+    assert.equal(plan.defs.length, 1, 'what was fetched has to be directly usable');
+    assert.ok(asked >= 1, 'Steam really should have been asked');
   });
 
-  test('Steam 那边也没有成就清单 → 才拒绝,而且不提命令行', async () => {
+  test('Steam has no achievement list either → only then refuse, and without mentioning a command line', async () => {
     const { db, config } = freshEnv({ defs: [] });
     const steam = { ...fakeSteam(), async fetchAchievementSchema() { return null; } };
     await assert.rejects(
@@ -476,13 +496,13 @@ describe('planGuide 的闸门', () => {
       (err) => {
         assert.equal(err.code, 'no-schema');
         assert.doesNotMatch(err.message, /tracker\.js|config\.json|sync --schema/,
-          '这句话会原样出现在 Dashboard 上,不能让没有终端的人去敲命令');
+          'this sentence appears verbatim on the Dashboard, so it must not send someone with no terminal to type a command');
         return true;
       }
     );
   });
 
-  test('成就太多 → 拒绝,但把「该改哪个配置」留给 CLI 自己说', async () => {
+  test('too many achievements → refused, leaving "which setting to change" to the CLI', async () => {
     const { db, config } = freshEnv();
     config.ai.maxAchievements = 1;
     await assert.rejects(
@@ -490,20 +510,20 @@ describe('planGuide 的闸门', () => {
       (err) => {
         assert.match(err.message, /上限/);
         assert.equal(err.code, 'too-many-achievements');
-        assert.deepEqual(err.detail, { count: 2, max: 1 }, '数字要带出去,CLI 才拼得出建议');
-        assert.doesNotMatch(err.message, /config\.json/, 'Dashboard 用户改不了配置文件');
+        assert.deepEqual(err.detail, { count: 2, max: 1 }, 'the numbers have to come through, or the CLI cannot assemble its advice');
+        assert.doesNotMatch(err.message, /config\.json/, 'a Dashboard user cannot edit the config file');
         return true;
       }
     );
   });
 
-  test('已经有 Notion 攻略页 → 拒绝(一个 appid 一个后端)', async () => {
+  test('a Notion guide page already exists → refused (one appid, one backend)', async () => {
     const { db, config } = freshEnv();
     upsertGuide(db, { appid: '1', name: '测试游戏', url: 'https://notion.so/x', kind: 'notion' });
     await assert.rejects(planGuide(db, { config, steam: fakeSteam(), appid: '1' }), /Notion/);
   });
 
-  test('目标文件已存在 → 拒绝覆盖(备份/diff/确认是第 8 步)', async () => {
+  test('the target file already exists → refuse to overwrite (backup / diff / confirmation is step 8)', async () => {
     const { db, config } = freshEnv();
     writeFileSync(join(config.guidesDir, guideFileName('测试游戏', '1')), '旧的攻略');
     await assert.rejects(
@@ -516,8 +536,9 @@ describe('planGuide 的闸门', () => {
     );
   });
 
-  test('Steam 给不出解锁状态 → 拒绝生成', async () => {
-    // 全部不勾的攻略是一份错的攻略,而且会被报成一堆 checked-mismatch,看着像模型写错了
+  test('Steam cannot give the unlock state → refuse to generate', async () => {
+    // A guide with nothing ticked is a wrong guide, and it would be reported as a pile of
+    // checked-mismatch findings, looking as though the model wrote it wrongly
     const { db, config } = freshEnv();
     const steam = { async fetchPlayerAchievements() { return { retry: true }; } };
     await assert.rejects(planGuide(db, { config, steam, appid: '1' }), /解锁状态/);
@@ -525,11 +546,11 @@ describe('planGuide 的闸门', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 整条流水线
+// The whole pipeline
 // ---------------------------------------------------------------------------
 
 describe('generateGuide', () => {
-  test('一轮过关:落盘、机械打勾、登记进 guides 表', async () => {
+  test('one round passes: it lands, is mechanically ticked and is registered in the guides table', async () => {
     const { db, config } = freshEnv();
     const provider = fakeProvider([GOOD]);
     const r = await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
@@ -539,26 +560,26 @@ describe('generateGuide', () => {
     assert.ok(existsSync(r.path));
 
     const text = readFileSync(r.path, 'utf8');
-    // 模型写的全是 `- [ ]`,已解锁的那个由程序勾上
-    assert.match(text, /- \[x\] \*\*第一步\*\*/, '已解锁的要被机械打勾');
-    assert.match(text, /- \[ \] \*\*第二步\*\*/, '没解锁的不许勾');
+    // Everything the model writes is `- [ ]`; the unlocked one is ticked by the program
+    assert.match(text, /- \[x\] \*\*第一步\*\*/, 'the unlocked one has to be mechanically ticked');
+    assert.match(text, /- \[ \] \*\*第二步\*\*/, 'the locked one must not be ticked');
     assert.match(text, /^# 测试游戏/);
     assert.match(text, /^appid: 1$/m);
 
-    // 用真正的发现逻辑登记,Dashboard 上才看得到链接
+    // Registered through the real discovery logic, which is what makes the link visible on the Dashboard
     assert.equal(allGuides(db).length, 1);
     assert.equal(allGuides(db)[0].kind, 'local');
     assert.ok(r.registered);
   });
 
-  test('草稿在过关后清掉,不留在 .drafts/', async () => {
+  test('the draft is cleaned up after passing and does not stay in .drafts/', async () => {
     const { db, config } = freshEnv();
     const r = await generateGuide(db, { config, provider: fakeProvider([GOOD]), steam: fakeSteam(), appid: '1' });
     assert.equal(existsSync(join(config.guidesDir, DRAFTS_DIR, guideFileName('测试游戏', '1'))), false);
     assert.equal(r.draftPath, null);
   });
 
-  test('第一轮漏了成就,回灌之后第二轮补上 → 过关', async () => {
+  test('the first round missed an achievement and the second fills it in after feedback → pass', async () => {
     const { db, config } = freshEnv();
     const provider = fakeProvider([MISSING_B, GOOD]);
     const r = await generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1', rounds: 3 });
@@ -566,32 +587,33 @@ describe('generateGuide', () => {
     assert.equal(r.ok, true);
     assert.equal(r.rounds, 2);
     assert.equal(provider.asked.length, 2);
-    assert.match(provider.asked[1], /第二步/, '回灌的清单要指名道姓说漏了哪个成就');
+    assert.match(provider.asked[1], /第二步/, 'the feedback list has to name which achievement was missed');
   });
 
-  test('三轮都没过 → 留成草稿,不落盘,而且发现逻辑扫不到它', async () => {
+  test('all three rounds fail → it stays a draft, does not land, and discovery cannot see it', async () => {
     const { db, config } = freshEnv();
     const provider = fakeProvider([MISSING_B, MISSING_B, MISSING_B]);
     const r = await generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1', rounds: 3 });
 
     assert.equal(r.ok, false);
     assert.equal(r.rounds, 3);
-    assert.equal(provider.asked.length, 3, '就是 3 轮,不能多问');
+    assert.equal(provider.asked.length, 3, 'exactly 3 rounds, no more');
     assert.equal(r.path, null);
-    assert.ok(existsSync(r.draftPath), '没过关也要留下来:丢掉等于烧掉钱还什么都不剩');
+    assert.ok(existsSync(r.draftPath), 'a failed run is kept too: throwing it away burns the money and leaves nothing');
     assert.equal(r.blocking.some((f) => f.code === 'missing-checkbox'), true);
 
-    // 这是整个文件最要紧的一条:没验过的草稿绝不能被登记,
-    // 否则 checkbox-sync 会拿它去勾用户的框
+    // This is the most important case in the file: an unvalidated draft must never be registered,
+    // or checkbox-sync takes it and ticks the user's boxes
     const found = syncGuidesFromMarkdown(db, config);
-    assert.equal(found.files, 0, '.drafts/ 是子目录,readdirSync 非递归 + 只认 .md,扫不到');
+    assert.equal(found.files, 0, '.drafts/ is a subdirectory, and readdirSync is non-recursive and .md-only, so it is not seen');
     assert.equal(allGuides(db).length, 0);
   });
 
-  // 这里只有两个成就,切不动(见 MIN_CHUNK),所以走的是"停下来"那条路。
-  // 成就够多时截断会先自己切小重问,见「截断之后自己切小重问」那一组 ——
-  // 两条路的共同点才是这条测试真正钉住的东西:**半份攻略绝不往下走**
-  test('模型返回被截断(max_tokens)且切不动 → 当场停,不拿半份攻略往下走', async () => {
+  // There are only two achievements here, too few to shard (see MIN_CHUNK), so this takes the
+  // "stop" path. With enough achievements, a truncation first shards smaller and asks again — see
+  // the "shard smaller and ask again after a truncation" group. What the two paths share is what
+  // this case really pins: **half a guide never goes further**
+  test('the model response was truncated (max_tokens) and cannot be sharded → stop on the spot rather than carrying half a guide forward', async () => {
     const { db, config } = freshEnv();
     const provider = {
       model: 'claude-opus-5',
@@ -616,17 +638,18 @@ describe('generateGuide', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 同名 + 描述为空:整份要能落地,而且要报出来
+  // A colliding name with an empty description: the whole guide has to land, and it has to be reported
   // -------------------------------------------------------------------------
-  // 复刻 KINGDOM HEARTS -HD 1.5+2.5 ReMIX- 的形状:四合一合集,每款子游戏各有一个
-  // 自己的「Proud Player」,而 Steam 对它们的描述返回空字符串。
-  // 改之前:197 条全写对的攻略被 15 条这种错误拦掉,先花三轮让模型抄不存在的描述,
-  // 最后什么都没落地。
-  describe('同名成就在 Steam 上没有描述', () => {
+  // Reproducing the shape of a four-in-one compilation, where each sub-game has its own
+  // 「Proud Player」 and Steam returns an empty string as their description.
+  // Before the change: a guide with all 197 entries written correctly was blocked by 15 findings
+  // of this kind, after first spending three rounds asking the model to copy a description that
+  // does not exist, and nothing landed in the end.
+  describe('a colliding achievement with no description on Steam', () => {
     const TWINS = [
-      def('ACH_001', 'Proud Player', ''),      // 描述为空 —— 谁都修不了
-      def('ACH_104', 'Proud Player', ''),      // 同名,同样为空
-      def('ACH_007', '独一份', '完成第七关。'), // 正常的一条,当对照
+      def('ACH_001', 'Proud Player', ''),      // empty description — nobody can fix it
+      def('ACH_104', 'Proud Player', ''),      // same name, equally empty
+      def('ACH_007', '独一份', '完成第七关。'), // a normal one, as a control
     ];
     const twinsEnv = () => {
       const dir = mkdtempSync(join(tmpdir(), 'guidegen-twins-'));
@@ -641,46 +664,48 @@ describe('generateGuide', () => {
       },
       async fetchGlobalAchievementPercentages() { return null; },
     });
-    // 三条都写了,名字一字不差 —— 攻略这边没有任何毛病
+    // All three written, with the names character for character — nothing wrong on the guide side
     const BODY =
       '```markdown\n## 全部\n\n' +
       '- [ ] **Proud Player**<br>隐藏成就:Proud 难度通关。<br>KH1 那一份。\n' +
       '- [ ] **Proud Player**<br>隐藏成就:Proud 难度通关。<br>KH2 那一份。\n' +
       '- [ ] **独一份**<br>完成第七关。<br>顺着主线走。\n```';
 
-    test('一轮就落地,不再拿它去重写', async () => {
+    test('it lands in one round and is not sent back for a rewrite', async () => {
       const { db, config } = twinsEnv();
       const provider = fakeProvider([BODY]);
       const r = await generateGuide(db, { config, provider, steam: twinsSteam(), appid: '1' });
 
-      assert.equal(r.ok, true, '攻略写对了就该落地 —— 拦它的那条错误谁都改不动');
-      assert.ok(r.path, '要真的写进 guides/,不是留在草稿里');
-      assert.equal(provider.asked.length, 1, '一轮就够,不该再花两轮抄不存在的描述');
+      assert.equal(r.ok, true, 'a correctly written guide should land — the finding blocking it is one nobody can fix');
+      assert.ok(r.path, 'it has to be really written into guides/, not left as a draft');
+      assert.equal(provider.asked.length, 1, 'one round is enough; it should not spend two more copying a description that does not exist');
       assert.equal(r.blocking.length, 0);
     });
 
-    test('落地了也必须报出来 —— 这几个框自动勾选永远认不出', async () => {
+    test('landing does not excuse silence — these boxes can never be recognised by automatic ticking', async () => {
       const { db, config } = twinsEnv();
       const r = await generateGuide(db, {
         config, provider: fakeProvider([BODY]), steam: twinsSteam(), appid: '1',
       });
-      // 不拦路 ≠ 不吭声。不报的话,用户要等到某天发现有两个框一直没动才会知道,
-      // 而那时候看起来更像是同步坏了
+      // Not blocking ≠ staying silent. Without a report, the user finds out one day by noticing
+      // two boxes that never move, and by then it looks more like the sync is broken
       const named = r.expected.filter((f) => f.code === 'ambiguous-empty-description');
-      assert.equal(named.length, 2, '两个撞名的成就各报一条');
+      assert.equal(named.length, 2, 'one finding for each colliding achievement');
       assert.deepEqual([...new Set(named.map((f) => f.name))], ['Proud Player'],
-        '要报 Steam 上那个写法,方便用户对得上');
-      // 正常那条不该被卷进来
+        'report the spelling as it is on Steam, so the user can match it up');
+      // The normal one should not be dragged in
       assert.ok(!named.some((f) => f.apiName === 'ACH_007'));
     });
 
-    test('同一轮里还有真问题时,打回清单里也不能出现它', async () => {
-      // **`MODEL_FIXABLE` 里不放它,是第二道防线,而且这一条测试是唯一能看见它的角度。**
+    test('with a real problem in the same round, it still must not appear in the send-back list', async () => {
+      // **Keeping it out of `MODEL_FIXABLE` is the second line of defence, and this case is the
+      // only angle from which it is visible.**
       //
-      // 平时 splitFindings 已经把它挪进 expected 了,重写轮压根碰不到 —— 所以把它加回
-      // MODEL_FIXABLE 也不会有任何测试变红(变异验证时实测如此)。只有同一轮里存在**另一条**
-      // 真该修的错误、重写轮真的跑起来的时候,这个成员资格才起作用:
-      // `buildFeedback` 是直接按 MODEL_FIXABLE 过 findings 的,没有先过 splitFindings
+      // Normally splitFindings has already moved it into expected and the rewrite round never
+      // touches it — so adding it back into MODEL_FIXABLE turns no test red (measured during
+      // mutation testing). The membership only matters when **another** genuinely fixable error
+      // exists in the same round and the rewrite round really runs: `buildFeedback` filters
+      // findings by MODEL_FIXABLE directly, without going through splitFindings first
       const MIXED = [
         def('ACH_001', 'Proud Player', ''),
         def('ACH_104', 'Proud Player', ''),
@@ -697,8 +722,9 @@ describe('generateGuide', () => {
         },
         async fetchGlobalAchievementPercentages() { return null; },
       };
-      // 两份都写全,别用 replace 去拼 —— 第一个 ``` 是**开**围栏,替掉它等于交出去
-      // 一份没有围栏的正文,而 extractMarkdown 那条兜底又会让它看着像正常工作
+      // Write both out in full rather than assembling with replace — the first ``` is the
+      // **opening** fence, and replacing it hands over a body with no fence at all, which the
+      // extractMarkdown fallback then makes look like normal operation
       const TWO_TWINS =
         '- [ ] **Proud Player**<br>隐藏成就。<br>KH1。\n' +
         '- [ ] **Proud Player**<br>隐藏成就。<br>KH2。\n';
@@ -709,15 +735,15 @@ describe('generateGuide', () => {
       const r = await generateGuide(db, { config, provider, steam, appid: '1' });
 
       assert.equal(r.ok, true);
-      assert.equal(provider.asked.length, 2, '第一轮漏了一条,第二轮补上');
+      assert.equal(provider.asked.length, 2, 'one was missed in the first round and filled in on the second');
       const feedback = provider.asked[1];
-      assert.match(feedback, /漏掉的那条/, '真该修的那条要在打回清单里');
+      assert.match(feedback, /漏掉的那条/, 'the genuinely fixable one has to be in the send-back list');
       assert.doesNotMatch(feedback, /注定同步不上/,
-        '描述是空的那条不能出现在打回清单里 —— 那是要求模型抄一个不存在的字符串');
+        'the one with an empty description must not appear in the send-back list — that is asking the model to copy a string that does not exist');
     });
 
-    test('描述**存在**只是没抄的时候,照旧打回重写', async () => {
-      // 反向那一半:别把"该抄没抄"也一起放过了
+    test('when the description **exists** and merely was not copied, it is still sent back for a rewrite', async () => {
+      // The other half: do not let "should have copied it and did not" through as well
       const WITH_DESC = [
         def('ACH_001', 'Proud Player', 'Clear on Proud.'),
         def('ACH_104', 'Proud Player', 'Clear on Critical.'),
@@ -733,19 +759,19 @@ describe('generateGuide', () => {
         },
         async fetchGlobalAchievementPercentages() { return null; },
       };
-      // 两条都不抄描述 → 该打回
+      // Neither copies the description → it has to be sent back
       const noDesc = '```markdown\n## 全部\n\n- [ ] **Proud Player**<br>随便写的<br>心得\n' +
         '- [ ] **Proud Player**<br>也是随便写的<br>心得\n```';
       const provider = fakeProvider([noDesc, noDesc, noDesc]);
       const r = await generateGuide(db, { config, provider, steam, appid: '1' });
 
-      assert.equal(r.ok, false, '有描述不抄是攻略的问题,必须拦');
-      assert.ok(provider.asked.length > 1, '这一种要回灌重写');
+      assert.equal(r.ok, false, 'having a description and not copying it is the guide problem and has to block');
+      assert.ok(provider.asked.length > 1, 'this kind has to be fed back for a rewrite');
       assert.ok(r.blocking.some((f) => f.code === 'ambiguous-no-description'));
     });
   });
 
-  test('rounds 不合法当场拦下(否则会被读成"过关了"再去复制不存在的草稿)', async () => {
+  test('an invalid rounds value is stopped on the spot (otherwise it reads as "passed" and then copies a draft that does not exist)', async () => {
     const { db, config } = freshEnv();
     for (const bad of [0, -1, NaN, 2.5]) {
       await assert.rejects(
@@ -755,7 +781,7 @@ describe('generateGuide', () => {
     }
   });
 
-  test('用量跨轮累加,能算出花费', async () => {
+  test('usage accumulates across rounds so the cost can be worked out', async () => {
     const { db, config } = freshEnv();
     const r = await generateGuide(db, {
       config, provider: fakeProvider([MISSING_B, GOOD]), steam: fakeSteam(), appid: '1', rounds: 3,
@@ -764,7 +790,7 @@ describe('generateGuide', () => {
     assert.equal(r.usage.outputTokens, 40);
   });
 
-  test('system 提示词逐字不变,回灌那轮才能命中前缀缓存', async () => {
+  test('the system prompt is byte-identical, which is what lets the feedback round hit the prefix cache', async () => {
     const { db, config } = freshEnv();
     const seen = [];
     const provider = fakeProvider([MISSING_B, GOOD]);
@@ -775,11 +801,11 @@ describe('generateGuide', () => {
     };
     await generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1', rounds: 3 });
     assert.equal(seen.length, 2);
-    assert.equal(seen[0], seen[1], 'system 变一个字节,后面的缓存全作废');
+    assert.equal(seen[0], seen[1], 'one byte different in system and the whole cache behind it is void');
   });
 });
 
-test('草稿目录建在 guidesDir 底下,但发现逻辑看不见它', () => {
+test('the drafts directory sits under guidesDir, and discovery cannot see it', () => {
   const { db, config } = freshEnv();
   mkdirSync(join(config.guidesDir, DRAFTS_DIR), { recursive: true });
   writeFileSync(join(config.guidesDir, DRAFTS_DIR, 'x_achievements.md'), '# X\n\nappid: 42\n\n- [ ] **A**');
@@ -788,36 +814,39 @@ test('草稿目录建在 guidesDir 底下,但发现逻辑看不见它', () => {
   assert.equal(allGuides(db).length, 0);
 });
 
-test('只有开围栏没有闭围栏时也要抠干净(模型忘了收尾 / 输出被截断)', () => {
-  // 实测踩过(2026-08-10):成对匹配的正则匹配不上,于是 ```markdown 那一行原样落进了
-  // 攻略文件。**校验器抓不到** —— 那行既不是 checkbox 也不违反任何规则,51/51 照样全绿
+test('an opening fence with no closing fence still has to be extracted cleanly (the model forgot to close it / the output was truncated)', () => {
+  // Hit on 2026-08-10: the paired regex did not match, so the ```markdown line landed verbatim in
+  // the guide file. **The validator cannot catch it** — that line is neither a checkbox nor a
+  // violation of any rule, and 51/51 stayed green
   assert.equal(extractMarkdown('```markdown\n## 主线\n\n- [ ] **A**'), '## 主线\n\n- [ ] **A**');
   assert.equal(extractMarkdown('```md\n- [ ] **A**\n```'), '- [ ] **A**');
-  // 正常成对的、以及压根没有围栏的,行为不变
+  // Properly paired ones, and ones with no fence at all, behave exactly as before
   assert.equal(extractMarkdown('```markdown\n正文\n```'), '正文');
   assert.equal(extractMarkdown('## 主线'), '## 主线');
 });
 
 // ---------------------------------------------------------------------------
-// 提示词 ↔ SKILL.md 的漂移
+// Drift between the prompt and SKILL.md
 // ---------------------------------------------------------------------------
 
-describe('提示词和 SKILL.md 不能悄悄脱节', () => {
+describe('the prompt and SKILL.md must not drift apart quietly', () => {
   const skillPath = new URL('../.claude/skills/achievement-guide-writing/SKILL.md', import.meta.url);
 
-  /** SKILL.md 里的规则标题:`## 规则一:…` 取「规则一」,`### 3.1 …` 取「3.1」 */
+  /** Rule headings in SKILL.md: `## 规则一:…` yields 「规则一」, `### 3.1 …` yields 「3.1」 */
   /**
-   * SKILL.md 里所有需要表态的条目。
+   * Every entry in SKILL.md that needs a position taken on it.
    *
-   * **不带编号的 `###` 子节也要算进来 —— 这一条是补出来的。** 原来只抓 `## 规则N`
-   * 和 `### N.N`,于是往任何一条规则底下加一个不带编号的子节,处置表一个字都不会响。
-   * 实测漏过一次:规则二的处置写着「没进 —— 截图不在 v1 范围」,而后来加进去的
-   * 「贴不了截图的时候:带时间点的视频链接」**是进了提示词的**,处置结论因此变了,
-   * 却没有任何东西提醒去更新 —— SKILL.md 那段还反过来写着「(见「规则二」的处置)」,
-   * 指着一条说它没进的记录。
+   * **Unnumbered `###` subsections count too — that was added later.** It used to capture only
+   * `## 规则N` and `### N.N`, so adding an unnumbered subsection under any rule left the
+   * disposition table completely silent. Measured once: rule 二's disposition said 「没进 —— 截图
+   * 不在 v1 范围」, while the subsection added later, 「贴不了截图的时候:带时间点的视频链接」,
+   * **did go into the prompt**, so the disposition changed with nothing to prompt an update — and
+   * that passage in SKILL.md said 「(见「规则二」的处置)」, pointing at a record that says it did
+   * not go in.
    *
-   * 子节按 `规则N/标题` 作 key。改标题会让这条测试红,这是想要的:改一个子节的标题
-   * 正是回头确认「它到底进没进提示词」的时候。
+   * A subsection is keyed as `规则N/标题`. Changing a heading turns this test red, which is the
+   * intent: changing a subsection heading is exactly the moment to confirm whether it went into
+   * the prompt.
    */
   function skillRuleKeys() {
     const text = readFileSync(skillPath, 'utf8');
@@ -835,275 +864,302 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
     return keys;
   }
 
-  test('SKILL.md 的每条规则都要在处置表里有交代', () => {
-    // RULES 是 SKILL.md 的手抄摘要(约 1/4 体量),全文不能直接发 —— 里面整节讲往 Notion
-    // 写、讲截图、讲委托子 agent,8.0 还明写"默认建在 Notion",发过去会主动误导模型。
-    // 但手抄就会漂移,而这个项目已经被"文档和代码各说各话"咬过一次。
-    // 这条测试把漂移变成一次失败:改了 SKILL.md 就必须表态。
+  test('every rule in SKILL.md has to be accounted for in the disposition table', () => {
+    // RULES is a hand-copied summary of SKILL.md (about a quarter of its size); the full text
+    // cannot be sent — whole sections are about writing to Notion, about screenshots, about
+    // delegating to sub-agents, and 8.0 states outright 「默认建在 Notion」, so sending it would
+    // actively mislead the model.
+    // But hand-copying drifts, and this project has already been bitten once by documentation and
+    // code saying different things.
+    // This test turns that drift into a failure: change SKILL.md and a position has to be taken.
     const missing = [...skillRuleKeys()].filter((k) => !(k in SKILL_RULE_DISPOSITION));
     assert.deepEqual(
       missing,
       [],
-      `SKILL.md 里这几条在 lib/guidegen.js 的 SKILL_RULE_DISPOSITION 里没有交代:${missing.join('、')}\n` +
-        '要么把它加进 RULES 提示词,要么在处置表里写明为什么不加。'
+      `these entries in SKILL.md are not accounted for in SKILL_RULE_DISPOSITION in lib/guidegen.js: ${missing.join('、')}\n` +
+        'either add it to the RULES prompt, or state in the disposition table why it is not added.'
     );
   });
 
-  // **处置表只对得上「标题」,对不上「内容」。** 规则一在表里写着「进了」,而它的
-  // 三个条件在 SKILL.md 和 RULES 里各存一份手抄 —— 改一边忘另一边,处置表一个字
-  // 都不会响,而两份不同口径的规则就是"文档和代码各说各话"的又一次。
-  // 苏丹的游戏「知识」那次改的正是条件 2,所以这条把三个条件都钉成同口径。
-  test('嵌套的三个条件,两份手抄必须同口径', () => {
+  // **The disposition table matches "headings", not "content".** Rule 一 is marked as included,
+  // while its three conditions exist as two hand-copied versions, in SKILL.md and in RULES —
+  // change one and forget the other and the disposition table stays completely silent, leaving two
+  // differently worded rules, which is documentation and code saying different things all over
+  // again.
+  // The one real case changed condition 2, so this pins all three conditions to one wording.
+  test('the three nesting conditions have to be worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /序号不是身份/, `${name} 少了条件 1`);
-      assert.match(text, /写得出做法/, `${name} 的条件 2 要拿"这一行有没有内容"当判据`);
-      assert.match(text, /互相替代/, `${name} 少了条件 3`);
+      assert.match(text, /序号不是身份/, `${name} is missing condition 1`);
+      assert.match(text, /写得出做法/, `${name} condition 2 has to use "does this line have content" as its criterion`);
+      assert.match(text, /互相替代/, `${name} is missing condition 3`);
       assert.doesNotMatch(text, /游戏自己不替你数/,
-        `${name} 还留着旧判据 —— 有计数器就不嵌套,会把全收集类成就整类挡在门外`);
+        `${name} still carries the old criterion — "no nesting when the game counts for you" keeps the whole collect-everything class out`);
     }
   });
 
-  // 苏丹的游戏「创造」:613 字**一整段**。内容其实是对的,模型自己都写了
-  // "前置准备:…"和"流程:1)…6)",但全挤在同一个 <br> 段里 —— 结构一点没落到页面上,
-  // 读的人分不出哪句是准备、哪句是操作、哪句是雷。
+  // One real case: 613 characters in **one paragraph**. The content was in fact right, and the
+  // model itself wrote 「前置准备:…」 and 「流程:1)…6)」, but all crammed into the same `<br>`
+  // segment — not one bit of the structure reached the page, and a reader cannot tell which
+  // sentence is preparation, which is an action and which is a trap.
   //
-  // 规则里从来没说过心得段要分行:硬规则 1 只定了「名字<br>描述<br>心得」三段,
-  // 心得内部长什么样一个字没提,于是"写详细"被执行成了"写长"。
-  test('心得段的分行规矩,两份手抄必须同口径', () => {
+  // The rules never said the notes segment has to be broken into lines: hard rule 1 only fixes the
+  // three segments 「名字<br>描述<br>心得」 and says nothing about what the notes look like inside,
+  // so "write in detail" was executed as "write long".
+  test('the line-breaking rule for the notes segment has to be worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /前置、步骤、警告分行写/, `${name} 少了分行规矩`);
-      assert.match(text, /一步一行/, `${name} 要说清步骤多了就一步一行`);
+      assert.match(text, /前置、步骤、警告分行写/, `${name} is missing the line-breaking rule`);
+      assert.match(text, /一步一行/, `${name} has to say that with many steps it becomes one step per line`);
       assert.match(text, /不是字数/,
-        `${name} 的判据要是"混没混进两种性质的东西" —— 卡字数会把该长的也砍短`);
+        `${name} criterion has to be "are two kinds of thing mixed in" — a character count cuts short what should be long`);
     }
   });
 
-  // 同一条成就还暴露了第二件事:嵌套那一节从头到尾只举收集品的例子
-  //(神庙、配方、支线、词条),模型于是把它读成"收集品的写法",
-  // 而「创造」是个六阶段的长流程 —— 三个条件它其实全都满足。
-  test('步骤链也算嵌套的候选,两份手抄必须同口径', () => {
+  // The same achievement exposed a second thing: the nesting section gives collectible examples
+  // from beginning to end (shrines, recipes, side quests, entries), so the model read it as "how
+  // to write collectibles", while 「创造」 is a six-stage long process — which in fact satisfies all
+  // three conditions.
+  test('a chain of steps is a nesting candidate too, worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /把流程本身写成子 checkbox/, `${name} 没说长流程也可以嵌套`);
+      assert.match(text, /把流程本身写成子 checkbox/, `${name} does not say a long process can be nested too`);
       assert.match(text, /三步以内的写在心得里就够/,
-        `${name} 少了下限 —— 不设的话两步的成就也会被拆成子框`);
+        `${name} is missing the lower bound — without it, a two-step achievement gets split into sub-boxes`);
       assert.match(text, /具体动作/,
-        `${name} 要挡住 步骤一/步骤二 那种没内容的拆法`);
+        `${name} has to block the contentless 步骤一/步骤二 form of splitting`);
     }
   });
-
-  // 「创造」重写完是 14 个子框,每一个都以「前置:」或「步骤:」开头 —— 同一个词
-  // 出现十四次,而它要说的事只有两件。分组标签该单独一行。
-  test('分组标签的写法,两份手抄必须同口径', () => {
+  // One real rewrite produced 14 sub-boxes, every one of them starting with 「前置:」 or
+  // 「步骤:」 — the same word fourteen times, saying only two things. A group label belongs on its
+  // own line.
+  test('how a group label is written has to be worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /标签单独占一行/, `${name} 少了分组标签的规矩`);
-      assert.match(text, /不要在每一条前面重复/, `${name} 少了「别重复」这半句 —— 那才是这条规则要治的病`);
-      // **这一条是机制要求,不是风格**,所以两边都要把"为什么"写出来 ——
-      // 只写"要这么写"的规则,下一个人一嫌啰嗦就改了
+      assert.match(text, /标签单独占一行/, `${name} is missing the group-label rule`);
+      assert.match(text, /不要在每一条前面重复/, `${name} is missing the "do not repeat it" half — which is the disease this rule treats`);
+      // **This one is a mechanical requirement, not a style choice**, so both sides have to state
+      // the "why" — a rule that only says "write it this way" gets changed by the next person who
+      // finds it verbose
       assert.match(text, /不能写成普通 bullet/,
-        `${name} 没说标签行必须也是 checkbox —— 那是局部重写能不能定位的前提`);
+        `${name} does not say a label line has to be a checkbox too — that is the precondition for a partial rewrite to locate anything`);
       assert.match(text, /五六条以内直接平铺/,
-        `${name} 少了下限,三条也套一层只会多两个空框`);
+        `${name} is missing the lower bound; wrapping three entries only adds two empty boxes`);
     }
 
-    // 两份手抄到这里分开,而且是故意的。RULES 不知道这份攻略
-    // 最后落哪个后端(`guidegen.js` 里那句注释),只能给两边都安全的
-    // checkbox 标签形;SKILL.md 是手改已知后端的页面用的,Notion 那一侧
-    // `fetchAllToDoBlocks` 把 toggle 当透明容器,折叠标签不会断开归属。
-    // **把分歧本身钉住**——否则下一个人要么把 Notion 那一段当矛盾删掉,
-    // 要么把它搬进 RULES,而后者会让本地 md 的 `todoSpans` 静默断掉。
+    // The two copies diverge here, deliberately. RULES does not know which backend this guide will
+    // land on (the comment in `guidegen.js`), so it can only give the checkbox label form that is
+    // safe on both sides; SKILL.md is for editing pages on a known backend by hand, and on the
+    // Notion side `fetchAllToDoBlocks` treats a toggle as a transparent container, so a
+    // collapsible label does not break attribution.
+    // **Pin the divergence itself** — otherwise the next person either deletes the Notion passage
+    // as a contradiction, or moves it into RULES, and the latter silently breaks `todoSpans` for
+    // local md.
     assert.match(skill, /toggle \/ column 当\*\*透明容器\*\*/,
-      'SKILL.md 少了 Notion 侧的例外 —— 折叠标签在 Notion 上是安全的,这是理由');
+      'SKILL.md is missing the Notion-side exception — a collapsible label is safe on Notion, and that is the reason');
     assert.match(skill, /target. 传不到时退回 checkbox 标签版/,
-      'SKILL.md 少了兜底方向 —— 猜错的代价不对等,默认必须是 checkbox 标签');
-    // `rules` 这里没传 target,拿到的就是兜底版。**兜底必须是两边都能活的那一版。**
+      'SKILL.md is missing the fallback direction — the cost of guessing wrong is asymmetric, so the default has to be the checkbox label');
+    // `rules` here is given no target, so what comes back is the fallback version. **The fallback
+    // has to be the one that survives on both sides.**
     assert.match(rules, /标签行必须也是/,
-      'target 没传时 RULES 必须给 checkbox 标签形 —— 折叠写进本地 md 会静默断区间');
+      'with no target, RULES has to give the checkbox label form — a collapsible written into local md silently breaks the range');
   });
 
-  // 分组标签是提示词里唯一按后端分岔的规则。Notion 上 `fetchAllToDoBlocks` 把 toggle
-  // 当透明容器(`parent` 原样往下传),折叠标签不会断开归属;本地 md 的 `todoSpans`
-  // 遇到非 checkbox 行就截断区间。两边给同一版必然坑掉其中一个。
-  test('分组标签按后端分岔,兜底必须是两边都安全的那一版', () => {
+  // The group label is the one rule in the prompt that branches by backend. On Notion,
+  // `fetchAllToDoBlocks` treats a toggle as a transparent container (`parent` is passed straight
+  // through), so a collapsible label does not break attribution; `todoSpans` for local md cuts the
+  // range at any non-checkbox line. One version for both sides is bound to break one of them.
+  test('the group label branches by backend, and the fallback has to be the one safe on both', () => {
     const defs = [def('A', '第一步', '完成第一关。')];
     const notion = buildSystemPrompt('测试游戏', '1', defs, { target: 'notion' });
     const local = buildSystemPrompt('测试游戏', '1', defs, { target: 'local' });
     const fallback = buildSystemPrompt('测试游戏', '1', defs);
 
-    assert.match(notion, /<summary>\*\*前置\*\*/, 'Notion 版没给折叠标签的写法');
+    assert.match(notion, /<summary>\*\*前置\*\*/, 'the Notion version does not give the collapsible label form');
     assert.doesNotMatch(notion, /标签行必须也是/,
-      'Notion 版不该还要求标签行是 checkbox —— 那正是要治的毛病');
+      'the Notion version should not still require a checkbox label line — that is exactly the ailment being treated');
     assert.match(notion, /也不要用 checkbox/,
-      'Notion 版少了「注意那一组降成普通 bullet」—— 警告勾不掉,还会被 --cascade 勾成假记录');
+      'the Notion version is missing "the caution group degrades to ordinary bullets" — a warning cannot be ticked off, and --cascade would tick it into a false record');
 
-    assert.match(local, /标签行必须也是/, '本地版必须保留 checkbox 标签的硬要求');
+    assert.match(local, /标签行必须也是/, 'the local version has to keep the hard checkbox-label requirement');
     assert.doesNotMatch(local, /<summary>\*\*前置\*\*/,
-      '本地版不能推荐折叠做标签 —— todoSpans 会当场截断区间');
+      'the local version must not recommend a collapsible as a label — todoSpans cuts the range on the spot');
 
-    // **兜底方向是有代价差的,不是随便挑一个。** 折叠写进本地 md 是静默断区间(默默重复),
-    // checkbox 标签写进 Notion 只是丑一点。所以 target 缺失时必须退到本地版。
+    // **The fallback direction has a cost asymmetry; it is not an arbitrary pick.** A collapsible
+    // written into local md silently breaks the range (quiet duplicates), while a checkbox label
+    // written into Notion is merely uglier. So a missing target has to fall back to the local version.
     assert.equal(fallback, local,
-      'target 没传时必须等同本地版 —— 猜成 Notion 版会让本地 md 静默产生重复条目');
+      'with no target it has to equal the local version — guessing the Notion version makes local md silently grow duplicate entries');
 
-    // 两边只在标签那一段分岔,别的规则不能跟着分
+    // The two sides diverge only in the label passage; no other rule may branch with it
     for (const [name, text] of [['notion', notion], ['local', local]]) {
-      assert.match(text, /标签单独占一行/, `${name} 版丢了分组标签的总规矩`);
-      assert.match(text, /五六条以内直接平铺/, `${name} 版丢了分组的下限`);
+      assert.match(text, /标签单独占一行/, `the ${name} version lost the overall group-label rule`);
+      assert.match(text, /五六条以内直接平铺/, `the ${name} version lost the lower bound for grouping`);
     }
   });
 
-  // 规则五原来只说"很长的清单"就折,没有数字 —— 分组标签那边有「五六条」的下限,
-  // 折叠这边没有,同一份攻略里两把尺子。三五行的表折起来只是把信息藏了。
-  test('折叠有行数下限,两份手抄必须同口径', () => {
+  // Rule 五 used to say only "a very long list" gets collapsed, with no number — while the group
+  // label side has a 「五六条」 lower bound and the collapsible side had none, two rulers in one
+  // guide. Collapsing a three-to-five-line table only hides the information.
+  test('collapsing has a line-count lower bound, worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
       assert.match(text, /10 行/,
-        `${name} 少了折叠的下限 —— 不设的话三行的表也会被折起来,信息反而被藏了`);
+        `${name} is missing the lower bound for collapsing — without it a three-line table gets collapsed and the information is hidden instead`);
     }
   });
 
   /**
-   * 行数下限只回答「折不折」,不回答「折什么」。少了这一条,整节成就会被打包进一个
-   * 折叠里(实测马特 `## 世界全清` 的 13 条),那一节在 Notion 上点开是空的。
-   * `unwrapAchievementToggles` 会把它拆开,但**提示词这一条不能因此省掉** ——
-   * 程序兜底是最后一道,不是第一道。
+   * A line-count bound answers "collapse or not", never "collapse what". Without this rule a whole
+   * section of achievements gets packed into one collapsible (measured: the 13 entries under one
+   * game's `## 世界全清`), and that section opens empty on Notion.
+   * `unwrapAchievementToggles` takes it apart, but **that is no reason to drop this prompt rule** —
+   * a program fallback is the last line, not the first.
    */
   /**
-   * **这一条是整轮返工的起点,而它在规范里一度一个字都没有。**《马特的寻猫游戏》四条
-   * 「将吉祥物替换为 X」被拆成「宝石与商店」和「吉祥物替换」两处 —— 两边各自说得通,
-   * 合起来就是 bug。程序那一半(`lib/guidecluster.js`)只在**分了段**时才跑,而库里
-   * 一半以上的游戏成就数不到 `ai.chunkSize`、一段写完 —— 它们没有兜底,只有这条规则。
+   * **This one is the starting point of a whole round of rework, and the spec once said nothing
+   * about it at all.** In one game, four 「将吉祥物替换为 X」 achievements were split between
+   * 「宝石与商店」 and 「吉祥物替换」 — each defensible on its own, and a bug taken together. The
+   * program half (`lib/guidecluster.js`) runs only when the guide **was sharded**, while more than
+   * half the games in the library have fewer achievements than `ai.chunkSize` and are written in
+   * one pass — they have no fallback, only this rule.
    */
-  test('同一类事必须在一个小节,两份手抄必须同口径', () => {
+  test('one kind of thing has to live in one section, worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /同一类事必须在同一个小节里/, `${name} 少了这一条`);
+      assert.match(text, /同一类事必须在同一个小节里/, `${name} is missing this rule`);
       assert.match(text, /不看.{0,4}解锁途径|不看是怎么解锁的/,
-        `${name} 要说清判据是官方描述而不是解锁途径 —— 按途径分正是当初劈开的那个理由`);
+        `${name} has to say the criterion is the official description rather than how it unlocks — grouping by unlock route is what split them apart in the first place`);
     }
   });
 
-  test('成就本身不进折叠,两份手抄必须同口径', () => {
+  test('an achievement itself never goes into a collapsible, worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    assert.match(rules, /成就本身那一行永远不进折叠/, 'RULES 少了这一条');
-    assert.match(skill, /成就那一行永远不进折叠/, 'SKILL.md 少了这一条');
+    assert.match(rules, /成就本身那一行永远不进折叠/, 'RULES is missing this rule');
+    assert.match(skill, /成就那一行永远不进折叠/, 'SKILL.md is missing this rule');
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
       assert.match(text, /折叠装的是.{0,12}辅料/,
-        `${name} 要说清折叠装的是什么 —— 只说「不许折成就」,模型分不出辅料算不算成就`);
+        `${name} has to say what a collapsible holds — saying only "do not collapse an achievement" leaves the model unable to tell whether supporting material counts as one`);
     }
   });
 
-  // 马特的寻猫游戏(找物游戏)的位置类成就:文字说不清「这 30 朵蘑菇在哪」,
-  // 而截图这条路是明确排除掉的(规则二的处置:模型给不出可靠的游戏内截图)。
-  // 实测把这几条重写一遍,模型自己找到的替代品是**带时间点的视频链接**
-  // (「对照 B站 BV1KFwzzCEsc 的 5-2 段落(01:56)」)—— 那就是该写进规则的东西。
-  test('位置类成就的兜底写法,两份手抄必须同口径', () => {
+  // Location achievements in a hidden-object game: prose cannot explain "where these 30 mushrooms
+  // are", and the screenshot route is explicitly excluded (rule 二's disposition: the model cannot
+  // produce reliable in-game screenshots).
+  // Measured by rewriting those entries: the substitute the model found by itself was **a video
+  // link with a timestamp** (「对照 B站 BV1KFwzzCEsc 的 5-2 段落(01:56)」) — which is what belongs
+  // in the rule.
+  test('the fallback for a location achievement is worded identically in both copies', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /时间点/, `${name} 少了「视频链接要带时间点」`);
+      assert.match(text, /时间点/, `${name} is missing "a video link has to carry a timestamp"`);
       assert.match(text, /留意角落/,
-        `${name} 要把万能话点名挡掉 —— 只说「写具体点」拦不住它`);
+        `${name} has to block the catch-all phrasing by name — saying only "write concretely" does not stop it`);
     }
-    // **两边措辞不同,共用一个断言只能钉住最弱的那个。** 各自最要紧的那句分开钉 ——
-    // 「时间点」这三个字在两边都出现好几处,删掉任何一处它都还在
-    assert.match(rules, /写不出具体位置时/, 'RULES 少了这条规则本身');
-    assert.match(rules, /时间点是关键/, 'RULES 少了「只给视频号等于让人从头翻」');
-    assert.match(skill, /贴不了截图的时候/, 'SKILL.md 少了这一节');
+    // **The two sides are worded differently, and one shared assertion pins only the weaker of
+    // them.** Pin the most important sentence of each separately — 「时间点」 appears several times
+    // on both sides, so deleting any one occurrence leaves it there
+    assert.match(rules, /写不出具体位置时/, 'RULES is missing this rule itself');
+    assert.match(rules, /时间点是关键/, 'RULES is missing "giving only the video id makes people scrub from the start"');
+    assert.match(skill, /贴不了截图的时候/, 'SKILL.md is missing this section');
   });
 
-  test('处置表里不能有 SKILL.md 已经删掉的条目', () => {
+  test('the disposition table must not carry entries SKILL.md has already deleted', () => {
     const keys = skillRuleKeys();
     const stale = Object.keys(SKILL_RULE_DISPOSITION).filter((k) => !keys.has(k));
-    assert.deepEqual(stale, [], `处置表里这几条 SKILL.md 已经没有了:${stale.join('、')}`);
+    assert.deepEqual(stale, [], `these entries in the disposition table are no longer in SKILL.md: ${stale.join('、')}`);
   });
 
-  test('几条对生成结果有实际约束的规则,确实在提示词里', () => {
+  test('the few rules that really constrain the output really are in the prompt', () => {
     const defs = [def('A', '第一步', '完成第一关。')];
     const p = buildSystemPrompt('测试游戏', '1', defs);
-    // 每一条都对应一个踩过或差点踩的坑,不是凑数
-    assert.match(p, /易错过/, '永久错过的标注');
-    assert.match(p, /不要标/, '季节性的**不能**标易错过 —— 假警报会让这个记号失效');
-    assert.match(p, /※除去追加内容/, 'DLC 排除标注的固定写法');
-    assert.match(p, /位置 XXX/, '位置标注的固定写法');
-    assert.match(p, /待确认/, '不写"推测/待确认"这类文档化备注');
-    assert.match(p, /机制速查/, '成就列表前的机制速查');
+    // Each corresponds to a pit fallen into or narrowly avoided; none is filler
+    assert.match(p, /易错过/, 'the permanently-missable marker');
+    assert.match(p, /不要标/, 'a seasonal one **must not** be marked missable — a false alarm makes the marker useless');
+    assert.match(p, /※除去追加内容/, 'the fixed wording of the DLC exclusion note');
+    assert.match(p, /位置 XXX/, 'the fixed wording of a location note');
+    assert.match(p, /待确认/, 'no documentation-style notes such as "guess / to be confirmed"');
+    assert.match(p, /机制速查/, 'the mechanics reference before the achievement list');
   });
 
-  // 2026-08-11 实际生成出来的:Wrap House Simulator 四个"玩满 7 天"成就下面
-  // 各挂了 `第1天`…`第7天`,一共 28 个子框。旧提示词只拦"互斥选项"(任一结局那种),
-  // 而这一批**每一条都要做**,合法地穿过了那道门。真正的问题是它们一条信息都不带,
-  // 而且其中一个父成就已解锁 —— cascade 会把 7 个空框勾成 7 条假记录。
-  test('提示词要拦住无意义的子 checkbox,不只拦互斥选项', () => {
+  // Actually generated on 2026-08-11: four "play for 7 days" achievements in one game each carried
+  // `第1天`…`第7天` beneath them, 28 sub-boxes in total. The old prompt only blocked mutually
+  // exclusive options (the "any one ending" kind), and this batch — where **every one has to be
+  // done** — passed legitimately through that gate. The real problem is that they carry no
+  // information at all, and one of the parent achievements was already unlocked, so cascade would
+  // tick 7 empty boxes into 7 false records.
+  test('the prompt has to block meaningless sub-checkboxes, not only mutually exclusive options', () => {
     const p = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    assert.match(p, /子 checkbox 默认不写/, '默认不嵌套 —— 嵌套要给理由,不是反过来');
-    assert.match(p, /序号不是身份/, '`第1天`/`第2天` 这种序号不构成子步骤');
-    // **不能直接 match 整段提示词。** 条件 1 里也写着 `第1天`,所以在整段上断言
-    // 「第1天」永远是绿的 —— 把条件 2 的例子整个删掉它也不会响。切到条件 2 自己那一段
+    assert.match(p, /子 checkbox 默认不写/, 'no nesting by default — nesting needs a reason, not the other way round');
+    assert.match(p, /序号不是身份/, '`第1天`/`第2天` numbering does not constitute a sub-step');
+    // **Do not match against the whole prompt.** Condition 1 also contains `第1天`, so asserting
+    // 「第1天」 over the whole text is permanently green — delete condition 2's example entirely and
+    // it still passes. Slice to condition 2 itself
     const c2 = p.slice(p.indexOf('2. **这一行'), p.indexOf('3. **每一条都要做'));
-    assert.ok(c2.length > 20, '切到条件 2 —— 这条检查失去了目标,不是通过了');
-    assert.match(c2, /第7天/, '条件 2 要点名一个"不该嵌套"的具体例子');
-    assert.match(p, /互相替代/, '互斥选项那条老规则不能在改写中丢掉');
+    assert.ok(c2.length > 20, 'slice to condition 2 — this check has lost its target rather than passed');
+    assert.match(c2, /第7天/, 'condition 2 has to name a concrete example of what should not be nested');
+    assert.match(p, /互相替代/, 'the old mutually-exclusive rule must not be lost in the rewrite');
   });
 
-  // **反方向的事故,2026-08-21:苏丹的游戏「知识」= 集齐《百科全书》全部词条**,
-  // 每个词条入手方式都不一样。用户点名重写它、并且要求写具体步骤,拿回来的仍然是
-  // 一整段「条目会随剧情推进和角色入队逐步录入」——一个词条都没点名,等于没写。
+  // **The accident in the other direction, 2026-08-21: one achievement = collect every entry of an
+  // in-game encyclopaedia**, with a different acquisition route per entry. The user named it for a
+  // rewrite and asked for concrete steps, and what came back was still one paragraph saying
+  // 「条目会随剧情推进和角色入队逐步录入」 — not one entry named, which is the same as not writing it.
   //
-  // 原因不在模型,在规则:旧的条件 2 是「游戏自己不替你数」,而百科全书当然有计数器,
-  // 所以这一条把整类全收集成就挡在了门外。三条必须同时成立,挡一条就够。
+  // The cause is not the model but the rule: the old condition 2 was 「游戏自己不替你数」, and an
+  // encyclopaedia of course has a counter, so this condition kept the entire collect-everything
+  // class out. All three have to hold, and blocking one is enough.
   //
-  // **而且那条判据本来就没在干活**:它自己举的三个例子(玩满 7 天、杀 100 只、
-  // 攒 5000 块)全都先被条件 1「序号不是身份」拦掉了 —— 它唯一独占的作用,
-  // 就是拦住合法的收集清单。它还和同一段的自检句直接矛盾:
-  // 「把那几行删掉,攻略少了什么信息吗?」——删掉三十个词条的入手方式,少的是全部。
-  test('但不能反过来把全收集类的成就也拦掉', () => {
+  // **And that criterion was not doing any work anyway**: its own three examples (play 7 days, kill
+  // 100, save up 5000) are all stopped first by condition 1 「序号不是身份」 — the one thing it
+  // uniquely did was block a legitimate collection list. It also directly contradicted the
+  // self-check sentence in the same passage: 「把那几行删掉,攻略少了什么信息吗?」 — delete the
+  // acquisition routes of thirty entries and what is missing is all of it.
+  test('but it must not block collect-everything achievements in return', () => {
     const p = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
     assert.doesNotMatch(p, /游戏自己不替你数/,
-      '这条判据挡不住该挡的(序号那类条件 1 已经挡了),只挡得住全收集清单');
-    assert.match(p, /写得出做法/, '判据要换成「这一行除了序号还有没有内容」');
+      'this criterion cannot block what should be blocked (condition 1 already blocks the numbering kind); it only blocks collection lists');
+    assert.match(p, /写得出做法/, 'the criterion has to become "does this line have anything besides a number"');
     const c2 = p.slice(p.indexOf('2. **这一行'), p.indexOf('3. **每一条都要做'));
-    assert.ok(c2.length > 20, '切到条件 2 —— 这条检查失去了目标,不是通过了');
+    assert.ok(c2.length > 20, 'slice to condition 2 — this check has lost its target rather than passed');
     assert.match(c2, /百科全书/,
-      '规则只给反例的话,模型学到的是「别嵌套」;该嵌套的那一面也要举一个');
+      'a rule with only counter-examples teaches the model "do not nest"; the side that should be nested needs an example too');
     assert.match(p, /长不是"不列"的理由/,
-      '「太长了」是把全收集写成一段话最常用的借口,要当场堵掉');
+      '"it is too long" is the most common excuse for writing a collection as one paragraph, and it has to be blocked on the spot');
   });
 });
-
 // ---------------------------------------------------------------------------
-// 难度信号
+// The difficulty signal
 // ---------------------------------------------------------------------------
 
-describe('全球解锁率', () => {
-  test('标出来,而且直接说该写深还是带过 —— 不让模型自己换算', () => {
-    // 实测《部落幸存者》最难 1.1%、最易 64.5%,差 60 倍;不给这个信号时,
-    // 生成的心得字数只差不到一倍 —— 模型分不出哪条难,就把力气平摊了
+describe('the global unlock rate', () => {
+  test('mark it, and say outright whether to write deeply or briefly — do not make the model convert it itself', () => {
+    // Measured on one game: the hardest is 1.1% and the easiest 64.5%, a factor of 60; without
+    // this signal, the generated notes differed in length by less than a factor of two — the model
+    // cannot tell which is hard, so it spreads the effort evenly
     const defs = [def('A', '大城堡', 'x'), def('B', '道路畅通', 'y')];
     const list = buildAchievementList('部落幸存者', '1', defs, new Map([['A', 1.1], ['B', 64.5]]));
     assert.match(list, /1\.1%.*这类要写深/);
     assert.match(list, /64\.5%.*一两句带过/);
-    assert.match(list, /力气按它分配/, '光标数字不够,得说清楚拿它干什么');
+    assert.match(list, /力气按它分配/, 'a bare number is not enough; it has to say what to do with it');
   });
 
-  test('拿不到解锁率时不留任何痕迹(整段说明也不出现)', () => {
+  test('with no unlock rates, it leaves no trace at all (the explanatory passage disappears too)', () => {
     const list = buildAchievementList('X', '1', [def('A', '甲', 'x')], null);
     assert.doesNotMatch(list, /解锁率|%/);
-    assert.doesNotMatch(list, /力气按它分配/, '没有数据还讲怎么用数据,只会让模型困惑');
+    assert.doesNotMatch(list, /力气按它分配/, 'explaining how to use data that is not there only confuses the model');
   });
 
-  test('Steam 拿不到解锁率时,生成流程照走', async () => {
-    // 锦上添花的数据,不该因为它挂掉就不给人生成攻略
+  test('when Steam cannot give the unlock rates, generation carries on', async () => {
+    // A nice-to-have signal should not stop someone from generating a guide when it is unavailable
     const { db, config } = freshEnv();
     const r = await generateGuide(db, {
       config, provider: fakeProvider([GOOD]), steam: fakeSteam(['A'], null), appid: '1',
@@ -1113,138 +1169,156 @@ describe('全球解锁率', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Dashboard 的生成按钮
+// The Dashboard generate button
 // ---------------------------------------------------------------------------
 
-describe('Dashboard 上的「生成」按钮', () => {
+describe('the 「生成」 button on the Dashboard', () => {
   const html = readFileSync(new URL('../Dashboard.html', import.meta.url), 'utf8');
 
-  test('按钮直接调具名函数,不靠事件冒泡', () => {
-    // 踩过:按钮自己带 event.stopPropagation()(不拦住的话点它会同时展开成就详情),
-    // 而处理器是挂在 document 上的委托 —— stopPropagation 正好把它挡死。
-    // 表现是"点了什么都没发生",**控制台里一个错都没有**,最难查的那种
+  test('the button calls a named function directly rather than relying on event bubbling', () => {
+    // Hit before: the button carries its own event.stopPropagation() (without it, clicking also
+    // expands the achievement detail), while the handler was a delegate on document — and
+    // stopPropagation kills it exactly.
+    // It presents as "clicking does nothing", **with not one error in the console**, the hardest
+    // kind to diagnose
     assert.match(html, /onclick="event\.stopPropagation\(\);window\.genGuide\(this\)"/);
     assert.match(html, /window\.genGuide = async function/);
     assert.doesNotMatch(
       html,
       /document\.addEventListener\('click'[\s\S]{0,120}data-gen/,
-      '别再改回事件委托 —— stopPropagation 会让它收不到'
+      'do not go back to event delegation — stopPropagation means it never arrives'
     );
   });
 
-  // 踩过(2026-08-11,打包版):原生 confirm 弹出来立刻就消失,人来不及点确定,
-  // 于是"从 Dashboard 生成攻略"在打包版上整条路是断的 —— 而同一份页面在浏览器里
-  // 完全正常,所以浏览器里怎么点都复现不出来。原生对话框归 Electron 主进程管,
-  // 页面夺不回来;页面内的框没有这个问题,两边行为也一致
-  test('确认框不能用原生 confirm/alert —— 打包版里它们会自己消失', () => {
-    // 先把注释削掉再查。**注释里提到这些名字是应该的** —— 那几段注释写的正是
-    // "为什么不许用原生的",拿它们判定"你还在用",等于禁止解释自己的决定。
-    // (这条测试第一次跑就是被自己的说明注释绊倒的)
+  // Hit on 2026-08-11 in the packaged build: the native confirm appeared and vanished at once,
+  // too fast to click, so "generate a guide from the Dashboard" was an entirely broken path in the
+  // packaged build — while the same page in a browser worked perfectly, so no amount of clicking
+  // in a browser could reproduce it. A native dialog belongs to the Electron main process and the
+  // page cannot take it back; an in-page dialog does not have this problem and behaves the same on
+  // both sides
+  test('the confirmation must not use native confirm/alert — in the packaged build they vanish on their own', () => {
+    // Strip comments before checking. **Those names appearing in comments is correct** — those
+    // passages are precisely about "why the native ones are not allowed", and using them to judge
+    // "you are still using it" amounts to forbidding an explanation of the decision.
+    // (The first run of this test was tripped by its own explanatory comment)
     const code = html
       .replace(/<!--[\s\S]*?-->/g, '')
       .replace(/^\s*(\*|\/\/).*$/gm, '');
 
-    assert.doesNotMatch(code, /window\.confirm\s*\(/, 'window.confirm 在 Electron 里点不到,改用 askConfirm()');
-    assert.doesNotMatch(code, /(?<![.\w])alert\s*\(/, 'alert 换成 askConfirm({notifyOnly:true})');
-    assert.doesNotMatch(code, /(?<![.\w])confirm\s*\(/, '裸 confirm( 也不行');
-    assert.match(html, /function askConfirm\(o\)/, '通用确认框本体');
-    assert.match(html, /id="askModal"/, '页面里得真有那个框,不能只有函数');
+    assert.doesNotMatch(code, /window\.confirm\s*\(/, 'window.confirm cannot be clicked in Electron; use askConfirm()');
+    assert.doesNotMatch(code, /(?<![.\w])alert\s*\(/, 'alert becomes askConfirm({notifyOnly:true})');
+    assert.doesNotMatch(code, /(?<![.\w])confirm\s*\(/, 'a bare confirm( is not allowed either');
+    assert.match(html, /function askConfirm\(o\)/, 'the shared confirmation dialog itself');
+    assert.match(html, /id="askModal"/, 'the page really has to contain that dialog, not just the function');
   });
 
-  // 这是**第二次**把花钱措辞从界面上拿掉了(第一次是设置页,commit 4d66ce9)。
-  // 提示语该说的是"接下来会发生什么",不是替用户评估值不值:key 是他自己配的,
-  // 单价他自己知道,而我们连服务端搜索怎么计费都没测过(见 CLAUDE.md「没有 spend caps」)。
-  // 拿一个我们说不清的数去吓人,比不说更糟。代码注释里说明"为什么有这道确认"是可以的,
-  // 用户读不到注释。
-  test('面向用户的文案里不提花钱 —— 已经被拿掉两次了', () => {
+  // This is the **second** time money wording was taken out of the interface (the first was the
+  // setup page, commit 4d66ce9). What a prompt should say is "what happens next", not an appraisal
+  // on the user's behalf: the key is theirs, they know their own rates, and we have never even
+  // measured how server-side search is billed (see CLAUDE.md, "no spend caps"). Frightening people
+  // with a number we cannot explain is worse than saying nothing. Explaining "why this confirmation
+  // exists" in a code comment is fine; the user never reads comments.
+  test('user-facing copy does not mention money — it has been removed twice already', () => {
     const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, '').replace(/^\s*(\*|\/\/).*$/gm, '');
     const MONEY = /花钱|产生费用|要花多少|收费/;
 
-    assert.doesNotMatch(strip(html), MONEY, 'Dashboard 的确认框和状态条里不提钱');
+    assert.doesNotMatch(strip(html), MONEY, 'the Dashboard confirmation dialogs and status bar do not mention money');
 
     const cli = strip(readFileSync(new URL('../tracker.js', import.meta.url), 'utf8'));
-    assert.doesNotMatch(cli, MONEY, 'CLI 的提示语和帮助里也不提钱(注释里说明理由没问题)');
+    assert.doesNotMatch(cli, MONEY, 'the CLI prompts and help do not mention money either (explaining the reason in a comment is fine)');
   });
 
-  // 重写(覆盖已有攻略)以前只有命令行能调 —— Dashboard 上有攻略的行只显示「📖 攻略」,
-  // 连按钮都没有。GUI 上点一下比敲一行命令容易得多,所以闸门**不能比 CLI 松**:
-  // 必须先预检、把"会失去什么"摆出来,再问。
-  test('Dashboard 能重写已有攻略,而且闸门和 CLI 一样严', () => {
-    // **入口在行上,不在 ⋯ 菜单里。** 2026-08-20 收进过菜单又收回来了 —— 理由见
-    // Dashboard.html 里 `.row-actions` 那段:重写是主动要做的动作,进第二层等于
-    // 每次都多一次点击。这里钉的是**入口还在、而且跑起来之后会置灰**,
-    // 不钉它长什么样(上一版钉在 `data-rewrite` 属性上,那个属性没了)
-    assert.match(html, /class="guide-btn rewrite"/, '有攻略的行要有重写入口');
+  // Rewriting (overwriting an existing guide) used to be callable only from the command line — a
+  // Dashboard row with a guide showed only 「📖 攻略」, with no button at all. One click in a GUI is
+  // far easier than typing a command line, so the gate **must not be looser than the CLI's**: run
+  // the preflight, lay out what will be lost, and only then ask.
+  test('the Dashboard can rewrite an existing guide, with a gate as strict as the CLI', () => {
+    // **The entry point is on the row, not in the ⋯ menu.** It was moved into the menu on
+    // 2026-08-20 and moved back — the reasoning is in the `.row-actions` passage in
+    // Dashboard.html: a rewrite is a deliberate action, and a second level means one extra click
+    // every time. What is pinned here is that **the entry exists and greys out while it runs**,
+    // not what it looks like (the previous version pinned the `data-rewrite` attribute, which is gone)
+    assert.match(html, /class="guide-btn rewrite"/, 'a row with a guide has to have a rewrite entry');
     assert.match(html, /window\.rewriteGuide\(/);
     assert.match(html, /window\.rewriteGuide = async function/);
-    // 置灰状态是**渲染出来的**,不是 render 之后手动设回去的 —— 挂在按钮上会被
-    // 下一次后台同步的重画洗掉,而重写要跑两三分钟,中间必然撞上。
-    // 切到真锚点再匹配,不写死那一串字符:上一版把空格数写进正则,改一个空格就红
+    // The greyed-out state is **rendered**, not set back by hand after render — hanging it on the
+    // button lets the next background sync repaint wash it off, and a rewrite runs for two or
+    // three minutes, so a collision is certain.
+    // Slice to a real anchor before matching rather than hardcoding the string: the previous
+    // version wrote the space count into the regex, and one changed space turned it red
     const rowActions = html.slice(
       html.indexOf('<div class="row-actions">'),
       html.indexOf('class="delete-btn"')
     );
-    assert.ok(rowActions.length > 0 && rowActions.length < 4000, '切到的应该是 row-actions 那一段');
+    assert.ok(rowActions.length > 0 && rowActions.length < 4000, 'what was sliced should be the row-actions passage');
     assert.match(rowActions, /guideBusy\.has\(String\(g\.appid\)\)/,
-      '重写按钮的置灰要从 guideBusy 渲染,不能挂在 DOM 上');
-    // 先预检再问 —— 顺序反了就成了"不知道会失去什么的确认"
-    // 按**函数定义**切,不是按名字第一次出现切 —— 名字最早出现在调用点上,
-    // 那样切出来的是两个调用之间的一小段,什么都匹配不到
+      'the rewrite button greying has to be rendered from guideBusy rather than hung on the DOM');
+    // Preflight first, then ask — the other order makes it "a confirmation that does not know what
+    // will be lost".
+    // Slice by the **function definition**, not the first occurrence of the name — the name first
+    // appears at a call site, and slicing there gives a fragment between two calls that matches
+    // nothing
     const fn = html.slice(
       html.indexOf('window.rewriteGuide = async function'),
       html.indexOf('window.migrateGuide = function')
     );
     assert.ok(
       fn.indexOf('previewGuideRewrite') < fn.indexOf('askConfirm'),
-      '必须先拿到预检结果再弹确认框'
+      'the preflight result has to be in hand before the confirmation dialog opens'
     );
-    assert.match(fn, /danger: true/, '覆盖不可逆,确认按钮要标红');
-    assert.match(fn, /startGuideGen\(appid, true[,)]/, '不把 overwrite 传下去,服务端会照常拒绝');
+    assert.match(fn, /danger: true/, 'an overwrite is irreversible, so the confirm button is red');
+    assert.match(fn, /startGuideGen\(appid, true[,)]/, 'without passing overwrite down, the server refuses as usual');
   });
 
-  test('生成和重写不会同时出现在一行 —— 一个针对没攻略的,一个针对有攻略的', () => {
-    assert.match(html, /const canGen = !g\.guideUrl/, '生成只给没攻略的行');
-    assert.match(html, /g\.guideUrl && aiReady/, '重写只给有攻略的行');
+  test('generate and rewrite never appear on the same row — one is for rows with no guide, the other for rows with one', () => {
+    assert.match(html, /const canGen = !g\.guideUrl/, 'generate is only for rows with no guide');
+    assert.match(html, /g\.guideUrl && aiReady/, 'rewrite is only for rows with one');
   });
 
-  // 用户反复说过三次:界面上的字太长、解释太多。确认框只该回答"会发生什么、要多久",
-  // 机制和保证属于说明,搬到代码注释里用户一个字都不用读。这条测试是防它长回去的 ——
-  // 每次想往框里加一句"顺便解释一下"的时候,它会先失败
-  test('确认框要短 —— 不摆项目符号清单,不写解释', () => {
+  // The user has said three times over that the interface text is too long and explains too much.
+  // A confirmation dialog should answer only "what will happen and how long it takes"; mechanics
+  // and guarantees are documentation, and moving them into code comments means the user reads not
+  // one word of them. This test exists to stop it growing back — every time someone wants to add
+  // "let me explain while we are here", it fails first
+  test('a confirmation dialog is short — no bulleted lists, no explanations', () => {
     const bodies = [...html.matchAll(/askConfirm\(\{[\s\S]{0,120}?body:\s*'([^']*)'/g)].map((m) => m[1]);
-    assert.ok(bodies.length >= 1, '至少该抓到一个字符串型 body(删除框)');
+    assert.ok(bodies.length >= 1, 'at least one string body should be caught (the delete dialog)');
     for (const b of bodies) {
       const lines = b.split('\\n').filter((l) => l.trim());
-      assert.ok(lines.length <= 3, `确认框最多三行,这个有 ${lines.length} 行:${b.slice(0, 60)}`);
-      assert.ok(!b.includes('· '), `别在确认框里摆项目符号清单:${b.slice(0, 60)}`);
+      assert.ok(lines.length <= 3, `a confirmation is at most three lines, this one has ${lines.length}: ${b.slice(0, 60)}`);
+      assert.ok(!b.includes('· '), `do not lay out a bulleted list in a confirmation: ${b.slice(0, 60)}`);
     }
   });
 
-  test('生成框只有一句问话,没有正文 —— 生成是可逆的,没什么要先交代', () => {
+  test('the generate dialog is one question with no body — generating is reversible, so there is nothing to state first', () => {
     const call = html.slice(html.indexOf("askConfirm({ title: '为《'"), html.indexOf("okText: '生成'") + 20);
-    assert.ok(call.includes("title: '为《'"), '生成框还在');
-    assert.ok(!/\bbody:/.test(call), '生成框不该再有正文');
-    // 但"内容没验过"这句话不能整个消失,它挪到结果那一行去了
-    assert.match(html, /内容需要你自己过一遍/, '攻略写完之后仍要如实说内容未经验证');
+    assert.ok(call.includes("title: '为《'"), 'the generate dialog is still there');
+    assert.ok(!/\bbody:/.test(call), 'the generate dialog should no longer have a body');
+    // But "the content is unverified" must not disappear entirely; it moved to the result line
+    assert.match(html, /内容需要你自己过一遍/, 'once a guide is written it still has to say honestly that the content is unverified');
   });
 
-  // **第二次了**(第一次是设置页,commit 4d66ce9,标题就写着「去掉对供应商的评价」)。
-  // 那次只改了设置页,没搜别处,于是 README、docs、CLI 的选择器里全留着。
-  // 单价随时变、质量我们没有可比的测量 —— 写出来就是臆断,而用户会当事实照着选。
-  // 只写可核实的:有没有联网搜索、key 在哪申请。
-  test('任何面向用户的地方都不写对供应商的评价', () => {
-    // markdown 和源码得分开剥。`^\s*\*` 在 .js/.html 里是块注释的续行,在 .md 里
-    // 是**加粗**或者列表项 —— 拿同一条规则去剥 markdown,会把整行正文一起吃掉,
-    // 断言就再也看不见那一行。量过一次:README、guides、configuration、cli
-    // 四个 md 面加起来 44 行对这条断言完全不可见。所以 .md 只剥 HTML 注释
+  // **The second time** (the first was the setup page, commit 4d66ce9, whose title says
+  // 「去掉对供应商的评价」). That time only the setup page was changed with no search elsewhere, so
+  // README, docs and the CLI selector all kept theirs.
+  // Rates change at any time and we have no comparable measurement of quality — writing it down is
+  // conjecture, and the user takes it as fact when choosing.
+  // Write only what is verifiable: whether there is web search, and where to get a key.
+  test('no user-facing surface carries an appraisal of a vendor', () => {
+    // Markdown and source have to be stripped differently. `^\s*\*` is a block-comment
+    // continuation in .js/.html and **bold** or a list item in .md — applying the same rule to
+    // markdown eats whole lines of prose, and the assertion never sees them again. Measured once:
+    // across README, guides, configuration and cli, 44 lines were completely invisible to this
+    // assertion. So .md has only HTML comments stripped
     const stripHtml = (s) => s.replace(/<!--[\s\S]*?-->/g, '');
     const strip = (s, rel) => (rel.endsWith('.md')
       ? stripHtml(s)
       : stripHtml(s).replace(/^\s*(\*|\/\/).*$/gm, ''));
-    // 自查:.md 剥完之后加粗行必须还在。少了这一句,把 strip 改回统一那版
-    // 也是全绿 —— 这条断言会静默变成空的,而空断言比没有断言更糟
+    // Self-check: after stripping .md, a bold line has to still be there. Without this line,
+    // changing strip back to the unified version is also all green — this assertion would silently
+    // become empty, and an empty assertion is worse than none
     assert.match(strip('**x** 最便宜', '../x.md'), /最便宜/,
-      'markdown 的加粗行被剥掉了,下面整个循环等于没跑');
+      'the bold line in markdown was stripped, so the whole loop below ran on nothing');
     const JUDGEMENT = /cheapest|priciest|most expensive|best quality|最便宜|最贵|质量最好|有免费额度/i;
     const surfaces = ['../README.md', '../docs/guides.md', '../docs/configuration.md',
       '../docs/cli.md',
@@ -1252,32 +1326,35 @@ describe('Dashboard 上的「生成」按钮', () => {
     for (const rel of surfaces) {
       const text = strip(readFileSync(new URL(rel, import.meta.url), 'utf8'), rel);
       const hit = text.match(JUDGEMENT);
-      assert.equal(hit, null, `${rel} 里还有对供应商的评价:「${hit && hit[0]}」`);
+      assert.equal(hit, null, `${rel} still carries an appraisal of a vendor: 「${hit && hit[0]}」`);
     }
   });
 
-  test('用了 askConfirm 的调用点都是 async/await —— 它返回 Promise,忘了 await 等于默认确认', () => {
-    // askConfirm 回的是 Promise,而 Promise 恒为真值。漏掉 await 的话
-    // `if (!askConfirm(...)) return` 永远不会 return —— 危险动作直接放行,静默
+  test('every askConfirm call site is async/await — it returns a Promise, and forgetting await means confirming by default', () => {
+    // askConfirm returns a Promise, and a Promise is always truthy. Miss the await and
+    // `if (!askConfirm(...)) return` never returns — the dangerous action is let straight through,
+    // silently
     for (const m of html.matchAll(/(?<!await\s)askConfirm\(\{/g)) {
       const before = html.slice(Math.max(0, m.index - 400), m.index);
       assert.ok(
         /await\s*$/.test(before) || /notifyOnly/.test(html.slice(m.index, m.index + 240)),
-        `askConfirm 的返回值没有被 await(位置 ${m.index}) —— 除非是 notifyOnly 的纯提示`
+        `the return value of askConfirm is not awaited (at ${m.index}) — unless it is a notifyOnly notice`
       );
     }
   });
 });
 
 // ---------------------------------------------------------------------------
-// 分段撰写(几百个成就的游戏)
+// Sharded writing (games with hundreds of achievements)
 // ---------------------------------------------------------------------------
-// 上限从 100 提到 500,靠的不是"调大一个数字"——一次输出装不下几百条正文,
-// 而**装不下不会报错**:模型写到一半停,校验器只说"后半段的成就都缺 checkbox"。
-// 所以超过一段就分几轮写,同一个 session(模型看得见自己前面写了什么),
-// 最后拼起来对**完整的一份**打勾和校验。
+// Raising the ceiling from 100 to 500 was not a matter of "turn a number up" — one output cannot
+// hold hundreds of entries of prose, and **not holding it raises no error**: the model stops
+// halfway and the validator only says "every achievement in the second half is missing a
+// checkbox". So beyond one shard it is written in several rounds, in the same session (the model
+// can see what it wrote before), and assembled at the end for ticking and validation over **one
+// complete guide**.
 
-describe('分段撰写', () => {
+describe('sharded writing', () => {
   const BIG = ['A', 'B', 'C', 'D', 'E'].map((k, i) => def(k, `成就${i + 1}`, `完成第${i + 1}关。`));
   const bigSteam = () => ({
     async fetchPlayerAchievements() {
@@ -1285,7 +1362,7 @@ describe('分段撰写', () => {
     },
     async fetchGlobalAchievementPercentages() { return null; },
   });
-  /** 某一段该有的 markdown */
+  /** The markdown one shard should carry */
   const seg = (items) =>
     '```markdown\n## 主线\n\n' +
     items.map((d) => `- [ ] **${d.name_cn}**<br>${d.description}<br>心得`).join('\n') +
@@ -1297,102 +1374,109 @@ describe('分段撰写', () => {
     return e;
   };
 
-  test('chunkDefs 切得对,余数单独成段', () => {
+  test('chunkDefs splits correctly, with the remainder as its own shard', () => {
     assert.deepEqual(chunkDefs([1, 2, 3, 4, 5], 2).map((c) => c.length), [2, 2, 1]);
-    assert.deepEqual(chunkDefs([1, 2, 3], 10).map((c) => c.length), [3], '装得下就只有一段');
-    assert.equal(chunkDefs([1, 2, 3], 0).length, 3, 'size 传 0 不能死循环');
-    assert.deepEqual(chunkDefs([], 50), [], '一个成就都没有就没有段');
+    assert.deepEqual(chunkDefs([1, 2, 3], 10).map((c) => c.length), [3], 'if it fits there is only one shard');
+    assert.equal(chunkDefs([1, 2, 3], 0).length, 3, 'a size of 0 must not loop forever');
+    assert.deepEqual(chunkDefs([], 50), [], 'no achievements means no shards');
   });
 
-  test('chunkDefs 把成就均摊到各段,不让最后一段变成零头', () => {
+  test('chunkDefs spreads the achievements evenly rather than leaving the last shard a remnant', () => {
     const n = (len) => Array.from({ length: len }, (_, i) => i);
-    // 这条是照着真事写的:人中之龙0 有 55 个成就,配 chunkSize=50。
-    // 朴素切片给 50 + 5 —— 段数同样是 2,却让第一段顶着上限去撞 max_tokens
+    // This case was written from a real event: one game has 55 achievements with chunkSize=50.
+    // A naive slice gives 50 + 5 — the same shard count, while making the first shard press right
+    // up against the ceiling and hit max_tokens
     assert.deepEqual(chunkDefs(n(55), 50).map((c) => c.length), [28, 27]);
     assert.deepEqual(chunkDefs(n(101), 50).map((c) => c.length), [34, 34, 33]);
-    // 整除时和以前一模一样 —— 均摊不该改动本来就均匀的情况
+    // When it divides evenly it is exactly as before — spreading should not disturb what is
+    // already even
     assert.deepEqual(chunkDefs(n(100), 50).map((c) => c.length), [50, 50]);
     assert.deepEqual(chunkDefs(n(50), 50).map((c) => c.length), [50]);
   });
 
-  test('chunkDefs 均摊之后:段数不增加、没有一段超上限、成就不丢不重', () => {
+  test('after chunkDefs spreads: the shard count does not grow, none exceeds the ceiling, and no achievement is lost or duplicated', () => {
     for (let len = 1; len <= 120; len++) {
       for (const size of [1, 2, 7, 50]) {
         const defs = Array.from({ length: len }, (_, i) => i);
         const chunks = chunkDefs(defs, size);
         const flat = chunks.flat();
-        // **上限是硬的。** 均摊只该把段变短;超了就等于悄悄把用户配的值改大了
-        assert.ok(chunks.every((c) => c.length <= size), `len=${len} size=${size} 有段超过上限`);
-        // 段数不能比朴素切法多 —— 多一段就是多一次请求、多一次搜索预算
+        // **The ceiling is hard.** Spreading should only make shards shorter; exceeding it
+        // quietly raises the value the user configured
+        assert.ok(chunks.every((c) => c.length <= size), `len=${len} size=${size} has a shard over the ceiling`);
+        // The shard count must not exceed the naive split — one more shard is one more request
+        // and one more search budget
         assert.ok(
           chunks.length <= Math.ceil(len / size),
-          `len=${len} size=${size} 段数比朴素切法还多`
+          `len=${len} size=${size} produced more shards than the naive split`
         );
-        // 顺序和完整性:模型是按「第 N–M 个成就」写的,漏一个或重一个都会
-        // 变成校验器口中的 missing-checkbox,而真因在这里
-        assert.deepEqual(flat, defs, `len=${len} size=${size} 成就丢了或顺序变了`);
+        // Order and completeness: the model writes by "achievements N–M", and one missing or one
+        // duplicated becomes a missing-checkbox in the validator's words while the real cause is here
+        assert.deepEqual(flat, defs, `len=${len} size=${size} lost an achievement or changed the order`);
       }
     }
   });
 
-  test('只有一段时,发过去的话和以前一字不差 —— 小攻略的行为不能被这次改动碰到', () => {
+  test('with only one shard the message sent is character for character what it was — the behaviour for a small guide must not be touched by this change', () => {
     assert.equal(buildChunkMessage([BIG], 0), '开始写吧。先联网查资料,再按规则写完整份攻略。');
   });
 
-  test('分段时告诉模型这一段是哪几个,以及别重复前面写过的', () => {
+  test('when sharded, tell the model which entries this shard is, and not to repeat earlier ones', () => {
     const chunks = chunkDefs(BIG, 2);
     const m = buildChunkMessage(chunks, 1);
     assert.match(m, /第 3–4 个成就/);
     assert.match(m, /成就3[\s\S]*成就4/);
     assert.match(m, /不要重复前面已经写过的小节和成就/);
-    assert.match(m, /后面还有/, '中间段不该收尾');
+    assert.match(m, /后面还有/, 'a middle shard should not wrap up');
     assert.match(buildChunkMessage(chunks, 2), /最后一段,写完就停/);
   });
 
   /**
-   * 各段并发写之后模型看不见别段,于是相邻两段都属于「主线」时会各写一行 `## 主线`。
-   * 提示词那边说的是"标题照开,重了程序合",这里就是那句承诺的兑现处 ——
-   * 少了它,攻略里会出现一个空标题紧跟着同名标题,内容一条没少但读起来像分类断了。
+   * With the shards written concurrently the model cannot see the others, so two adjacent shards
+   * both belonging to 「主线」 each write a `## 主线` line. What the prompt says is "open the
+   * heading as you need, the program merges duplicates", and this is where that promise is kept —
+   * without it the guide carries an empty heading immediately followed by one of the same name,
+   * with not one entry missing while it reads as though the categorisation broke.
    */
-  describe('拼接时合掉跨段重复的小节标题', () => {
-    test('紧挨着的同名标题合成一个', () => {
+  describe('merging section headings duplicated across shards on assembly', () => {
+    test('adjacent headings of the same name merge into one', () => {
       const out = joinBodies(['## 主线\n\n- [ ] **A**', '## 主线\n\n- [ ] **B**']);
-      assert.equal(out.match(/## 主线/g).length, 1, '两段都开了「主线」,只该留一个标题');
-      assert.match(out, /\*\*A\*\*[\s\S]*\*\*B\*\*/, '条目一条都不能少,顺序也不能变');
+      assert.equal(out.match(/## 主线/g).length, 1, 'both shards opened 「主线」, and only one heading should remain');
+      assert.match(out, /\*\*A\*\*[\s\S]*\*\*B\*\*/, 'not one entry may be lost and the order may not change');
     });
 
-    test('中间隔了别的小节又转回来的,不合 —— 那是游戏自己的分类', () => {
+    test('one that returns after another section in between is not merged — that is the game own categorisation', () => {
       const out = joinBodies(['## 主线\n- [ ] **A**', '## 支线\n- [ ] **B**', '## 主线\n- [ ] **C**']);
       assert.equal(out.match(/## 主线/g).length, 2,
-        '只合紧挨着的。隔着别的小节又回来是合法结构,合掉等于把 C 塞进支线');
+        'only adjacent ones merge. Returning after another section is a legitimate structure, and merging pushes C into the side quests');
     });
 
-    test('层级不同不合 —— `## 收集` 和 `### 收集` 是两个东西', () => {
+    test('different levels do not merge — `## 收集` and `### 收集` are two different things', () => {
       const out = joinBodies(['## 收集\n- [ ] **A**', '### 收集\n- [ ] **B**']);
       assert.match(out, /## 收集/);
       assert.match(out, /### 收集/);
     });
 
-    test('只在段首合。段中间出现的同名标题不动', () => {
+    test('merging happens only at a shard start. A same-named heading in the middle of a shard is untouched', () => {
       const out = joinBodies(['## 主线\n- [ ] **A**', '- [ ] **B**\n\n## 主线\n- [ ] **C**']);
       assert.equal(out.match(/## 主线/g).length, 2,
-        '第二段是以条目开头的,它里面那个标题是新开的一节,不是重复的开头');
+        'the second shard starts with an entry, so the heading inside it opens a new section rather than being a duplicated start');
     });
 
-    test('空段和失败段(null)直接跳过,不留空行也不错位', () => {
+    test('empty shards and failed shards (null) are skipped, leaving no blank line and no misalignment', () => {
       assert.equal(joinBodies(['## A\n- [ ] **x**', null, '', '## B\n- [ ] **y**']),
         '## A\n- [ ] **x**\n\n## B\n- [ ] **y**');
-      assert.equal(joinBodies([null, null]), '', '一段都没有就是空字符串,不是 "null"');
+      assert.equal(joinBodies([null, null]), '', 'no shards at all is an empty string, not "null"');
     });
   });
 
   /**
-   * 跨段分类。**这一组钉的是一个真实事故**:《波西亚时光》91 个成就分两段写,
-   * 两段各自定各自的分区,并起来 17 个小节 —— 恋爱那件事被拆成六个,
-   * `## 主线剧情` 原样出现两次。每一段自己内部零重复,乱的只有并集。
+   * Cross-shard categorisation. **This group pins a real incident**: one game's 91 achievements
+   * were written in two shards, each shard defining its own sections, and the union came to 17
+   * sections — the romance topic was split into six and `## 主线剧情` appeared verbatim twice.
+   * Each shard was internally duplicate-free; only the union was a mess.
    */
-  describe('跨段分类', () => {
-    /** 一段正文:按 [[小节名, 成就[]], ...] 摆好。`seg` 把标题写死成「主线」,这里要能换 */
+  describe('cross-shard categorisation', () => {
+    /** One shard of body text, laid out as [[section, achievements[]], ...]. `seg` hardcodes the heading as 主线, and this has to vary it */
     const body = (parts) =>
       '```markdown\n' +
       parts
@@ -1402,14 +1486,16 @@ describe('分段撰写', () => {
         .join('\n\n') +
       '\n```';
 
-    test('端到端:两段各开一次同名小节,成品里只有一个', async () => {
-      // 上面几条验的是零件。**这一条验的是这些零件真的接在生成流程上** ——
-      // 分类问没问、映射有没有真的搬动条目、接缝重复合没合掉,漏掉任何一环
-      // 都不会报错,只会让成品重新长出重复的小节
-      // **形状照抄《波西亚时光》**:重复的「主线」落在第 2 段的**末尾**,
-      // 而接缝两侧是「社交」。接缝那一对 joinBodies 自己就能合,所以拿它当端到端
-      // 断言等于什么都没验 —— 真正只有归并治得了的,是离接缝远的那一个
-      const { db, config } = envFor(3); // 5 个成就切成 3 + 2
+    test('end to end: two shards each open the same section once, and the finished guide has one', async () => {
+      // The cases above verify the parts. **This one verifies those parts are really wired into
+      // the generation flow** — whether classification was asked for, whether the mapping really
+      // moved the entries, whether the duplicate at the seam was merged; miss any link and nothing
+      // raises an error, the finished guide merely grows duplicate sections again.
+      // **The shape is copied from that real game**: the duplicated 「主线」 lands at the **end** of
+      // shard 2, while both sides of the seam are 「社交」. joinBodies can merge the pair at the
+      // seam by itself, so using that as the end-to-end assertion verifies nothing — what only the
+      // merge can cure is the one far from the seam
+      const { db, config } = envFor(3); // 5 achievements split into 3 + 2
       const provider = fakeProvider(
         [
           body([['主线', BIG.slice(0, 2)], ['社交', [BIG[2]]]]),
@@ -1418,37 +1504,40 @@ describe('分段撰写', () => {
         { sections: ['主线', '社交'] }
       );
       const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
-      assert.equal(provider.regroupAsks, 1, '分区只统一一趟,不是每段问一次');
-      assert.match(provider.regroupPrompt, /已经写完了/, '问的确实是「写完之后再分类」那一趟');
-      assert.match(provider.regroupPrompt, /现在在:/, '要把各段自己给的分节一起交上去 —— 那是这一趟比前置那趟多出来的信息');
-      assert.doesNotMatch(provider.asked[0], /一字不差地照抄/, '写正文时不该再钉死标题,各段自己开');
+      assert.equal(provider.regroupAsks, 1, 'sections are unified in one pass, not once per shard');
+      assert.match(provider.regroupPrompt, /已经写完了/, 'what is asked really is the "classify after writing" pass');
+      assert.match(provider.regroupPrompt, /现在在:/, 'the sections each shard chose have to go up with it — that is the information this pass has that the earlier one did not');
+      assert.doesNotMatch(provider.asked[0], /一字不差地照抄/, 'when writing the body the headings should no longer be pinned; each shard opens its own');
       const text = readFileSync(res.path, 'utf8');
-      assert.equal(text.match(/## 主线/g).length, 1, '「主线」被两段各开了一次,成品里只该有一个');
+      assert.equal(text.match(/## 主线/g).length, 1, '「主线」 was opened once by each shard, and the finished guide should have one');
       assert.equal(text.match(/## 社交/g).length, 1);
-      assert.ok(text.indexOf('## 主线') < text.indexOf('## 社交'), '顺序按分类结果走');
-      assert.equal((text.match(/- \[ \]/g) ?? []).length, 5, '5 个成就一个都不能少');
+      assert.ok(text.indexOf('## 主线') < text.indexOf('## 社交'), 'the order follows the classification result');
+      assert.equal((text.match(/- \[ \]/g) ?? []).length, 5, 'not one of the 5 achievements may be lost');
     });
 
-    test('两个界面都要报「正在统一分区」和「没统一成」', () => {
-      // **两个消费者都是 if/else if 链,不认识的 phase 静默落地。**
-      // 不加分支的表现有两个,都不报错:定分区那几十秒里进度条一动不动(看着像卡死),
-      // 以及降级悄悄发生 —— 后者正是这个项目最防的那种退化,而它在成品上是看得见的
-      // (小节标题重复),用户只会觉得"这次生成的分区怎么乱七八糟"。
+    test('both interfaces have to report "unifying the sections" and "could not unify"', () => {
+      // **Both consumers are if/else-if chains, and an unrecognised phase lands silently.**
+      // Not adding a branch has two symptoms, neither of them an error: the progress bar does not
+      // move for the tens of seconds the sections take (which looks like a hang), and the
+      // degradation happens quietly — the latter being exactly the kind of decay this project
+      // guards against most, and it is visible in the finished guide (duplicated section
+      // headings), where the user only thinks "the categorisation came out a mess this time".
       //
-      // **先剥行注释再剥块注释**(见 CLAUDE.md):反过来的话,注释里出现的 `/*`
-      // 会把下面的代码一起吃掉,于是断言被喂饱,代码删了它照样绿
+      // **Strip line comments before block comments** (see CLAUDE.md): the other way round, a `/*`
+      // appearing in a comment swallows the code below it, so the assertion is fed and stays green
+      // with the code deleted
       const strip = (src) =>
         src.replace(/(^|[^:])\/\/[^\n]*/gm, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
       const read = (f) => strip(readFileSync(new URL('../' + f, import.meta.url), 'utf8'));
       for (const f of ['tracker.js', 'lib/server.js']) {
         const src = read(f);
-        assert.ok(src.includes("=== 'regroup'"), `${f} 没处理 regroup —— 那几十秒界面上什么都不动`);
-        assert.ok(src.includes("'regroup-done'"), `${f} 没报分区统一好了`);
-        assert.ok(src.includes("'regroup-failed'"), `${f} 没报降级 —— 静默退化`);
+        assert.ok(src.includes("=== 'regroup'"), `${f} does not handle regroup — nothing moves on screen for those tens of seconds`);
+        assert.ok(src.includes("'regroup-done'"), `${f} does not report that the sections were unified`);
+        assert.ok(src.includes("'regroup-failed'"), `${f} does not report the degradation — a silent decay`);
       }
     });
 
-    test('分区统一不出来时降级,不中断生成', async () => {
+    test('when the sections cannot be unified it degrades rather than interrupting generation', async () => {
       const { db, config } = envFor(3);
       const provider = fakeProvider([seg(BIG.slice(0, 3)), seg(BIG.slice(3))], { sections: null });
       const events = [];
@@ -1456,38 +1545,43 @@ describe('分段撰写', () => {
         db, config, provider, steam: bigSteam(), appid: '1',
         onProgress: (e) => events.push(e),
       });
-      assert.ok(res.path, '正文是用户已经等了几分钟的东西,不能因为骨架没定成就整份作废');
+      assert.ok(res.path, 'the body is something the user already waited minutes for; the whole thing must not be voided because the skeleton could not be settled');
       assert.equal((readFileSync(res.path, 'utf8').match(/- \[ \]/g) ?? []).length, 5);
-      // **降级要出声。** 悄悄发生的退化正是这个项目最防的那种
+      // **A degradation has to speak up.** A decay that happens quietly is exactly what this
+      // project guards against most
       assert.ok(events.some((e) => e.phase === 'regroup-failed'),
-        '降级了就要报一条 regroup-failed');
-      // 降级 = 保留各段自己分的标题,而不是把正文推平成一节
+        'a degradation has to report a regroup-failed');
+      // Degrading = keep the headings each shard chose, rather than flattening the body into one section
       const degraded = readFileSync(res.path, 'utf8');
-      assert.match(degraded, /^## /m, '降级也要留着各段自己开的小节');
-      // **接缝合并只有在这条路上才看得出来。** 分类那一趟成功时它会按标题重新分桶,
-      // 顺手把重复的合掉,于是拼接处漏没漏合一点痕迹都不留;降级之后没人兜底了,
-      // 两段各开的 `## 主线` 会原样留成两个。实测:把落盘那句换成裸拼接,
-      // 全套测试一条都不红 —— 这条断言就是拿来堵那个洞的
+      assert.match(degraded, /^## /m, 'even degraded, the sections each shard opened have to stay');
+      // **The seam merge is only observable on this path.** When the classification pass succeeds
+      // it re-buckets by heading and merges duplicates along the way, so a missed seam merge leaves
+      // no trace at all; once degraded there is no fallback, and the `## 主线` each shard opened
+      // stays as two. Measured: replace the landing line with a bare concatenation and not one test
+      // in the suite turns red — this assertion is what plugs that hole
       assert.equal((degraded.match(/^## 主线$/gm) ?? []).length, 1,
-        '两段都以「主线」开头,joinBodies 要在接缝上合掉重复的那一行');
+        'both shards start with 「主线」, and joinBodies has to merge the duplicate line at the seam');
     });
   });
 
-  test('chunksNeedingRewrite 按 apiName 把问题定位到具体那一段', () => {
+  test('chunksNeedingRewrite locates a problem to a specific shard by apiName', () => {
     const chunks = chunkDefs(BIG, 2);
     const blocking = [{ code: 'missing-checkbox', apiName: 'E', message: 'x' }];
     assert.deepEqual(chunksNeedingRewrite(blocking, chunks), [2]);
-    // 定位不到的(没带 apiName)不该乱指一段 —— 调用方会退回全部重写
+    // What cannot be located (carrying no apiName) must not point at a shard at random — the caller
+    // falls back to rewriting everything
     assert.deepEqual(chunksNeedingRewrite([{ code: 'merged-line', message: 'x' }], chunks), []);
   });
 
   // -------------------------------------------------------------------------
-  // 被 max_tokens 截断 → 切小重问
+  // Truncated by max_tokens → shard smaller and ask again
   // -------------------------------------------------------------------------
-  // 装进单次请求的是 thinking + 正文,而 thinking 随游戏/模型/端点变,兼容端点上
-  // 连压它的参数都发不出去。所以不预测该切多大,而是**等截断真的发生**再切 ——
-  // 截断是量到的事实,它直接说明这一段越了界。
-  describe('截断之后自己切小重问', () => {
+  // What has to fit in one request is thinking plus prose, and thinking varies with the game, the
+  // model and the endpoint — on a compatible endpoint the parameter that would cap it cannot even
+  // be sent. So rather than predicting how big a shard should be, **wait until a truncation really
+  // happens** and then split — a truncation is a measured fact, and it says directly that this
+  // shard went over the line.
+  describe('sharding smaller and asking again after a truncation', () => {
     const N = 12;
     const MANY = Array.from({ length: N }, (_, i) => def(`K${i}`, `成就${i + 1}`, `完成第${i + 1}关。`));
     const manySteam = () => ({
@@ -1502,7 +1596,7 @@ describe('分段撰写', () => {
       return e;
     };
 
-    /** 能指定每次的 stopReason,并且把**每次看到的完整历史**记下来 */
+    /** Lets each call's stopReason be specified, and records **the full history seen each time** */
     function scriptedProvider(script) {
       return {
         model: 'claude-opus-5',
@@ -1515,9 +1609,10 @@ describe('分段撰写', () => {
           this.seen.push(JSON.stringify(messages));
           this.asked.push(messages.at(-1).content);
           const step = script[this.asked.length - 1];
-          if (!step) throw new Error('scriptedProvider 的脚本用完了');
-          // 传输层的故障(401、网络断了)—— 和 checkResult 判出来的「这一段不可用」
-          // 是两类东西,而它们从同一个 await 里出来。见 CHUNK_LOCAL
+          if (!step) throw new Error('the scriptedProvider script ran out');
+          // A transport failure (a 401, a dropped connection) is a different class from
+          // "this shard is unusable" as judged by checkResult, and they come out of the same
+          // await. See CHUNK_LOCAL
           if (step.throws) throw step.throws;
           const text = step.text ?? '';
           return {
@@ -1539,8 +1634,8 @@ describe('分段撰写', () => {
 
     const HALF_WRITTEN = '```markdown\n## 主线\n\n- [ ] **成就1**<br>完成第1关。<br>写到这里就被砍了\n```';
 
-    test('一段写不完就一分为二,两半都问一遍,成就一个不少', async () => {
-      const { db, config } = manyEnv(N); // 一整段,必然要切
+    test('a shard that cannot be finished is split in two, both halves are asked, and no achievement is lost', async () => {
+      const { db, config } = manyEnv(N); // one whole shard, so it is bound to split
       const provider = scriptedProvider([
         { text: HALF_WRITTEN, stop: 'max_tokens', out: 61445 },
         { text: seg(MANY.slice(0, 6)) },
@@ -1552,18 +1647,18 @@ describe('分段撰写', () => {
         onProgress: (e) => events.push(e),
       });
 
-      assert.equal(r.ok, true, '切小之后应该顺利写完');
-      assert.equal(provider.asked.length, 3, '截断那次 + 两半 = 三次');
+      assert.equal(r.ok, true, 'once sharded smaller it should finish cleanly');
+      assert.equal(provider.asked.length, 3, 'the truncated call plus the two halves = three');
       const text = readFileSync(r.path, 'utf8');
       for (const d of MANY) {
-        assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} 丢了`);
+        assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} was lost`);
       }
       const re = events.find((e) => e.phase === 'resplit');
-      assert.ok(re, '切小要发进度事件 —— 界面上不能是「卡住了」');
+      assert.ok(re, 'sharding smaller has to emit a progress event — the interface must not read as "stuck"');
       assert.deepEqual([re.from, re.to], [12, 6]);
     });
 
-    test('重问之前必须把被截断的那一轮从历史里摘掉', async () => {
+    test('the truncated round has to be removed from the history before asking again', async () => {
       const { db, config } = manyEnv(N);
       const provider = scriptedProvider([
         { text: HALF_WRITTEN, stop: 'max_tokens' },
@@ -1572,24 +1667,25 @@ describe('分段撰写', () => {
       ]);
       await generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' });
 
-      // **这条是整件事最容易做错的地方。** 废稿留在上下文里,而重问的提示词写着
-      // 「不要重复前面已经写过的成就」—— 模型会跳过它写了一半的那几个,
-      // 产出看着完全正常,只是少了条目。失败会报出来,缺东西不会
+      // **This is the easiest thing in the whole business to get wrong.** The dead draft stays in
+      // the context while the re-ask prompt says 「不要重复前面已经写过的成就」 — so the model skips
+      // the ones it half wrote, and the output looks entirely normal while missing entries. A
+      // failure is reported; missing content is not
       assert.ok(
         !provider.seen[1].includes('写到这里就被砍了'),
-        '第二次请求的历史里还留着被截断的废稿'
+        'the second request history still carries the truncated dead draft'
       );
       assert.ok(
         !provider.seen[2].includes('写到这里就被砍了'),
-        '第三次请求的历史里还留着被截断的废稿'
+        'the third request history still carries the truncated dead draft'
       );
-      // 摘掉的只是废稿那一轮,正常写完的那一段必须留着 —— 同一个 session 的意义
-      // 就在于模型看得见自己前面写了什么
-      assert.ok(provider.seen[2].includes('成就1'), '第一半的成果不该被一起摘掉');
+      // What is removed is only the dead-draft round; a shard that was written properly has to
+      // stay — the whole point of one session is that the model can see what it wrote before
+      assert.ok(provider.seen[2].includes('成就1'), 'the work of the first half should not be removed along with it');
     });
 
-    test('切到下限还是写不完就停下来,并且说清楚为什么别去调大 maxTokens', async () => {
-      // 5 == MIN_CHUNK,不能再切
+    test('at the lower bound and still unable to finish, it stops and says plainly why not to raise maxTokens', async () => {
+      // 5 == MIN_CHUNK, no further split possible
       const FIVE = MANY.slice(0, 5);
       const { db, config } = manyEnv(5, FIVE);
       const provider = scriptedProvider([{ text: HALF_WRITTEN, stop: 'max_tokens' }]);
@@ -1606,23 +1702,25 @@ describe('分段撰写', () => {
         }),
         (err) => {
           assert.match(err.message, /已经切到 5 个成就/);
-          assert.match(err.message, /这是用量不是上限/, '那个数字是用量,得说明白');
-          // **这句话会原样进 Dashboard 的浮窗。** 该动哪个旋钮是终端才给得出、
-          // 也才有意义的建议(tracker.js 接住 chunk-too-small 之后自己补)
+          assert.match(err.message, /这是用量不是上限/, 'that number is usage, and it has to be said');
+          // **This sentence goes verbatim into the Dashboard floater.** Which knob to turn is
+          // advice only a terminal can give and only there means anything (tracker.js adds it
+          // after catching chunk-too-small)
           assert.equal(err.code, 'chunk-too-small');
-          // `was` 记的是**改写之前**那个码。切不动之后 code 一律变成 chunk-too-small,
-          // 于是"到底是被截断还是根本没输出正文"就只剩这一个字段说得清 ——
-          // 而那两种情况下"换个模型"这条建议的分量完全不同
+          // `was` records the code from **before** the rewrite. Once it cannot be split further
+          // the code always becomes chunk-too-small, so "was it truncated or did it output no
+          // prose at all" is left to this one field — and the weight of the advice "try another
+          // model" is completely different between those two
           assert.deepEqual(err.detail, { size: 5, min: 5, was: 'max_tokens' });
           assert.doesNotMatch(err.message, /ai\.maxTokens|anthropicExtras|config\.json/,
-            'Dashboard 用户没有终端,也不该被要求去编辑配置文件');
+            'a Dashboard user has no terminal and should not be asked to edit a config file');
           return true;
         }
       );
-      assert.equal(provider.asked.length, 1, '切不动了就不该再问一次');
+      assert.equal(provider.asked.length, 1, 'once it cannot be split further it should not ask again');
     });
 
-    test('只有截断才切小重问 —— 拒答、RECITATION 切小了照样撞', async () => {
+    test('only a truncation shards smaller and re-asks — a refusal or RECITATION hits the same wall when smaller', async () => {
       for (const stop of ['refusal', 'recitation']) {
         const { db, config } = manyEnv(N);
         const provider = scriptedProvider([{ text: '', stop }]);
@@ -1630,26 +1728,27 @@ describe('分段撰写', () => {
           () => generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' }),
           (err) => {
             assert.equal(err.code, stop);
-            assert.doesNotMatch(err.message, /已经切到/, '这不是长度问题,别按长度问题报');
+            assert.doesNotMatch(err.message, /已经切到/, 'this is not a length problem, so do not report it as one');
             return true;
           }
         );
-        assert.equal(provider.asked.length, 1, `${stop} 不该重试`);
+        assert.equal(provider.asked.length, 1, `${stop} should not be retried`);
       }
     });
 
     // -----------------------------------------------------------------------
-    // 空回复:先原样重问,还空再切小
+    // An empty reply: ask again unchanged first, and shard smaller if it is still empty
     // -----------------------------------------------------------------------
-    // 「一个 text 块都没有」是这条路上唯一真正的**瞬时**失败:请求没问题、段长没问题、
-    // 资料也搜到了,就是这一次没吐出正文。它此前一次都不重试,整份当场作废 ——
-    // 实测撞到过(KINGDOM HEARTS,197 个成就第 3/4 段)。
-    describe('空回复', () => {
-      test('原样再问一次就好了 —— 不该为此把整份作废', async () => {
+    // "Not one text block" is the only genuinely **transient** failure on this path: the request
+    // is fine, the shard length is fine, the research was found, and this one call simply produced
+    // no prose. It used to be retried not once, voiding the whole guide on the spot — measured
+    // (one game, shards 3 and 4 of 197 achievements).
+    describe('an empty reply', () => {
+      test('asking again unchanged is enough — the whole guide should not be voided over it', async () => {
         const { db, config } = manyEnv(N);
         const provider = scriptedProvider([
-          { text: '' },              // 空回复
-          { text: seg(MANY) },       // 再问一次就有了
+          { text: '' },              // an empty reply
+          { text: seg(MANY) },       // asking again produces it
         ]);
         const events = [];
         const r = await generateGuide(db, {
@@ -1657,32 +1756,35 @@ describe('分段撰写', () => {
           onProgress: (e) => events.push(e),
         });
 
-        assert.equal(r.ok, true, '重问一次就该正常写完');
+        assert.equal(r.ok, true, 'one re-ask should finish it normally');
         assert.equal(provider.asked.length, 2);
-        assert.deepEqual(r.chunkFailures, [], '补上了就不该还挂着失败记录');
+        assert.deepEqual(r.chunkFailures, [], 'once filled in, no failure record should still be hanging');
         const ev = events.find((e) => e.phase === 'retry');
-        assert.ok(ev, '重问要发进度事件 —— 界面上不能是「卡了三分钟」');
+        assert.ok(ev, 'a re-ask has to emit a progress event — the interface must not read as "stuck for three minutes"');
         assert.deepEqual([ev.attempt, ev.of], [1, 1]);
       });
 
-      test('重问时那条空 assistant 必须先从历史里摘掉', async () => {
-        // 不摘的话历史里就有一轮「问了这一段 / 什么都没答」,而重问的是**同一句话** ——
-        // 模型完全可能当成"你已经问过了",于是再答一次空。这跟被截断那一轮必须摘掉
-        // 是同一条理由,只是废稿的形状不同(那边是半份,这边是空的)
+      test('the empty assistant turn has to be removed from the history before asking again', async () => {
+        // Without removing it, the history holds a round of "asked for this shard / answered
+        // nothing" while the re-ask is **the same sentence** — the model may well take it as "you
+        // already asked" and answer empty again. The same reasoning as removing the truncated
+        // round, only the dead draft has a different shape (half a guide there, empty here)
         const { db, config } = manyEnv(N);
         const provider = scriptedProvider([{ text: '' }, { text: seg(MANY) }]);
         await generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' });
 
         const second = JSON.parse(provider.seen[1]);
-        assert.equal(second.length, 1, '重问时历史里只该有新问的那一句 user');
+        assert.equal(second.length, 1, 'on the re-ask the history should hold only the newly asked user turn');
         assert.equal(second[0].role, 'user');
       });
 
-      test('控制符泄漏走同一条阶梯:先原样重问,补上就当没事发生', async () => {
-        // 供应商把内部记号写进正文,输出从那里断掉(见 lib/ai.js 的 leakedControlToken)。
-        // 和空回复同类:是这一次采样跑偏,不是这一段有问题 —— 重问一次很可能就正常了。
-        // 线上那次(KINGDOM HEARTS)因为没有这道拦截,三轮都把断掉的正文当成功收下了,
-        // 结果少 10 个成就,而那三行乱码进了草稿
+      test('a leaked control token takes the same ladder: ask again unchanged, and once filled in treat it as though nothing happened', async () => {
+        // The vendor writes an internal marker into the prose and the output breaks off there (see
+        // leakedControlToken in lib/ai.js). The same class as an empty reply: this one sampling
+        // went off the rails, not this shard — asking again will very likely be normal.
+        // The production occurrence had no such interception, so all three rounds accepted the
+        // broken-off prose as a success, ending 10 achievements short with those three garbage
+        // lines in the draft
         const { db, config } = manyEnv(N);
         const provider = scriptedProvider([
           { text: '```markdown\n- [ ] **成就1**<br>完成第1关。<br>写到一半</｜｜DSML｜｜parameter>\n' },
@@ -1694,20 +1796,20 @@ describe('分段撰写', () => {
           onProgress: (e) => events.push(e),
         });
 
-        assert.equal(r.ok, true, '重问一次就该好');
+        assert.equal(r.ok, true, 'one re-ask should fix it');
         assert.equal(provider.asked.length, 2);
         const ev = events.find((e) => e.phase === 'retry');
-        assert.ok(ev, '要发重问的进度事件');
+        assert.ok(ev, 'the re-ask progress event has to be emitted');
         assert.equal(ev.reason, 'control-token');
-        // 断掉的那半份绝不能留在成品里
-        assert.doesNotMatch(readFileSync(r.path, 'utf8'), /DSML/, '乱码不能进攻略文件');
+        // The broken-off half must never stay in the finished product
+        assert.doesNotMatch(readFileSync(r.path, 'utf8'), /DSML/, 'garbage must not get into the guide file');
       });
 
-      test('一直泄漏也不拖垮整份 —— 记下来接着写后面的', async () => {
-        // control-token 必须在 CHUNK_LOCAL 里:它是这一段自己的问题(HTTP 200),
-        // 不是供应商坏了,所以放过这一段、接着写后面几段是对的
-        // 每段 5 个 == MIN_CHUNK,所以切不动 —— 这条只考「记下来接着跑」,
-        // 不把切分的行为也混进来
+      test('persistent leaking does not drag the whole guide down — record it and carry on with the rest', async () => {
+        // control-token has to be in CHUNK_LOCAL: it is this shard's own problem (HTTP 200), not a
+        // broken vendor, so passing over this shard and carrying on with the rest is right.
+        // 5 per shard == MIN_CHUNK, so no further split — this case examines only "record it and
+        // carry on" without mixing in the splitting behaviour
         const LOTS = Array.from({ length: 10 }, (_, i) => def(`K${i}`, `成就${i + 1}`, `完成第${i + 1}关。`));
         const e = freshEnv({ defs: LOTS });
         e.config.ai = { maxAchievements: 500, chunkSize: 5 };
@@ -1719,25 +1821,26 @@ describe('分段撰写', () => {
         };
         const junk = { text: '```markdown\n- [ ] **x**<br>y</｜｜DSML｜｜invoke>\n' };
         const provider = scriptedProvider([
-          { text: seg(LOTS.slice(0, 5)) },  // 第 1 段正常
-          junk, junk,                        // 第 2 段:泄漏 + 重问还泄漏 → 切不动,记下来放过
-          { text: seg(LOTS.slice(5)) },      // 第 2 轮把它补上
+          { text: seg(LOTS.slice(0, 5)) },  // shard 1 is normal
+          junk, junk,                        // shard 2: leaks, leaks again on the re-ask → cannot split, recorded and passed over
+          { text: seg(LOTS.slice(5)) },      // the second round fills it in
         ]);
         const r = await generateGuide(e.db, { config: e.config, provider, steam, appid: '1' })
           .catch((err) => ({ threw: err }));
-        assert.ok(!r.threw, '不该整份抛出去:' + (r.threw && r.threw.message));
-        assert.equal(r.ok, true, '第二轮补上了就该落地');
+        assert.ok(!r.threw, 'the whole thing should not be thrown: ' + (r.threw && r.threw.message));
+        assert.equal(r.ok, true, 'filled in on the second round, it should land');
         assert.doesNotMatch(readFileSync(r.path, 'utf8'), /DSML/);
       });
 
-      test('重问还是空 ⇒ 按长度问题处理,切成两半', async () => {
-        // 第二次还空就不是抽风了。兼容端点上既发不出压 thinking 的参数,也不能假定
-        // 它会把「额度被思考吃光」如实报成 max_tokens —— 所以"空回复"里混着一部分
-        // 实质上就是截断的情况,而切小正是那部分的解
+      test('still empty on the re-ask ⇒ treat it as a length problem and split in two', async () => {
+        // Empty a second time is no longer a glitch. On a compatible endpoint the parameter that
+        // would cap thinking cannot be sent, and it cannot be assumed to report "the allowance was
+        // eaten by thinking" honestly as max_tokens — so "empty reply" carries a share of cases
+        // that are truncations in substance, and sharding smaller is the cure for that share
         const { db, config } = manyEnv(N);
         const provider = scriptedProvider([
-          { text: '' },                    // 空
-          { text: '' },                    // 重问还是空 → 切
+          { text: '' },                    // empty
+          { text: '' },                    // still empty on the re-ask → split
           { text: seg(MANY.slice(0, 6)) },
           { text: seg(MANY.slice(6)) },
         ]);
@@ -1748,34 +1851,36 @@ describe('分段撰写', () => {
         });
 
         assert.equal(r.ok, true);
-        assert.equal(provider.asked.length, 4, '空 + 重问 + 两半 = 四次');
+        assert.equal(provider.asked.length, 4, 'empty + re-ask + two halves = four');
         const re = events.find((e) => e.phase === 'resplit');
-        assert.ok(re, '切小要发进度事件');
+        assert.ok(re, 'sharding smaller has to emit a progress event');
         assert.deepEqual([re.from, re.to], [12, 6]);
-        assert.equal(re.reason, 'empty', '要说清是因为空回复才切的,不是因为截断');
+        assert.equal(re.reason, 'empty', 'it has to say the split was caused by an empty reply, not by a truncation');
       });
 
-      test('切完的两半各自还能再重问一次 —— 重试次数跟着段走', async () => {
-        // 切小换的是**一段更小的内容**,前面那两次空回复是上一段的历史,不该记在它头上。
-        // 计数不归零的话,切完的第一半只要抽风一次就直接判死,而它其实一次都没试过
+      test('each half after a split gets its own re-ask — the retry count follows the shard', async () => {
+        // Sharding smaller swaps in **a smaller piece of content**, and the two earlier empty
+        // replies are the previous shard's history and should not be charged to it. Without
+        // resetting the count, the first half only has to glitch once to be killed outright, while
+        // it has not been tried even once
         const { db, config } = manyEnv(N);
         const provider = scriptedProvider([
-          { text: '' }, { text: '' },       // 整段:空 + 重问还空 → 切
-          { text: '' },                     // 前一半:空
-          { text: seg(MANY.slice(0, 6)) },  // 前一半:重问就有了
+          { text: '' }, { text: '' },       // whole shard: empty + still empty on the re-ask → split
+          { text: '' },                     // first half: empty
+          { text: seg(MANY.slice(0, 6)) },  // first half: the re-ask produces it
           { text: seg(MANY.slice(6)) },
         ]);
         const r = await generateGuide(db, { db, config, provider, steam: manySteam(), appid: '1' });
-        assert.equal(r.ok, true, '切完的那一半也该有自己的一次重问机会');
+        assert.equal(r.ok, true, 'a half after the split should get its own re-ask too');
         assert.equal(provider.asked.length, 5);
       });
     });
 
     // -----------------------------------------------------------------------
-    // 一段失败,整份不作废
+    // One shard fails without voiding the whole guide
     // -----------------------------------------------------------------------
-    describe('一段写不出来时不拖垮整份', () => {
-      /** 24 个成就分 4 段,每段 6 个 —— 和线上那次(197 个分 4 段)同形状 */
+    describe('one shard that cannot be written does not drag the whole guide down', () => {
+      /** 24 achievements in 4 shards of 6 — the same shape as the production case (197 in 4 shards) */
       const M = 24;
       const LOTS = Array.from({ length: M }, (_, i) => def(`K${i}`, `成就${i + 1}`, `完成第${i + 1}关。`));
       const lotsSteam = () => ({
@@ -1791,15 +1896,15 @@ describe('分段撰写', () => {
       };
       const quarter = (n) => LOTS.slice(n * 6, n * 6 + 6);
 
-      test('第 3 段作废也接着写第 4 段,前几段的成果不丢', async () => {
+      test('shard 3 is voided and shard 4 is still written, with the earlier shards work kept', async () => {
         const { db, config } = lotsEnv();
-        // 第 3 段拒答(不可重试、不可切),前后两段正常
+        // Shard 3 refuses (not retryable, not splittable); the shards before and after are normal
         const provider = scriptedProvider([
           { text: seg(quarter(0)) },
           { text: seg(quarter(1)) },
           { text: '', stop: 'refusal' },
           { text: seg(quarter(3)) },
-          // 第二轮补第 3 段
+          // The second round fills in shard 3
           { text: seg(quarter(2)) },
         ]);
         const events = [];
@@ -1808,22 +1913,23 @@ describe('分段撰写', () => {
           onProgress: (e) => events.push(e),
         });
 
-        // **这条是这次改动的核心。** 原来第 3 段一失败就直接抛出去,前两段几分钟的
-        // 联网研究连同第 4 段一起作废 —— 而少的那一段有现成的补救路径:
-        // 它的成就全被报成 missing-checkbox,chunksNeedingRewrite 精确挑出这一段,
-        // 下一轮只重问它。那套机器本来就在
-        assert.equal(r.ok, true, '第二轮补上了就该顺利落地');
-        assert.equal(provider.asked.length, 5, '第一轮 4 次(含失败那次)+ 第二轮补 1 次');
+        // **This is the core of the change.** Previously a failed shard 3 was thrown straight out,
+        // voiding the first two shards' minutes of web research along with shard 4 — while the
+        // missing shard has a ready-made remedy: all its achievements are reported as
+        // missing-checkbox, chunksNeedingRewrite picks out exactly that shard, and the next round
+        // re-asks only it. That machinery was already there
+        assert.equal(r.ok, true, 'filled in on the second round, it should land cleanly');
+        assert.equal(provider.asked.length, 5, 'round one is 4 calls (including the failed one) plus 1 to fill in on round two');
         const text = readFileSync(r.path, 'utf8');
         for (const d of LOTS) {
-          assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} 丢了`);
+          assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} was lost`);
         }
         const ev = events.find((e) => e.phase === 'chunk-failed');
-        assert.ok(ev, '放弃一段必须发进度事件 —— 悄悄少一块是最糟的失败方式');
+        assert.ok(ev, 'giving up a shard has to emit a progress event — quietly missing a piece is the worst way to fail');
         assert.deepEqual([ev.chunk, ev.count], [3, 6]);
       });
 
-      test('补第 3 段时问的是「写这一段」,不是甩过去六条「缺 checkbox」', async () => {
+      test('filling in shard 3 asks for "write this shard", not six "missing checkbox" findings', async () => {
         const { db, config } = lotsEnv();
         const provider = scriptedProvider([
           { text: seg(quarter(0)) },
@@ -1834,14 +1940,15 @@ describe('分段撰写', () => {
         ]);
         await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
 
-        // 一段从没写出来,缺的不是修正意见,是这一段本身。拿打回清单去问,等于
-        // 递给模型六条「XX 没有 checkbox」,而它压根没见过这一段的内容
+        // A shard that was never written is missing not corrections but the shard itself. Asking
+        // with the send-back list hands the model six "XX has no checkbox" findings about content
+        // it has never seen
         const refill = provider.asked[4];
-        assert.match(refill, /只写第 13–18 个成就/, '该用原来那句「写这一段」');
-        assert.doesNotMatch(refill, /校验没过/, '这一段没写过,谈不上校验没过');
+        assert.match(refill, /只写第 13–18 个成就/, 'it has to use the original "write this shard" wording');
+        assert.doesNotMatch(refill, /校验没过/, 'this shard was never written, so there is no failed validation to speak of');
       });
 
-      test('供应商坏了要原样抛出去,不能当成「这一段没成」接着问', async () => {
+      test('a broken vendor is thrown through verbatim rather than recorded as "this shard did not work"', async () => {
         const { db, config } = lotsEnv();
         const boom = Object.assign(new Error('deepseek API HTTP 401:key 不对'), { code: 'bad-api-key' });
         const provider = scriptedProvider([
@@ -1852,9 +1959,10 @@ describe('分段撰写', () => {
         await assert.rejects(
           () => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }),
           (err) => {
-            // **code 必须原样传出去。** 它是 tracker.js 顶层 catch 用来挂终端建议的钥匙
-            // (bad-api-key 那条要说「环境变量会盖掉 config.json」,而清环境变量只能在
-            // 终端做)。当成一段的失败记下来,这条建议就永远走不到那儿了
+            // **The code has to pass through verbatim.** It is the key tracker.js's top-level catch
+            // uses to attach terminal advice (the bad-api-key one has to say 「环境变量会盖掉
+            // config.json」, and clearing an env var can only be done in a terminal). Recorded as a
+            // shard failure, that advice never reaches there
             assert.equal(err.code, 'bad-api-key');
             return true;
           }
@@ -1862,12 +1970,13 @@ describe('分段撰写', () => {
       });
 
       /**
-       * **「并发」不能只是个说法。** 段数没变、请求数没变、攻略也一模一样,所以把
-       * runPool 换回 for 循环,整套测试原本一条都不会红 —— 唯一的差别是墙上时间,
-       * 而那正是这次改动的**全部**目的。所以这一条直接量重叠:让每段的请求挂住,
-       * 数同时在飞的有几个。
+       * **"Concurrent" must not be merely a claim.** The shard count is unchanged, the request
+       * count is unchanged and the guide is identical, so swapping runPool back for a for loop
+       * would originally have turned not one test red — the only difference is wall-clock time,
+       * and that is the **entire** purpose of the change. So this case measures the overlap
+       * directly: hold each shard's request open and count how many are in flight at once.
        */
-      test('第一轮各段真的同时在飞,不是排队', async () => {
+      test('the shards of round one really are in flight together rather than queued', async () => {
         const { db, config } = lotsEnv();
         config.ai.concurrency = 3;
         let inFlight = 0;
@@ -1880,16 +1989,17 @@ describe('分段撰写', () => {
         provider.send = async (args) => {
           inFlight++;
           peak = Math.max(peak, inFlight);
-          // 挂一拍再往下走 —— 排队的话这一拍里不会有第二段进来,峰值就停在 1
+          // Hold for a tick before carrying on — queued, no second shard enters during that tick
+          // and the peak stays at 1
           await new Promise((r) => setTimeout(r, 0));
           inFlight--;
           return inner(args);
         };
         await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
-        assert.equal(peak, 3, `同时在飞的峰值是 ${peak},说明还在一段一段排队`);
+        assert.equal(peak, 3, `the peak in flight was ${peak}, which means it is still queueing shard by shard`);
       });
 
-      test('concurrency: 1 退回顺序 —— 排查问题时要有这条退路', async () => {
+      test('concurrency: 1 falls back to sequential — that escape route has to exist for diagnosis', async () => {
         const { db, config } = lotsEnv();
         config.ai.concurrency = 1;
         let inFlight = 0;
@@ -1910,8 +2020,9 @@ describe('分段撰写', () => {
         assert.equal(peak, 1);
       });
 
-      test('顺序跑时,整体故障之后一个请求都不再发', async () => {
-        // `concurrency: 1` 就是原来的顺序行为,这一条把它原样钉住:撞墙即停,不多问一次
+      test('running sequentially, not one request goes out after a total failure', async () => {
+        // `concurrency: 1` is the original sequential behaviour, and this pins it as it was: hit
+        // the wall and stop, with not one extra call
         const { db, config } = lotsEnv();
         config.ai.concurrency = 1;
         const boom = Object.assign(new Error('deepseek API HTTP 401:key 不对'), { code: 'bad-api-key' });
@@ -1922,21 +2033,24 @@ describe('分段撰写', () => {
         ]);
         await assert.rejects(() =>
           generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }));
-        assert.equal(provider.asked.length, 3, '整体故障不该再去问第 4 段 —— 那是同一堵墙');
+        assert.equal(provider.asked.length, 3, 'a total failure should not go on to ask shard 4 — that is the same wall');
       });
 
-      test('并发跑时,撞墙之后停止派新活 —— 多撞的次数由并发数封顶,不随段数涨', async () => {
-        // **并发下"当场停"做不到:请求已经发出去了,取消不了。** 能做到的是不再往下派,
-        // 于是最坏多撞 concurrency-1 次,而不是每剩一段撞一次 —— 这就是它的全部价值。
+      test('running concurrently, no new work is dispatched after hitting the wall — the extra hits are capped by the concurrency, not by the shard count', async () => {
+        // **Concurrently, "stop on the spot" is impossible: the requests are already out and cannot
+        // be cancelled.** What is possible is dispatching no more, so at worst it hits the wall
+        // concurrency-1 more times rather than once per remaining shard — which is its entire value.
         //
-        // **这一条的形状是被变异测试逼出来的。** 第一版用 8 段 + 并发 2、脚本只给两条,
-        // 于是每条泳道都是被自己那次错误停下的("脚本用完了"),`stop` 拿掉照样绿。
-        // 要让 `stop` 成为唯一能解释结果的东西,得让**不出错的泳道有活可接**:
-        // 8 段、并发 3、只有第 2 段炸,其余六段的成功回复都备好。
-        //   有 stop:派出 0/1/2,第 1 段炸 ⇒ 0 和 2 跑完就收工,一共 3 次
-        //   没 stop:0 完了接 3、2 完了接 4 …… 一路问到 8 次
+        // **The shape of this case was forced by mutation testing.** The first version used 8
+        // shards with concurrency 2 and a script of only two entries, so every lane was stopped by
+        // its own error ("the script ran out") and removing `stop` stayed green.
+        // To make `stop` the only thing that can explain the result, **the lanes that do not error
+        // need work to pick up**: 8 shards, concurrency 3, only shard 2 blowing up, and successful
+        // replies prepared for the other six.
+        //   with stop: dispatch 0/1/2, shard 1 blows up ⇒ 0 and 2 finish and it wraps up, 3 calls
+        //   without stop: 0 finishes and takes 3, 2 finishes and takes 4 … all the way to 8 calls
         const e = freshEnv({ defs: LOTS });
-        e.config.ai = { maxAchievements: 500, chunkSize: 3, concurrency: 3 }; // 24 / 3 = 8 段
+        e.config.ai = { maxAchievements: 500, chunkSize: 3, concurrency: 3 }; // 24 / 3 = 8 shards
         const boom = Object.assign(new Error('HTTP 401'), { code: 'bad-api-key' });
         const third = (n) => LOTS.slice(n * 3, n * 3 + 3);
         const provider = scriptedProvider([
@@ -1948,21 +2062,24 @@ describe('分段撰写', () => {
           () => generateGuide(e.db, { db: e.db, config: e.config, provider, steam: lotsSteam(), appid: '1' }),
           (err) => {
             assert.equal(err.code, 'bad-api-key',
-              '**抛的必须是段号最小的那个错**。401 会让在飞的请求一起失败,'
-              + '而它们谁先 reject 取决于网络快慢 —— 取"最先炸的"会让同一个输入两次跑报出不同的原因');
+              '**what is thrown has to be the error of the lowest-numbered shard**. A 401 fails every request in flight, '
+              + 'and which of them rejects first depends on network speed — taking "the first to blow up" makes two runs of the same input report different causes');
             return true;
           }
         );
         assert.ok(provider.asked.length <= 4,
-          `问了 ${provider.asked.length} 次(8 段)。撞墙后还在派新活,`
-          + '等于每剩一段再撞一次同一堵墙 —— 而那正是顺序版当场抛出去要省掉的东西');
+          `it asked ${provider.asked.length} times (8 shards). Dispatching new work after hitting the wall `
+          + 'means hitting the same wall once per remaining shard — which is exactly what throwing on the spot saves in the sequential version');
       });
 
-      test('两段一起炸时,报的是段号小的那个,不是先炸的那个', async () => {
-        // **这一条是变异测试逼出来的:只有一段失败时,排序和不排序结果一样。**
-        // 真实场景是 401 —— 在飞的请求会一起失败,而谁先 reject 只取决于网络快慢。
-        // 取"最先炸的"意味着同一个输入两次跑能报出不同的原因,排查时先怀疑的方向就不一样。
-        // 所以这里故意让**段号小的那个慢一点炸**:不排序的话它一定选不中。
+      test('when two shards blow up together, the one reported is the lower-numbered one, not the first to blow up', async () => {
+        // **This case was forced by mutation testing: with only one shard failing, sorting and not
+        // sorting give the same result.**
+        // The real scenario is a 401 — every request in flight fails, and which rejects first
+        // depends only on network speed. Taking "the first to blow up" means two runs of the same
+        // input can report different causes, and the first suspicion when diagnosing differs.
+        // So the lower-numbered shard is deliberately made to blow up **later**: without sorting it
+        // could never be selected.
         const { db, config } = lotsEnv();
         config.ai.concurrency = 3;
         const early = Object.assign(new Error('第 2 段先炸'), { code: 'later-shard' });
@@ -1989,37 +2106,40 @@ describe('分段撰写', () => {
           () => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }),
           (err) => {
             assert.equal(err.code, 'first-shard',
-              '第 2 段先 reject,但要报的是第 1 段那个 —— 否则同一个输入两次跑报出不同的原因');
+              'shard 2 rejects first, but what has to be reported is shard 1 — otherwise two runs of the same input report different causes');
             return true;
           }
         );
       });
 
-      test('重写失败时,保住上一轮已经写好的那一段', async () => {
-        // 重写轮里那一格装的是上一轮的正文。**改不动不等于该丢掉** ——
-        // 抹成空的话,一次"这轮没改好"就把原来能用的那份也带走了,
-        // 而用户看到的是那一段凭空消失,不是"这一段没改好"
+      test('when a rewrite fails, the shard already written in the previous round is kept', async () => {
+        // The slot in a rewrite round holds the previous round's body. **Unable to change it is not
+        // the same as should be discarded** — blanking it means one "this round did not improve it"
+        // takes away the perfectly usable original as well, and what the user sees is that shard
+        // vanishing into thin air rather than "this shard did not improve"
         const { db, config } = lotsEnv();
         const provider = scriptedProvider([
           { text: seg(quarter(0)) },
           { text: seg(quarter(1)) },
           { text: seg(quarter(2)) },
-          // 第 4 段少写一个成就 ⇒ 校验不过 ⇒ 第二轮定点重写它
+          // Shard 4 is one achievement short ⇒ validation fails ⇒ round two rewrites it specifically
           { text: seg(quarter(3).slice(0, 5)) },
-          { text: '', stop: 'refusal' },   // 第 2 轮:重写失败
-          { text: '', stop: 'refusal' },   // 第 3 轮:还是失败
+          { text: '', stop: 'refusal' },   // round 2: the rewrite fails
+          { text: '', stop: 'refusal' },   // round 3: it fails again
         ]);
         const r = await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
         const draft = readFileSync(r.draftPath, 'utf8');
         assert.match(draft, new RegExp(quarter(3)[0].name_cn),
-          '第 4 段第一轮写出来的内容必须还在 —— 重写没成功,不代表要把它删掉');
-        assert.match(draft, new RegExp(quarter(0)[0].name_cn), '别的段更不该受影响');
+          'what shard 4 produced in round one has to still be there — a failed rewrite does not mean deleting it');
+        assert.match(draft, new RegExp(quarter(0)[0].name_cn), 'the other shards should be even less affected');
       });
 
-      test('整体故障抛出去时,已经写好的几段仍然留在草稿里', async () => {
-        // **这一条才真正钉住「每写完一段就落盘」。** 轮末那次 writeDraft 在这条路上
-        // 根本走不到(异常直接穿出 generateGuide),所以草稿里有没有东西,全靠逐段那次写。
-        // 线上那次失败后 .drafts/ 是空的,就是因为草稿只在整个分段循环跑完之后才写
+      test('when a total failure is thrown, the shards already written stay in the draft', async () => {
+        // **This case is what really pins "write to disk after each shard".** The end-of-round
+        // writeDraft is unreachable on this path (the exception goes straight out of
+        // generateGuide), so whether the draft holds anything depends entirely on the per-shard
+        // write. After the production failure .drafts/ was empty, precisely because the draft was
+        // written only after the whole sharding loop finished
         const { db, config } = lotsEnv();
         const provider = scriptedProvider([
           { text: seg(quarter(0)) },
@@ -2029,36 +2149,39 @@ describe('分段撰写', () => {
         const draft = join(config.guidesDir, DRAFTS_DIR, guideFileName('测试游戏', '1'));
         await assert.rejects(() => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }));
 
-        assert.ok(existsSync(draft), '前两段的成果必须已经在盘上 —— 那是用户已经付过钱的东西');
+        assert.ok(existsSync(draft), 'the first two shards work has to already be on disk — the user has paid for it');
         const text = readFileSync(draft, 'utf8');
         for (const d of [...quarter(0), ...quarter(1)]) {
-          assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} 应该留在草稿里`);
+          assert.ok(text.includes(`**${d.name_cn}**`), `${d.name_cn} should stay in the draft`);
         }
       });
 
-      test('每写完一段就落盘 —— 一段失败不该把前面几段的钱一起丢掉', async () => {
+      test('write to disk after each shard — one failed shard should not throw away the money spent on the earlier ones', async () => {
         const { db, config } = lotsEnv();
-        // 前两段成功,第 3 段起全部拒答:三轮都补不上,最后 ok=false
+        // The first two shards succeed and everything from shard 3 refuses: three rounds cannot
+        // fill it in, ending in ok=false
         const provider = scriptedProvider([
           { text: seg(quarter(0)) },
           { text: seg(quarter(1)) },
           { text: '', stop: 'refusal' },
           { text: seg(quarter(3)) },
-          { text: '', stop: 'refusal' },  // 第 2 轮
-          { text: '', stop: 'refusal' },  // 第 3 轮
+          { text: '', stop: 'refusal' },  // round 2
+          { text: '', stop: 'refusal' },  // round 3
         ]);
         const r = await generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' });
 
         assert.equal(r.ok, false);
-        assert.equal(r.path, null, '知道缺一段就绝不能落地');
-        // **草稿原来是整个分段循环跑完之后才写的**,所以任何一段中途抛异常都会把
-        // 前面几段连同它们的联网研究一起丢掉。实测:线上那次失败后 .drafts/ 是空的
-        assert.ok(existsSync(r.draftPath), '草稿必须在');
+        assert.equal(r.path, null, 'knowing a shard is missing, it must never land');
+        // **The draft used to be written only after the whole sharding loop finished**, so an
+        // exception in any shard threw away the earlier ones along with their web research.
+        // Measured: after the production failure .drafts/ was empty
+        assert.ok(existsSync(r.draftPath), 'the draft has to be there');
         const draft = readFileSync(r.draftPath, 'utf8');
         for (const d of [...quarter(0), ...quarter(1), ...quarter(3)]) {
-          assert.ok(draft.includes(`**${d.name_cn}**`), `写成功的 ${d.name_cn} 应该留在草稿里`);
+          assert.ok(draft.includes(`**${d.name_cn}**`), `the successfully written ${d.name_cn} should stay in the draft`);
         }
-        // 病因要交出去。少一段的症状是六条 missing-checkbox,而那是症状不是病因
+        // The cause has to be handed out. The symptom of a missing shard is six missing-checkbox
+        // findings, and that is a symptom, not the cause
         assert.equal(r.chunkFailures.length, 1);
         assert.deepEqual(
           [r.chunkFailures[0].chunk, r.chunkFailures[0].of, r.chunkFailures[0].count],
@@ -2067,58 +2190,60 @@ describe('分段撰写', () => {
         assert.match(r.chunkFailures[0].reason, /拒答/);
       });
 
-      test('全部段都写不出来 ⇒ 抛第一个真原因,不是一堆「缺 checkbox」', async () => {
+      test('every shard failing ⇒ throw the first real cause, not a pile of "missing checkbox"', async () => {
         const { db, config } = lotsEnv();
         const provider = scriptedProvider(Array.from({ length: 4 }, () => ({ text: '', stop: 'refusal' })));
         await assert.rejects(
           () => generateGuide(db, { db, config, provider, steam: lotsSteam(), appid: '1' }),
           (err) => {
-            // 一段都没写出来时继续往下走,会拿一份空草稿去校验、报出"每个成就都缺
-            // checkbox",然后再花两轮重问 —— 症状盖住病因,还多花两轮的钱
+            // Carrying on when not one shard was written means validating an empty draft, reporting
+            // "every achievement is missing a checkbox" and then spending two more rounds asking —
+            // the symptom buries the cause and two extra rounds are paid for
             assert.equal(err.code, 'refusal');
             assert.doesNotMatch(err.message, /checkbox/);
             return true;
           }
         );
-        assert.equal(provider.asked.length, 4, '第一轮走完就该停,不该再开第二轮');
+        assert.equal(provider.asked.length, 4, 'it should stop once round one is done rather than opening a second round');
       });
     });
   });
 
-  test('五个成就分三段写完,拼起来五个 checkbox 一个不少', async () => {
+  test('five achievements written in three shards assemble into five checkboxes with none missing', async () => {
     const { db, config } = envFor(2);
     const chunks = chunkDefs(BIG, 2);
     const provider = fakeProvider(chunks.map(seg));
     const r = await generateGuide(db, { config, provider, steam: bigSteam(), appid: '1' });
 
     assert.equal(r.ok, true);
-    assert.equal(provider.asked.length, 3, '三段就该问三次');
+    assert.equal(provider.asked.length, 3, 'three shards should take three calls');
     const text = readFileSync(r.path, 'utf8');
-    // 直接比字符串,不拼正则 —— `- [ ] **名字**` 里每个字符都要转义,拼错了
-    // 报的是"正则无效",而不是"攻略少了一条",排查方向整个偏掉
+    // Compare strings directly rather than assembling a regex — every character of
+    // `- [ ] **名字**` would need escaping, and getting it wrong reports "invalid regex" rather
+    // than "the guide is one entry short", sending the diagnosis entirely the wrong way
     for (const d of BIG) {
-      assert.ok(text.includes(`- [ ] **${d.name_cn}**`), `${d.name_cn} 在拼起来的攻略里丢了`);
+      assert.ok(text.includes(`- [ ] **${d.name_cn}**`), `${d.name_cn} was lost in the assembled guide`);
     }
-    assert.equal((text.match(/^# /gm) || []).length, 1, '标题只能有一个,不能每段各写一个');
+    assert.equal((text.match(/^# /gm) || []).length, 1, 'there can be only one title, not one per shard');
   });
 
-  test('只有一段出问题时,第二轮只重问那一段', async () => {
+  test('when only one shard has a problem, round two re-asks only that shard', async () => {
     const { db, config } = envFor(2);
     const chunks = chunkDefs(BIG, 2);
-    // 第 2 段(成就3/成就4)漏了成就4
+    // Shard 2 (成就3/成就4) is missing 成就4
     const bad = seg([chunks[1][0]]);
     const provider = fakeProvider([seg(chunks[0]), bad, seg(chunks[2]), seg(chunks[1])]);
     const r = await generateGuide(db, { config, provider, steam: bigSteam(), appid: '1' });
 
     assert.equal(r.ok, true);
     assert.equal(r.rounds, 2);
-    assert.equal(provider.asked.length, 4, '第一轮 3 次 + 第二轮只补 1 次');
-    assert.match(provider.asked[3], /第 2\/3 段/, '重问的必须是出问题的那一段');
+    assert.equal(provider.asked.length, 4, '3 calls in round one plus 1 to fill in on round two');
+    assert.match(provider.asked[3], /第 2\/3 段/, 'the re-ask has to be the shard with the problem');
     assert.match(provider.asked[3], /只重新输出这一段/);
     assert.match(readFileSync(r.path, 'utf8'), /- \[ \] \*\*成就4\*\*/);
   });
 
-  test('打回清单只列这一段自己的问题,别把别段的错也塞进来', () => {
+  test('the send-back list carries only this shard own problems, not another shard errors', () => {
     const chunks = chunkDefs(BIG, 2);
     const findings = [
       { level: 'error', code: 'missing-checkbox', apiName: 'B', message: '成就2 没有 checkbox' },
@@ -2126,14 +2251,16 @@ describe('分段撰写', () => {
     ];
     const m = buildChunkFeedback(findings, chunks, 0, new Set());
     assert.match(m, /成就2/);
-    assert.doesNotMatch(m, /成就5/, '第 3 段的问题不该出现在第 1 段的打回清单里');
+    assert.doesNotMatch(m, /成就5/, 'a shard 3 problem should not appear in shard 1 send-back list');
   });
 });
 
-// `--dry-run` 存在的唯一理由是"让人看到会发过去什么"。它自己拼一遍参数就会和真正
-// 发出去的那份分叉 —— 实际踩到过:预演漏了 `rarity` 和 `target`,于是 ARK 的预演
-// 打印的是 checkbox 标签版,而真跑会发折叠版。**结构上只留一个入口**,分叉无处发生。
-test('提示词只有一个入口,预演和真发不会分叉', () => {
+// The only reason `--dry-run` exists is to let someone see what would be sent. Assembling the
+// parameters a second time inside it makes it fork from the copy actually sent — measured: the
+// dry run was missing `rarity` and `target`, so one game's dry run printed the checkbox label
+// version while a real run would send the collapsible version. **Structurally there is only one
+// entry point**, so the fork has nowhere to happen.
+test('the prompt has one entry point, so a dry run and a real send cannot fork', () => {
   const plan = {
     game: '测试游戏',
     defs: [def('A', '第一步', '完成第一关。')],
@@ -2142,19 +2269,20 @@ test('提示词只有一个入口,预演和真发不会分叉', () => {
   };
   const viaPlan = systemPromptFor(plan, '1', { canSearch: true });
   assert.match(viaPlan, /<summary>\*\*前置\*\*/,
-    'systemPromptFor 没把 plan.target 透下去 —— 预演就会印错版本');
+    'systemPromptFor did not pass plan.target through — the dry run would print the wrong version');
 
-  // 三条路都必须走 systemPromptFor,不许自己调 buildSystemPrompt 拼参数
+  // All three paths have to go through systemPromptFor; none may call buildSystemPrompt with its
+  // own parameters
   for (const f of ['../lib/guidegen.js', '../lib/guidepatch.js', '../tracker.js']) {
     const src = readFileSync(new URL(f, import.meta.url), 'utf8');
     const direct = src.split('\n').filter((l) =>
       /\bbuildSystemPrompt\(/.test(l) && !/^export function buildSystemPrompt|return buildSystemPrompt/.test(l.trim()));
     assert.deepEqual(direct, [],
-      `${f} 里还有直接调 buildSystemPrompt 的地方 —— 参数会跟另外两条路分叉`);
+      `${f} still calls buildSystemPrompt directly — its parameters will fork from the other two paths`);
   }
 });
 
-describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
+describe('regroupByAssignment (the rearrangement after classification moved to a final pass)', () => {
   const D = [
     def('A', '喵界图鉴', '解锁所有吉祥物。'),
     def('B', '狗狗上位', '将吉祥物替换成一条狗。'),
@@ -2164,14 +2292,17 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
   const map = (pairs) => new Map(pairs);
 
   /**
-   * 分类那一趟**只列装成就的小节**,纯说明小节它一个字都不会提 —— 而没被提到的一律
-   * 接在后面。于是规则 3.5 的「机制速查」会从列表前面被搬到全篇末尾,吊在最后一条成就
-   * 下面;那是给人在读列表之前看的东西,挪到末尾等于没写。
+   * The classification pass **lists only the sections holding achievements** and never mentions a
+   * pure prose section — and anything unmentioned is appended at the end. So the 「机制速查」 of
+   * rule 3.5 would be moved from before the list to the very end of the document, dangling under
+   * the last achievement; that is something to read before the list, and moving it to the end is
+   * the same as not writing it.
    *
-   * 《马特的寻猫游戏》重写之后确实是这个结果,不过草稿已经删了,没法证明是重排搬的还是
-   * 模型本来就写在末尾。**两种情况下这条规则都对**,所以按规则写,不按猜测写。
+   * One game's rewrite really did come out that way, though the draft has been deleted and it
+   * cannot be proven whether the rearrangement moved it or the model wrote it at the end to begin
+   * with. **The rule is right in either case**, so write by the rule, not by the guess.
    */
-  test('分类名单没提到的纯说明小节,留在成就列表原来那一侧', () => {
+  test('a pure prose section not mentioned in the classification stays on the side of the achievement list it was on', () => {
     const body = [
       '## 机制速查',
       '- 提示条随时间恢复,分三档。',
@@ -2186,12 +2317,13 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
     });
     const heads = out.split('\n').filter((l) => l.startsWith('## ')).map((l) => l.slice(3));
     assert.deepEqual(heads, ['机制速查', '商店', '备注'],
-      '速查在前、备注在后 —— 两边都按原文那一侧留着');
+      'the reference first and the notes last — each stays on the side it was on in the original');
   });
 
-  // 马特的寻猫游戏实际踩到的:四条同类吉祥物成就被劈进两个小节。写正文之前那一趟**结构上**
-  // 看不见这个劈开(劈开是它之后才发生的),而最后一趟看得见全文,所以能搬回来。
-  test('把劈到两处的同类成就搬到一起,小节说明跟着自己的小节走', () => {
+  // Hit in one real game: four achievements of the same kind were split across two sections. The
+  // pass before the body is written **structurally** cannot see that split (the split happens
+  // after it), while the final pass sees the whole document and can move them back.
+  test('achievements of the same kind split across two places are brought together, with a section intro following its own section', () => {
     const body = [
       '## 商店',
       '宝石是商店货币。',
@@ -2207,25 +2339,27 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
       sections: ['商店', '吉祥物替换'],
     });
 
-    assert.match(out, /## 商店\n\n宝石是商店货币。/, '小节说明必须留在自己的小节下');
+    assert.match(out, /## 商店\n\n宝石是商店货币。/, 'a section intro has to stay under its own section');
     const mascot = out.slice(out.indexOf('## 吉祥物替换'));
-    assert.match(mascot, /狗狗上位/, '狗狗上位没搬过来');
+    assert.match(mascot, /狗狗上位/, '狗狗上位 was not moved across');
     assert.match(mascot, /宿敌登台/);
-    assert.doesNotMatch(out.slice(0, out.indexOf('## 吉祥物替换')), /狗狗上位/, '搬过去了就不能还留在原处');
+    assert.doesNotMatch(out.slice(0, out.indexOf('## 吉祥物替换')), /狗狗上位/, 'once moved it must not remain in its old place');
   });
 
-  // 模型漏给一条映射时,**原地不动**是唯一不制造新错误的处置 —— 丢掉是静默损失,
-  // 塞杂项是把一条分好的成就主动分错
-  test('映射没覆盖到的成就留在原来的小节', () => {
+  // When the model misses a mapping, **leaving it where it is** is the only handling that creates
+  // no new error — dropping it is a silent loss, and putting it in a miscellaneous section is
+  // actively misfiling an achievement that was correctly filed
+  test('an achievement the mapping does not cover stays in its original section', () => {
     const body = ['## 商店', '- [ ] **喵界图鉴**<br>解锁所有吉祥物。', '- [ ] **开盒**<br>使用各式钥匙打开30个宝箱。'].join('\n');
     const out = regroupByAssignment(body, { defs: D, assignment: map([['A', '商店']]), sections: ['商店'] });
-    assert.match(out, /开盒/, '没给映射的条目不能被丢掉');
-    assert.equal((out.match(/开盒/g) ?? []).length, 1, '也不能被复制一份');
+    assert.match(out, /开盒/, 'an entry with no mapping must not be dropped');
+    assert.equal((out.match(/开盒/g) ?? []).length, 1, 'nor duplicated');
   });
 
-  // Notion 目标下一条成就的正文是「自己那行 + 几个 <details> 分组」。搬家必须整块搬,
-  // 只搬走第一行会把子步骤留在原小节 —— 那正是 todoSpans 只认 checkbox 行的老毛病
-  test('带 <details> 分组的成就整块搬走,子步骤不掉队', () => {
+  // With a Notion target, one achievement's body is "its own line plus a few `<details>` groups".
+  // The move has to take the whole block: moving only the first line leaves the sub-steps in the
+  // original section — the old ailment of todoSpans recognising only checkbox lines
+  test('an achievement with <details> groups moves as one block, with no sub-step left behind', () => {
     const body = [
       '## 商店',
       '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
@@ -2241,25 +2375,28 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
       defs: D, assignment: map([['B', '吉祥物替换'], ['C', '吉祥物替换']]), sections: ['吉祥物替换'],
     });
     const head = out.slice(0, out.indexOf('## 吉祥物替换'));
-    assert.doesNotMatch(head, /先买下狗狗吉祥物/, '子步骤被留在原小节了 —— 区间没吃到折叠');
+    assert.doesNotMatch(head, /先买下狗狗吉祥物/, 'the sub-step was left in the original section — the range did not take the collapsible');
     assert.match(out.slice(out.indexOf('## 吉祥物替换')), /先买下狗狗吉祥物/);
   });
 
-  // 一条成就都不剩、只剩开场说明的小节:留着是看得见的瑕疵,丢掉是看不见的损失
-  test('只剩开场说明的小节保留,不静默丢字', () => {
+  // A section left with no entries at all and only its intro: keeping it is a visible blemish,
+  // dropping it is an invisible loss
+  test('a section left with only its intro is kept, with no text silently dropped', () => {
     const body = ['## 商店', '这一节讲商店怎么用。', '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。'].join('\n');
     const out = regroupByAssignment(body, { defs: D, assignment: map([['B', '吉祥物替换']]), sections: ['吉祥物替换'] });
-    assert.match(out, /这一节讲商店怎么用。/, '小节被搬空了,但它的说明不能跟着消失');
+    assert.match(out, /这一节讲商店怎么用。/, 'the section was emptied, but its intro must not disappear with it');
   });
 
-  // 《破晓传奇》实测踩到的:小节级的长清单折叠(规则五)里面的 `- [ ]`,在
-  // `parseTodos` 眼里是顶层的(前面没有更浅的 checkbox 可挂)。不特判就会被当成
-  // 一条条独立成就搬走 —— 折叠剩个空壳、12 个条目散落在外面。
+  // Hit in one real game: a `- [ ]` inside a section-level long-list collapsible (rule 五) is
+  // top-level as far as `parseTodos` is concerned (there is no shallower checkbox before it to
+  // hang off). Without a special case they are moved away as individual achievements — the
+  // collapsible is left an empty shell with 12 entries scattered outside it.
   //
-  // **而前两条断言一条都没响**:一个字都没丢,丢的是结构。断言 3 是为此加的,
-  // 同样用故障注入验过(把这个分支改成 `if (false && ...)`,它当场抛
-  // 「重排把折叠块拆开了」)。
-  test('小节级的独立折叠整块跟着小节走,不被拆成一堆顶层条目', () => {
+  // **And the first two assertions did not fire at all**: not one character was lost; what was
+  // lost was the structure. Assertion 3 was added for that, and verified the same way by fault
+  // injection (changing that branch to `if (false && ...)` makes it throw
+  // 「重排把折叠块拆开了」 on the spot).
+  test('a section-level standalone collapsible follows its section as one block rather than being split into a pile of top-level entries', () => {
     const body = [
       '## 黎明之后',
       '<details>',
@@ -2273,36 +2410,38 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
       defs: D, assignment: new Map([['B', '黎明之后']]), sections: ['黎明之后'],
     });
     assert.match(out, /<summary>12 个个人支线一览<\/summary>\n- \[ \] 「回归自我」/,
-      '折叠被掏空了 —— 条目必须留在它里面');
+      'the collapsible was hollowed out — the entries have to stay inside it');
     assert.doesNotMatch(out, /<\/details>\n\n- \[ \] 「回归自我」/,
-      '条目被搬到折叠外面去了');
+      'the entries were moved outside the collapsible');
   });
 
-  // 《破晓传奇》实测踩到的：「羁绊」被搬空之后，页面上留下一个只有一段说明、
-  // 一条成就都没有的标题,紧跟在拿走了它全部条目的「羁绊与对话」后面。
-  // 原来的规则是「留着」,理由是没有规则能说清那段说明该跟谁走 ——
-  // 而「条目去得最多的那个小节」就是一个确定的判据,不用猜。
-  test('被搬空的小节,开场说明并到接收条目最多的那个小节', () => {
+  // Hit in one real game: after 「羁绊」 was emptied the page was left with a heading carrying only
+  // an intro and not one achievement, sitting right after the section that took all of its entries.
+  // The old rule was "keep it", on the grounds that no rule could say who that intro should follow —
+  // and "the section that received the most entries" is a definite criterion needing no guess.
+  test('the intro of an emptied section is merged into the section that received the most of its entries', () => {
     const body = ['## 商店', '商店怎么用的说明。', '- [ ] **狗狗上位**<br>x', '- [ ] **宿敌登台**<br>y'].join('\n');
     const out = regroupByAssignment(body, {
       defs: D, assignment: new Map([['B', '外观'], ['C', '外观']]), sections: ['外观'],
     });
-    assert.doesNotMatch(out, /## 商店/, '被搬空的小节不该再留一个空标题');
-    assert.match(out, /商店怎么用的说明。/, '但它的说明一个字都不能丢');
-    assert.ok(out.indexOf('## 外观') < out.indexOf('商店怎么用的说明'), '说明要落在接收方那一节里');
+    assert.doesNotMatch(out, /## 商店/, 'an emptied section should not leave an empty heading behind');
+    assert.match(out, /商店怎么用的说明。/, 'but not one character of its intro may be lost');
+    assert.ok(out.indexOf('## 外观') < out.indexOf('商店怎么用的说明'), 'the intro has to land in the receiving section');
   });
 
-  // 本来就没有条目的纯说明小节没有「最多」可言,留着才是对的
-  test('本来就没条目的纯说明小节不动', () => {
+  // A pure prose section that never had entries has no "most" to speak of, so keeping it is right
+  test('a pure prose section that never had entries is untouched', () => {
     const body = ['## 写在前面', '这游戏要通三遍。', '## 商店', '- [ ] **狗狗上位**<br>x'].join('\n');
     const out = regroupByAssignment(body, { defs: D, assignment: new Map(), sections: [] });
-    assert.match(out, /## 写在前面/, '没条目可搬的小节不该被并掉');
+    assert.match(out, /## 写在前面/, 'a section with no entries to move should not be merged away');
   });
 
-  // **断言不是摆设,是用故障注入验过的。** 把出口那行改成 `b.prose[0]`(只取开场说明的
-  // 第一行)之后,它当场抛出「重排丢了正文:「说明第二行。」进去 1 次、出来 0 次」。
-  // 这里留的是它的**反面**:正文里同一条成就出现两次是校验器的活,重排不该顺手"修"掉。
-  test('重复条目原样留着,由校验器去报,重排不自作主张', () => {
+  // **The assertion is not decorative; it was verified by fault injection.** Changing the exit line
+  // to `b.prose[0]` (taking only the first line of the intro) made it throw
+  // 「重排丢了正文:「说明第二行。」进去 1 次、出来 0 次」 on the spot.
+  // What is kept here is its **opposite**: the same achievement appearing twice in the body is the
+  // validator's job, and the rearrangement should not "fix" it while it is there.
+  test('duplicate entries are left as they are for the validator to report; the rearrangement does not take it upon itself', () => {
     const dup = [
       '## 商店',
       '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
@@ -2310,23 +2449,24 @@ describe('regroupByAssignment(分类挪到最后一趟之后的重排)', () => {
       '- [ ] **狗狗上位**<br>将吉祥物替换成一条狗。',
     ].join('\n');
     const out = regroupByAssignment(dup, { defs: D, assignment: new Map([['B', '商店']]), sections: ['商店'] });
-    assert.equal((out.match(/狗狗上位/g) ?? []).length, 2, '两条都要留着 —— 去重是校验器的职责,不是重排的');
+    assert.equal((out.match(/狗狗上位/g) ?? []).length, 2, 'both have to stay — deduplication is the validator job, not the rearrangement');
   });
 });
 
 /**
- * 规则五的折叠是给长内容用的,不是给成就列表用的 —— 但规则五只写了「到 10 行才折」,
- * 没写「成就本身永远不折」。实测《马特的寻猫游戏》整节 `## 世界全清` 的 13 条成就被
- * 塞进一个折叠里,那一节在 Notion 上显示 0 条。
+ * The collapsible of rule 五 is for long content, not for the achievement list — but rule 五 only
+ * said 「到 10 行才折」 and never said 「成就本身永远不折」. Measured on one game: the whole
+ * `## 世界全清` section of 13 achievements was stuffed into one collapsible, and that section shows
+ * 0 entries on Notion.
  */
-describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
+describe('unwrapAchievementToggles (pulling achievements out of a collapsible)', () => {
   const D = [
     def('W1', '快乐露营者', '以100%完成度通关世界1的所有关卡。'),
     def('W2', '老练水手', '以100%完成度通关世界2的所有关卡。'),
     def('S', '宿敌登台', '将吉祥物替换为一只怪物。'),
   ];
 
-  test('顶层折叠里装着成就 —— 拆开,标题降成一行加粗', () => {
+  test('a top-level collapsible holding achievements — take it apart, with the label demoted to a bold line', () => {
     const md = [
       '## 世界全清',
       '<details>',
@@ -2338,12 +2478,12 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
     ].join('\n');
     const { text, unwrapped } = unwrapAchievementToggles(md, D);
     assert.deepEqual(unwrapped, ['世界 1~12 全清与通关']);
-    assert.doesNotMatch(text, /<\/?details|<\/?summary/i, '外壳一点不留');
-    assert.match(text, /^\*\*世界 1~12 全清与通关\*\*$/m, '标签留着 —— 它是这一组的名字');
+    assert.doesNotMatch(text, /<\/?details|<\/?summary/i, 'not a trace of the shell remains');
+    assert.match(text, /^\*\*世界 1~12 全清与通关\*\*$/m, 'the label is kept — it is the name of this group');
     for (const t of ['快乐露营者', '老练水手']) assert.match(text, new RegExp(t));
   });
 
-  test('缩进的成就掏出来之后回到顶格 —— 不然 parseTodos 把它们当子步骤', () => {
+  test('indented achievements return to column zero once pulled out — otherwise parseTodos takes them for sub-steps', () => {
     const md = [
       '## 世界全清',
       '<details>',
@@ -2354,15 +2494,16 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
     ].join('\n');
     const { text } = unwrapAchievementToggles(md, D);
     for (const line of text.split('\n').filter((l) => l.includes('- [ ]'))) {
-      assert.equal(line, line.trimStart(), `还缩着:${line}`);
+      assert.equal(line, line.trimStart(), `still indented: ${line}`);
     }
   });
 
   /**
-   * **这一条是防误伤的那一半。** 规则一要求 Notion 目标下把前置/步骤/注意写成缩进的
-   * `<details>` 分组标签,那种折叠里装的是子步骤,不是成就 —— 拆了就把规则一毁了。
+   * **This is the half that guards against collateral damage.** Rule 一 requires prerequisites /
+   * steps / cautions to be written as indented `<details>` group labels under a Notion target, and
+   * a collapsible of that kind holds sub-steps, not achievements — taking it apart destroys rule 一.
    */
-  test('挂在成就底下的分组标签折叠不许碰', () => {
+  test('a group-label collapsible hanging under an achievement must not be touched', () => {
     const md = [
       '## 吉祥物',
       '- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。<br>心得',
@@ -2373,19 +2514,22 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
     ].join('\n');
     const { text, unwrapped } = unwrapAchievementToggles(md, D);
     assert.deepEqual(unwrapped, []);
-    assert.equal(text, md, '一个字都不该动');
+    assert.equal(text, md, 'not one character should change');
   });
 
   /**
-   * **缩进这一条是独立的一道闸,不能靠「里面有没有成就」代替。**
+   * **The indentation criterion is its own gate and cannot be replaced by "does it hold
+   * achievements".**
    *
-   * 分组折叠里的子步骤通常反查不到成就(整句话不等于成就名,`resolveTodoToAchievement`
-   * 要的是精确相等),所以多数时候两道闸看起来是一回事。但「前置」这一组**天然会把
-   * 别的成就一条一行列出来**,那种行是精确相等的,反查得到 —— 那时候只剩缩进能说明
-   * 这是挂在别人底下的辅料,而不是一节成就列表。拆了它,规则一的分组标签就毁了,
-   * 而且那几条子步骤会变成顶层条目,读起来像重复的成就。
+   * Sub-steps inside a group collapsible usually resolve to no achievement (a whole sentence does
+   * not equal an achievement name, and `resolveTodoToAchievement` requires exact equality), so most
+   * of the time the two gates look like the same thing. But the 「前置」 group **naturally lists
+   * other achievements one per line**, and those lines are exactly equal and do resolve — at which
+   * point only the indentation says this is supporting material hanging under something else rather
+   * than a section of achievement list. Take it apart and rule 一's group labels are destroyed, and
+   * those sub-steps become top-level entries that read like duplicated achievements.
    */
-  test('缩进折叠里逐条列出的前置成就,也不许拆', () => {
+  test('prerequisite achievements listed one by one inside an indented collapsible must not be taken apart either', () => {
     const md = [
       '## 世界全清',
       '- [ ] **快乐露营者**<br>以100%完成度通关世界1的所有关卡。<br>心得',
@@ -2396,11 +2540,11 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
       '\t</details>',
     ].join('\n');
     const { text, unwrapped } = unwrapAchievementToggles(md, D);
-    assert.deepEqual(unwrapped, [], '缩进说明它是辅料,里面提到成就不改变这一点');
+    assert.deepEqual(unwrapped, [], 'the indentation says it is supporting material, and mentioning achievements inside does not change that');
     assert.equal(text, md);
   });
 
-  test('装的不是成就的顶层折叠也不碰 —— 全结局对照表那种', () => {
+  test('a top-level collapsible that holds no achievements is untouched too — the all-endings table kind', () => {
     const md = [
       '## 收集',
       '<details>',
@@ -2414,8 +2558,9 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
     assert.equal(text, md);
   });
 
-  // 模型被截断时正好留下一个没关的 <details>,一路吃到文末会吞掉后面所有成就
-  test('折叠没闭合就不动它', () => {
+  // A truncated model response leaves exactly one unclosed <details>, and running to end of file
+  // would swallow every achievement after it
+  test('an unclosed collapsible is left alone', () => {
     const md = [
       '## 世界全清',
       '<details>',
@@ -2427,7 +2572,7 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
     assert.equal(text, md);
   });
 
-  test('开合标签各占一行的 summary 也认', () => {
+  test('a summary whose opening and closing tags sit on their own lines is recognised too', () => {
     const md = [
       '## 世界全清',
       '<details>',
@@ -2440,108 +2585,112 @@ describe('unwrapAchievementToggles(把藏进折叠的成就掏出来)', () => {
     ].join('\n');
     const { text, unwrapped } = unwrapAchievementToggles(md, D);
     assert.deepEqual(unwrapped, ['世界 1~12 全清']);
-    assert.doesNotMatch(text, /<\/?summary/i, '裸的 summary 标签不许留在正文里');
+    assert.doesNotMatch(text, /<\/?summary/i, 'a bare summary tag must not be left in the body');
   });
 
-  test('没有折叠的正文原样返回', () => {
+  test('a body with no collapsible comes back unchanged', () => {
     const md = '## 一节\n\n- [ ] **宿敌登台**<br>将吉祥物替换为一只怪物。';
     assert.deepEqual(unwrapAchievementToggles(md, D), { text: md, unwrapped: [] });
   });
 });
 
 /**
- * 已经解锁的成就只写一行。
+ * An already-unlocked achievement gets one line.
  *
- * 攻略是拿来照着做的,而已经做完的那几条不需要做法 —— 名字、官方描述、一个能勾的框
- * 就是他还会用到的全部。省掉的是这几条的查资料和正文,也就是这个功能唯一花钱的地方。
+ * A guide is something to follow, and the entries already finished need no method — the name, the
+ * official description and a box that can be ticked are everything still of use. What is saved is
+ * the research and prose for those entries, which is the only thing this feature spends money on.
  */
-describe('已解锁的成就只写一行', () => {
-  describe('briefApiNames —— 谁进略写名单', () => {
+describe('an unlocked achievement gets one line', () => {
+  describe('briefApiNames — who goes on the brief list', () => {
     const D = [def('A', '甲', '一'), def('B', '乙', '二'), def('C', '丙', '三')];
 
-    test('解锁了的进,没解锁的不进', () => {
+    test('unlocked ones go in, locked ones do not', () => {
       assert.deepEqual([...briefApiNames(D, ['A', 'C'])], ['A', 'C']);
     });
 
-    test('一个都没解锁 → 名单是空的', () => {
+    test('none unlocked → the list is empty', () => {
       assert.deepEqual([...briefApiNames(D, [])], []);
     });
 
-    // **全解锁的游戏一条都不省。** 省下来的就是整篇攻略 —— 剩下一串只有名字和官方
-    // 描述的行,而那份东西 Steam 页面上本来就有。会给 100% 的游戏生成攻略的人,
-    // 要的恰恰是内容
-    test('全解锁 → 名单是空的,不是全都进', () => {
+    // **A fully unlocked game saves not one entry.** What would be saved is the whole guide —
+    // leaving a string of lines carrying only names and official descriptions, which the Steam page
+    // already has. Someone generating a guide for a 100% game wants precisely the content
+    test('fully unlocked → the list is empty, not everything', () => {
       assert.deepEqual([...briefApiNames(D, ['A', 'B', 'C'])], []);
     });
 
-    test('没有成就时不炸', () => {
+    test('no achievements does not blow up', () => {
       assert.deepEqual([...briefApiNames([], ['A'])], []);
       assert.deepEqual([...briefApiNames(null, null)], []);
     });
   });
 
-  describe('buildChunkMessage —— 提示词里怎么说', () => {
+  describe('buildChunkMessage — how the prompt says it', () => {
     const D = [def('A', '甲', '一'), def('B', '乙', '二'), def('C', '丙', '三'), def('D', '丁', '四')];
 
-    // 名单空的时候这句话必须**一个字都不多** —— 这是绝大多数攻略走的那条路
-    test('没有要略写的 → 和原来一字不差', () => {
+    // With an empty list this sentence has to carry **not one extra character** — this is the path
+    // the vast majority of guides take
+    test('nothing to write briefly → character for character what it was', () => {
       assert.equal(buildChunkMessage([D], 0, new Set()),
         '开始写吧。先联网查资料,再按规则写完整份攻略。');
       assert.equal(buildChunkMessage([D], 0), '开始写吧。先联网查资料,再按规则写完整份攻略。');
     });
 
-    test('略写的是少数 → 点名那几个', () => {
+    test('the brief ones are a minority → name them', () => {
       const m = buildChunkMessage([D], 0, briefApiNames(D, ['A']));
       assert.match(m, /「甲」/);
       assert.match(m, /一行就停/);
-      assert.doesNotMatch(m, /「乙」/, '要写完整的那些不该出现在略写名单里');
+      assert.doesNotMatch(m, /「乙」/, 'the ones to write in full should not appear on the brief list');
     });
 
-    // 大部分游戏是"已经解锁了一大半",那时候列"要写详细的这几个"比列"要略写的
-    // 那四十个"短得多,而且正好是模型这一段真正要干的活
-    test('略写的是多数 → 反过来点名要写完整的那几个', () => {
+    // Most games are "already more than half unlocked", and there listing "the few to write in
+    // full" is far shorter than listing "the forty to write briefly", and is exactly the work the
+    // model really has to do for this shard
+    test('the brief ones are the majority → name the few to write in full instead', () => {
       const m = buildChunkMessage([D], 0, briefApiNames(D, ['A', 'B', 'C']));
       assert.match(m, /只有这几个要按规则写完整/);
       assert.match(m, /「丁」/);
-      assert.doesNotMatch(m, /「甲」/, '略写的是多数时不该再把它们一个个列出来');
+      assert.doesNotMatch(m, /「甲」/, 'when the brief ones are the majority they should not be listed one by one');
     });
 
-    test('分段时那句话跟着段走,不是全篇一份', () => {
+    test('when sharded, that sentence follows the shard rather than being one for the whole guide', () => {
       const chunks = [D.slice(0, 2), D.slice(2)];
       const brief = briefApiNames(D, ['A', 'D']);
       assert.match(buildChunkMessage(chunks, 0, brief), /「甲」/);
-      assert.doesNotMatch(buildChunkMessage(chunks, 0, brief), /「丁」/, '第一段不该提别段的成就');
+      assert.doesNotMatch(buildChunkMessage(chunks, 0, brief), /「丁」/, 'shard one should not mention another shard achievement');
       assert.match(buildChunkMessage(chunks, 1, brief), /「丁」/);
     });
   });
 
-  describe('端到端:generateGuide 真的这么问', () => {
-    test('解锁了一个 → 提示词里点名让它只写一行', async () => {
+  describe('end to end: generateGuide really asks this way', () => {
+    test('one unlocked → the prompt names it and asks for one line only', async () => {
       const { db, config } = freshEnv();
       const provider = fakeProvider([GOOD]);
       await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
-      assert.match(provider.asked[0], /「第一步」/, '已解锁的那条要被点名');
+      assert.match(provider.asked[0], /「第一步」/, 'the unlocked one has to be named');
       assert.match(provider.asked[0], /一行就停/);
     });
 
-    test('全解锁 → 一条都不略,提示词回到原来那句', async () => {
+    test('fully unlocked → nothing is abbreviated and the prompt returns to the original sentence', async () => {
       const { db, config } = freshEnv();
       const provider = fakeProvider([GOOD]);
       await generateGuide(db, { config, provider, steam: fakeSteam(['A', 'B']), appid: '1' });
       assert.doesNotMatch(provider.asked[0], /一行就停/,
-        '全解锁时省下来的就是整篇攻略,剩下的东西 Steam 页面上本来就有');
+        'when fully unlocked what would be saved is the whole guide, and what is left the Steam page already has');
     });
 
-    // **覆盖重写一条都不省。** 攻略里已经有花过钱写出来的正文,而"他后来把这条解锁了"
-    // 不是把那段字删掉的理由 —— 删掉之后没有任何地方找得回来
-    test('覆盖重写 → 不略写,已经写出来的正文不许被收成一行', async () => {
+    // **An overwrite rewrite abbreviates nothing.** The guide already holds prose that was paid
+    // for, and "they unlocked this one since" is no reason to delete that text — once deleted there
+    // is nowhere left to find it
+    test('an overwrite rewrite → no abbreviation; prose already written must not be collapsed into one line', async () => {
       const { db, config } = freshEnv();
       const provider = fakeProvider([GOOD]);
       await generateGuide(db, {
         config, provider, steam: fakeSteam(['A']), appid: '1', overwrite: true,
       });
       assert.doesNotMatch(provider.asked[0], /一行就停/,
-        '覆盖时略写等于把他付过钱的正文删掉');
+        'abbreviating on an overwrite deletes prose they paid for');
     });
   });
 });
