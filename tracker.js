@@ -1160,9 +1160,9 @@ async function cmdGuideGen() {
         p.done(`  ⚠️  分区没统一成(${ev.reason}),保留各段自己分的结果`);
       } else if (ev.phase === 'regroup-merged') {
         // 这是程序**改掉了模型给的分类**,而成品上看不出是谁改的。说清楚改了几处
-        p.done(`  ${ev.clusters} 组同类成就被劈开了,已并回一处(搬 ${ev.moved} 条 → ${ev.into.join('、')})`);
+        p.done(`  ${ev.clusters} 组同类成就散在几个小节里,已合到 ${ev.into.join('、')}(移了 ${ev.moved} 条)`);
       } else if (ev.phase === 'unwrapped-toggles') {
-        p.done(`  ${ev.titles.length} 个折叠里装的是成就,已摊开:${ev.titles.join('、')}`);
+        p.done(`  ${ev.titles.length} 处成就本来收在折叠里,已摊开:${ev.titles.join('、')}`);
       } else if (ev.phase === 'unwrap-failed') {
         p.done(`  ⚠️  ${ev.reason},折叠保持原样`);
       } else if (ev.phase === 'rewrite') {

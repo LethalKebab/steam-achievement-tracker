@@ -1616,6 +1616,82 @@ describe('两下点的按钮不会卡在置灰上', () => {
  * 这一节钉的都是删掉不会报错的东西:按钮类型、出现的条件、撤销例外、以及它的
  * 两句文案。撤销例外那一条在上面「攻略备份的一键删」里,和 `#arc-wipe` 一起验。
  */
+/**
+ * 岔路的回头路
+ * ------------------------------------------------------------------
+ * 首次设置第一屏是 全新设置 / 从备份恢复 的岔路,而这个岔路**曾经是单向门**:
+ * 点进「从备份恢复」之后页面上没有任何控件能退回来,而打包版没有地址栏、没有
+ * 后退键,托盘的「打开面板」也只 show/focus —— 手上没有备份文件的人只能把整个
+ * 程序退掉。用户报上来的就是这个。
+ *
+ * 回头路和 `#back-btn` **不是一个东西**,这一节的每一条都在守住那个区分:
+ * 那个去 Dashboard、只在设置模式下上膛(首次设置是关卡,不该有出口);
+ * 这个只在首次设置里出现,回的是上面那两个选择,人始终还在闸里。
+ */
+describe('岔路的回头路', () => {
+  const html = read('Setup.html');
+  const js = inlineScripts(html).join(SEP);
+  /** 先行注释再块注释 —— 下面几条断言找的词在解释它们的注释里都出现过 */
+  const codeOnly = (s) => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const code = codeOnly(js);
+  const tag = html.match(/<button[^>]*id="gate-back"[^>]*>([^<]*)<\/button>/);
+
+  test('存在、是 type="button"、默认收起', () => {
+    assert.ok(tag, '找不到 #gate-back —— 少了它，「从备份恢复」就又是一扇单向门');
+    assert.match(tag[0], /type="button"/, '它在 <form> 里，默认 type 会把表单提交掉');
+    assert.match(tag[0], /\shidden\b/, '岔路本身不该有回头路');
+  });
+
+  test('两条分支都把它露出来', () => {
+    for (const fn of ['startWizard', 'startRestore']) {
+      const i = code.indexOf('function ' + fn + '(');
+      assert.ok(i > 0, '找不到 ' + fn);
+      assert.match(code.slice(i, code.indexOf('\n    }', i)), /gate-back'\)\.hidden = false/,
+        fn + ' 没把回头路露出来 —— 那条分支就回不来了');
+    }
+  });
+
+  /**
+   * `startRestore` 藏了三个元素、改了标题和副标题。`showGate` 漏还原任何一个,
+   * 第二次走到那一节就缺半截 —— 而它不会报错。
+   */
+  test('showGate 把 startRestore 藏起来的都还原了', () => {
+    const g = code.indexOf('function showGate(');
+    assert.ok(g > 0, '找不到 showGate');
+    const body = code.slice(g, code.indexOf('\n    }', g));
+    for (const id of ['backup-make', 'backup-title', 'restore-title']) {
+      assert.ok(body.includes(id), 'showGate 没还原 ' + id + ' —— startRestore 把它藏了');
+    }
+    assert.match(body, /gate'\)\.hidden = false/, 'showGate 要把岔路放回来');
+    assert.match(body, /gate-back'\)\.hidden = true/, '岔路上不该再有回头路');
+  });
+
+  /**
+   * **回头路把 `showWizard` 变成了可以跑第二次的函数。** 里面那几个
+   * `addEventListener` 于是会一路叠加:实测拿掉守卫、来回三趟之后,
+   * 「跳过」一下从第 1 步跳到第 4 步。重复绑定不报错,只是行为翻倍。
+   */
+  test('向导的一次性接线只能跑一次', () => {
+    const i = code.indexOf('function wireWizard(');
+    assert.ok(i > 0, '找不到 wireWizard —— 一次性接线得单独关起来');
+    const body = code.slice(i, code.indexOf('\n    }', i));
+    assert.match(body, /if \(wizardWired\) return;/, '少了这道守卫，监听会叠加');
+    for (const ev of ['step-skip', 'step-next']) {
+      assert.ok(body.includes(ev), ev + ' 的监听要在守卫后面绑');
+    }
+    const sw = code.indexOf('function showWizard(');
+    assert.doesNotMatch(code.slice(sw, code.indexOf('\n    }', sw)), /addEventListener/,
+      'showWizard 里不能再有裸的 addEventListener —— 它现在会跑好几次');
+  });
+
+  test('回头路不是去 Dashboard 的那个出口', () => {
+    const i = code.indexOf("addEventListener('click', showGate)");
+    assert.ok(i > 0, '回头路要接到 showGate 上');
+    assert.doesNotMatch(tag[1], /Dashboard/,
+      '首次设置是关卡，这个按钮回的是岔路、不是 Dashboard');
+  });
+});
+
 describe('设置页的出口', () => {
   const html = read('Setup.html');
   const js = inlineScripts(html).join(SEP);

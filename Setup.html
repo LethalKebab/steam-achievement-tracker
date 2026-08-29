@@ -586,8 +586,12 @@
          只在设置模式出现:首次设置时这一页是道关卡,凭据填好之前不该有出口。
          `type="button"` 不能掉 —— 它就在 <form> 里,默认类型是 submit -->
     <button type="button" class="back" id="back-btn" hidden>← 返回 Dashboard</button>
+    <!-- 岔路的回头路。和 `#back-btn` **不是**一个东西:那个去 Dashboard、只在设置模式
+         下上膛,这个只在首次设置里出现,回的是上面那两个选择。两种含义共用一个控件
+         正是筛选芯片那一轮的教训 -->
+    <button type="button" class="back" id="gate-back" hidden>← 重新选择</button>
     <h1 id="page-title">初始设置</h1>
-    <div class="subtitle" id="page-subtitle">只需要填一次,密钥都存在本机的 config.json 里</div>
+    <div class="subtitle" id="page-subtitle">只填一次,密钥只存在这台电脑上</div>
     <!-- 首次设置的岔路。**问的不是「你是不是新用户」** —— 那要人先猜到这个程序
          管什么叫「新」。问的是有没有东西要带过来,这个人自己就知道答案。
          设置页再进来时整块不出现:那时候 config 已经在了,岔路早就走过了 -->
@@ -618,7 +622,7 @@
       <!-- 没有 required 属性是**故意的**:一次只显示一节,而浏览器拒绝校验一个
            display:none 的必填控件 —— 它会静默阻止提交并报「not focusable」。
            必填由下面提交处理里那段人工检查负责,不通过时会跳回这一步并说明原因 -->
-      <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空则不改</span></label>
+      <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空就不改</span></label>
       <input id="key" name="key" type="text" autocomplete="off">
       <label for="id">② SteamID64</label>
       <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字">
@@ -626,7 +630,7 @@
 
     <section class="step" data-step="2" hidden>
       <h2 class="step-title">Step 2 · AI 攻略生成<span class="tag opt">可选</span><span class="configured" id="ai-set" hidden>已配置</span></h2>
-      <div class="hint">给没有攻略的游戏联网查资料、写一份。<strong>内容对不对没有东西能验,生成完自己读一遍。</strong></div>
+      <div class="hint">给没有攻略的游戏联网查资料、写一份。<strong>内容准不准没法自动检查,生成完自己读一遍。</strong></div>
       <label for="ai-provider">供应商</label>
       <select id="ai-provider" name="ai-provider">
         <option value="">不启用</option>
@@ -634,7 +638,7 @@
         <option value="anthropic">Anthropic (Claude)</option>
         <option value="gemini">Google Gemini</option>
       </select>
-      <label for="ai-key">API Key<span class="configured" id="ai-key-set" hidden>已配置,留空则不改</span></label>
+      <label for="ai-key">API Key<span class="configured" id="ai-key-set" hidden>已配置,留空就不改</span></label>
       <!-- 占位符是 paintAiProvider 按供应商填的(各家形状不一样)。这里不写死一个 ——
            写死就有两家是错的,而 JS 起来之前那一瞬间宁可是空的,也不要是错的 -->
       <input id="ai-key" name="ai-key" type="password" autocomplete="off">
@@ -657,7 +661,7 @@
            「能不能让我打开说明跟着走」缺的就是这一行。指向 GitHub 上渲染好的那份而不是
            自己再抄一遍:重抄一份的下场就是上面那条注释 -->
       <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener">详细步骤 ↗</a></p>
-      <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空则不改</span></label>
+      <label for="notion-token">Integration Secret<span class="configured" id="token-set" hidden>已配置,留空就不改</span></label>
       <!-- 现在新建的密钥是 ntn_ 开头。老的 secret_ 仍然有效,所以这里只是换掉占位符
            给出的样子,验证那一侧不认前缀(认前缀就会在 Notion 下次改名时把好 token 拒了) -->
       <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="ntn_...">
@@ -1030,7 +1034,7 @@
       const ok = ($('key').value.trim() || isEditMode) && $('id').value.trim();
       if (!ok) {
         msg.className = 'msg error';
-        msg.textContent = 'Steam Web API Key 和 SteamID64 都要填 —— 这两个是必需的,跳不过去。';
+        msg.textContent = 'Steam Web API Key 和 SteamID64 都要填,这一步跳不过去。';
       }
       return Boolean(ok);
     }
@@ -1061,27 +1065,28 @@
       // 首次设置先走岔路,向导等选了「全新设置」才出现。设置页没有这一步 ——
       // config 已经在了,那个问题早就有答案了
       if (!isEditMode) {
-        // **第 1 步在标记里是不带 hidden 的** —— 平时是 showStep() 把其余几节收起来,
-        // 而岔路这条分支不走 showStep,所以要自己收。少这一行,第 1 步就直接
-        // 摊在两个选择下面,岔路等于没岔
-        document.querySelectorAll('.step').forEach((s) => { s.hidden = true; });
-        // 副标题("只需要填一次…")是给向导写的,对「从备份恢复」那条讲不通,
-        // 而岔路上那两个选择本来就不需要一句说明。选了「全新设置」再放回去
-        $('page-subtitle').textContent = '';
-        $('gate').hidden = false;
         $('gate-new').addEventListener('click', startWizard);
         $('gate-restore').addEventListener('click', startRestore);
+        $('gate-back').addEventListener('click', showGate);
+        showGate();
         return;
       }
       $('nav-backup').hidden = false;
       showWizard();
     }
 
-    /** 步骤条 + 各步 + 按钮行,两种模式共用 */
-    function showWizard() {
-      $('step-nav').hidden = false;
-      // 这一行始终显示 —— 提交按钮住在里面。收起的是里面那两个向导按钮,不是整行
-      $('step-actions').hidden = false;
+    /**
+     * 一次性接线。**必须只跑一次。**
+     *
+     * 岔路能回头之后,`showWizard()` 就不再是「一个页面生命周期里只跑一次」了 ——
+     * 岔路 → 向导 → 岔路 → 向导会把下面每个监听都再挂一遍,于是「跳过」一下跳两步、
+     * 「下一步」校验两次。**这类重复绑定不报错**,只是行为翻倍,而且要走过回头路
+     * 才看得见。
+     */
+    let wizardWired = false;
+    function wireWizard() {
+      if (wizardWired) return;
+      wizardWired = true;
 
       // **两种模式下步骤条都能点。** 一步步走太慢,而这几节本来就互相独立,
       // 没有哪一节的内容依赖前一节填了什么。第 1 步的必填由提交时的校验兜底,
@@ -1091,28 +1096,71 @@
         li.addEventListener('click', () => showStep(Number(li.dataset.goto)));
       });
 
+      if (isEditMode) return;
+      // 边填边换标签。`input` 覆盖打字,`change` 兜住 <select>(它的 input 事件
+      // 在旧浏览器上不保证)。绑在 form 上而不是逐个输入框,新增字段不用再来改这里
+      form.addEventListener('input', refreshSkipLabel);
+      form.addEventListener('change', refreshSkipLabel);
+      $('step-skip').addEventListener('click', () => showStep(currentStep + 1));
+      // 「下一步」只出现在第 1 步,所以这里无条件校验
+      $('step-next').addEventListener('click', () => {
+        if (stepOneOk()) showStep(2);
+      });
+    }
+
+    /** 步骤条 + 各步 + 按钮行,两种模式共用 */
+    function showWizard() {
+      $('step-nav').hidden = false;
+      // 这一行始终显示 —— 提交按钮住在里面。收起的是里面那两个向导按钮,不是整行
+      $('step-actions').hidden = false;
+      wireWizard();
+
       if (isEditMode) {
         $('step-skip').hidden = true;
         $('step-next').hidden = true;
         btn.hidden = false;
       } else {
         btn.textContent = '完成设置';
-        // 边填边换标签。`input` 覆盖打字,`change` 兜住 <select>(它的 input 事件
-        // 在旧浏览器上不保证)。绑在 form 上而不是逐个输入框,新增字段不用再来改这里
-        form.addEventListener('input', refreshSkipLabel);
-        form.addEventListener('change', refreshSkipLabel);
-        $('step-skip').addEventListener('click', () => showStep(currentStep + 1));
-        // 「下一步」只出现在第 1 步,所以这里无条件校验
-        $('step-next').addEventListener('click', () => {
-          if (stepOneOk()) showStep(2);
-        });
       }
       showStep(1);
     }
 
+    /**
+     * 回到岔路。**两条分支都得回得来。**
+     *
+     * 「从备份恢复」本身没有出口:手上没有备份文件的人点进去之后,页面上没有任何
+     * 控件能退回来,而打包版没有地址栏、没有后退键,托盘的「打开面板」也只是把
+     * 现有窗口叫到前面 —— 唯一的办法是把整个程序退掉。这是用户报上来的那个。
+     *
+     * **这不违反「首次设置不给出口」那条规矩:** 回的是岔路,不是 Dashboard,人还在
+     * 闸里。去 Dashboard 的 `#back-btn` 仍然只在设置模式下上膛。
+     *
+     * 这个函数也是首次设置的**初始状态**(`initSteps` 直接调它),所以两条分支动过的
+     * 每一处都要在这里还原 —— 漏一个,第二次进那一节就缺半截,而且不会报错。
+     */
+    function showGate() {
+      // **第 1 步在标记里是不带 hidden 的** —— 平时是 showStep() 把其余几节收起来,
+      // 而岔路这条分支不走 showStep,所以要自己收。少这一行,第 1 步就直接
+      // 摊在两个选择下面,岔路等于没岔
+      document.querySelectorAll('.step').forEach((s) => { s.hidden = true; });
+      $('step-nav').hidden = true;
+      $('step-actions').hidden = true;
+      $('gate-back').hidden = true;
+      // 这三个是 startRestore 藏起来的
+      $('backup-make').hidden = false;
+      $('backup-title').hidden = false;
+      $('restore-title').hidden = false;
+      $('page-title').textContent = '初始设置';
+      // 副标题("只需要填一次…")是给向导写的,对「从备份恢复」那条讲不通,
+      // 而岔路上那两个选择本来就不需要一句说明。选了「全新设置」再放回去
+      $('page-subtitle').textContent = '';
+      $('gate').hidden = false;
+    }
+
     function startWizard() {
       $('gate').hidden = true;
-      $('page-subtitle').textContent = '只需要填一次,密钥都存在本机的 config.json 里';
+      $('gate-back').hidden = false;
+      $('page-subtitle').textContent = '只填一次,密钥只存在这台电脑上';
       showWizard();
     }
 
@@ -1123,6 +1171,7 @@
      */
     function startRestore() {
       $('gate').hidden = true;
+      $('gate-back').hidden = false;
       $('backup-make').hidden = true;
       $('backup-title').hidden = true;
       $('restore-title').hidden = true;
