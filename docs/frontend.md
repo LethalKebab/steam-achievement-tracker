@@ -1,537 +1,537 @@
-# 前端(设计记录)
+# Frontend (design record)
 
-`Dashboard.html` 和 `Setup.html` 的设计决定:**试过什么、为什么退回来、哪些不许再提**。
+The decisions behind `Dashboard.html` and `Setup.html`: **what was tried, why it was reverted, and what must not be proposed again.**
 
-和 [ai-guide-writing.md](ai-guide-writing.md)、[self-update.md](self-update.md) 同一个体例 —— 记的是理由,不是用法。CLAUDE.md 里只留一行结论和指向这里的链接;要改前端之前先读这份,别重新推导。
+Same genre as [ai-guide-writing.md](ai-guide-writing.md) and [self-update.md](self-update.md) — this records reasons, not usage. CLAUDE.md keeps a one-line rule and a link here; read this before changing the frontend rather than re-deriving it.
 
-两个页面都是一大团字符串:项目零依赖、没有构建步骤,所以没有共享样式表,也没有组件框架。下面很多约束是这件事的直接后果。
+Both pages are one big string each: the project has zero dependencies and no build step, so there is no shared stylesheet and no component framework. Many of the constraints below follow directly from that.
 
-**验证手段有个硬边界。** `test/html-smoke.test.js` 里没有 DOM,点击、焦点、CSS 层叠一概验不到 —— 它钉的是引用完整性(每个 `getElementById` 的目标存在、每个 CSS 类型选择器有对应标签)加上从线上 bug 蒸馏出来的源码断言。**别把它的绿灯读成「界面是好的」**,这份文档里一半的毛病都是在浏览器里发现的。
-
----
-
-## 一、设计令牌
-
-`:root` 里放着整套视觉系统:4 级表面、3 级线、3 级文字、强调色、4 级进度色、UI 字体栈,以及字号 / 间距 / 圆角 / 阴影 / 动效的比例尺。
-
-**同一块在 `Setup.html` 里逐字节存了第二份**,`html-smoke.test.js` 逐条声明地比对两份。它挡的失效是最难看见的那种:**未定义的 CSS 变量不报错**,只是那一条声明作废,值悄悄退回继承来的东西。
-
-现在确实有一张共享样式表了(`/fonts/noto-sans-sc.css`),令牌**仍然不放进去**:那个文件是 101 条机器生成的 `@font-face`,把设计系统埋进一份 vendor 资产里,意味着下次重新 vendor 就会弄丢它。重复 + 一致性测试仍然是对的形状。
-
-`--topbar-h` **故意不在这一块**:它是运行时量出来的,不是设计令牌。这条也有测试钉着 —— 否则让一致性检查通过的最省事办法,就是往 Setup 里粘一个没用的 `--topbar-h`,然后这一块开始收集非设计的垃圾。
-
-### 线是 alpha,不是固定 hex
-
-旧的 `--border` 和 `--panel-alt` 是**同一个值**,于是任何画在悬停表面上的边框直接消失。alpha 白在四级表面上都成立,是构造上正确,不是调出来的。
-
-### `--page-pad` 存在,是因为顶栏的负边距必须等于 `body` 的 padding
-
-写两处会漂。
-
-### 三档文字颜色钉在 WCAG AA 上,而且是等距的 —— 这是算术,不是品味
-
-`--text-3` 必须在**四级表面上全部**过 AA。`#6d7f95` 过不了:`--bg` 上 4.46、`--surface` 3.95、`--surface-2` 3.43、**`--surface-3` 上 2.94** —— 而它虽然被令牌注释写成「占位、禁用、时间戳」,实际扛着表头、`无成就系统` 这个数据值、攻略/重写按钮的文字、11px 的成就描述,以及 `#gen-bar` 的警告文字。**整页最难读的一句话,是那条警告。**
-
-约束是算术,值得写下来:要在 `--surface-3`(OKLCH L=0.333)上过 4.5:1,文字亮度需要 L ≥ 0.698,而 `--text` 在 L=0.921 —— **三档必须挤进 0.223 的亮度区间**。旧的梯度是 0.192 / 0.139,新的是 0.110 / 0.111,是唯一塞得下的均分。
-
-所以 `--text-2` 也跟着动了(`#98a9be` → `#b4c3d5`),尽管它本来就过。**只抬 `--text-3` 不是这个修法的简化版,是个坏掉的版本** —— 第三档会正好落在 AA 底线上、紧贴第二档下面,两档间距从 0.139 塌到 0.028,三层变两层。
-
-值是在 OKLCH 里算的(色相 253.6)再写成 hex。**OKLCH 是算术,不是运行时依赖。**
-
-重新测的时候拿真实页面跑一遍对比度扫描,别信这里的数字;改过任何表面之后要重跑 —— 下限是 `--surface-3` 定的,而**把它调暗没有用**(到 `#222c3b` 时它和 `--surface-2` 的对比度变成 1.00,也就是同一个颜色了,还没换来足够余量)。
+**Verification has a hard boundary.** `test/html-smoke.test.js` has no DOM — clicks, focus and the cascade cannot be checked there. It pins referential integrity (every `getElementById` target exists, every CSS type selector has a tag) plus source assertions distilled from shipped bugs. **Do not read its green as "the UI is fine"** — half the defects recorded here were found in a browser.
 
 ---
 
-## 二、字体
+## 1. Design tokens
 
-自托管 **Noto Sans SC Variable**(OFL-1.1):`assets/fonts/noto-sans-sc.css` + 101 个 `files/*.woff2` + `LICENSE`,共 4.7 MB,由 `lib/server.js` 挂在 `/fonts/`。
+`:root` holds the whole visual system: a 4-step surface ramp, a 3-level line hierarchy, 3 text levels, the accent, a 4-step progress ramp, the UI font stack, and scales for type / spacing / radius / elevation / motion.
 
-从 `@fontsource-variable/noto-sans-sc` vendor 过来的 —— **要更新就重装那个包再复制一遍,别手改**。
+**The same block exists byte-for-byte in `Setup.html`**, and `html-smoke.test.js` compares them declaration by declaration. The failure it prevents is silent in the worst way: **an undefined CSS variable doesn't error**, it makes that one declaration fail and the value quietly falls back to whatever was inherited.
 
-### 为什么存在:两次测量,不是偏好
+There *is* a shared stylesheet now (`/fonts/noto-sans-sc.css`), and the tokens still are not in it, deliberately: that file is 101 machine-generated `@font-face` rules, and burying the design system inside a vendored asset means the next re-vendor loses it. Duplication plus a parity test remains the right shape.
 
-**(1) 没人说得出中文是用什么字体渲染的。** 旧的字体栈是 `"Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif`;用 canvas 墨水覆盖率在开发机上量,CJK 字形既**不是**微软雅黑(墨水曲线对不上)**也不是**栈里点名的 `Noto Sans SC` —— 它一路掉到 Chromium 自己的 CJK 兜底,而那个逐机器不同。页面里每一个字号、字距、行高都是照着「碰巧是什么」调的。
+`--topbar-h` is deliberately **not** in this block: it's a runtime measurement, not a design token. A test pins that too — otherwise the cheapest way to make the parity check pass is to paste a useless `--topbar-h` into Setup, and the block starts collecting non-design junk.
 
-**(2) `600` / `650` / `700` 在中文里是同一个字重。** 96px 下「成」的墨水覆盖率:300→2116,400→3120,500→3776,然后 **600/650/700 全部 → 4517**。而 `.wordmark` 是 700、`h1` 是 650、`.ach-name`/`.badge`/`.reading .value` 是 600 —— 声明了三档,渲染成一档。换字体之后三档真的不一样了(4204 / 4428 / 4601),因为文件带一根 100–900 的真 `wght` 轴。
+### Lines are alpha, never a fixed hex
 
-**重测这件事的时候当心 `document.fonts.check()`** —— 它对 MiSans 和 HarmonyOS Sans SC 都返回 `true`,而这两个可证明不存在(墨水量和一个根本不存在的字体名完全相同)。**量墨水,别问可用性。**
+The old `--border` was literally the same value as `--panel-alt`, so every border drawn on a hover surface vanished. An alpha white is correct against all four surfaces by construction, not by tuning.
 
-### 101 个文件是重点,不是意外
+### `--page-pad` exists because the topbar's negative margin has to equal `body`'s padding
 
-Fontsource 按 `unicode-range` 把字体切开,浏览器只取屏幕上真的用到的那些子集。在真实的 312 款游戏库上量:**24 个请求 / 1.37 MB,占 4.7 MB 的 28.5%**,`DOMContentLoaded` 从 51 ms 变成 55 ms。
+Written twice, they drift.
 
-响应头是 `Cache-Control: public, max-age=31536000, immutable` —— 这是 `sendFile` 的 `no-store` **唯一**的例外,因为这个服务器里别的东西都是改完刷新,而字体是不可变的,否则每次打开都要重下约 40 个子集。
+### The three text levels are pinned to WCAG AA, and they are equally spaced on purpose — that's arithmetic, not taste
 
-**别把这个「简化」成一个大字体文件**:那是拿懒加载的 1.37 MB 换急加载的 4.7 MB。
+`--text-3` must clear AA on **all four surfaces**. `#6d7f95` does not: 4.46 on `--bg`, 3.95 on `--surface`, 3.43 on `--surface-2`, **2.94 on `--surface-3`** — while carrying, despite a token comment reading 「占位、禁用、时间戳」, the table headers, the `无成就系统` data value, the guide/rewrite button labels, the 11px achievement descriptions and `#gen-bar`'s warning text. **The warning message was the least readable string on the page.**
 
-### `/fonts/` 路由
+The binding constraint is arithmetic and worth writing down: to clear 4.5:1 on `--surface-3` (OKLCH L=0.333) a text colour needs L ≥ 0.698, and `--text` sits at L=0.921 — so **all three levels have to fit inside 0.223 of lightness**. The old ramp stepped 0.192 / 0.139; the new one steps 0.110 / 0.111, which is the only even split that fits.
 
-扩展名白名单(`.css` / `.woff2`)**加上**对 `assets/fonts` 的包含性检查 —— 和 `resolveGuidePath` 同一个理由,路径来自 URL。两条分支都对着跑起来的服务器验过,包括一个**落在允许扩展名上的**穿越尝试(`/fonts/%2e%2e%2fnope.css`)确实走到 403,而不是被扩展名那一关提前挡掉。
+Hence `--text-2` moved too (`#98a9be` → `#b4c3d5`) even though it already passed. **Raising only `--text-3` is not a smaller version of this fix, it is a broken one** — the third level lands on the AA floor right underneath the second, collapsing their separation from 0.139 to 0.028 and turning three tiers into two.
 
-### 四种不出声的失效,全部钉住了
+Values were computed in OKLCH (hue 253.6) and written as hex. **OKLCH is the arithmetic, not a runtime dependency.**
 
-`<link>` 丢了、`--font-ui` 把兜底写在最前、`.woff2` 缺文件、打包过滤器少了 `assets/**/*` —— **四种都渲染出一个完全正常的页面**,只是悄悄退回系统字体,也就是退回上面那两个问题。`html-smoke.test.js` 四条全钉,外加 OFL 的 `LICENSE`(这个仓库是公开的)。五条断言都做过故障注入。
-
-打包那一条尤其值得钉:它**只在打包版失效**,`npm start` 永远看着是好的 —— 和 `icon.ico`、`updater.js` 踩过的是同一个坑。
+Re-measure with a contrast sweep over the live page rather than trusting these numbers, and re-run it after any surface change — `--surface-3` is what sets the floor, and **darkening it does not help** (at `#222c3b` it becomes contrast 1.00 against `--surface-2`, i.e. the same colour, before it buys enough headroom).
 
 ---
 
-## 三、标题(wordmark)
+## 2. The font
 
-### 现在的做法(别退回去)
+Self-hosted **Noto Sans SC Variable** (OFL-1.1): `assets/fonts/noto-sans-sc.css` + 101 `files/*.woff2` + `LICENSE`, 4.7 MB, served at `/fonts/` by `lib/server.js`.
 
-`Steam 成就追踪器` 一个 `<h1>`,三种角色靠三种手段区分:
+Vendored from `@fontsource-variable/noto-sans-sc` — **regenerate by re-installing that package and re-copying, not by hand-editing.**
 
-- 「Steam」是平台 —— 0.74em、**字重 500**、宽字距、`--text-3`
-- 「成就」是关键词 —— 强调色
-- 其余是正文
+### Why it exists: two measurements, not a preference
 
-主体是 27px **字重 800**。
+**(1) Nobody could say what font the Chinese rendered in.** The old stack was `"Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif`; measured by canvas ink coverage on the dev machine, the CJK glyphs came from *neither* Microsoft YaHei (different ink curve) *nor* the `Noto Sans SC` named in the stack — it fell through to Chromium's own CJK fallback, which differs per machine, while every font size, letter-spacing and line-height in the page was tuned against whatever that happened to be.
 
-**用 800 不用 900 是故意的**:这个标题只在 27px 出现一次,而 900 在这个尺寸上开始把 CJK 字形的笔画糊在一起 —— 放大了才好看,那不算数。
+**(2) `600` / `650` / `700` were the same weight in Chinese.** Ink coverage of 成 at 96px: 300→2116, 400→3120, 500→3776, then **600/650/700 all → 4517**. `.wordmark` is 700, `h1` is 650, `.ach-name`/`.badge`/`.reading .value` are 600 — three declared tiers rendering as one. After the swap all three differ (4204 / 4428 / 4601), because the file carries a real `wght` axis of 100–900.
 
-**没有下划线,也别加回来。** 字重反差已经说清楚「这是标题」了,再加一条线是同一句话说两遍;而一条手画的线,在一个图标全是 24 格常规笔画的顶栏里,什么都不匹配。`.wm-text` 也跟着丢掉了 `position: relative`(它当初只是用来锚定那条绝对定位的线)。
+**Beware `document.fonts.check()` when re-testing this** — it returned `true` for MiSans and HarmonyOS Sans SC, both of which were provably absent (ink identical to a font name that does not exist). **Measure ink, not availability.**
 
-**这一切在自托管字体之前做不到** —— 旧字体栈把 600/650/700 渲染成一档,唯一能让「Steam」后退的手段就是调暗,而调暗正是把 `--text-3` 逼进对比度失败的原因。现在字重和颜色各干一件事。**如果「Steam」还要再退,用更轻的字重,绝不要用更暗的颜色。**
+### The 101 files are the point, not an accident
 
-`.wm-latin` 那个手调的 `0.74em` 在换字体之后活了下来 —— 换完量到的拉丁大写字高与 CJK 墨水比是 0.593,换之前约 0.58,所以**别不量就去「重新校准」它**。
+Fontsource splits the face by `unicode-range`, so the browser fetches only the subsets whose characters are actually on screen. Measured on the real 312-game library: **24 requests / 1.37 MB, 28.5% of the 4.7 MB**, and `DOMContentLoaded` stayed at 55 ms (was 51).
 
-### 三次「画」出来的标题都退回来了
+Served with `Cache-Control: public, max-age=31536000, immutable` — the **one** exception to `sendFile`'s `no-store`, because everything else in this server is edit-and-refresh while a font is immutable and would otherwise re-download ~40 subsets on every open.
 
-标题被打扮过三次、又卸妆三次。记在这里是为了别再花掉一整天。
+**Do not "simplify" this into one big font file**: that trades a lazy 1.37 MB for an eager 4.7 MB.
 
-**这和上面那节不矛盾**:现行做法改的是**字重**,一笔都没重画。禁的是**生成字形**。
+### The `/fonts/` route
 
-1. **Ink Free** —— 一个 Windows 手写体。错了两层:它**只有拉丁字形,一个中文都没有**;而且只在 Windows 上有,别的机器全部静默兜底。
-2. **手写 SVG 字形路径** —— 产出的是**错字**,不是难看的字:「成」丢了内部,「就」丢了「口」和「尤」。一个中文字 8–15 笔,凭记忆写坐标必然弄错结构。
-3. **对字体位图自动描边**(marching squares)再抖动轮廓 —— 结构对了,但轮廓连接断掉,`fill-rule: evenodd` 叠在断掉的环上渲染成一地碎片。
+An extension allow-list (`.css` / `.woff2`) **and** a containment check against `assets/fonts` — same reasoning as `resolveGuidePath`, since the path comes from the URL. Both branches were verified against the running server, including that a traversal ending in a *permitted* extension (`/fonts/%2e%2e%2fnope.css`) actually reaches the 403 rather than being caught earlier by the extension test.
 
-第四版技术上是成的 —— 真文字 + `feTurbulence`/`feDisplacementMap` 的墨水滤镜,字形正确性交给字体,只有边缘是我们的 —— 但在 27px 下效果太轻,不值这套机器,于是一并退了。
+### Four silent failure modes, all pinned
 
-**留下来的教训:字形正确性属于字体。** 任何重画 CJK 字形的做法都是在重跑第 2 或第 3 次尝试。换真字体的字重、字号、颜色、字距都可以,现行做法就是这么做的;**生成轮廓**不行。
+A missing `<link>`, a fallback-first `--font-ui`, a missing `.woff2`, and a packaging filter without `assets/**/*` **all render a perfectly normal-looking page** that has quietly reverted to system fonts — i.e. straight back to the two problems above. `html-smoke.test.js` pins all four plus the OFL `LICENSE` (this repo is public). All five assertions were mutation-tested.
 
-真要一个有辨识度的标题,现实的路只有两条:外部产出的资产(设计师或书法生成器交一个 SVG),或者在大得多的展示尺寸上用那个墨水滤镜。
+The packaging one is worth pinning especially: it breaks **only** the packaged build while `npm start` looks perfect — the same trap as `icon.ico` and `updater.js`.
 
 ---
 
-## 四、顶栏
+## 3. The wordmark
 
-### 冻结的顶栏
+### Current design (do not revert)
 
-`.topbar` 把标题和操作行包成一个 `position: sticky` 块。三处是承重的:
+`Steam 成就追踪器` in one `<h1>`, three roles by three means:
 
-- **负边距**(现在是 `calc(var(--page-pad) * -1)`)抵消 `body` 的 padding,让栏横贯到边 —— 没有它,表格会从两侧的空隙里滚过去,读起来像渲染 bug。
-- **背景必须不透明**,否则滚动的表格会透出来。它现在是一个叠层:`radial-gradient(…), linear-gradient(…), var(--bg)`,而 **`var(--bg)` 必须留在最后** —— CSS 里最后一层画在最底下,它是撑住上面两层半透明色调的不透明底。删掉栏就透了;挪到最前它会盖住色调。
-- **`z-index: 100` 故意排在两个底部浮层之下**(`#gen-bar` 9990、`lib/rpc.js` 的同步条 9999)—— 它们从不和顶栏重叠,争层级什么也换不来。
+- 「Steam」 is the platform — 0.74em, **weight 500**, wide tracking, `--text-3`
+- 「成就」 is the keyword — accent colour
+- the rest is plain
 
-那个渐变叠层就是全部的「banner」—— **故意没有图片、没有玻璃、没有纹理**,因为这条栏永远在屏幕上,任何有花纹的东西看到第三眼就开始累。
+The body is **weight 800** at 27px.
 
-### 底边是分隔线,不是进度条
+**800 rather than 900 on purpose:** this wordmark only ever appears at 27px, and 900 starts closing up the strokes of CJK glyphs at that size — it looks better enlarged, which does not count.
 
-**别把 AGCR 进度条加回这里。** 想法本身在抽象层面是成立的(让一个已经占着位置的东西说点什么,还不多占高度),实际错了,而理由属于**数据**不属于画法:
+**There is no underline, and it should not come back.** The weight contrast already says "this is the title", so a rule under it is the same statement made twice — and a hand-drawn mark matches nothing in a topbar whose icons are all 24-grid regular strokes. `.wm-text` lost `position: relative` with it (that existed solely to anchor the absolutely-positioned rule).
 
-**几百款游戏的库上,AGCR 几乎不动。** 它是所有开过的游戏的均值,打穿一整款游戏只让它动零点几个百分点 —— 也就是说那根条渲染成一个永远三分之一满的槽。**一根从来看不出前进的进度条报告的不是进度,是不完整**,而且每次打开页面都说一遍。
+**None of this was possible before the self-hosted font** — the old stack rendered 600/650/700 as one weight in Chinese, so the only way to push 「Steam」 back was to dim it, and dimming is what drove `--text-3` into its contrast failure. Weight and colour now do one job each. **If 「Steam」 ever needs to recede further, use a lighter weight, never a darker colour.**
 
-数字本身从来不是问题,也没动:平均完成率仍然印在读数区,一个变化缓慢的数字放在那里读起来是**统计量**。删掉的是「给这个数字套上『离满还有多远』这个形状」的决定,因为那个形状对变化速度做了数据兑现不了的承诺。
+`.wm-latin`'s hand-tuned `0.74em` survived the font swap — Latin-cap-to-CJK-ink ratio measured 0.593 after, against ~0.58 before, so **do not "recalibrate" it without measuring first**.
 
-**在这里重新提议任何常驻进度指示之前,先去量它那个数字一周能动多少。**
+### Three attempts at a *drawn* wordmark were reverted
 
-边现在是 `.topbar` 上的 `border-bottom: 1px solid var(--line-3)` —— 用 border 而不是原来那个绝对定位的子元素,这样 `offsetHeight` 把它算进去,`--topbar-h` 自动保持正确。令牌也跟着意义走了:进度槽是 `--line-2`(控件表面),而顶栏底边正是 `--line-3` 的定义(「区块边界 —— 顶栏底边」)。
+The title got dressed up three times and undressed three times; the record is here so nobody spends the day again.
 
-同步扫光(`.topbar::after`)用途没变,但挪到了 `bottom: -1px`:`bottom` 是相对 **padding** 盒解析的,而 border 画在它外面,所以放 `0` 的话扫光会浮在分隔线上方,同步时那条边看起来是两条线。
+**This does not contradict the section above:** the shipped design changes font *weight*, which redraws nothing. The prohibition is specifically on generating letterforms.
 
-`getDashboardData` 里的 `data.avg` 一起删了 —— 没有别的调用者。
+1. **Ink Free** — a Windows handwriting font. Wrong twice over: it is **Latin-only, so it carries no Chinese glyphs at all**, and it ships only on Windows, so every other machine silently fell back.
+2. **Hand-authored SVG glyph paths** — produced *wrong characters*, not merely ugly ones: 成 lost its interior, 就 lost 口 and 尤. A Chinese glyph is 8–15 strokes and coordinates written from memory get the structure wrong.
+3. **Auto-tracing the font bitmap** (marching squares) then rippling the outline — structure came out right, but the contour chaining broke and `fill-rule: evenodd` over broken loops rendered a field of shards.
 
----
+A fourth version did work technically — real text with an `feTurbulence`/`feDisplacementMap` ink filter, which keeps glyph correctness with the font and makes only the edges ours — but at 27px the effect is too slight to be worth the machinery, and it was reverted with the rest.
 
-## 五、图标
+**The durable lesson: glyph correctness belongs to the font.** Anything that redraws CJK letterforms is re-running attempt 2 or 3. Choosing a different weight, size, colour or tracking of a real font is fine and is what the current design does; *generating outlines* is not.
 
-内联 SVG,不是 emoji。`<body>` 顶部一个 `<symbol>` 精灵图,通过 `icon(name, filled)` 取用;24 格网格、`stroke-width: 1.75`、`currentColor`。
-
-**界面里任何地方都不要重新引入 emoji。** emoji 自带颜色(CSS `color` 够不着)、逐操作系统渲染不同、而且不落在文字基线上。这个项目为此投降过两次:行内菜单的触发器只能用纯文本 `⋮`,因为 `✏️` 无论 opacity 压到多低都是一支亮黄铅笔;同步图标转不起来,因为 Windows 上的 🔄 是「蓝色圆角方块 + 白色箭头」一整个字形,转它等于转那块牌子。
-
-两个限制现在都没了,同步图标真的会转(按钮上加 `.spinning`)。屏幕上仅剩的 emoji 来自**游戏名**,那是用户数据。
-
-**`onSyncState` 仍然绝不能写 `syncBtn.textContent`** —— 那是旧的文字按钮显示「同步中...」的做法,现在这么干会删掉转场动画挂着的那个 `.icon-glyph` 内层 span。状态走 `class` 和 `title`,两者都不动按钮的内容。
+If a distinctive title is ever wanted beyond that, the only realistic routes are an externally-produced asset (a designer or a calligraphy generator hands over an SVG) or the ink filter at a much larger display size.
 
 ---
 
-## 六、表格行
+## 4. The topbar
 
-行现在分成三块:`.row-marks`(星、心)、身份(封面、名字、徽标)、`.row-actions`(攻略、重写、notion、备份、更多)。
+### The frozen top bar
 
-在此之前它们是一长串等距的兄弟节点,而 `margin-left: auto` 只挂在**最后**一个按钮上,于是攻略那几个按钮飘在不知道哪儿的中间。
+`.topbar` wraps the title and the action row in one `position: sticky` block. Three details are load-bearing:
 
-### 行内操作:🔒 出来,✏️ 进去
+- The **negative margins** (now `calc(var(--page-pad) * -1)`) cancel `body`'s padding so the bar spans edge to edge — without them the table scrolls through the gutters on either side and it reads as a rendering bug.
+- The background must stay **opaque** or the scrolling table shows through. It is a stack — `radial-gradient(…), linear-gradient(…), var(--bg)` — and **`var(--bg)` has to stay last**: in CSS the last layer paints at the bottom, so it is the opaque base holding the two translucent tints up. Drop it and the bar goes see-through; move it first and it covers the tints.
+- **`z-index: 100` deliberately sits below the two bottom-anchored floaters** (`#gen-bar` at 9990, `lib/rpc.js`'s sync bar at 9999) — they never overlap it, so competing for layers buys nothing.
 
-行上是 🔒 和 ✏️,不是原来那个 `Manual` 文字开关加 🗑。
+That gradient stack is the whole "banner" — **deliberately no image, no glass, no texture**, because the bar is permanently on screen and anything patterned there gets tiring by the third look.
 
-**删除不可逆,而它当时就摆在一个人们天天要按的按钮旁边** —— 那种排布迟早出事。现在两个**破坏性或有后果的**操作(改数字、删除)收进一个 ✏️ 菜单,而**可逆、常用**的那个(锁定)升成直接可点的 🔒/🔓。
+### The bottom edge is a separator, not a progress bar
 
-这就是要守住的排序规则:**深度买的是安全,所以把它花在需要安全的操作上。**
+**An AGCR track there should not come back.** The idea is sound in the abstract (make something already occupying space say something, at no extra height) and wrong in practice, for a reason that belongs to the *data* rather than the drawing:
 
-选「编辑」会**顺带把行锁上**,而且必须锁:`setManualAchievements` 拒绝未锁的行,而那道守卫是对的 —— 没有它,下一次同步会静默覆盖掉你敲进去的数字。锁亮起来就是反馈;后果写在菜单项的 `title` 里,不写在标签上。
+**AGCR over a several-hundred-game library is close to immovable.** It is a mean over every started game, so finishing a whole game moves it a fraction of a percent — meaning the bar renders as a permanently one-third-full slot. **A progress bar that never visibly advances does not report progress, it reports incompleteness**, and it says so on every single page load.
 
-一个共享的 `#rowEditMenu` 元素每次点击重新定位,而不是每行一个菜单(300 行的库否则要挂 300 个隐藏菜单)。
+The number itself was never the problem and is untouched: 平均完成率 still prints in the readout, where a figure that changes slowly reads as a *statistic*. What was deleted is the decision to give that figure the shape of "how far from full", because that shape makes a promise about movement the data cannot keep.
 
-触发器的字形现在取自精灵图。**它不能是 emoji** —— `.delete-btn` 用 `color` + `opacity` 把它压暗,而 emoji 自带颜色。那个限制随 emoji 一起死了;活下来的是**要求**:这个字形必须压得暗。
+**Before re-proposing any always-on progress indicator here, check how far its number moves in a week.**
 
-### 改数字是一种模式,不是状态
+The edge is now `border-bottom: 1px solid var(--line-3)` on `.topbar` — a border rather than the old absolutely-positioned child, so `offsetHeight` includes it and `--topbar-h` stays correct for free. The token moved with the meaning: the progress track was `--line-2` (a control surface), and a plain topbar edge is what `--line-3` is defined for (「区块边界 —— 顶栏底边」).
 
-锁着的行上挂常驻数字输入框,意味着滚动时任何一次误点都会改掉一个数字,没有确认也没有撤销。
+The sync sweep (`.topbar::after`) survives unchanged in purpose but moved to `bottom: -1px`: `bottom` resolves against the *padding* box while the border paints outside it, so at `0` the sweep would float above the separator and the edge would read as two lines during a sync.
 
-现在由 `editingAppid` 把关:只能从菜单进入,焦点离开该行**或者**点击落在行外时退出。**两个出口都需要** —— 点空白处在某些浏览器里不移动焦点,所以只靠 `focusout` 会把行卡在编辑态,而那正是这个改动要消除的隐患。
-
-编辑期间 change 处理器只更新完成率单元格,不调用 `render()`:全量重渲染会重建 `innerHTML` 并把焦点一起带走,于是从「完成数」Tab 到「成就总数」时,第二个输入框会在光标底下被换掉。
-
-菜单项调 `stopPropagation()`,否则文档级的 click 处理器会看见这次菜单点击,在同一个 tick 里把刚打开的编辑模式关掉。
-
-### 排序:两层置顶盖在所选排序之上
-
-**★ 优先级压过 🎮 最近在玩** —— 手动的选择永远压过自动的信号。最近在玩的行之间按 `playedDaysAgo` 排。
-
-### 徽章和置顶共用一个窗口,但不是同一个判据
-
-`RECENT_PLAY_DAYS`(5)是共享的窗口 —— **绝不要给徽章和置顶各写各的天数**,否则一行排到最上面而行上没有任何东西说明为什么。
-
-但两者**不是**同一个谓词:`isRecentlyPlayed` 驱动徽章;`pinsToTop` 还额外要求 `typeof total === 'number' && total > 0`,驱动置顶。置顶的意思是「你玩了这个,去看看还差什么」,而没有进度可显示时这句话没有意义。
-
-**测正向条件,不要测 `!== 'N/A'`** —— 「没什么可追踪的」有三种形状(`'N/A'` 没有成就系统、`null` 还没同步、`0` 一个都没有),而 `null` 是常见的那个,因为刚加进来的游戏正好既是刚玩过又是还没计数。那一行仍然在正常位置显示 🎮,并在 `total` 到位后自己重新进入置顶。
-
-**不对称只在这一个方向上是安全的** —— 有徽章没置顶自己解释得通,有置顶没徽章解释不通。
-
-### 🔔 取代了「新成就」表
-
-旧的 `#newAchSection` 表列出所有 `total` 变大的游戏。铃铛改为显示两个具体事件,数据来自 `perfect_lost_date` / `ach_added_date`。
-
-「已读」存在 `localStorage`,键是**原始 ISO 时间戳**,不是界面渲染的天数 —— 天数每天都变,以它为键的已读集合过一夜就对不上了,红点每天早上自己复活。
-
-打开面板即全部标记为已读:红点回答的是「有没有新的」,不是「处理了没有」。
+`data.avg` in `getDashboardData` went with it — it had no other caller.
 
 ---
 
-## 七、筛选行
+## 5. Icons
 
-五个**三态**芯片,不是复选框。每个芯片是一个属性(喜爱 / 家庭 / 已完成 / 受限 / 无成就),循环 中立 → 只看 → 排除 → 中立。
+Inline SVG, not emoji. One `<symbol>` sprite at the top of `<body>`, reached through the `icon(name, filled)` helper; 24-unit grid, `stroke-width: 1.75`, `currentColor`.
 
-两态表达不了这件事,于是方向被逼进标签里(`隐藏已完成` vs `只看喜爱`),而另一个方向永远够不着。名字用光秃秃的名词,因为带方向的名字在另一个状态下会读成 `只看隐藏已完成`。
+**Do not reintroduce an emoji anywhere in the UI.** Emoji carry their own colour (CSS `color` cannot touch them), render differently per OS, and do not sit on the text baseline. This project surrendered to that twice: the row menu's trigger had to stay a plain text `⋮` because `✏️` stayed a bright yellow pencil however far the opacity was pushed, and the sync icon could not spin because 🔄 on Windows is one glyph of "blue rounded square + white arrow", so rotating it rotates the plate.
 
-**循环方向是推出来的,不是品味**:三个状态构成一个环,所以「中立」正好有一个便宜的前驱。喜爱/家庭 从中立起步、通常下一步是「只看」;另外三个从排除起步、通常下一步是回中立 —— 这个顺序让两边都只要一次点击。回到刚离开的状态要两次点击;那是环的拓扑,不是缺陷,而反向手势(右键)考虑过并**故意没做**。
+Both constraints are gone now, and the sync icon does spin (`.spinning` on the button). The only remaining emoji on screen come from **game names**, which are user data.
 
-**状态活在前导的标记里,标签文字从不改动。** 形状是主信号(点 / 亮点 / 横杠),颜色是次要的 —— WCAG 禁止只靠颜色编码,而四级表面之间只差约 15%,色调在 30px 的芯片上分不出三个状态。标签加删除线被排除了:这一行一天要扫几十遍,一个变形状的标记比五个标签时不时挂一道线安静得多。横杠比它自己的标签亮一档(`--text-2` 对 `--text-3`),让眼睛落在标记上而不是词上。
-
-**标记的盒子固定 9×9,笔画画在 `::before` 里** —— 动画改元素自身的宽度会把芯片撑宽,而芯片是排成一行的,于是循环一次会把右边每个芯片都推一下。
-
-**排除态不是红色**:红色在这里是 `--danger`,而五个芯片里有三个静息状态就是排除,红色会变成常驻警报。
-
-多个非中立芯片**取交集**(只看喜爱 + 只看家庭 可以合法地为空;行数会报出来,没有任何东西去救它)。
-
-`FILTERS` 是筛选逻辑、芯片顺序、以及「被『排除已完成』挡住了」这句措辞的**唯一事实源** —— 把它摊到标记、状态和接线里的 id 数组三处,会让漏改的地方表现为「点了没反应」而不是报错,所以点击处理器是委托的。`html-smoke.test.js` 钉住循环方向、起始状态,以及芯片与 `FILTERS` 的名字和顺序一致。
-
-一处值得保留的不对称:「被…挡住了,点这里查看」这个跳转把挡路的芯片**重置为中立,而不是沿环前进一步** —— 从「排除」前进会落到「只看」,那会在用户只想看见一行的时候把整张表换成它的补集。
+**`onSyncState` must still never write `syncBtn.textContent`** — that was how the old text button showed 「同步中...」, and doing it now would delete the inner `.icon-glyph` span the spin animation hangs off. State goes through `class` and `title`, both of which leave the button's contents alone.
 
 ---
 
-## 八、搜索框
+## 6. Table rows
 
-Dashboard 的「搜索游戏名…」和重写对话框的「搜索成就」共用一个形状:`.search-field` 包住 input,`.field-clear` 绝对定位盖在右内边距上,Esc 是键盘等价物。
+The row is grouped into three blocks — `.row-marks` (star, heart), the identity (cover, name, badges), and `.row-actions` (guide, rewrite, notion, backups, more).
 
-**三处承重,每一处失效都不出声:**
+They were previously one flat run of equally-spaced siblings, and `margin-left: auto` sat on the *last* button alone, so the guide buttons floated in the middle of nowhere.
 
-- **两个 input 都必须保留 `placeholder`** —— ✕ 是靠 `:placeholder-shown` 显示的,那是 input 自己的状态而不是它的第二份副本。这一点之所以重要:两个字段都有直接给 `value` 赋值的代码路径(对话框每次打开都清空筛选),而直接赋值不触发 `input` 事件。代价是:如果把 placeholder 换成这个页面别处用的可见标签,✕ 就会挂在一个空框上。
-- **按钮盖在 input 上,绝不追加在它后面**,而它需要的右侧 padding 是无条件的 —— 摆进文档流会让整行每敲一个字就横移一下,而只在有文字时才出现的 padding 会让第一个字符跳一下。
-- **清空时派发 `input` 事件,而不是按名字调处理器** —— `#searchBox` 挂着 `render` 和 `onSearchInput`,`#askPickFilter` 挂着自己的 `oninput`,按名字调漏掉一个就表现为「清空了,结果还在屏幕上」。
+### Row actions: 🔒 out, ✏️ in
 
-Esc 只在字段有文字时拦截,空筛选下仍然能关掉对话框。`html-smoke.test.js` 四条全钉,做过故障注入。
+The row carries 🔒 and ✏️, not the old `Manual` text toggle beside a 🗑.
 
----
+**Delete is irreversible and sat next to a button people press routinely** — that arrangement mis-fires eventually. Now the two *destructive-or-consequential* actions (edit the counts, delete) live behind one ✏️ menu, and the *reversible, frequently-used* one (lock) is promoted to a direct 🔒/🔓 icon.
 
-## 九、成就面板
+That is the ordering rule to keep: **depth buys safety, so spend it on the actions that need it.**
 
-### 「还差哪些成就」显示你自己的攻略,不是搜索框
+Choosing 「编辑」 **locks the row as a side effect** and must — `setManualAchievements` refuses unlocked rows, and that guard is correct: without it the next sync silently overwrites the numbers you typed. The lock lighting up is the feedback; the consequence is stated in the menu item's `title`, not its label.
 
-展开一行显示的是用户自己攻略里对应每条成就的正文。**不是一个跳出工具的搜索链接** —— 要找的东西通常已经写下来了。
+One shared `#rowEditMenu` element is repositioned per click rather than one menu per row (a 300-row library would otherwise carry 300 hidden menus).
 
-每张卡片带上对应 checkbox 自己的文字(名字 + 逐字描述 + 心得是**一个** Notion 块,这是 `notionblocks.js` 刻意保证的,所以那段文字**就是**答案,不需要抓正文),外加一个跳到那个块的链接。
+The trigger glyph now comes from the sprite. **It cannot be an emoji** — `.delete-btn` dims it with `color` + `opacity`, and an emoji carries its own colours. That constraint died with the emoji; what survives it is the *requirement*, which is that this glyph must dim.
 
-**三处承重:**
+### Editing counts is a *mode*, not a state
 
-- **归属判定用 `resolveTodoToAchievement`,一个字没改** —— 和 `audit` 用的是同一个反查,要求逐字唯一的描述或无歧义的名字,否则返回 null。**在这里放松它的诱惑比在勾选路径上大得多**,因为一张空卡片**看着像 bug**,而一张错卡片看着挺正常;而它正是决定往用户笔记里写什么的那个函数,为显示放松它等于为写入放松它。`mapAchievementGuides` 因此只是它上面一层纯粹的组装(`matching.test.js` 钉住:重复成就取第一个、本身是成就的子步骤不会被归到邻居名下、同名冲突不产生条目)。
-- **归属不了的成就显示「攻略里还没写这条」并保留搜索链接** —— 选它而不是沉默,因为空白才是可行动的那一半:表头现在读作 `还差 8 / 44 个成就 · 攻略里已写 8 / 8 条`,这让面板变成一张覆盖率地图,而这个东西以前得跑全库 `guide-lint` 才产得出来。
-- **读攻略是软失败的**:一个失效的 Notion token 把它的消息放进表头,成就列表原封不动 —— 拿一个假的 `NOTION_TOKEN` 跑真服务器验过。
+Permanent number inputs on a locked row mean any stray click while scrolling changes a count with no confirmation and no undo.
 
-没有注册攻略的游戏不动它(只有搜索链接);**成就 schema 没同步的也不动**,因为 `resolveTodoToAchievement` 需要 `api_name`/`name_cn`/`name_en`/`description`,而 `getMissingAchievements` 的实时 schema 兜底产不出那个形状 —— 在那里断言「攻略里还没写」是猜。
+Now `editingAppid` gates them: entered only from the menu, left when focus leaves the row **or** when a click lands outside it. **Both exits are needed** — clicking blank space doesn't move focus in every browser, so `focusout` alone can strand a row in edit mode, which is the exact hazard this removed.
 
-### 剥掉攻略里对名字和描述的复述(`stripGuideEcho`)
+While editing, the change handler updates only the rate cell instead of calling `render()`: a full re-render rebuilds `innerHTML` and takes the focus with it, so tabbing from 完成数 to 成就总数 would swap the second field out from under the cursor.
 
-按写作约定,一个 checkbox 开头是成就名和**逐字**官方描述 —— 而卡片上面已经从 Steam 印过这两样了。不剥的话每张卡片都把话说两遍,把真正的心得挤出窗口。
+The menu items call `stopPropagation()`, without which the document-level click handler would see the menu click and close edit mode in the same tick it opened.
 
-**只从顶部剥,而且只剥整行就是复述的行。**
+### Row order: two pin layers over the chosen sort
 
-**别拿 `extractTitleCandidates` 去判断名字那一行** —— 那个函数会把 `知识(Rationality) — "…" 集齐全部百科全书条目` 切成 `知识`,用在这里会把整条心得删掉。它的用途是**找到匹配**,不是证明某行只有一个名字。
+**★ priority beats 🎮 recently-played** — the manual choice always outranks the automatic signal. Recently-played rows sort by `playedDaysAgo` among themselves.
 
-**改写过的描述一律保留**:那是用户自己的措辞,而在**隐藏**成就上,那一行往往是解锁条件唯一出现的地方(Steam 什么都不返回)—— 夏洛克家的「处理酸奶丢失的情况。」正是因此活下来的,这也是为什么比较用的是原始行的 `description` 而不是显示串(隐藏成就的显示值是个占位符)。
+### The badge and the pin share one window, but are not the same predicate
 
-**剥到空返回空串,那个窗口干脆不画。** 它一开始在空的时候返回原文,理由是「不要显示空卡片」—— 错了,因为名字、描述和跳转图标都还在,实际效果是:一条**只**抄了官方文字的条目,变成了屏幕上最冗余的一张卡(实测:资本家、成就达人)。
+`RECENT_PLAY_DAYS` (5) is the shared window — **never give the badge and the pin separate windows**, or a row sorts to the top with nothing explaining why.
 
-这条规则的两个测试是靠故障注入才立起来的;其中 `知识` 那个用例原本是**空过**的 —— 单行攻略剥成空之后撞上旧的兜底,不管剥得多错都原样返回。它现在带第二行,所以剥过头是看得见的。
+They are **not** the same predicate though: `isRecentlyPlayed` drives the badge; `pinsToTop` also requires `typeof total === 'number' && total > 0` and drives the pin. Pinning means "you played this, go see what's left", which is meaningless with no progress to show.
 
-### 卡片对齐,攻略块不对齐 —— 这句话就是整条布局规则
+**Test the positive condition, not `!== 'N/A'`** — "nothing to track" has three shapes (`'N/A'` no system, `null` not synced yet, `0` none exist), and `null` is the common one because a newly-added game is exactly the case that is both freshly played and not yet counted. The row still shows 🎮 in its normal position and re-enters the pin by itself once `total` arrives.
 
-`.ach-guide` 左侧那条强调线是一把**尺**:它描着文字走,所以它的长度读起来就是「有多少文字」。一条越过文字伸进空白的线,读起来是「下面还有」。
+**Asymmetry is safe in this direction only** — badge-without-pin explains itself, pin-without-badge doesn't.
 
-卡片是一个**容器** —— 有填充有边框,所以里面多出来的空间读起来是内边距。
+### 🔔 replaced the new-achievements table
 
-所以**对齐由容器承担,尺永远不承担**:`.ach-grid` 用 `align-items: stretch` 让同一行的卡片外框对齐,而 `.ach-guide` 只有 `max-height` 上限、其余由内容撑开,于是线在文字结束的地方停下。
+The old `#newAchSection` table listed anything whose `total` had grown. The bell instead shows two specific events sourced from `perfect_lost_date` / `ach_added_date`.
 
-**永远不要给文字块一个它没挣来的高度** —— 被迫采用的长度和自己挣来的长度不是一回事,而强调线只在第二种情况下是诚实的。
+"Read" is stored in `localStorage` keyed on the **raw ISO timestamps**, not the day counts the UI renders — day counts change daily, so a seen-set keyed on them stops matching overnight and the red dot resurrects itself every morning.
 
-另外四条撑着它:
-
-- **上限加在同时装文字**和**子步骤的容器上**,不是加在文字上:`.ach-substep` 是文字的兄弟节点,会从加在文字上的上限里逃出去,把卡片撑得比同行高。**要在真有子步骤的游戏上验这一条** —— 一个每份攻略 `subSteps: []` 的库显示不出这个缺陷。
-- **窗口写成 `calc(var(--fs-xs) * 1.6 * 6)`**,不用 `em`:`em` 会重新基于容器继承到的字号,于是窗口悄悄变成「表格字号的六行」而不是攻略的六行。
-- **`.ach-grid.has-expanded .ach-item { align-self: start }`** —— 否则 `stretch` 会把展开卡片的同行伙伴一起拖到它的高度,而那些大半是空的。
-- **渐隐和指针挂在 `.clamped` 类上**,由 JS 只加在 `scrollHeight` 确实超出盒子的卡片上,绝不用 `:not(.expanded)`:反过来的话,一份本来就装得下的攻略会盖上一层什么都没遮的渐变,还有一个承诺了它做不到的交互的光标。
-
-**先把所有卡片的 `scrollHeight` 读完再写任何 class** —— 交错着来会每张卡片强制一次回流,而这个库最大的一份攻略有 408 条成就。
-
-展开是 `classList.toggle('expanded')`;单参数的 toggle 是故意的翻转,`html-smoke.test.js` 把它从布尔强制转换规则里豁免掉(`args.length < 2`)。
-
-跳到 Notion 的是**成就名旁边的一个图标**,不是攻略下面一个带标签的链接 —— 放在攻略下面会和窗口抢空间,还得手工把它排除在裁剪之外。
+Opening the panel marks everything read: the dot answers "is there anything new", not "have you dealt with it".
 
 ---
 
-## 十、重写对话框(♻)
+## 7. The filter row
 
-### 入口就放在已经存在的那个对话框里
+Five **tri-state** chips, not checkboxes. Each chip is one attribute (喜爱 / 家庭 / 已完成 / 受限 / 无成就) cycling 中立 → 只看 → 排除 → 中立.
 
-**范围**那一行是个朴素的二选一 —— **整篇** 或 **自选** —— 而走到这一步是靠删东西删出来的。
+Two states cannot express that, which forces the direction into the label (`隐藏已完成` vs `只看喜爱`) and leaves the other direction unreachable. Names are bare nouns, because a direction-carrying name reads as `只看隐藏已完成` in the other state.
 
-它最早把算好的集合(`稀有成就 27`、`未解锁 1`)当作范围选项摆出来,那有个具体的缺陷:**你在对一个从没见过的集合确认一次花钱且不可逆的重写**,而且事后没法调整。所有者指出这些预设根本不是范围,而是**选择的起点**,于是它们挪进了选择器,变成**勾选**自己那批条目的按钮 —— 现在你看得见到底是哪 27 条,可以逐条增删。
+**The cycle direction is derived, not a taste call**: three states form a ring, so 中立 has exactly one cheap predecessor. 喜爱/家庭 start neutral and their usual next step is 只看; the other three start excluded and theirs is back to 中立 — this order gives both one click. Returning to a state you just left costs two clicks; that is the ring's topology, not a defect, and a reverse gesture (right-click) was considered and deliberately not built.
 
-跟着删掉的:服务端的 `patchPresets` 那套机器(一次 `planGuide`、四个预设)、`unavailable` 与 `0` 的区分和它的 `—` 渲染、以及每个预设各自的预检。客户端本来就拿着每个可选项的 `rarity` 和 `unlocked`,所以计数在本地算,一次往返都不用。
+**The state lives in the leading mark; the label text is never touched.** Shape is the primary signal (dot / lit dot / dash) with colour secondary — WCAG forbids encoding by colour alone, and the four surface levels are only ~15% apart, so tint cannot separate three states on a 30px chip. A strikethrough on the excluded label is ruled out: this row gets scanned dozens of times a day, and a mark changing shape reads far quieter than five labels sometimes wearing a line. The dash is one step brighter than its own label (`--text-2` over `--text-3`) so the eye lands on the mark rather than the word.
 
-**`RARE_PCT` 是发给客户端的(`rarePct`),而不是当成字面量 `15` 抄一份** —— 决定「稀有」的那个阈值在提示词里、在 `--only rare` 里、在快捷按钮里、在百分比的强调色里,必须是同一个数。
+**The mark's box is a fixed 9×9 with the stroke drawn in `::before`** — animating the element's own width widens the chip, and chips sit in a row, so one cycle nudges every chip to its right.
 
-### 那一行重建了三次,第三次是**筛选**
+**Excluded is not red**: red is `--danger` here and three of five chips sit excluded at rest, so red would be a permanent alarm.
 
-**第一版是选中一批的开关**,亮起来的含义是「这一批里每一条现在都被选中了」。那是一个**推导出来的事实**被读成了**「我按了这个」**,而**属性批次互相重叠、小节批次不重叠**:在部落幸存者上,那唯一一条未解锁的条目同时也是稀有的,于是按「稀有」把「未解锁」也点亮了 —— 而再按「未解锁」(此时它是亮的,所以它的动作是**减去**)又把「稀有」熄了。**按一个键,另一个键在变。** 所有者作为 bug 报了上来,它确实是:两种含义共用一个视觉状态。
+Multiple non-neutral chips **intersect** (只看喜爱 + 只看家庭 can legitimately be empty; the row count reports it and nothing rescues it).
 
-**第二版把它们改成没有按下态的一次性追加动作**,这杀死了连锁反应 —— 然后撞上所有者发现的下一堵墙:**只能追加就只能表达并集**,于是「我还没拿到的那些稀有成就」这个最有用的集合,只能靠先取全部 22 条稀有再手工取消勾选来达到。
+`FILTERS` is the single source of truth for the filter, the chip order and the wording of 「被「排除已完成」挡住了」 — spreading that over markup, state, and an id array in the wiring makes a missed spot show up as "clicking does nothing" rather than as an error, so the click handler is delegated. `html-smoke.test.js` pins the cycle direction, the opening states, and chip↔`FILTERS` name-and-order agreement.
 
-**第三版把「看」和「取」拆开**:两个芯片是筛选器(两个都按 = 交集),计数旁边的 `全选` 取走当前显示的一切。按下态重新变得诚实,因为处理器可证明地从不碰 `selected` —— 靠断言那个处理器里不出现 `sel` 这个词来钉住,因为边界在那里,不在任何具体拼写上。
-
-**一个谓词函数同时服务列表和全选**:写两份的话,全选会悄悄取走屏幕上没有的条目,而这紧接着就是一个花钱且不可逆的动作。
-
-**小节复选框三轮都是三态开关** —— 它们的批次不重叠,所以连锁行为在那里不可能出现,而且它们本来就作用在筛选后的视图上,这也是第三版改动很小的原因。
-
-### 「已选 N 条」曾经静默停在上一次全量重画的值,连续三轮
-
-那个计数只在 `paintPicker` 末尾写,而勾选单条**故意跳过全量重画**(否则会在你往下勾的时候把滚动位置弹回顶部)。于是计数冻在上一次全量重画留下的值上,而它上面那句话更新得好好的。
-
-**没人发现,是因为另一个数字是对的** —— 你得把两个数放在一起读才看得出来。它最后是靠拿**显示的**计数和 `querySelectorAll('input:checked').length` 对比才浮出来的,也就是拿 UI 去对 DOM,而不是读 UI。
-
-`paintCount()` 现在是自己的函数,正是为了让勾选单条那条路径能调它,`html-smoke.test.js` 钉住这个调用(做过故障注入)。
-
-**一个值有两个渲染器却只有一条重画路径时,先假定它们已经漂了,然后去量。**
-
-### 对话框宽度钉死,正文整个删掉
-
-两件所有者是用出来的:
-
-**`.modal-box` 按内容定宽**,这对两行确认框是对的,对一个装着实时列表的框是错的:勾一条会改变哪一行最宽,于是整个对话框在一个正瞄着复选框的光标底下抽搐。`.ask-wide` 把它钉在 520px,而且是在对话框**有**选择器时就加,不是在选择器**显示**时才加,否则切换整篇/自选会跳一下。九种状态实测(切模式、快捷勾选、取消勾选、折叠、筛选、清空)全程 520px,而没有选择器的对话框保持自然宽度(生成确认框是 297px)。
-
-**对话框最后一点正文都没有了。** 自选那边删掉了「只改选中的 27 条」(它把正下方的「已选 27 条」又说了一遍)和「其余 24 个一字不动」(它把自选的含义又说了一遍);整篇那边同样删到只剩一句 —— 有多少手工勾的子步骤框会被还原 —— 而第四轮所有者把这句也砍了:**重写本身就已经蕴含替换现有内容,备份两种情况都会做,所以那句话是在复述自己的动词。**
-
-披露没有消失,它收敛到了一个界面上:`formatPreflight` 仍然为 `--overwrite` 印出每一个有风险的勾选,`guideoverwrite.test.js` 钉着它 —— 因为 CLI 是写给一个敲了 flag、担得起细节的人看的,而对话框担不起。
-
-没有调用者之后,`askConfirm` 的**函数式 body**(它会根据当前选择重算文字)一起删了,连同它的六次重画调用;`html-smoke.test.js` 现在钉住相反的不变式 —— 重写确认框不传 `body`(做过故障注入),外加 `#askBody` 自身的显示/隐藏。事后重新实测:body `display:none`、各状态 520px、七个步骤上显示的计数都等于 `querySelectorAll('input:checked').length`。
-
-### 「自选…」是一个控件干两件事
-
-**标签先叫过「挑几条…」,改掉的理由是一条规则**:另外三个选项(`整篇`、`稀有成就`、`未解锁`)全是**命名一个集合的名词**,而「挑几条」是描述动作的动词短语 —— 形状不匹配,摆在它们旁边读着随便。`自选…` 回答的是这一行在问的同一个问题(哪个集合?**我挑的那个**),省略号保留了「点这里会展开更多界面」的信号。
-
-选择器把攻略自己的成就**按它们所在的小节标题分组**列出,每行带全球解锁率和解锁状态;每个标题有一个**三态复选框**,整节取走或放下。
-
-那个复选框是所有者问「小节能不能一次选中」之后加的 —— **行为本来就有**,叫作「点标题」,写在一句只有在什么都没选中时才渲染的正文里。于是你挑中第一条的瞬间它就消失了,没人找得到。**一个需要读说明才知道的可供性不是可供性**;这个框画在和条目复选框完全相同的尺寸和左边缘上,于是不用一个字就读成同一类控件。
-
-所以「选一个小节」和「选单条」是同一个控件,发出去的请求永远是一个朴素的 `api_name` 列表 —— 也就是 `resolveScope` 本来就有的显式列表分支,Dashboard 因此完全不需要 `section:` 选择器。
-
-空选择**禁用确认按钮**(Enter 也遵守),而不是发到服务端再被拒。
-
-### 没有 `thin` 选择器,而这个理由是通用的
-
-它没有诚实的中文短名:「写得薄」是 *thin content* 的翻译,而且还**给条目定了性**;「没写打法」把「写了一句」说成「什么都没写」。**一个需要先解释阈值才说得通的判据,不能做成按钮。**
-
-它留在 CLI 上作为 `--only thin[:字数]`,阈值可调且有文档。**两个界面不必提供相同的选项。**
-
-### 两个读着随便的标签,以及它们背后的形状规则
-
-「筛成就名…」→「**搜索成就**」(一个动词硬塞进名词位置,而这是个 `type=search` 输入框,搜索就是那个词),「怎么改」→「**重写要求**」。
-
-第二个是这个对话框里第三个撞上同一条规则的标签:**这一行里的标签都是名词短语(范围、写法),所以夹一个问句进来读着随便** —— 和两轮之前「挑几条」夹在 整篇/稀有成就/未解锁 之间是一模一样的毛病。
-
-「要求」单独用被否掉了,太抽象;「重写要求」靠点明这个要求**是关于什么的**保住了具体性,同时和对话框自己的标题挂上钩。这个字段想要什么由它的 placeholder 回答,而 placeholder 开头就是真正的问题:留空会怎样。
-
-### 写法放在确认框里,不放在行上也不放在设置里
-
-那个花钱前的确认框本来就存在,而且几乎是空的(一个标题一个按钮)。**「要不要花这笔」和「写多深」是同一个决定**,拆开就意味着先回答再选择。
-
-放在行上会给 300 行里的每一行都加一个控件;放在设置里会把一个**每次都要选**的东西变成一个**存下来的偏好**。
-
-它复用 `.view-toggle` —— 顶栏已经有的分段控件 —— 而不是引入这个页面唯一的一根滑块,依据和删掉手画标题下划线是同一条先例:**一个和旁边任何东西都不匹配的元素,在这里会被删掉。**
-
-**`askConfirm` 仍然返回布尔值**;选择写回调用方自己的 `o.choice.value`,所以它另外六个调用点一个字都不用改。
-
-服务端这个值搭着 `startGuideGen` → `enqueue` → `runGuideGen`,变成一份**每次运行独有的配置副本** —— 写 `config.ai.effort` 会让一次「极速」悄悄给排在后面的所有任务重新调档。
-
-重写对话框里硬编码的「约 2–4 分钟」同时删掉了:相同输入实测过 76/174/337 秒,而极速模式还要再快 8 倍,所以任何区间都是系统兑现不了的承诺。
+One asymmetry worth keeping: the 「被…挡住了,点这里查看」 jump resets the blocking chip to **中立, not one step round the cycle** — advancing from 排除 lands on 只看, which swaps the table for its complement when the user only asked to see one row.
 
 ---
 
-## 十一、浮层
+## 8. The search boxes
 
-两个浮层,两个角。`#gen-bar`(攻略进度)是 `position: fixed` **左下**;`lib/rpc.js` 的同步状态条硬编码在**右下**,`z-index: 9999`。
+The Dashboard's 搜索游戏名… and the rewrite dialog's 搜索成就 share one shape: `.search-field` wraps the input, `.field-clear` is absolutely positioned over its right inset, and Esc is the keyboard equivalent.
 
-生成要跑好几分钟(真实游戏上实测 35 秒到 11 分钟,而且**故意不在屏幕上引用这个区间**),期间用户在滚表格,所以一个在顶部随文档流的条等于「滚回上面去看它还活着没」。
+**Three things are load-bearing and each fails silently:**
 
-任何浮着的东西都需要不透明背景,否则会渲染在表格文字上面。`#gen-bar` 在 9990,同步条赢下任何冲突;`max-width: 720px` 的媒体查询把它们改成上下堆叠。
+- **Both inputs must keep a `placeholder`** — the ✕ is shown by `:placeholder-shown`, which is the input's own state rather than a second copy of it. That matters because both fields have code paths that assign `value` directly (the dialog wipes the filter on every open) and a direct assignment fires no `input` event. The price is that swapping a placeholder for a visible label, which this page does elsewhere, leaves the ✕ hanging on an empty box.
+- **The button is positioned over the input, never appended after it**, and the right padding it needs is unconditional — laying it out in flow shoves the row sideways on every keystroke, and padding that appears only when there is text makes the first character jump.
+- **Clearing dispatches an `input` event rather than calling the handlers by name** — `#searchBox` carries `render` and `onSearchInput`, `#askPickFilter` carries its own `oninput`, and a named call missing one reads as 「清空了,结果还在屏幕上」.
 
-它的关闭按钮设一个 `genDismissed` 标志,`showGen` 遵守它 —— 没有它,3 秒的轮询会在你关掉几秒后又把条打开。开始一次新的生成/迁移会清掉这个标志。
-
----
-
-## 十二、通用交互
-
-### hover 不能变暗,每个控件都要有按下态
-
-重建之后留下的两个缺陷。
-
-`.badge-btn` 挂着一条一刀切的 `:hover { opacity: 0.85 }`,于是悬停一个**启用的**锁定/家庭徽标除了让它变淡什么也没做 —— **指着一个控件反而让它更难看清**。每个变体现在有自己的**加深**式 hover,`transition: all` 一起删了(它会把新的 `:active` 变换也扫进去,让按下变得迟钝)。
-
-另外,**整个文件里没有一条 `:active` 规则** —— 每个按钮都有 hover,没一个有按下反馈,而这是个行每天要被点几十次的工具。现在有一条全局按下规则,挨着那条全局 `:focus-visible` 放,理由和后者存在的理由相同:**逐组件的交互状态会一个组件一个组件地被忘掉**。
-
-它用 `translateY(1px)`(只走合成器 —— 改 padding/margin 会在每次点击时让 300 行的表格回流),并故意排除 `.g-card`,那个的 hover 已经占了 `translateY(-3px)`。
-
-### 每条 `.armed` 都要配一条 `:hover` 孪生规则
-
-`.armed` 是两个类(0,2,0);每个按钮自己的 `:hover:not(:disabled)` 是一个类加两个伪类(0,3,0)—— **hover 赢**。而第一次点击之后光标正好停在按钮上,于是那个确认红正好在它必须被看见的时刻被盖掉。
-
-两个页面里每一条 armed 规则因此都写成一对(`.x.armed, .x.armed:hover:not(:disabled)`)。
-
-**缺孪生规则时什么都不报错**,症状只是颜色不对,而且只在活的光标停在控件上时才出现 —— 所以截图和读 CSS 都看不见。`html-smoke.test.js` 要求每一条都配。
+Esc only intercepts when the field has text, so an empty filter still lets the dialog close. `html-smoke.test.js` pins all four, mutation-tested.
 
 ---
 
-## 十三、设置页(`Setup.html`)
+## 9. The achievement panel
 
-它同时是首次运行的闸门和设置页。`config.json` 里没有 Steam 凭据时,`lib/server.js` 的 `/` 处理器发它而不是 `Dashboard.html`;从 Dashboard 的「设置」按钮随时可达。
+### 「还差哪些成就」 shows your own guide, not a search box
 
-`getSettings` 驱动这两种模式;**密钥字段留空 = 保持现状**,绝不是清空。
+Expanding a row shows the user's own guide text per achievement. **Not a search link out of the tool** — the thing being looked for is usually already written.
 
-### 第一屏是个岔路,而这是程序唯一非问不可的问题
+Each card carries the matching checkbox's own text from the guide (name + verbatim description + notes are **one** Notion block, which `notionblocks.js` deliberately guarantees, so that text *is* the solution — no prose scraping needed) plus a link to that exact block.
 
-没有配置也没有数据,对「第一次用」和「老用户换新机器」来说**长得一模一样** —— 磁盘上没有任何东西能区分它们,所以这是唯一推不出来、只能问的问题。
+**Three things are load-bearing:**
 
-它问成「全新设置 / 从备份恢复」,而不是「你是新用户吗」:后者让用户去猜这个程序所谓的「新」是什么意思,前者用他手上现成的东西就能回答。
+- **Attribution is `resolveTodoToAchievement`, unchanged** — the same reverse lookup `audit` uses, which demands a unique verbatim description or an unambiguous name and otherwise returns null. **The pull to loosen it is much stronger here than in the tick path**, because a blank card *looks* like a bug while a wrong one looks fine; and it is the same function that decides what gets written into the user's notes, so loosening it for display loosens it for writing. `mapAchievementGuides` is therefore a pure assembly layer over it (`matching.test.js` pins first-wins on a repeated achievement, that a sub-step which is itself an achievement is not filed under its neighbour, and that a same-name collision yields **no** entry).
+- **An achievement it cannot attribute says 「攻略里还没写这条」 and keeps the search link** — chosen over silence because the blanks are the actionable half: the header reads `还差 8 / 44 个成就 · 攻略里已写 8 / 8 条`, which makes the panel a coverage map that previously needed `guide-lint` across the whole corpus to produce.
+- **The guide read is soft-failed**: a dead Notion token puts its message in the header and leaves the achievement list untouched, verified by running a real server with a bogus `NOTION_TOKEN`.
 
-「全新设置」是实心按钮,因为第一次用的人是多数,**而且点错很便宜** —— 备份文件还在,恢复入口在设置页里仍然够得着。
+A game with no registered guide is untouched (search link only) — and so is one whose achievement schema hasn't synced, because `resolveTodoToAchievement` needs `api_name`/`name_cn`/`name_en`/`description` and `getMissingAchievements`'s live-schema fallback can't produce that shape; claiming 「攻略里还没写」 there would be a guess.
 
-岔路那条分支**必须自己把每一个 `.step` 藏起来**:标记里第 1 步不带 `hidden` 属性(平时是 `showStep()` 负责藏),没有那一行的话向导的第一步会渲染在两个选项底下,岔路就不成其为岔路。这是在浏览器里抓到的,`html-smoke.test.js` 看不见。
+### The guide text is stripped of its echo of the name and description (`stripGuideEcho`)
 
-### 岔路必须能回头
+By the writing convention a checkbox opens with the achievement's name and its **verbatim** official description — both of which the card already prints above, from Steam. Left alone, every card said everything twice and pushed the actual tips out of the window.
 
-用户实报的问题:新装之后不小心点了「从备份恢复」、没点「全新设置」,进去以后退不出来,只能把整个程序关掉重开。
+**Stripping runs only from the top, and only on lines that are *entirely* the echo.**
 
-`startRestore()` 把岔路藏起来、露出第 4 节的恢复界面,之后页面上没有任何控件能退回去。**三条路都不通**:`#back-btn`(返回 Dashboard)只在设置模式下上膛,这是对的,首次设置本来就是一道关卡;`#step-nav` 只有 `showWizard()` 会显示,而恢复那条分支根本不走它;打包版没有地址栏也没有后退键,托盘的「打开面板」只做 show/focus。
+**Do not judge the name line with `extractTitleCandidates`** — that function slices `知识(Rationality) — "…" 集齐全部百科全书条目` down to `知识`, so using it here deletes the whole tip. It exists to *find a match*, not to prove a line is nothing but a name.
 
-手上没有备份文件的人于是彻底卡住。「全新设置」那条其实也是单向的,只不过还能靠把设置填完走出去,所以一直没人报。
+**A paraphrased description is always kept**: it is the user's own wording, and on a *hidden* achievement that line is usually the only place the unlock condition appears at all (Steam returns nothing) — 夏洛克家's 「处理酸奶丢失的情况。」 survives for exactly that reason, which is also why the comparison uses the raw row's `description` and not the display string, whose hidden-achievement value is a placeholder.
 
-**加的是回岔路,不是回 Dashboard。** `#gate-back`(重新选择)和 `#back-btn` 是两个控件,不能合成一个 —— 让一个控件承担两种含义,筛选芯片那一轮已经吃过亏了。新控件只在首次设置里出现,回的是上面那两个选择,人始终还在闸里,所以「首次设置不给出口」这条规矩没有被破坏。
+**Stripping to nothing returns an empty string and the window simply isn't drawn.** It first returned the original text on empty, justified as "never show an empty card" — wrong, because the name, the description and the jump icon are all still there, and the actual effect was that an entry which had *only* copied the official text became the most redundant card on screen (measured: 资本家, 成就达人).
 
-`showGate()` 同时也是首次设置的初始状态,`initSteps` 直接调它。**两条分支动过的地方都要在这里还原**:`startRestore` 藏起来的三个元素、标题、副标题、步骤条、按钮行。漏掉任何一个,第二次走到那一节就会缺半截,而且不报错。
+Two of this rule's tests were mutation-tested into existence; one of them, the `知识` case, was **passing vacuously** because a single-line guide stripped to empty hit the old fallback and came back unchanged no matter how wrong the stripping was. It now carries a second line so over-stripping is observable.
 
-**这个改动带出来一个新坑,已经堵上。** 回头路让 `showWizard()` 从「一辈子只跑一次」变成可以反复跑,而它里面有四处 `addEventListener`。拿掉守卫实测:岔路和向导之间来回三趟之后,点一下「跳过」直接从第 1 步跳到第 4 步,三个监听一起响。**重复绑定不报错,只是行为翻倍,而且要走过回头路才看得见。** 一次性接线因此拆进 `wireWizard()`,进门先过 `wizardWired`。
+### The card equalises, the guide block does not — that sentence is the whole layout rule
 
-验证是两头都做的,因为 `html-smoke.test.js` 没有 DOM、看不见这类问题(当初岔路那个 bug 也是在浏览器里发现的)。浏览器实跑用隔离的 8778 端口和独立的 `TRACKER_DATA_DIR`,不碰真实数据;走了 岔路→从备份恢复→回岔路→全新设置→回岔路,每一步核对九项状态;来回三趟之后「跳过」只前进一步;`#back-btn` 全程没有露过面。五条源码断言逐个注错跑红、还原跑绿。
+The accent rule down the left of `.ach-guide` is a **measure**: it traces the text, so its length reads as how much text there is. A rule running past the text into blank space reads as "there is more below".
 
-**量几何之前必须先给浏览器面板设视口。** 没设的时候 `clientWidth` 是 0,第一次量到按钮 12x85、以为被压扁,那个读数是假的 —— 当时整个 form 才 34px 宽。
+The card is a **container** — fill and border, so leftover room inside it reads as padding.
 
-### 设置页需要一个**出口**,而它不叫「取消」
+So the container carries the alignment and the measure never does: `.ach-grid` is `align-items: stretch` so card outlines line up per row, while `.ach-guide` is `max-height`-capped and otherwise sized by its content, so the rule stops where the text stops.
 
-打包版没有地址栏、没有后退键,托盘的「打开面板」只 show/focus 现有窗口(`showWindow` 从不调 `loadURL`),所以没有 `#back-btn` 的话,离开 `/setup` 的唯一办法是「保存并验证」—— 改变主意等于退出程序重开。
+**Never give the text block a height it did not earn** — a length an element is forced to adopt is not the same as one it earned, and the accent rule is only honest at the second kind.
 
-**入口那一半本来就处理过了**(Dashboard 上的 ⚙ 链接正是因为「打包版没有地址栏」才存在),出口这一半是同一个约束的另一面。
+Four rules hold the rest up:
 
-**它命名的是去哪,不是撤销什么**,因为这个页面上有六个控件在保存**之前**就已经提交:`createNotionGuideDb` 当场把新 id 写进磁盘,立即备份 / 恢复 / 全部删除 / 逐份删除全都立即生效。所以一个叫「取消」的按钮会承诺一次它只能对七个文本框兑现的全页回滚。
+- **The cap is on the container that holds text *and* sub-steps**, not on the text: `.ach-substep` divs are the text's siblings and would escape a cap set on the text, growing the card past its row-mates. **Verify that on a game that actually has sub-steps** — a library where every guide has `subSteps: []` cannot show the defect.
+- **The window is written `calc(var(--fs-xs) * 1.6 * 6)`**, not in `em`: `em` on a container re-bases onto whatever font-size the container inherits, so the window silently means "six lines of the table's type" rather than six lines of the guide.
+- **`.ach-grid.has-expanded .ach-item { align-self: start }`** — `stretch` would otherwise drag an expanded card's row-mates to its full height, mostly empty.
+- **The fade and the pointer hang on a `.clamped` class** JS adds only where `scrollHeight` really exceeds the box, never on `:not(.expanded)`: gated the other way, a guide that already fits gets a gradient over nothing and a cursor promising an interaction it cannot perform.
 
-三处承重:
+**Read `scrollHeight` for every card before writing any class** — interleaving them forces a reflow per card, on a library whose biggest guide is 408 achievements.
 
-- **`type="button"`**:它在 `<form>` 里面,默认类型会在点击时**提交**。
-- **只在编辑模式**(`armBack()` 从 `isEditMode` 分支调用):首次运行时这个页面是闸门,必须完全没有出口。
-- **脏检查是逐字段的,不是一次快照** —— `createNotionGuideDb` 只重新标记 `notion-db`,因为整表重置会静默吞掉同一次会话里做的真实未保存编辑。
+Expansion is `classList.toggle('expanded')`; the single-argument toggle is a deliberate flip that `html-smoke.test.js` exempts (`args.length < 2`) from its boolean-coercion rule.
 
-干净的表单一次点击就走;只有脏的才上膛,因为每次都弹确认会把自己训练成一个反射动作。`#back-btn` 还必须和 `#arc-wipe` 一起放进文档级点击的解除上膛例外里,理由写在那里。
-
-### 三步向导,一套机制,两种行为
-
-第 1 步 Steam(必填)→ 2 AI → 3 Notion,一次显示一节,外加一个只在设置模式出现的第 4 节(备份与恢复)。
-
-**步骤条在两种模式下都可点** —— 一步步走很慢,而各节互相独立,强制顺序换不来任何东西。唯一的区别是下面那个按钮:首次运行只显示一个(第 1 步是 `下一步`,可选的中间步是 `跳过`,最后是 `完成设置`),设置访问只显示 `保存并验证`。
-
-它取代的是一整页 `<details>`,必填和可选字段混在一起,没有任何东西标明哪个是哪个。
-
-**每个输入框都留在那一个 `<form>` 里,只是被藏起来**,而提交读 `$(id).value`,那是看得见隐藏节点的 —— 所以「跳过」只是「留空」,整条保存路径一个字没动。
-
-### 每步只有一个按钮
-
-曾经短暂地有过一排 上一步 / 暂时跳过 / 下一步。步骤条可点之后,三个里有两个是冗余的 —— **步骤条就是返回按钮**,而在可选步骤上,「跳过」和「下一步」是同一个动作披着两个标签。
-
-**保持这个形状:屏幕上的说明文字和近乎重复的控件,在这里的代价都大于收益。** 第 2、3、4 步的解释段落是同样的理由删掉的;留下的那一句警告的是不可恢复的数据丢失(首次同步前先导入),那不是在解释功能怎么用。长篇理由活在 `docs/` 里,永远不在屏幕上。
-
-### 表单里不能用 `required`
-
-一个隐藏的 `required` 控件会让浏览器拒绝提交,并且只在控制台报一个「not focusable」—— 也就是说从 Notion 那一页按保存会**看得见地什么都不做**。
-
-校验现在是手写的 `stepOneOk()`,不通过时**跳回第 1 步并说明原因**,而不是之前那个静默的 `return`(在一次只显示一节的情况下,那看起来就是按钮坏了)。
-
-### `STEP_COUNT` 和 `WIZARD_LAST` 是两个数
-
-4 和 3。前者约束 `showStep` 的钳位,后者是 `完成设置` 挂的地方 —— 备份是设置专有的一节,不属于首次运行。
-
-它们曾经是同一个常量,复用意味着 `showStep(4)` 直接被钳回 3,于是**新标签页点了根本不打开**,而且什么都不报错。
-
-### AI 那一步显示的是**所选厂商**的状态,不是文件的
-
-`ai.providers` 按厂商存密钥和模型,所以「换一家试试」不再等于「把密钥再粘一遍」—— 但前提是表单跟着下拉框走。`paintAiProvider()` 在每次 `change` 时重画三样:已配置徽标、密钥 placeholder、模型字段。
-
-三处承重,而且都不报错:
-
-- **选项标签从 `opt.dataset.label` 重建,绝不追加** —— `textContent += ' · 已配置'` 第一次是对的,第二次就产出「DeepSeek · 已配置 · 已配置」,而每次切换都会重画。
-- **换厂商会清掉密钥框里已经敲的东西**,因为那串字是给刚离开的厂商准备的,提交它等于在新厂商名下存一个保证错误的密钥,表现为一次和「切换」毫无关系的校验失败。
-- **步骤标题上的「已配置」问的是这一步做完没有,不是当前厂商有没有密钥**(`Object.values(aiProviders).some(...)`):配好了 Anthropic 却停在 Gemini 上,这一步仍然是完成的,而 `!cur?.hasKey` 在那里会读成「配置丢了」。
-
-原生 `<option>` 装不下 SVG,而靠前导空格对齐是逐渲染器不同的,所以这里的标记是后缀,不是筛选芯片用的那种前导标记。以源码断言的形式钉在 `html-smoke.test.js`(运行器里没有 DOM),前两条做过故障注入。
-
-### 这里的归档面板**不是**用来恢复的
-
-人真正会有的问题是**「这个游戏的上一版哪去了」**,那是逐游戏的。从一张全局的设置表里回答它,意味着离开你正在看的那一行,然后在一个相邻条目只差一个时间戳的列表里把它找回来。
-
-所以恢复挪到了 Dashboard 的行上,这里只留真正全局的东西:**总大小**(每份归档都跟着备份 zip 走,而一个 Notion 页面导出约 120 KB)和**孤儿**(游戏已经从库里删掉的归档,⋯ 菜单根本够不着)。
-
-两个后果,都是故意的:
-
-- 它**按大小排,不按日期** —— 同样的数据,不同的问题,另一种排序属于另一个界面。
-- 它提供 看 / 删,**但不提供恢复**,孤儿也不提供 —— 恢复一个孤儿会 `upsertGuide` 出一行指向 Dashboard 不渲染的游戏,也就是一份你仍然看不见的攻略,所以诚实的指示是「先把游戏加回来」,概要行上写的就是这句。
-
-**面板只在编辑模式下拉取**:首次设置时那些目录必然是空的,而从 zip 恢复那条路自己拥有那块屏幕。
+The jump to Notion is an **icon beside the achievement name**, not a labelled link under the guide — under the guide it competes with the window for space and has to be kept out of the clip by hand.
 
 ---
 
-## 附:两条页面级的硬规则
+## 10. The rewrite dialog (♻)
 
-**作者写的 `display:` 会静默击败 `hidden` 属性。** `[hidden] { display: none }` 来自**浏览器默认样式表**,所以任何作者规则都压过它,把那个元素的 `hidden` 变成装饰 —— JS 一直在设 `.hidden = true`,元素一直显示,什么都不报错。两个页面都带一条全局 `[hidden] { display: none !important }`,`html-smoke.test.js` 钉着它。**逐个元素去打补丁是打地鼠**,下一条 `display:` 规则会同样安静地开出一个新洞。
+### Reachable from the dialog that was already there
 
-**原生对话框在这个程序里两个进程都不能用。** 打包版里原生对话框会在点得到之前出现又消失,于是每一个挂在它后面的动作都够不着;`dialog.showMessageBox` 从主进程调用会立刻返回 `response: 420`,一个在按钮范围之外的值。**边界是「原生 vs 页面」,不是「渲染进程 vs 主进程」。** 这个项目里任何地方都不要加原生对话框 —— 它静默失败,而一个非零的 response 会被读成「用户拒绝了」。
+The **范围** row is a plain either/or — **整篇** or **自选** — and getting there took removing something.
 
-`askConfirm({title, body, okText, danger, notifyOnly})` 是页内替代品,浏览器和打包版里完全一致。它返回一个 **Promise**,所以每个调用点都必须 `await`:漏掉 `await` 会让 `if (!askConfirm(...)) return` 永远不 return,静默放行那个危险操作。两条规则都钉在 `guidegen.test.js`。
+It first offered the computed sets (`稀有成就 27`, `未解锁 1`) as scope options, which had a concrete defect: **you confirmed a paid, irreversible rewrite over a set you had never seen**, and could not adjust it afterwards. The owner spotted that the presets are not scopes at all but *starting points for a selection*, so they moved inside the picker as buttons that **tick** their entries — now you see exactly which 27, and can add or drop individually.
+
+What went with them: the server-side `patchPresets` machinery (one `planGuide`, four presets), the `unavailable`-vs-`0` distinction and its `—` rendering, and the per-preset preflight. The client already holds `rarity` and `unlocked` on every pickable item, so the counts are computed locally with no round trip.
+
+**`RARE_PCT` is sent to the client (`rarePct`) rather than duplicated as a literal `15`** — the threshold that decides "rare" in the prompt, in `--only rare`, in the shortcut and in the percentage's accent colour has to be one number.
+
+### That row was rebuilt three times, and the third one is **filters**
+
+**It shipped as toggles that selected a batch**, whose lit state meant "every entry in this batch is currently selected". That is a *derived fact* read as *"I pressed this"*, and **property batches overlap while section batches do not**: on 部落幸存者 the single 未解锁 entry is also rare, so pressing 稀有 lit 未解锁 too — and pressing 未解锁 (now lit, so its action was *subtract*) then dimmed 稀有. **Press one key, watch a different one change.** Reported by the owner as a bug, and it was one: two meanings sharing one visual state.
+
+**Attempt two made them add-once actions with no pressed state**, which killed the chain — and then hit the wall the owner found next: *add-only expresses unions and nothing else*, so 「the rare ones I have not got yet」, the single most useful set, could only be reached by taking all 22 rare and unticking by hand.
+
+**Attempt three splits looking from taking**: the two chips are filters (press both = intersection) and a `全选` next to the count takes whatever is currently shown. The pressed state is honest again because the handler provably never touches `selected` — pinned by asserting the word `sel` does not appear in it, since that is the boundary, not any particular spelling.
+
+**One predicate function serves both the list and 全选**: written twice, 全选 would quietly take entries that were not on screen, immediately before a paid irreversible action.
+
+**The section boxes were tri-state toggles through all three rounds** — their batches are disjoint, so the connected behaviour cannot arise there, and they already operated on the filtered view, which is why attempt three was a small change.
+
+### The count line was silently stale for three rounds
+
+`已选 N 条` was written only at the end of `paintPicker`, and ticking a single entry **deliberately skips the full repaint** (it would jump the scroll position back to the top while you are working down the list). So the count froze at whatever the last full repaint left, while the sentence above it updated correctly.
+
+**Nobody saw it because the other number was right** — you have to read the two together to notice. It surfaced only from comparing the *displayed* count against `querySelectorAll('input:checked').length`, i.e. checking the UI against the DOM rather than reading the UI.
+
+`paintCount()` is now its own function precisely so the single-entry path can call it, and `html-smoke.test.js` pins that call (mutation-tested).
+
+**When a value has two renderers and only one repaint path, assume they have drifted and go measure.**
+
+### The dialog's width is pinned, and the body is gone entirely
+
+Two things the owner caught by using it.
+
+**`.modal-box` sizes to its content**, which is right for a two-line confirm and wrong for one containing a live list: ticking an entry changed which row was widest, so the whole dialog twitched under a cursor that was aiming at a checkbox. `.ask-wide` pins it to 520px and is applied whenever the dialog *has* a picker — not whenever the picker is *shown*, or switching 整篇/自选 would jump instead. Measured across nine states (mode switch, quick-pick, untick, collapse, filter, clear): 520px throughout, while the pickerless dialogs keep their natural width (the generate confirm is 297px).
+
+**The dialog ends up with no body at all.** 自选 lost 「只改选中的 27 条」 (a restatement of the 「已选 27 条」 directly below the list) and 「其余 24 个一字不动」 (which restates what 自选 means); 整篇 was cut the same way down to one surviving clause — how many hand-ticked sub-step boxes revert — and on the fourth pass the owner cut that too: **a rewrite already implies replacing what is there, and the backup is taken either way, so the sentence restates its own verb.**
+
+The disclosure did not vanish, it narrowed to one surface: `formatPreflight` still prints every at-risk tick for `--overwrite` and `guideoverwrite.test.js` pins it, because the CLI writes for someone who typed a flag and can afford the detail while a dialog cannot.
+
+With no caller left, `askConfirm`'s **function-valued body** (it recomputed the text from the current selection) went with it, along with its six repaint calls; `html-smoke.test.js` now pins the opposite invariant — the rewrite confirm passes no `body` (mutation-tested), plus the display/hide of `#askBody` itself. Re-verified live afterwards: body `display:none`, 520px across every state, and the displayed count equal to `querySelectorAll('input:checked').length` at each of seven steps.
+
+### `自选…` is one control doing two jobs
+
+**The label went through 「挑几条…」 first, and the reason it changed is a rule:** the other three options (`整篇`, `稀有成就`, `未解锁`) are all *nouns naming a set*, and 「挑几条」 was a verb phrase describing an action — a shape mismatch that reads as casual next to them. `自选…` answers the same question the row asks (which set? *the one I pick*), and the ellipsis keeps the "this opens more UI" signal.
+
+The picker lists the guide's own achievements **grouped by the section heading they sit under**, each row carrying its global unlock rate and unlock state; every heading has a **tri-state checkbox** that takes or drops the whole section.
+
+That box was added after the owner asked whether sections could be selected at once — **the behaviour already existed**, as "click the heading", explained in a body sentence that only rendered while nothing was selected. So it vanished the moment you picked your first entry, and nobody found it. **An affordance you have to read about is not an affordance**; the box is drawn at exactly the size and left edge of the item checkboxes so it reads as the same kind of control without a word of explanation.
+
+So "pick a section" and "pick individual entries" are the same control, and the request that goes out is always a plain `api_name` list — the explicit-list branch `resolveScope` already had, so the Dashboard never needs a `section:` selector at all.
+
+Empty selection **disables the confirm button** (and Enter respects that) rather than being refused server-side.
+
+### There is no `thin` selector, and the reason generalises
+
+It has no honest short Chinese name: 「写得薄」 is a translation of *thin content* and additionally *grades* the entry; 「没写打法」 calls "wrote one sentence" "wrote nothing". **A criterion that needs its threshold explained before it makes sense cannot be a button.**
+
+It stays on the CLI as `--only thin[:字数]`, where the threshold is adjustable and documented. **The two surfaces need not offer the same options.**
+
+### Two labels that read as casual, and the shape rule behind both
+
+「筛成就名…」 → 「搜索成就」 (a verb jammed into a noun slot, on a `type=search` input where 搜索 is simply the word) and 「怎么改」 → 「重写要求」.
+
+The second is the third label in this dialog to hit the same rule: **the labels in a row are noun phrases (范围, 写法), so a question mixed in among them reads as casual** — identical to 「挑几条」 among 整篇/稀有成就/未解锁 two rounds earlier.
+
+「要求」 alone had been rejected as too abstract; 「重写要求」 keeps the concreteness by naming what the requirement is *about*, and ties to the dialog's own title. What the field wants is answered by its placeholder, which leads with the real question: what happens if you leave it blank.
+
+### 写法 lives in the confirmation, not on the row or in settings
+
+The pre-spend confirm already existed and was nearly empty (a title and one button). **「Do you want to spend this」 and 「how deep」 are one decision**, so splitting them means answering before choosing.
+
+A per-row selector would put one control on each of 300 rows; a settings field would make a per-run choice into a stored preference.
+
+It reuses `.view-toggle` — the segmented control the top bar already has — rather than introducing the page's only slider, on the same precedent that removed the hand-drawn wordmark rule: **an element matching nothing next to it gets removed here.**
+
+**`askConfirm` still returns a boolean**; the pick is written back into the caller's own `o.choice.value`, so its six other call sites did not have to change.
+
+Server-side the value rides `startGuideGen` → `enqueue` → `runGuideGen` and becomes a **per-run config copy** — writing `config.ai.effort` would let one 极速 silently retune everything queued behind it.
+
+The rewrite dialog's hardcoded 「约 2–4 分钟」 went at the same time: identical input has measured 76/174/337 s, and the fast mode is 8× faster again, so any quoted range is a promise the system cannot keep.
+
+---
+
+## 11. The floating layers
+
+Two floating layers, two corners. `#gen-bar` (guide progress) is `position: fixed` **bottom-left**; `lib/rpc.js`'s sync status bar hardcodes bottom-right at `z-index: 9999`.
+
+Generation runs for minutes — measured between 35 s and 11 min on real games, and **deliberately not quoted as a range anywhere on screen** — and the user is scrolling the table meanwhile, so an in-flow bar at the top means "scroll back up to see if it's still alive".
+
+Anything floating needs an opaque background or it renders on top of table text. `#gen-bar` sits at 9990 so the sync bar wins any collision, and a `max-width: 720px` media query stacks them instead.
+
+Its close button sets a `genDismissed` flag that `showGen` honours — without it the 3-second poll re-opens the bar seconds after you close it — and starting a new generation/migration clears the flag.
+
+---
+
+## 12. Shared interaction rules
+
+### Hover must not dim, and every control has a press state
+
+Two defects the rebuild left behind.
+
+`.badge-btn` carried a blanket `:hover { opacity: 0.85 }`, so hovering an **enabled** 锁定/家庭 badge did nothing but fade it — **pointing at a control made it harder to see**. Each variant now gets a *deepening* hover instead, and the `transition: all` went with it (it would have swept up the new `:active` transform and made presses lag).
+
+Separately, **the file contained zero `:active` rules** — every button had hover, none had press feedback, in a tool whose rows get clicked dozens of times a day. There is now one global press rule next to the global `:focus-visible`, for the same reason that one exists: **per-component interaction states get forgotten one component at a time.**
+
+It uses `translateY(1px)` (compositor-only — a padding/margin nudge would reflow a 300-row table on every click) and deliberately excludes `.g-card`, whose hover already owns `translateY(-3px)`.
+
+### Every `.armed` rule needs a `:hover` twin
+
+`.armed` is two classes (0,2,0); each button's own `:hover:not(:disabled)` is a class plus two pseudo-classes (0,3,0) — **hover wins**. And the cursor is sitting on the button right after the first click, so the confirm-red is painted over at exactly the moment it has to be visible.
+
+Every armed rule in both pages is therefore written as a pair (`.x.armed, .x.armed:hover:not(:disabled)`).
+
+**Nothing errors when the twin is missing**, the symptom is only a wrong colour, and it appears only while a live cursor rests on the control — so screenshots and reading the CSS both miss it. `html-smoke.test.js` requires the twin for each one.
+
+---
+
+## 13. The setup page (`Setup.html`)
+
+It is the first-run gate **and** the settings page. Served instead of `Dashboard.html` when `config.json` has no Steam credentials; reachable any time from the Dashboard's 设置 button. `getSettings` drives the two modes.
+
+**Secret fields blank = keep current**, never = clear.
+
+### The first screen is a fork, and it is the one thing the program has to ask
+
+No config and no data looks **identical** for "first time ever" and "already a user, new machine" — nothing on disk distinguishes them, so this is the single question that cannot be inferred.
+
+It is asked as 全新设置 / 从备份恢复 rather than 「你是新用户吗」: the second makes the user guess what this program means by "new", the first is answerable from what they have in front of them.
+
+全新设置 is the solid button because first-timers are the majority **and mis-clicking is cheap** — the backup file is still there and restore stays reachable from the settings page.
+
+The gate branch **must hide every `.step` itself**: step 1 carries no `hidden` attribute in the markup (normally `showStep()` does the hiding), so without that line the wizard's first step renders underneath the two choices and the fork is not a fork. Caught in a browser, not by a test.
+
+### The fork has to be reversible
+
+Reported by the user: after a fresh install they clicked 「从备份恢复」 by accident instead of 「全新设置」, and could not get back out — the only way was to close the whole program and reopen it.
+
+`startRestore()` hid the fork and revealed the step-4 restore UI, after which no control on the page could go back. **All three routes were closed**: `#back-btn` (return to Dashboard) is only armed in settings mode, which is correct — first-run is deliberately a gate; `#step-nav` is only shown by `showWizard()`, which the restore branch never calls; and the packaged build has no address bar and no back key, while the tray's 「打开面板」 only shows and focuses.
+
+Someone with no backup file was therefore stuck. The 全新设置 branch is one-way too, but you can still walk out of it by filling the settings in, which is why nobody reported that one.
+
+**What was added is a way back to the fork, not back to the Dashboard.** `#gate-back` (重新选择) and `#back-btn` are two controls and must not be merged — making one control carry two meanings is the mistake the filter chips already paid for. The new control only appears during first-run and returns to the two choices above, so the user is still inside the gate and the "first-run has no exit" rule is intact.
+
+`showGate()` is also first-run's initial state (`initSteps` calls it directly), so **it must restore everything either branch touched**: the three elements `startRestore` hid, the title, the subtitle, the step bar and the button row. Miss any one and the second visit to that section renders half-built, without erroring.
+
+**That change opened a new hole, now plugged.** A way back turns `showWizard()` from "runs once ever" into something that can run repeatedly, and it contains four `addEventListener` calls. Measured with the guard removed: after three round trips between the fork and the wizard, one click on 「跳过」 jumped from step 1 to step 4 as three listeners fired together. **Duplicate binding does not error, it just doubles the behaviour, and you have to walk the way back to see it.** One-time wiring therefore moved into `wireWizard()`, behind a `wizardWired` check.
+
+Verification was done at both ends, because `html-smoke.test.js` has no DOM and cannot see this class of bug (the original fork bug was also found in a browser). The live run used an isolated port 8778 and a separate `TRACKER_DATA_DIR`, touching no real data; it walked fork → restore → back → fresh setup → back, checking nine pieces of state at each step, confirmed 「跳过」 advances exactly one step after three round trips, and that `#back-btn` never appeared. Five source assertions were each broken and restored.
+
+**Set the viewport before measuring geometry in the browser panel.** With none set, `clientWidth` is 0; a first reading of "button is 12x85, so it's squashed" was false — the whole form was 34px wide at the time.
+
+### The settings page needs an exit, and it is not called 「取消」
+
+The packaged app has no address bar, no back key, and the tray's 「打开面板」 only shows and focuses the existing window (`showWindow` never calls `loadURL`), so without `#back-btn` the only way off `/setup` is 「保存并验证」 — changing your mind means quitting the program and relaunching.
+
+The *entry* half of this constraint was already handled (the ⚙ link on the Dashboard exists precisely because the packaged build has no address bar); the exit half is the same constraint from the other side.
+
+**It names where it goes, not what it undoes**, because six controls on this page commit *before* save — `createNotionGuideDb` writes the new id to disk on the spot, and 立即备份 / 恢复 / 全部删除 / per-archive delete all act immediately. A button labelled 「取消」 would promise a page-wide rollback it can only deliver for seven text inputs.
+
+Three details are load-bearing:
+
+- **`type="button"`**: it lives inside the `<form>`, and the default type would *submit* on click.
+- **Edit mode only** (`armBack()` is called from the `isEditMode` branch): during first-run the page is a gate and must have no exit at all.
+- **The dirty check is per field, not one snapshot** — `createNotionGuideDb` re-marks only `notion-db`, because a whole-form reset would silently swallow a genuine unsaved edit made in the same sitting.
+
+A clean form leaves on one click; only a dirty one arms, since a confirmation shown every time trains itself into a reflex. `#back-btn` must also sit in the document-click disarm exception beside `#arc-wipe`.
+
+### Three wizard steps, one mechanism, two behaviours
+
+Step 1 Steam (required) → 2 AI → 3 Notion, one section visible at a time, plus a settings-only 4th (备份与恢复).
+
+**The step bar is clickable in both modes** — stepping one at a time is slow, and the sections are independent, so nothing is gained by forcing an order. The only difference is the button below: first run shows exactly one (`下一步` on step 1, `跳过` on the optional middles, `完成设置` at the end), the settings visit shows only `保存并验证`.
+
+It replaced a flat page of `<details>` where required and optional fields sat together with nothing marking which was which.
+
+**Every input stays in the one `<form>` and is merely hidden**, and submit reads `$(id).value`, which sees hidden nodes — so "skip" just means "left blank" and the whole save path is untouched.
+
+### One button per step
+
+There was briefly a row of 上一步 / 暂时跳过 / 下一步. Two of the three were redundant once the step bar became clickable — **the bar *is* the back button**, and on an optional step "skip" and "next" are the same action wearing two labels.
+
+Keep this shape: **on-screen prose and near-duplicate controls both cost more than they give here.** Explanatory paragraphs were cut from steps 2, 3 and 4 for the same reason; the one that stayed warns about unrecoverable data loss (import before first sync), which is not an explanation of how the feature works. Long-form rationale lives in `docs/`, never on screen.
+
+### No `required` inside the stepped form
+
+A hidden `required` control makes the browser refuse to submit with a console-only "not focusable" error — i.e. pressing save from the Notion tab would do nothing, visibly.
+
+Validation is the manual `stepOneOk()`, and failing it **jumps back to step 1 and says why** rather than the previous silent `return`, which with one section on screen would have looked like a dead button.
+
+### `STEP_COUNT` and `WIZARD_LAST` are different numbers
+
+4 and 3. The first bounds `showStep`'s clamp, the second is where `完成设置` hangs — 备份 is a settings-only section and is not part of first-run.
+
+They were one constant, and reusing it meant `showStep(4)` clamped straight back to 3, so **the new tab simply did not open when clicked**, and nothing errored.
+
+### The AI step shows the selected vendor's state, not the file's
+
+`ai.providers` stores a key and model per vendor, so 「换一家试试」 stopped meaning 「把密钥再粘一遍」 — but only if the form follows the dropdown. `paintAiProvider()` repaints three things on every `change`: the 已配置 badge, the key placeholder, and the model field.
+
+Three details are load-bearing and none of them errors when wrong:
+
+- **The option labels are rebuilt from `opt.dataset.label`, never appended to** — `textContent += ' · 已配置'` is right the first time and produces 「DeepSeek · 已配置 · 已配置」 on the second repaint, which happens on every switch.
+- **Changing vendor clears whatever is typed in the key box**, because that string was meant for the vendor you just left and submitting it would store a guaranteed-wrong key under the new one, surfacing as a validation failure that says nothing about the switch.
+- **The step header's 已配置 asks whether the step is done, not whether the current vendor has a key** (`Object.values(aiProviders).some(...)`): configured Anthropic while parked on Gemini is still a finished step, and `!cur?.hasKey` there reads as "the config was lost".
+
+A native `<option>` cannot hold an SVG and leading-space alignment is renderer-dependent, so the marker is a suffix here rather than the leading mark the filter chips use. Pinned as source assertions in `html-smoke.test.js` (no DOM in the runner), the first two mutation-tested.
+
+### The archive panel here is **not** where you restore from
+
+The question a person actually has is **「这个游戏的上一版哪去了」**, which is per-game. Answering it from a global Settings table means leaving the row you are looking at and then finding it again in a list where adjacent entries differ only by a timestamp.
+
+So restore moved onto the Dashboard row itself, and what stays here is the residue that genuinely has no per-game home: **total size** (every archive rides inside the backup zip, and a Notion page dumps as ~120 KB) and **orphans** — archives whose game has been deleted from the library, which the ⋯ menu cannot reach at all.
+
+Two consequences follow and both are deliberate:
+
+- It is sorted **by size, not by date** — same data, different question, so the other sort belongs to the other surface.
+- It offers 看 / 删 but **not 恢复**, including for orphans — restoring an orphan would `upsertGuide` a row pointing at a game the Dashboard does not render, i.e. a guide you still cannot see, so the honest instruction is 「先把游戏加回来」 and that is what the summary line says.
+
+**The panel is fetched only in edit mode**: during first-run setup those directories are necessarily empty, and the restore-from-zip path owns that screen.
+
+---
+
+## Appendix: two page-wide hard rules
+
+**An author `display:` silently defeats the `hidden` attribute.** `[hidden] { display: none }` comes from the *user-agent* stylesheet, so any author rule outranks it and turns that element's `hidden` into decoration — JS keeps setting `.hidden = true`, the element keeps showing, nothing errors. Both pages carry a global `[hidden] { display: none !important }` and `html-smoke.test.js` pins it. **Patching per element is whack-a-mole**; the next `display:` rule opens a fresh hole just as quietly.
+
+**Native dialogs are unusable in this app — in *either* process.** A native dialog appears and vanishes before it can be clicked in the packaged build, so every action gated behind one is unreachable; `dialog.showMessageBox` from the main process returns instantly with `response: 420`, a value outside the button range. **The boundary is native-vs-page, not renderer-vs-main.** Do not add a native dialog anywhere in this project — it fails silently, and a non-zero response reads as "user declined".
+
+`askConfirm({title, body, okText, danger, notifyOnly})` is the in-page replacement, identical in browser and package. It returns a **Promise**, so every call site must `await` it: a forgotten `await` makes `if (!askConfirm(...)) return` never return, silently green-lighting the dangerous action. Both rules are pinned in `guidegen.test.js`.
