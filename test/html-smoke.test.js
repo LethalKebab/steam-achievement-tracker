@@ -837,11 +837,11 @@ describe('自托管字体', () => {
 
 
 /**
- * 推理强度那一格。**默认必须是高** —— 低档实测把 16 条里的 9 条写成套模板的句子
- * (「第 III 章全体查证正确即解锁」),而那是攻略一半以上的条目。默认漂到低档不会
+ * 写法那一格。**默认必须是「仔细」** —— 快速档实测把 16 条里的 9 条写成套模板的句子
+ * (「第 III 章全体查证正确即解锁」),而那是攻略一半以上的条目。默认漂到快速不会
  * 报任何错,只会让所有新攻略悄悄变薄。
  */
-describe('确认框里的推理强度', () => {
+describe('确认框里的写法', () => {
   const dash = read('Dashboard.html');
   const markup = markupNoComments(dash);
   const js = inlineScripts(dash).join('\n').replace(/\/\/[^\n]*/g, '');
@@ -856,12 +856,28 @@ describe('确认框里的推理强度', () => {
     return new Function(js.slice(at, end) + '; return effortChoice;')();
   })();
 
-  test('默认是高,而且三档齐全', () => {
+  test('默认是仔细,而且只有两档', () => {
     assert.equal(effortChoice().value, 'high',
-      '低档会把一半以上的条目写成模板句 —— 默认漂过去不会报错,只会让攻略悄悄变薄');
-    assert.deepEqual(effortChoice().options.map((o) => o.value), ['low', 'medium', 'high'],
+      '快速档会把一半以上的条目写成模板句 —— 默认漂过去不会报错,只会让攻略悄悄变薄');
+    // **medium 不能回到屏幕上。** 同一次测量里它和 high 分不开(都是 0 条模板句,
+    // 时间差在噪声里),摆出来就是让人在一个量不出区别的选择上停下来权衡,
+    // 而唯一诚实的说明是「这两个一样」。config.json 里照样收,这里只管屏幕
+    assert.deepEqual(effortChoice().options.map((o) => o.value), ['low', 'high'],
       '顺序也是内容:从左到右是从省到深,反过来会让人按位置选错');
-    assert.equal(effortChoice().label, '推理强度');
+    assert.equal(effortChoice().label, '写法');
+  });
+
+  test('每一档都说清楚选它会失去什么', () => {
+    // 「快速/仔细」四个字本身不解释任何东西 —— 没有这一句,想省钱的人不知道
+    // 省掉的是什么,而那正是这一格唯一要回答的问题
+    for (const o of effortChoice().options) {
+      assert.ok(o.hint && o.hint.length > 8, `${o.label} 没有说明`);
+    }
+    // 快速那句必须点到**模板句**。这是整次 A/B 里唯一测出来的代价(16 条里 9 条),
+    // 也是他选之前唯一需要知道的事;换成"内容差一点"之类的软话就等于没说
+    const low = effortChoice().options.find((o) => o.value === 'low');
+    assert.match(low.hint, /模板/,
+      '省下来的代价具体是"变成模板句" —— 说软了就帮不了人做决定');
   });
 
   test('选中态要报出来,而且两处都要写', () => {
@@ -1046,7 +1062,7 @@ describe('确认框里的推理强度', () => {
   });
 
   test('确认框不再写死时长', () => {
-    // 同样输入实测 76/174/337 秒,而且推理强度可调之后低档快八倍 —— 任何写死的
+    // 同样输入实测 76/174/337 秒,而且写法可选之后快速档快八倍 —— 任何写死的
     // 区间都是在承诺一个给不出的东西。时长看进度条
     const noBlockComments = js.replace(/\/\*[\s\S]*?\*\//g, '');
     assert.doesNotMatch(markup + noBlockComments, /约 \d[–-]\d 分钟/, '这句话在低档上会当场变错');
