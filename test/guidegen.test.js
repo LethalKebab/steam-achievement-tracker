@@ -805,14 +805,31 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
   const skillPath = new URL('../.claude/skills/achievement-guide-writing/SKILL.md', import.meta.url);
 
   /** SKILL.md 里的规则标题:`## 规则一:…` 取「规则一」,`### 3.1 …` 取「3.1」 */
+  /**
+   * SKILL.md 里所有需要表态的条目。
+   *
+   * **不带编号的 `###` 子节也要算进来 —— 这一条是补出来的。** 原来只抓 `## 规则N`
+   * 和 `### N.N`,于是往任何一条规则底下加一个不带编号的子节,处置表一个字都不会响。
+   * 实测漏过一次:规则二的处置写着「没进 —— 截图不在 v1 范围」,而后来加进去的
+   * 「贴不了截图的时候:带时间点的视频链接」**是进了提示词的**,处置结论因此变了,
+   * 却没有任何东西提醒去更新 —— SKILL.md 那段还反过来写着「(见「规则二」的处置)」,
+   * 指着一条说它没进的记录。
+   *
+   * 子节按 `规则N/标题` 作 key。改标题会让这条测试红,这是想要的:改一个子节的标题
+   * 正是回头确认「它到底进没进提示词」的时候。
+   */
   function skillRuleKeys() {
     const text = readFileSync(skillPath, 'utf8');
     const keys = new Set();
+    let rule = null;
     for (const line of text.split('\n')) {
       let m = line.match(/^##\s+(规则[一二三四五六七八九十]+)/);
-      if (m) { keys.add(m[1]); continue; }
-      m = line.match(/^###\s+(\d+\.\d+)/);
-      if (m) keys.add(m[1]);
+      if (m) { rule = m[1]; keys.add(rule); continue; }
+      m = line.match(/^###\s+(.+?)\s*$/);
+      if (!m) continue;
+      const title = m[1];
+      const numbered = title.match(/^(\d+\.\d+)/);
+      keys.add(numbered ? numbered[1] : `${rule}/${title}`);
     }
     return keys;
   }
@@ -958,6 +975,22 @@ describe('提示词和 SKILL.md 不能悄悄脱节', () => {
    * `unwrapAchievementToggles` 会把它拆开,但**提示词这一条不能因此省掉** ——
    * 程序兜底是最后一道,不是第一道。
    */
+  /**
+   * **这一条是整轮返工的起点,而它在规范里一度一个字都没有。**《马特的寻猫游戏》四条
+   * 「将吉祥物替换为 X」被拆成「宝石与商店」和「吉祥物替换」两处 —— 两边各自说得通,
+   * 合起来就是 bug。程序那一半(`lib/guidecluster.js`)只在**分了段**时才跑,而库里
+   * 一半以上的游戏成就数不到 `ai.chunkSize`、一段写完 —— 它们没有兜底,只有这条规则。
+   */
+  test('同一类事必须在一个小节,两份手抄必须同口径', () => {
+    const skill = readFileSync(skillPath, 'utf8');
+    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
+    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
+      assert.match(text, /同一类事必须在同一个小节里/, `${name} 少了这一条`);
+      assert.match(text, /不看.{0,4}解锁途径|不看是怎么解锁的/,
+        `${name} 要说清判据是官方描述而不是解锁途径 —— 按途径分正是当初劈开的那个理由`);
+    }
+  });
+
   test('成就本身不进折叠,两份手抄必须同口径', () => {
     const skill = readFileSync(skillPath, 'utf8');
     const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
