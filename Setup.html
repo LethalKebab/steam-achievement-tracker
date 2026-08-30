@@ -881,9 +881,10 @@
       msg.className = 'msg ' + worst;
       msg.textContent = '';
 
-      // **「还有问题」只留给真出错的时候。** 一个灰色的看板不是问题,库照常能用;把它也叫问题,
-      // 会让刚刚成功保存配置的人以为哪里坏了 —— 而在修完之后那一屏,这句话紧跟在两行「已经做好」
-      // 后面,读起来像自我否定
+      // **「还有问题」 is for something that is actually wrong.** A grey board is not a problem —
+      // the database works — and calling it one tells somebody whose config just saved cleanly
+      // that something broke. On the screen *after* a repair it is worse: the sentence lands
+      // directly under two lines of 「已经做好」, so the page reads as contradicting itself.
       const head = document.createElement('div');
       head.textContent =
         (done && done.length ? done.join(';') + '。' : '') +
@@ -892,9 +893,11 @@
 
       const list = document.createElement('ul');
       for (const p of problems) {
-        // **没有 emoji。** 它们自带颜色、按系统渲染、不落基线 —— 这条规则整个界面都守着,
-        // 这里是唯一的漏网处,而这次改动把 warn 那一支从冷门变成了每个老用户都会看到的一行。
-        // 严重程度交给颜色:容器已经按最严重的一条上色,单条只在与之不同时才标出来
+        // **No emoji.** They carry their own colour, render per OS and do not sit on the
+        // baseline. The rule holds across the whole interface and this line was its one
+        // survivor, because the warn branch was almost unreachable — and this change makes it
+        // the row every existing user sees. Severity is a colour instead: the container is
+        // already painted for the worst item, so a single line marks itself only when it differs.
         const li = document.createElement('li');
         li.textContent = p.message;
         if (p.severity !== 'error') li.className = 'warn';
@@ -922,10 +925,11 @@
 
       const bar = document.createElement('div');
       if (fixable) {
-        // **标签跟着它这次要做的事走。** 「帮我补上」是从「补缺失的选项」来的;老库一个选项都不缺,
-        // 要做的是排分组和加看板,那句话就没在说实话了
+        // **The label follows what this press will actually do.** 「帮我补上」 came from "add the
+        // missing options"; an older database is missing none, and what happens is regrouping,
+        // recolouring and a board view — so that label would not be telling the truth.
         const reformat = problems.some((p) => p.code === 'outdated-format');
-        // 问句在上面,按钮只放动词
+        // The question is in the text above; the button carries only the verb
         const label = reformat ? '套用' : '帮我补上';
         const fix = document.createElement('button');
         fix.type = 'button';
@@ -948,8 +952,9 @@
           if ((again.problems || []).length) {
             showNotionProblems(again.problems, again.fixable, []);
           } else {
-            // **一句话说完。** 三件事逐条报出来是把日志搬到了界面上;这一屏之后就跳走了,读的人
-            // 要的是「成了」。要看做了哪几件事的是命令行,那边照旧逐条打印
+            // **One sentence.** Itemising what was done is a log entry moved onto a screen that
+            // redirects a second and a half later, where the reader wants "it worked". The
+            // surface that lists them is the CLI, and it still does.
             msg.className = 'msg ok';
             msg.textContent = (r.added || []).length
               ? '补上 ' + r.added.join(' / ') + '。'
@@ -961,7 +966,8 @@
       }
       const skip = document.createElement('button');
       skip.type = 'button';
-      // 页面自己已经定义了「整宽的次要按钮」这个变体,用它 —— 两个实心主按钮并排,等于没有主次
+      // This page already defines the full-width secondary variant, so use that — two solid
+      // primary buttons side by side is the same as having no hierarchy at all
       skip.className = 'btn-sub btn-wide';
       skip.textContent = '先这样,进入面板';
       skip.onclick = () => { window.location.href = '/'; };
