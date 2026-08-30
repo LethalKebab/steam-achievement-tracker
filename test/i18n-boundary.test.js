@@ -280,8 +280,17 @@ describe('the messages in ' + TABLE_NAME, () => {
     // English and every message from lib/ keeps answering in Chinese
     assert.match(stripComments(read(join('lib', 'server.js'))), /setMessageLanguage\(config\.uiLanguage\)/,
       'serve has to set it before anything can fail');
-    assert.match(stripComments(read('tracker.js')), /setMessageLanguage\(config\.uiLanguage\)/,
+    // **The CLI sets it once, at dispatch, rather than inside each command.** It was inside
+    // `withSteam`, which most commands go through and five do not — `drafts`, `ai-check`,
+    // `guide-gen`, `guide-gen --only` and `init` load the config themselves — and every one of them
+    // printed Chinese under an English interface, silently, because the tables default to Chinese
+    const tracker = stripComments(read('tracker.js'));
+    assert.match(tracker, /setMessageLanguage\(loadConfig\(\{ required: \[\] \}\)\.uiLanguage\)/,
       'the CLI shares these messages with the Dashboard and has to agree with it');
+    assert.ok(tracker.indexOf('setMessageLanguage(') < tracker.indexOf('const fn = COMMANDS[command]'),
+      'it has to be set before the command runs, or the first thing a command prints is in the wrong language');
+    assert.equal((tracker.match(/setMessageLanguage\(/g) ?? []).length, 1,
+      'one call, at the one point every command passes through — a second is a place that can disagree');
     assert.match(stripComments(read(join('lib', 'api.js'))), /setMessageLanguage\(lang\)/,
       'saveUiLanguage has to move the messages too, or the toggle changes the page and not the errors');
   });

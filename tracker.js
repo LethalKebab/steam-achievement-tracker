@@ -36,7 +36,7 @@ import {
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
-import { setMessageLanguage, achName } from './lib/messages.js';
+import { setMessageLanguage, messageLanguage, achName } from './lib/messages.js';
 import { serve } from './lib/server.js';
 import { clog } from './lib/cli-messages.js';
 import {
@@ -169,21 +169,23 @@ function applyAiFlags(config) {
  */
 function warnEnvOverrides() {
   const notes = [];
-  for (const [name, label] of [['AI_PROVIDER', '供应商'], ['AI_MODEL', '模型']]) {
-    if (process.env[name]) notes.push(`${label}来自环境变量 ${name}=${process.env[name]}(盖掉了 config.json)`);
+  for (const [name, label] of [['AI_PROVIDER', 'env.provider'], ['AI_MODEL', 'env.model']]) {
+    if (process.env[name]) {
+      notes.push(clog('env.fromEnv', { label: clog(label), name, value: process.env[name] }));
+    }
   }
   for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'DEEPSEEK_API_KEY']) {
-    if (process.env[name]) notes.push(`API key 可能来自环境变量 ${name}(盖掉了 config.json)`);
+    if (process.env[name]) notes.push(clog('env.keyFromEnv', { name }));
   }
   for (const n of notes) console.log(`  ⚠️  ${n}`);
   if (notes.length) {
-    console.log('      清掉:Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue');
+    console.log(clog('env.clear'));
   }
 }
 
 /** A provider instance. `--dry` / `--dry-run` sends nothing, so it has to be constructible without a key */
 async function providerFor(config, { needKey = true } = {}) {
-  const ai = !needKey && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
+  const ai = !needKey && !config.ai.apiKey ? { ...config.ai, apiKey: clog('env.dryRunKey') } : config.ai;
   return createProvider({ ai });
 }
 
@@ -220,11 +222,6 @@ function makeProgressHandler(p) {
 
 function withSteam({ requireSteam = true } = {}) {
   const config = loadConfig({ required: requireSteam ? ['steam'] : [] });
-  // The CLI's own output is not switchable (see #86 — its audience and the Dashboard's need not be
-  // one decision), but the messages **lib/ throws** are shared with the Dashboard and come from a
-  // table now. Setting it here keeps one error from reading in two languages depending on which
-  // entry point hit it
-  setMessageLanguage(config.uiLanguage);
   const db = openDb(config.dbPath);
   const steam = new SteamClient(config, { log: () => {} });
   return { config, db, steam };
@@ -424,27 +421,27 @@ async function cmdInitNotion() {
  * somebody looking at a grey board wondering what the command did.
  */
 function reportReformat(r) {
-  if (r.regrouped?.length) console.log(`   🔧 排进看板分组:${r.regrouped.join(' / ')}`);
-  if (r.stillWrongGroup?.length) console.log(`   ❌ 分组没落地:${r.stillWrongGroup.join(' / ')}`);
-  if (r.boardView?.created) console.log('   🔧 加了看板视图,放在第一个标签页');
+  if (r.regrouped?.length) console.log(clog('fix.regrouped', { names: r.regrouped.join(' / ') }));
+  if (r.stillWrongGroup?.length) console.log(clog('fix.stillWrongGroup', { names: r.stillWrongGroup.join(' / ') }));
+  if (r.boardView?.created) console.log(clog('fix.boardCreated'));
   else if (r.boardView && !r.boardView.ok) {
-    console.log(`   ⚠️  看板视图没建成:${r.boardView.error}`);
-    console.log('      库照常能用,攻略照样生成,复选框照样勾');
+    console.log(clog('fix.boardFailed', { reason: r.boardView.error }));
+    console.log(clog('fix.boardHarmless'));
   }
   if (r.colour?.recoloured?.length) {
-    const done = r.colour.recoloured.map((n) => `${n} ${COLOUR_ZH[GUIDE_STATUS_STYLE[n].color]}`).join(',');
-    console.log(`   🔧 换好颜色:${done}`);
+    const done = r.colour.recoloured.map((n) => `${n} ${clog(COLOUR_ZH[GUIDE_STATUS_STYLE[n].color])}`).join(',');
+    console.log(clog('fix.recoloured', { names: done }));
     // Say it out loud. Pages that had to be written back are pages Notion did not bring back on its
     // own, and that is the one number telling you the snapshot earned its keep
     if (r.colour.restored?.length) {
-      console.log(`      有 ${r.colour.restored.length} 页的状态是照快照写回去的:${r.colour.restored.slice(0, 5).join('、')}`);
+      console.log(clog('fix.restored', { n: r.colour.restored.length, names: r.colour.restored.slice(0, 5).join('、') }));
     }
   }
   if (r.colour?.stillWrong?.length) {
-    const want = r.colour.stillWrong.map((n) => `${n} ${COLOUR_ZH[GUIDE_STATUS_STYLE[n].color]}`).join(',');
-    console.log(`   ⚠️  这几个状态的颜色没换成:${want}`);
+    const want = r.colour.stillWrong.map((n) => `${n} ${clog(COLOUR_ZH[GUIDE_STATUS_STYLE[n].color])}`).join(',');
+    console.log(clog('fix.colourFailed', { names: want }));
     if (r.colour.error) console.log(`      ${r.colour.error}`);
-    console.log('      也可以自己来:打开那个库 → 点状态属性 → 逐个挑一次');
+    console.log(clog('fix.colourByHand'));
   }
 }
 
@@ -701,9 +698,7 @@ async function cmdSync() {
     : null;
 
   console.log(
-    selection
-      ? '开始同步(--fast:只查玩过的 + 轮换复查一批)\n'
-      : '开始同步(Ctrl+C 可以随时停,已经写进库的数据不会丢)\n'
+    clog(selection ? 'sync.startFast' : 'sync.start')
   );
   const t0 = Date.now();
 
@@ -711,39 +706,48 @@ async function cmdSync() {
     const r = await fullSync(db, steam, { onProgress, selection });
     p.done();
     console.log(
-      `  库:owned ${r.library.ownedCount} 款(Unvetted ${r.library.unvettedCount} 款),新增 ${r.library.added.length} 款,Unvetted 标记更新 ${r.library.restamped} 处` +
+      clog('sync.library', {
+        owned: r.library.ownedCount, unvetted: r.library.unvettedCount,
+        added: r.library.added.length, restamped: r.library.restamped,
+      }) +
         // Only when something moved: after the first run this is 0 on every sync, and a permanent
         // 「补英文名 0 款」 is noise on the one line that has to stay readable
-        (r.library.namedEn ? `,补英文名 ${r.library.namedEn} 款` : '')
+        (r.library.namedEn ? clog('sync.namedEn', { n: r.library.namedEn }) : '')
     );
-    if (r.library.added.length) console.log(`     新增:${r.library.added.map((a) => a.name).join('、')}`);
-    console.log(`  成就完成数:更新 ${r.stats.updated} 款,无成就系统 ${r.stats.noSystem} 款,留待重试 ${r.stats.retried} 款`);
+    if (r.library.added.length) console.log(clog('sync.added', { names: r.library.added.map((a) => a.name).join('、') }));
+    console.log(clog('sync.stats', { updated: r.stats.updated, noSystem: r.stats.noSystem, retried: r.stats.retried }));
     const s = r.stats.selection;
     if (s.gated) {
-      console.log(`     取样:查了 ${s.total} 款(玩过 ${s.played} / 不在 owned ${s.unowned} / 轮换复查 ${s.swept})` + (s.sweepPending ? `,${s.sweepPending} 款排队等下次` : ''));
+      console.log(
+        clog('sync.sample', { total: s.total, played: s.played, unowned: s.unowned, swept: s.swept })
+        + (s.sweepPending ? clog('sync.samplePending', { n: s.sweepPending }) : '')
+      );
     }
-    if (r.stats.bumped.length) console.log(`     🆕 成就总数变多了(游戏更新):${r.stats.bumped.join('、')}`);
-    console.log(`  成就详情:处理 ${r.schema.processed}/${r.schema.candidates} 款,查不到定义 ${r.schema.skippedNoSchema} 款`);
+    if (r.stats.bumped.length) console.log(clog('sync.bumped', { names: r.stats.bumped.join('、') }));
+    console.log(clog('sync.schema', { processed: r.schema.processed, candidates: r.schema.candidates, skipped: r.schema.skippedNoSchema }));
   } else {
     if (only.includes('library')) {
       const r = await syncLibrary(db, steam, { onProgress });
       p.done(
-        `  库:新增 ${r.added.length} 款,Unvetted 标记更新 ${r.restamped} 处` +
-          (r.namedEn ? `,补英文名 ${r.namedEn} 款` : '')
+        clog('sync.libraryShort', { added: r.added.length, restamped: r.restamped })
+          + (r.namedEn ? clog('sync.namedEn', { n: r.namedEn }) : '')
       );
     }
     if (only.includes('achievements')) {
       const r = await syncAchievementStats(db, steam, { onProgress });
-      p.done(`  成就完成数:更新 ${r.updated} 款,无成就系统 ${r.noSystem} 款,留待重试 ${r.retried} 款`);
+      p.done(clog('sync.stats', { updated: r.updated, noSystem: r.noSystem, retried: r.retried }));
     }
     if (only.includes('schema')) {
       const r = await syncAchievementSchema(db, steam, { onProgress });
-      p.done(`  成就详情:处理 ${r.processed}/${r.candidates} 款`);
+      p.done(clog('sync.schemaShort', { processed: r.processed, candidates: r.candidates }));
     }
   }
 
   const agcr = computeAgcrStats(db);
-  console.log(`\n✅ 用时 ${((Date.now() - t0) / 1000).toFixed(0)} 秒 — AGCR ${Math.floor(agcr.avg * 100)}%(精确 ${(agcr.avg * 100).toFixed(3)}%),完美游戏 ${agcr.perfectCount} 款`);
+  console.log(clog('sync.done', {
+    seconds: ((Date.now() - t0) / 1000).toFixed(0),
+    pct: Math.floor(agcr.avg * 100), exact: (agcr.avg * 100).toFixed(3), perfect: agcr.perfectCount,
+  }));
 }
 
 async function cmdServe() {
@@ -759,14 +763,30 @@ function cmdStatus() {
   const last = getMeta(db, 'last_sync');
   const count = (fn) => games.filter(fn).length;
 
-  console.log(`\n数据库:${countGames(db)} 款游戏`);
-  console.log(`  上次同步:${last ? new Date(last).toLocaleString('zh-CN') : '还没同步过'}`);
-  console.log(`  AGCR:${Math.floor(agcr.avg * 100)}%(精确 ${(agcr.avg * 100).toFixed(3)}%),计入 ${agcr.eligibleCount} 款`);
-  console.log(`  完美(100%):${agcr.perfectCount} 款`);
-  console.log(`  Unvetted:${count((g) => g.status === 'Unvetted')} 款 / Manual:${count((g) => g.status === 'Manual')} 款 / 家庭共享标记:${count((g) => g.family)} 款`);
-  console.log(`  ♥ 喜爱:${count((g) => g.favorite)} 款 / ★ 重点关注:${count((g) => g.priority)} 款`);
-  console.log(`  没有成就系统:${count((g) => g.has_achievements === 0)} 款 / 还没同步到数据:${count((g) => g.total === null && g.has_achievements !== 0)} 款`);
-  console.log(`  攻略:${allGuides(db).length} 条(Notion ${allGuides(db).filter((g) => g.kind === 'notion').length} / 本地 ${allGuides(db).filter((g) => g.kind === 'local').length})\n`);
+  // **The locale follows the interface language, not the machine.** `toLocaleString` with a
+  // hardcoded 'zh-CN' prints a Chinese-formatted timestamp under an English interface — the one
+  // thing in this block that no string table would have caught
+  const locale = messageLanguage() === 'en' ? 'en-GB' : 'zh-CN';
+  const guides = allGuides(db);
+  console.log(clog('status.db', { n: countGames(db) }));
+  console.log(clog('status.lastSync', { when: last ? new Date(last).toLocaleString(locale) : clog('status.never') }));
+  console.log(clog('status.agcr', { pct: Math.floor(agcr.avg * 100), exact: (agcr.avg * 100).toFixed(3), n: agcr.eligibleCount }));
+  console.log(clog('status.perfect', { n: agcr.perfectCount }));
+  console.log(clog('status.flags', {
+    unvetted: count((g) => g.status === 'Unvetted'),
+    manual: count((g) => g.status === 'Manual'),
+    family: count((g) => g.family),
+  }));
+  console.log(clog('status.marks', { fav: count((g) => g.favorite), pri: count((g) => g.priority) }));
+  console.log(clog('status.noAch', {
+    none: count((g) => g.has_achievements === 0),
+    unsynced: count((g) => g.total === null && g.has_achievements !== 0),
+  }));
+  console.log(clog('status.guides', {
+    n: guides.length,
+    notion: guides.filter((g) => g.kind === 'notion').length,
+    local: guides.filter((g) => g.kind === 'local').length,
+  }));
 }
 
 async function cmdGuides() {
@@ -776,27 +796,27 @@ async function cmdGuides() {
 
   if (wantLocal) {
     const r = syncGuidesFromMarkdown(db, config, { force: flags.has('--force') });
-    console.log(`本地 guides/:扫了 ${r.files} 个 .md,登记 ${r.added.length} 条`);
+    console.log(clog('guides.local', { files: r.files, added: r.added.length }));
     for (const a of r.added) console.log(`  ${a.action === 'appended' ? '+' : '~'} ${a.appid}  ${a.name}  (${a.file})`);
-    if (r.skipped.length) console.log(`  跳过(没有 "appid: NNNNNN" 行):${r.skipped.join('、')}`);
+    if (r.skipped.length) console.log(clog('guides.skipped', { names: r.skipped.join('、') }));
     for (const c of r.conflicts) {
-      console.log(`  ⚠️  ${c.appid} 已经登记了 Notion 攻略,没动 ${c.file}(想改成用本地 md 加 --force)`);
+      console.log(clog('guides.conflict', { appid: c.appid, file: c.file }));
     }
   }
 
   if (wantNotion) {
     const notion = new NotionClient(config);
     if (!notion.configured) {
-      console.log('Notion:没配 token,跳过(要用的话在 config.json 填 notion.token 和 notion.overviewDbId)');
+      console.log(clog('guides.noToken'));
     } else {
       const r = await syncGuidesFromNotion(db, notion);
-      console.log(`Notion:数据库里 ${r.dbPages} 个页面,新页面 ${r.newPagesChecked} 个,登记 ${r.added.length} 条`);
+      console.log(clog('guides.notion', { pages: r.dbPages, fresh: r.newPagesChecked, added: r.added.length }));
       for (const a of r.added) console.log(`  + ${a.appid}  ${a.name}`);
       for (const f of r.failed) console.log(`  ⚠️  ${f.title}:${f.error}`);
     }
   }
 
-  console.log(`\n当前 guides 表(${allGuides(db).length} 条):`);
+  console.log(clog('guides.table', { n: allGuides(db).length }));
   for (const g of allGuides(db)) console.log(`  ${g.appid.padEnd(8)} ${g.kind.padEnd(6)} ${g.name}`);
 }
 
@@ -809,18 +829,18 @@ async function cmdGuideStatus() {
   const { config, db } = withSteam({ requireSteam: false });
   const notion = new NotionClient(config);
   if (!notion.configured) {
-    return console.log('Notion:没配 token(config.json 的 notion.token / notion.overviewDbId)');
+    return console.log(clog('gs.noToken'));
   }
   const dryRun = flags.has('--dry-run');
-  if (dryRun) console.log('预演模式:只算不写\n');
+  if (dryRun) console.log(clog('gs.dryRun'));
 
   const r = await syncGuideStatuses(db, { notion, dryRun });
   const up = r.updates.filter((u) => u.reason === 'complete').length;
   const down = r.updates.filter((u) => u.reason === 'incomplete').length;
-  console.log(`攻略数据库 ${r.pages} 个页面:${up} 个该标 Done,${down} 个该退回 Staged`);
+  console.log(clog('gs.summary', { pages: r.pages, up, down }));
   for (const l of r.logs) console.log(`  ${l.gameName} — ${l.result}`);
-  if (!r.updates.length) console.log('  (没有要改的,状态和完成度已经一致)');
-  else if (dryRun) console.log('\n确认没问题就去掉 --dry-run 再跑一次。');
+  if (!r.updates.length) console.log(clog('gs.nothing'));
+  else if (dryRun) console.log(clog('gs.rerun'));
 }
 
 async function cmdCheckboxSync() {
@@ -831,8 +851,8 @@ async function cmdCheckboxSync() {
   const cascade = !flags.has('--no-cascade');
   const p = progressPrinter();
 
-  if (dryRun) console.log('预演模式:只读攻略页面算出会勾哪些,不写任何东西\n');
-  if (!cascade) console.log('已关闭子步骤联动:只按成就名/描述匹配勾选\n');
+  if (dryRun) console.log(clog('cbs.dryRun'));
+  if (!cascade) console.log(clog('cbs.noCascade'));
 
   const r = await checkboxSync(db, steam, {
     notion,
@@ -842,7 +862,7 @@ async function cmdCheckboxSync() {
     cascade,
     onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
   });
-  p.done(`检查了 ${r.checked} 款游戏,产生 ${r.logs.length} 条日志`);
+  p.done(clog('cbs.checked', { games: r.checked, logs: r.logs.length }));
 
   // Printed grouped by game; a flat list of a few hundred entries is unreadable
   const byGame = new Map();
@@ -851,17 +871,16 @@ async function cmdCheckboxSync() {
     byGame.get(l.gameName).push(l);
   }
   for (const [game, logs] of byGame) {
-    console.log(`\n  ${game}(${logs.length} 条)`);
+    console.log(clog('cbs.game', { game, n: logs.length }));
     for (const l of logs) console.log(`    ${l.achievement || '—'} → ${l.result}`);
   }
 
   if (r.checked === 0) {
-    console.log('  (没有符合条件的游戏:需要有攻略登记、有成就系统、且还没 100% 完成)');
+    console.log(clog('cbs.noCandidates'));
   } else if (dryRun) {
     const willCheck = r.logs.filter((l) => l.code === 'would-tick').length;
     console.log(
-      `\n预演结束:会勾选 ${willCheck} 个 checkbox。确认没问题就去掉 --dry-run 再跑一次。` +
-        '\n(Notion 的勾选没法自动撤销,建议先只跑一款游戏:checkbox-sync <appid>)'
+      clog('cbs.dryRunEnd', { n: willCheck })
     );
   }
 }
@@ -876,7 +895,7 @@ async function cmdAudit() {
   const notion = new NotionClient(config);
   const p = progressPrinter();
 
-  console.log('审计已勾选的 checkbox:找"勾上了但成就其实没解锁"的(只读,不会改任何东西)\n');
+  console.log(clog('audit.intro'));
   const { results, totals, candidates } = await auditGuideTicks(db, steam, {
     notion,
     config,
@@ -887,28 +906,28 @@ async function cmdAudit() {
 
   for (const r of results) {
     if (r.skipped) {
-      console.log(`  ⏭  ${r.name} —— 跳过:${r.skipped}`);
+      console.log(clog('audit.skipped', { name: r.name, reason: r.skipped }));
       continue;
     }
     if (r.wrong.length === 0) continue;
-    console.log(`\n  ❌ ${r.name}(已勾 ${r.ticked} 个,其中 ${r.wrong.length} 个对应的成就没解锁)`);
+    console.log(clog('audit.wrongGame', { name: r.name, ticked: r.ticked, wrong: r.wrong.length }));
     for (const w of r.wrong) {
-      console.log(`     ${w.name}(${w.apiName},按${w.via === 'description' ? '描述' : '名字'}对上的)`);
+      console.log(clog('audit.wrongEntry', { name: w.name, apiName: w.apiName, via: clog(w.via === 'description' ? 'audit.viaDesc' : 'audit.viaName') }));
       console.log(`       ${w.text.replace(/\s+/g, ' ').slice(0, 70)}`);
     }
   }
 
   console.log(
-    `\n审计完 ${totals.games}/${candidates} 款游戏,检查了 ${totals.ticked} 个已勾选的 checkbox`
+    clog('audit.total', { games: totals.games, candidates, ticked: totals.ticked })
   );
-  console.log(`  确认勾错:${totals.wrong} 个`);
+  console.log(clog('audit.wrongTotal', { n: totals.wrong }));
   // The coverage has to be stated honestly: the ones that could not be resolved carry no verdict, and
   // "0 wrong" must not look stronger than the audit's actual coverage
-  console.log(`  对不上具体成就、没下结论:${totals.unresolved} 个(攻略文字既没抄描述原文、名字也不唯一)`);
-  if (totals.skipped) console.log(`  跳过的游戏:${totals.skipped} 款(见上面)`);
+  console.log(clog('audit.unresolved', { n: totals.unresolved }));
+  if (totals.skipped) console.log(clog('audit.skippedTotal', { n: totals.skipped }));
   if (totals.wrong > 0) {
-    console.log('\n勾错的框需要手动取消勾选——checkbox-sync 只会勾上、从不取消,修不了自己的错。');
-    console.log('取消之前先自己确认一遍:也可能是你自己有意勾的(比如标记"计划要做")。');
+    console.log(clog('audit.fixByHand'));
+    console.log(clog('audit.checkFirst'));
   }
 }
 
@@ -941,9 +960,9 @@ async function cmdGuideLint() {
   const appid = positional[0] ?? null;
   const p = progressPrinter();
 
-  console.log('校验攻略写法(只读,不会改任何东西)');
-  if (checkTicks) console.log('已开启勾选状态校验:每款游戏都要单独问一次 Steam,会慢不少\n');
-  else console.log('(勾选状态默认不校验,要的话加 --checked)\n');
+  console.log(clog('lint.intro'));
+  if (checkTicks) console.log(clog('lint.withTicks'));
+  else console.log(clog('lint.withoutTicks'));
 
   const { results, totals } = await lintAllGuides(db, {
     notion,
@@ -960,7 +979,7 @@ async function cmdGuideLint() {
   const detail = Boolean(appid);
   for (const r of results) {
     if (r.skipped) {
-      if (detail) console.log(`  ⏭  ${r.name} —— 跳过:${r.skipped}`);
+      if (detail) console.log(clog('lint.skipped', { name: r.name, reason: r.skipped }));
       continue;
     }
     const { findings, stats } = r.lint;
@@ -968,7 +987,7 @@ async function cmdGuideLint() {
 
     const mark = stats.errors ? '❌' : findings.length ? '⚠️ ' : '✅';
     console.log(
-      `\n  ${mark} ${r.name}(${r.appid})  ${stats.covered}/${stats.achievements} 覆盖,${stats.todos} 个框`
+      clog('lint.guide', { mark, name: r.name, appid: r.appid, covered: stats.covered, achievements: stats.achievements, todos: stats.todos })
     );
     if (detail) {
       for (const f of findings) console.log(`     ${f.level === 'error' ? '✖' : '·'} ${f.message}`);
@@ -981,29 +1000,28 @@ async function cmdGuideLint() {
     }
   }
   if (!detail && results.some((r) => !r.skipped && r.lint.findings.length)) {
-    console.log('\n  (逐条看某一份:guide-lint <appid>)');
+    console.log(clog('lint.perGuide'));
   }
 
   console.log(
-    `\n校验了 ${totals.guides} 份攻略:${totals.noErrors} 份没有 error` +
-      `(其中 ${totals.clean} 份连 warn 都没有)`
+    clog('lint.total', { guides: totals.guides, noErrors: totals.noErrors, clean: totals.clean })
   );
   if (totals.skipped) {
-    console.log(`  跳过 ${totals.skipped} 份(多半是 100% 通关的游戏,成就详情没同步,没有可比对的基准)`);
+    console.log(clog('lint.skippedTotal', { n: totals.skipped }));
   }
   if (totals.achievements) {
     const pct = ((totals.covered / totals.achievements) * 100).toFixed(1);
-    console.log(`  成就覆盖:${totals.covered}/${totals.achievements}(${pct}%)`);
+    console.log(clog('lint.coverage', { covered: totals.covered, achievements: totals.achievements, pct }));
   }
   const entries = Object.entries(totals.byCode).sort((a, b) => b[1] - a[1]);
   if (entries.length) {
-    console.log(`\n  按问题类型:`);
+    console.log(clog('lint.byKind'));
     for (const [code, n] of entries) {
       console.log(`    ${String(n).padStart(4)}  ${codeLabel(code)}`);
     }
   }
-  if (totals.errors === 0) console.log('\n没有 error。');
-  else console.log(`\n合计 ${totals.errors} 个 error、${totals.warnings} 个 warn。改的是攻略内容,不是代码。`);
+  if (totals.errors === 0) console.log(clog('lint.noErrors'));
+  else console.log(clog('lint.errorTotal', { errors: totals.errors, warnings: totals.warnings }));
 }
 
 /** Picks a game that has achievement detail for the smoke test. With no appid given, takes the first usable one in the library */
@@ -1011,7 +1029,7 @@ function pickSmokeTarget(db, appid) {
   if (appid) {
     const defs = achievementsFor(db, appid);
     if (!defs.length) {
-      throw new Error(`appid ${appid} 还没有成就详情。先跑 \`node tracker.js sync --schema\``);
+      throw new Error(clog('smoke.noDetail', { appid }));
     }
     return { appid: String(appid), name: getGame(db, appid)?.name || defs[0].game_name || String(appid), defs };
   }
@@ -1021,7 +1039,7 @@ function pickSmokeTarget(db, appid) {
     const defs = achievementsFor(db, g.appid);
     if (defs.length) return { appid: String(g.appid), name: g.name || String(g.appid), defs };
   }
-  throw new Error('数据库里一条成就详情都没有。先跑 `node tracker.js sync --schema`');
+  throw new Error(clog('smoke.noneAtAll'));
 }
 
 /**
@@ -1640,7 +1658,7 @@ async function cmdGuideToNotion() {
 function cmdDrafts() {
   const config = loadConfig({ required: [] });
   const dir = join(config.guidesDir, DRAFTS_DIR);
-  if (!existsSync(dir)) return console.log('草稿目录还不存在,没什么可清的。');
+  if (!existsSync(dir)) return console.log(clog('drafts.noDir'));
 
   const days = Number(flagValue('older-than') ?? 0);
   const cutoff = Date.now() - days * 86400_000;
@@ -1653,32 +1671,32 @@ function cmdDrafts() {
     })
     .sort((a, b) => a.mtime - b.mtime);
 
-  if (!files.length) return console.log('草稿目录是空的。');
+  if (!files.length) return console.log(clog('drafts.empty'));
 
   const doomed = files.filter((x) => x.mtime.getTime() < cutoff);
-  console.log(`\n${join(config.guidesDir, DRAFTS_DIR)}:${files.length} 份草稿\n`);
+  console.log(clog('drafts.header', { dir: join(config.guidesDir, DRAFTS_DIR), n: files.length }));
   for (const x of files) {
-    const mark = flags.has('--clean') && doomed.includes(x) ? '删' : '  ';
-    console.log(`  ${mark} ${String(x.ageDays).padStart(4)} 天前  ${String(x.size).padStart(7)} B  ${x.f}`);
+    const mark = flags.has('--clean') && doomed.includes(x) ? clog('drafts.markDelete') : '  ';
+    console.log(clog('drafts.row', { mark, age: String(x.ageDays).padStart(4), size: String(x.size).padStart(7), file: x.f }));
   }
 
   if (!flags.has('--clean')) {
-    console.log('\n草稿不会被攻略发现逻辑扫到,留着不影响任何东西 —— 只是会一直堆着。');
-    console.log('要清:node tracker.js drafts --clean [--older-than N]');
+    console.log(clog('drafts.harmless'));
+    console.log(clog('drafts.howToClean'));
     return;
   }
-  if (!doomed.length) return console.log(`\n没有超过 ${days} 天的草稿,什么都没删。`);
+  if (!doomed.length) return console.log(clog('drafts.nothingOld', { days }));
 
   for (const x of doomed) rmSync(x.path, { force: true });
-  console.log(`\n✅ 删了 ${doomed.length} 份,还剩 ${files.length - doomed.length} 份。`);
+  console.log(clog('drafts.deleted', { n: doomed.length, left: files.length - doomed.length }));
 }
 
 function cmdExport() {
   const dir = positional[0] ?? join(ROOT, 'exports');
   mkdirSync(dir, { recursive: true });
   const { db } = withSteam({ requireSteam: false });
-  console.log('\n导出到 ' + dir + ':');
-  for (const f of exportAll(db, dir)) console.log(`  ${f.file}(${f.rows} 行)`);
+  console.log(clog('export.to', { dir }));
+  for (const f of exportAll(db, dir)) console.log(clog('export.file', { file: f.file, rows: f.rows }));
 }
 
 /** Records which version wrote this data in the backup manifest — used at restore time to judge whether the format is readable */
@@ -1716,14 +1734,14 @@ function cmdBackup() {
   const out = join(dir, backupName());
   writeFileSync(out, zip);
 
-  console.log('\n✅ 备份好了:' + out);
-  console.log(`   ${manifest.counts.games} 款游戏、${manifest.counts.achievements} 条成就、${manifest.counts.guides} 条攻略登记、${manifest.guideFiles} 个攻略文件`);
+  console.log(clog('backup.done', { path: out }));
+  console.log(clog('backup.counts', { games: manifest.counts.games, achievements: manifest.counts.achievements, guides: manifest.counts.guides, files: manifest.guideFiles }));
   console.log(`   ${(zip.length / 1048576).toFixed(1)} MB`);
   if (manifest.hasConfig) {
-    console.log('\n⚠️  里面有 config.json,也就是**明文的** Steam / Notion / AI 密钥。');
-    console.log('   拿到这个文件的人能花你的 AI 额度。不想带就加 --no-config。');
+    console.log(clog('backup.hasSecrets'));
+    console.log(clog('backup.secretsCost'));
   }
-  console.log('\n换到新机器:把这个 zip 拷过去,`node tracker.js restore <文件>`。');
+  console.log(clog('backup.moveMachine'));
 }
 
 /**
@@ -1785,7 +1803,7 @@ async function cmdRestore() {
 function cmdLog() {
   const { db } = withSteam({ requireSteam: false });
   const rows = recentSyncLog(db, Number(positional[0] ?? 30));
-  if (!rows.length) return console.log('还没有同步日志');
+  if (!rows.length) return console.log(clog('log.empty'));
   for (const r of rows.reverse()) {
     const ts = new Date(r.ts).toLocaleString('zh-CN');
     console.log(`${ts}  ${r.game_name || '—'}  ${r.achievement || ''}  ${r.result}`);
@@ -1876,6 +1894,25 @@ const COMMANDS = {
   '--help': cmdHelp,
   '-h': cmdHelp,
 };
+
+/**
+ * **The interface language is set once, here, before any command runs.**
+ *
+ * It used to be set inside `withSteam`, which most commands go through — but not all: `drafts`,
+ * `ai-check`, `guide-gen`, `guide-gen --only` and `init` call `loadConfig` directly, and every one
+ * of them printed Chinese under an English interface. Nothing errored, because the tables default to
+ * Chinese and a missing `setMessageLanguage` simply leaves them there. One call at the single point
+ * every command passes through cannot be forgotten by the next command added.
+ *
+ * `required: []` so this cannot throw: a missing credential is the command's own error to raise,
+ * with its own wording, and failing here would replace it with a worse one.
+ */
+try {
+  setMessageLanguage(loadConfig({ required: [] }).uiLanguage);
+} catch {
+  // An unreadable or absent config.json is `init`'s whole reason for existing, and it is also the
+  // state a first-time user is in. Falling through on the default language is correct here
+}
 
 const fn = COMMANDS[command];
 if (!fn) {
