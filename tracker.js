@@ -36,7 +36,7 @@ import {
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
-import { setMessageLanguage } from './lib/messages.js';
+import { setMessageLanguage, achName } from './lib/messages.js';
 import { serve } from './lib/server.js';
 import {
   NotionClient,
@@ -1062,7 +1062,7 @@ async function cmdAiCheck() {
   const db = openDb(config.dbPath);
   const target = pickSmokeTarget(db, positionalArgs()[0] ?? null);
   const def = target.defs.find((d) => d.description) ?? target.defs[0];
-  const achName = def.name_cn || def.name_en || def.api_name;
+  const shownName = achName(def);
 
   const system =
     '你在帮一个 Steam 成就攻略作者做资料调研。回答用中文,只讲怎么达成,不要寒暄和总结段。';
@@ -1425,7 +1425,7 @@ async function cmdGuidePatch(appid) {
   for (const e of entries.slice(0, 12)) {
     const pct = plan.rarity?.get(e.apiName);
     const rare = pct === undefined || pct === null ? '' : `  (全球 ${pct.toFixed(1)}%)`;
-    console.log(`       ${e.def.name_cn || e.def.name_en}${rare}`);
+    console.log(`       ${achName(e.def)}${rare}`);
   }
   if (entries.length > 12) console.log(`       …… 还有 ${entries.length - 12} 条`);
 
@@ -1439,7 +1439,7 @@ async function cmdGuidePatch(appid) {
     console.log(`\n  ⚠️  另有 ${unlocatable.length} 条点到了、但现有攻略里没有对应的 checkbox,这次改不到:`);
     for (const a of unlocatable.slice(0, 8)) {
       const d = plan.defs.find((x) => x.api_name === a);
-      console.log(`       ${d?.name_cn || d?.name_en || a}`);
+      console.log(`       ${achName(d) || a}`);
     }
     if (unlocatable.length > 8) console.log(`       …… 还有 ${unlocatable.length - 8} 条`);
     console.log('       这几条是"攻略里压根没写",要整篇重写(--overwrite)或者自己补一行。');
@@ -1532,7 +1532,7 @@ async function cmdGuidePatch(appid) {
       console.log(`  这 ${r.missing.length} 条模型没交回来:`);
       for (const a of r.missing.slice(0, 8)) {
         const d = plan.defs.find((x) => x.api_name === a);
-        console.log(`     ✖ ${d?.name_cn || d?.name_en || a}`);
+        console.log(`     ✖ ${achName(d) || a}`);
       }
     }
     for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
