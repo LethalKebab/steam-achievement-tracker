@@ -1380,12 +1380,17 @@
          container align, and let the measure only tell the truth */
       align-items: stretch;
     }
-    /* With a card expanded, the whole row falls back to its natural height. A grid
-       row's height equals its tallest card, so once the expanded one grows tall,
-       stretch pulls the neighbouring cards into large empty boxes — exactly the
-       whitespace stretch was meant to avoid.
-       Aligned at rest, independent when expanded; each state gets what it needs */
-    .ach-grid.has-expanded .ach-item { align-self: start; }
+    /* The row holding an expanded card falls back to its natural height. A grid row's
+       height equals its tallest card, so once the expanded one grows tall, stretch
+       pulls its row-mates into large empty boxes — exactly the whitespace stretch was
+       meant to avoid.
+       **The class sits on the card, not on the grid.** On the grid it reached every
+       card the grid held, so expanding one guide in the fourth row also pulled the
+       first three rows apart — rows that cannot have moved, since a row's height is
+       its own tallest card's. Only the row that actually holds the expanded card gives
+       up its alignment, and JS works out which cards those are.
+       Aligned at rest, independent where expanded; each state gets what it needs */
+    .ach-grid .ach-item.row-expanded { align-self: start; }
     .ach-item {
       display: flex;
       gap: var(--s2);
@@ -3679,12 +3684,41 @@
         // toggle rather than add — once expanded it has to be collapsible with another click. The single-argument flip is deliberate
         el.addEventListener('click', function() {
           el.classList.toggle('expanded');
-          const grid = el.closest('.ach-grid');
-          // The second argument has to be coerced to a boolean: passing undefined makes toggle **flip** rather than clear
-          grid.classList.toggle('has-expanded', Boolean(grid.querySelector('.ach-guide.expanded')));
+          markExpandedRows(el.closest('.ach-grid'));
         });
       });
     }
+
+    /* Which cards sit in a row that holds an expanded guide. **The alignment is given up a
+       row at a time, not a grid at a time** — see the .row-expanded rule for why. CSS has no
+       way of saying "the row this card is in", which is the only reason this is counted out
+       in JS at all: the used value of grid-template-columns is one resolved length per
+       column, so its length is the column count, and the rest is arithmetic.
+       Read the column count once and write every class after it, the same measure-then-write
+       order the clamping above follows */
+    function markExpandedRows(grid) {
+      const items = Array.prototype.slice.call(grid.querySelectorAll('.ach-item'));
+      const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+      const openRows = new Set();
+      items.forEach(function(item, i) {
+        if (item.querySelector('.ach-guide.expanded')) openRows.add(Math.floor(i / cols));
+      });
+      items.forEach(function(item, i) {
+        if (openRows.has(Math.floor(i / cols))) item.classList.add('row-expanded');
+        else item.classList.remove('row-expanded');
+      });
+    }
+
+    /* auto-fill re-counts the columns as the window changes width, so which cards share a row
+       is not settled once — an expansion left alone through a resize marks the row it used to
+       be in. **One listener, registered once at startup**: render() replaces the grid on every
+       repaint, so a listener attached beside the grid would be left behind by each one. It
+       looks the grid up when it fires rather than closing over it, and there is at most one on
+       the page — only the open game row has an .ach-grid */
+    window.addEventListener('resize', function() {
+      const grid = document.querySelector('.ach-grid');
+      if (grid) markExpandedRows(grid);
+    });
 
     function renderMissingRow(appid) {
       const data = missingAchCache[appid];
