@@ -287,7 +287,7 @@ describe('createGuideDatabase', () => {
     const c = stubCreate({ readBackProps: full(), dataSources: [] });
     const db = await c.createGuideDatabase({ parentPageId: 'p1' });
     assert.equal(db.boardView.ok, false);
-    assert.match(db.boardView.error, /data source/);
+    assert.match(db.boardView.error, /数据源/);
   });
 });
 
@@ -582,7 +582,8 @@ describe('inspectGuideDb — ask everything worth asking at the moment the datab
     assert.deepEqual(codes(r), [DB_PROBLEM.COLOUR_BY_HAND]);
     assert.equal(r.fixable, false, 'a button that cannot change anything is worse than none');
     assert.equal(r.ok, true);
-    assert.match(r.problems[0].message, /In progress → blue/, 'it has to say which colour, or it is unactionable');
+    // The colour word is the one on Notion's own picker, which is Chinese in a Chinese workspace
+    assert.match(r.problems[0].message, /In progress 蓝/, 'it has to say which colour, or it is unactionable');
   });
 
   test('a database already in the current format raises nothing and offers no button', async () => {

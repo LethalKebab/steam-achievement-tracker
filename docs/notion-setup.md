@@ -107,6 +107,7 @@ Press **「保存并验证」**. The program asks everything it needs to ask rig
 | Whether the ID really points at a database | Reports "not a database" and "not shared" separately |
 | Whether there is a title property | States exactly what is missing |
 | Whether the status options are complete | If not, a **「帮我补上」** button appears — one click fills them in |
+| Whether the database is still in the older format | If so, a **「帮我整理成看板」** button appears — see below |
 | Whether it can actually write | Creates a page and immediately archives it; a read-only connection is reported on the spot |
 
 If everything passes, it returns to the Dashboard automatically. If anything fails the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
@@ -130,7 +131,7 @@ Three of the names — `Not started` / `In progress` / `Done` — are **Notion's
 
 ### If your database was made by an older version
 
-Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. Press **「帮我补上」** (or run `node tracker.js notion-check --fix`) and it brings most of it up to date in one go:
+Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. The settings page notices and offers **「帮我整理成看板」** (the same thing `node tracker.js notion-check --fix` does), which brings most of it up to date in one go:
 
 - the four options are sorted into their board columns
 - a board view is added and put first, so the database opens as a board

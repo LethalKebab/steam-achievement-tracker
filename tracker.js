@@ -44,6 +44,7 @@ import {
   inspectGuideDb,
   repairGuideDb,
   GUIDE_STATUS_STYLE,
+  COLOUR_ZH,
   DB_PROBLEM,
 } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
@@ -414,17 +415,17 @@ async function cmdInitNotion() {
  * somebody looking at a grey board wondering what the command did.
  */
 function reportReformat(r) {
-  if (r.regrouped?.length) console.log(`   🔧 归进正确的看板分组:${r.regrouped.join(' / ')}`);
+  if (r.regrouped?.length) console.log(`   🔧 排进看板分组:${r.regrouped.join(' / ')}`);
   if (r.stillWrongGroup?.length) console.log(`   ❌ 分组没落地:${r.stillWrongGroup.join(' / ')}`);
-  if (r.boardView?.created) console.log('   🔧 已加看板视图,并放在第一个标签页');
+  if (r.boardView?.created) console.log('   🔧 加了看板视图,放在第一个标签页');
   else if (r.boardView && !r.boardView.ok) {
     console.log(`   ⚠️  看板视图没建成:${r.boardView.error}`);
-    console.log('      库照常能用,攻略生成和勾选都不受影响');
+    console.log('      库照常能用,攻略照样生成,复选框照样勾');
   }
   if (r.wrongColour?.length) {
-    const want = r.wrongColour.map((n) => `${n} → ${GUIDE_STATUS_STYLE[n].color}`).join(',');
-    console.log(`   ⚠️  这几个选项的颜色只能你自己改:${want}`);
-    console.log('      Notion 不允许改已有选项的颜色(改新加的可以)。打开那个库 → 点状态属性 → 逐个挑颜色');
+    const want = r.wrongColour.map((n) => `${n} ${COLOUR_ZH[GUIDE_STATUS_STYLE[n].color]}`).join(',');
+    console.log(`   ⚠️  这几个状态的颜色要你自己去 Notion 里挑:${want}`);
+    console.log('      已经建好的选项,Notion 只让人在界面里改颜色。打开那个库 → 点状态属性 → 逐个挑一次');
   }
 }
 

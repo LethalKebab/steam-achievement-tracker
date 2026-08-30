@@ -487,6 +487,9 @@
   #arc-sum:empty { display: none; }
   .msg { font-size: var(--fs-sm); margin-top: var(--s4); min-height: 16px; line-height: 1.5; }
   .msg.error { color: var(--danger); }
+  /* A warning inside an otherwise-fine block: the container is already coloured for the worst
+     item, so this only has to say "this particular line is not that one" */
+  .msg li.warn { color: var(--warn); }
   .msg.ok { color: var(--ok); }
 
   /* The instructions inside each section. **The selector moved from `details ol`
@@ -878,15 +881,23 @@
       msg.className = 'msg ' + worst;
       msg.textContent = '';
 
+      // **「还有问题」只留给真出错的时候。** 一个灰色的看板不是问题,库照常能用;把它也叫问题,
+      // 会让刚刚成功保存配置的人以为哪里坏了 —— 而在修完之后那一屏,这句话紧跟在两行「已经做好」
+      // 后面,读起来像自我否定
       const head = document.createElement('div');
       head.textContent =
-        (done && done.length ? done.join(';') + '。' : '') + '配置已保存,但这个库还有问题:';
+        (done && done.length ? done.join(';') + '。' : '') +
+        (worst === 'error' ? '配置已保存,但这个库还有问题:' : '配置已保存,还剩一处:');
       msg.appendChild(head);
 
       const list = document.createElement('ul');
       for (const p of problems) {
+        // **没有 emoji。** 它们自带颜色、按系统渲染、不落基线 —— 这条规则整个界面都守着,
+        // 这里是唯一的漏网处,而这次改动把 warn 那一支从冷门变成了每个老用户都会看到的一行。
+        // 严重程度交给颜色:容器已经按最严重的一条上色,单条只在与之不同时才标出来
         const li = document.createElement('li');
-        li.textContent = (p.severity === 'error' ? '❌ ' : '⚠️ ') + p.message;
+        li.textContent = p.message;
+        if (p.severity !== 'error') li.className = 'warn';
         for (const c of p.causes || []) {
           const sub = document.createElement('div');
           sub.textContent = '· ' + c;
@@ -911,18 +922,23 @@
 
       const bar = document.createElement('div');
       if (fixable) {
+        // **标签跟着它这次要做的事走。** 「帮我补上」是从「补缺失的选项」来的;老库一个选项都不缺,
+        // 要做的是排分组和加看板,那句话就没在说实话了
+        const reformat = problems.some((p) => p.code === 'outdated-format');
+        const label = reformat ? '帮我整理成看板' : '帮我补上';
         const fix = document.createElement('button');
         fix.type = 'button';
-        fix.textContent = '帮我补上';
+        fix.textContent = label;
         fix.onclick = async () => {
           fix.disabled = true;
-          fix.textContent = '补…';
+          fix.textContent = reformat ? '整理…' : '补…';
           const r = await call('repairNotionGuideDb', []);
           if (r.error) {
             fix.disabled = false;
-            fix.textContent = '帮我补上';
+            fix.textContent = label;
             const why = document.createElement('div');
-            why.textContent = '❌ ' + r.error;
+            why.className = 'warn';
+            why.textContent = r.error;
             bar.appendChild(why);
             return;
           }
@@ -931,8 +947,14 @@
           if ((again.problems || []).length) {
             showNotionProblems(again.problems, again.fixable, []);
           } else {
+            // **从真的做掉的事情里拼。** 原来这里写死成「补上了 X」,而一个老库一个选项都不缺,
+            // X 是空的 —— 那一屏会显示「补上了 ,这个库现在可用了」
+            const did = [];
+            if ((r.added || []).length) did.push('补上 ' + r.added.join(' / '));
+            if ((r.regrouped || []).length) did.push('排好了看板分组');
+            if (r.boardView && r.boardView.created) did.push('加了看板视图');
             msg.className = 'msg ok';
-            msg.textContent = '✅ 补上了 ' + (r.added || []).join(' / ') + ',这个库现在可用了。';
+            msg.textContent = did.length ? did.join(',') + '。' : '这个库本来就是好的。';
             setTimeout(() => { window.location.href = '/'; }, 1500);
           }
         };
