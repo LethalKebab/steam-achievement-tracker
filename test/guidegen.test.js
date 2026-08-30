@@ -29,7 +29,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  openDb, insertGame, replaceAchievements, upsertGuide, allGuides,
+  openDb, insertGame, replaceAchievements, upsertGuide, allGuides, setGuideLang,
 } from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
@@ -55,6 +55,7 @@ import {
   buildChunkFeedback,
   chunksNeedingRewrite,
   SKILL_RULE_DISPOSITION,
+  PROMPT_SECTIONS,
   DRAFTS_DIR,
   unwrapAchievementToggles,
 } from '../lib/guidegen.js';
@@ -2698,5 +2699,294 @@ describe('an unlocked achievement gets one line', () => {
       assert.doesNotMatch(provider.asked[0], /一行就停/,
         'abbreviating on an overwrite deletes prose they paid for');
     });
+  });
+});
+
+/**
+ * The prompt forks by language
+ * ------------------------------------------------
+ * Rule text cannot be shared between the two — a translation is a different string all the way
+ * down — so what is shared is the shape. These tests are what makes "one builder, language as a
+ * parameter" mean something other than two prompts that drift.
+ *
+ * The alternative was generating English by asking the Chinese prompt for English output. It reads
+ * as the cheap option and is not: the rules would still be describing a Chinese guide format, and
+ * the one signal that anything was wrong would be guides slowly coming out in a different shape.
+ */
+describe('the prompt in two languages', () => {
+  const defs = [
+    {
+      api_name: 'A_ONE', name_cn: '开局', name_en: 'First Step',
+      description: '完成序章', description_en: 'Finish the prologue', hidden: 0,
+    },
+    {
+      api_name: 'A_TWO', name_cn: '收藏家', name_en: 'Collector',
+      description: '', description_en: '', hidden: 1,
+    },
+  ];
+  const build = (lang, opts) => buildSystemPrompt('测试游戏', '1', defs, { target: 'notion', lang, ...opts });
+
+  describe('section parity', () => {
+    test('every section in the table appears in its own language, in order', () => {
+      for (const half of [0, 1]) {
+        const prompt = build(half === 0 ? 'zh' : 'en');
+        let at = -1;
+        for (const pair of PROMPT_SECTIONS) {
+          const found = prompt.indexOf('\n' + pair[half] + '\n');
+          assert.notEqual(found, -1, pair[half] + ' is missing from the ' + (half ? 'English' : 'Chinese') + ' prompt');
+          assert.ok(found > at, pair[half] + ' is out of order');
+          at = found;
+        }
+      }
+    });
+
+    test('neither prompt has a section the table does not list', () => {
+      // Without this the table is satisfied by a prompt that grew a section in one language only —
+      // the exact failure it exists to catch, arriving from the side it is not looking at
+      for (const half of [0, 1]) {
+        const rules = build(half === 0 ? 'zh' : 'en').split('\n---\n')[0];
+        const headings = [...rules.matchAll(/^## .+$/gm)].map((m) => m[0]);
+        const listed = PROMPT_SECTIONS.map((pair) => pair[half]);
+        // The research block is appended after the rules and varies with canSearch rather than with
+        // language, so its two sections are not part of this table
+        const research = /查资料|research|预算|budget|联网|network/i;
+        const unlisted = headings.filter((h) => !listed.includes(h) && !research.test(h));
+        assert.deepEqual(unlisted, [], 'unlisted sections in the ' + (half ? 'English' : 'Chinese') + ' prompt');
+      }
+    });
+
+    test('the two halves of every pair really are different strings', () => {
+      // A pair filled in by pasting the Chinese heading into both columns would satisfy everything
+      // above while leaving that section untranslated
+      for (const [zh, en] of PROMPT_SECTIONS) assert.notEqual(zh, en);
+    });
+  });
+
+  describe('the rules that genuinely differ', () => {
+    test('the English prompt asks for English output', () => {
+      assert.match(build('en'), /\*\*Write it in English\.\*\*/);
+    });
+
+    test('the English list puts the official English name first', () => {
+      // Rule 3 requires the bold name to equal a name in the list, so which one leads decides which
+      // language the entries come out in — and the matching index holds both, so either one ticks
+      assert.match(build('en'), /\*\*First Step\*\* \/ 开局/);
+      assert.match(build('zh'), /\*\*开局\*\* \/ First Step/);
+    });
+
+    test('the English list quotes description_en', () => {
+      assert.match(build('en'), /Official description: Finish the prologue/);
+      assert.match(build('zh'), /官方描述:完成序章/);
+    });
+
+    test('an achievement with no English description keeps the Chinese one rather than losing it', () => {
+      // A game synced before description_en existed has English names and Chinese descriptions. An
+      // empty description leaves rule 4 with nothing to copy verbatim and the entry gets written from
+      // its name alone. The odd-looking result is recoverable by syncing; an invented one is not
+      const half = [{ ...defs[0], description_en: '' }];
+      assert.match(buildSystemPrompt('测试游戏', '1', half, { target: 'notion', lang: 'en' }),
+        /Official description: 完成序章/);
+    });
+
+    test('an empty description is marked as empty in both languages, never left blank', () => {
+      assert.match(build('en'), /\(empty on Steam\)/);
+      assert.match(build('zh'), /\(Steam 上是空的\)/);
+    });
+
+    test('the English prompt drops the missing-Chinese-localisation rules', () => {
+      // Both are about a game shipping no Chinese name. In an English guide they have no subject,
+      // and a rule with no subject still costs the model attention
+      assert.doesNotMatch(build('en'), /暂无中文翻译/);
+      assert.doesNotMatch(build('en'), /官方中文/);
+      assert.match(build('zh'), /暂无中文翻译/);
+    });
+
+    test('citations follow the source actually read rather than naming one site', () => {
+      // The Chinese prompt names B站 because that is where the coverage is for its readers. The
+      // English one must not inherit that as a default, or it cites a source it never opened
+      assert.match(build('en'), /Cite whatever source you actually read/);
+      assert.match(build('zh'), /B站 BV/);
+    });
+
+    test('the research sources stay the same in both — the fork is the output, not the reading', () => {
+      // Deliberate: for a Chinese-developed game the best guide really is on NGA or Bilibili, and a
+      // model that can read it can write English from it. Dropping those sites would make English
+      // guides worst exactly where guides are hardest to find
+      for (const site of ['TrueAchievements', 'Fandom']) {
+        assert.ok(build('en').includes(site), site + ' is missing from the English research rules');
+        assert.ok(build('zh').includes(site), site + ' is missing from the Chinese research rules');
+      }
+      assert.match(build('en'), /Bilibili/);
+    });
+
+    test('the offline variant forks too', () => {
+      assert.match(build('en', { canSearch: false }), /You have \*\*no search or page-fetch tools\*\*/);
+      assert.match(build('zh', { canSearch: false }), /你这次没有联网能力/);
+    });
+  });
+
+  describe('the rules that must NOT differ', () => {
+    // The hard rules are what the validator checks afterwards. One dropped from a single language
+    // produces guides that fail lint in that language only, which reads as the model being worse at
+    // English rather than as a missing rule
+    const HARD = [
+      ['一行只能有一个 checkbox', 'One checkbox per line'],
+      ['永远不要写 `- [x]`', 'never `- [x]`'],
+      ['一字不差', 'must match the list below exactly'],
+      ['原文照抄', 'Copy the official description verbatim'],
+      ['不要写大标题行', 'Do not write a top-level heading'],
+    ];
+
+    test('every hard rule is present in both languages', () => {
+      const zh = build('zh');
+      const en = build('en');
+      for (const [z, e] of HARD) {
+        assert.ok(zh.includes(z), 'the Chinese prompt lost: ' + z);
+        assert.ok(en.includes(e), 'the English prompt lost: ' + e);
+      }
+    });
+
+    test('both prompts number the same count of hard rules', () => {
+      // Every numbered rule, not only the ones opening in bold — four of the eight do not, and a
+      // regex that sees only bold ones counts four in each language and calls that parity
+      const count = (p) => (p.split('\n---\n')[0].match(/^\d+\. /gm) || []).length;
+      assert.ok(count(build('zh')) >= 8, 'the hard rules were not found at all');
+      assert.equal(count(build('en')), count(build('zh')));
+    });
+  });
+
+  test('the language reaches the prompt only through the plan', () => {
+    // Same rule as `target`: three paths have to send the same prompt — full generation, partial
+    // rewrite, and --dry-run's preview. A caller resolving the language for itself is where they
+    // first disagree, and the preview exists precisely to show what will be sent
+    const plan = { game: '测试游戏', defs, rarity: null, target: 'notion', lang: 'en' };
+    assert.equal(systemPromptFor(plan, '1', { canSearch: true }), build('en'));
+    assert.equal(systemPromptFor({ ...plan, lang: 'zh' }, '1', { canSearch: true }), build('zh'));
+  });
+});
+
+/**
+ * Which language a generated guide comes out in
+ * ------------------------------------------------
+ * Resolved once, in `planGuide`, from the interface language — and that is deliberately the entire
+ * mechanism for changing an existing guide's language. There is no separate "generate in English"
+ * action: a second button beside 「重写」 doing the same work with a different output is two ways to
+ * spend the same money on the one guide a game is allowed. So switching the interface and pressing
+ * 「重写」 is how a Chinese guide becomes an English one, which is why the rewrite dialog's title
+ * names the language — otherwise that path would be silent.
+ */
+describe('the language a guide is generated in', () => {
+  const plan = (uiLanguage) => {
+    const { db, config } = freshEnv();
+    return planGuide(db, { config: { ...config, uiLanguage }, steam: fakeSteam(), appid: '1' });
+  };
+
+  test('follows the interface language', async () => {
+    assert.equal((await plan('en')).lang, 'en');
+    assert.equal((await plan('zh')).lang, 'zh');
+  });
+
+  test('an unset or unrecognised interface language means Chinese', async () => {
+    // `uiLanguage` is a config field, so it is a value a person can type
+    for (const junk of [undefined, null, '', 'fr', 'EN']) {
+      assert.equal((await plan(junk)).lang, 'zh', String(junk));
+    }
+  });
+
+  test('an overwrite follows the interface too, not the guide it replaces', async () => {
+    // The half that is easy to get backwards, and getting it backwards removes the only way to
+    // change a guide's language: a rewrite that inherited the old language could never produce
+    // anything but the old language
+    const { db, config } = freshEnv();
+    upsertGuide(db, { appid: '1', name: '测试游戏', url: 'g.md', kind: 'local' });
+    setGuideLang(db, '1', 'zh');
+    writeFileSync(join(config.guidesDir, 'g.md'), '# 测试游戏\n\nappid: 1\n\n- [ ] **第一步**\n');
+    const p = await planGuide(db, {
+      config: { ...config, uiLanguage: 'en' }, steam: fakeSteam(), appid: '1', overwrite: true,
+    });
+    assert.equal(p.existing.lang, 'zh', 'the old guide really was Chinese');
+    assert.equal(p.lang, 'en', 'and the rewrite is planned in the interface language');
+  });
+});
+
+describe('the landed guide records which language it was written in', () => {
+  /**
+   * Written after the landing rather than as a field on the upsert, because the two discovery paths
+   * that create the row register guides they *found* and know nothing about the language.
+   *
+   * **Only on success.** Recording it from a run that failed to land would leave the achievement
+   * panel marking a guide that is still the old one — a wrong marker on a guide nobody changed.
+   */
+  test('a guide generated in English is recorded as English', async () => {
+    const { db, config } = freshEnv();
+    const r = await generateGuide(db, {
+      config: { ...config, uiLanguage: 'en' }, provider: fakeProvider([GOOD]),
+      steam: fakeSteam(['A']), appid: '1',
+    });
+    assert.equal(r.ok, true);
+    assert.equal(allGuides(db)[0].lang, 'en');
+  });
+
+  test('a guide generated in Chinese is recorded as Chinese', async () => {
+    const { db, config } = freshEnv();
+    const r = await generateGuide(db, {
+      config: { ...config, uiLanguage: 'zh' }, provider: fakeProvider([GOOD]),
+      steam: fakeSteam(['A']), appid: '1',
+    });
+    assert.equal(r.ok, true);
+    assert.equal(allGuides(db)[0].lang, 'zh');
+  });
+
+  test('a rewrite that changes the language updates the record', async () => {
+    // The path a person actually takes to get an English guide: switch the interface, press 「重写」.
+    // If the column kept the old value the panel would go on marking the guide as Chinese while its
+    // text was English — the marker pointing the wrong way is worse than no marker
+    const { db, config } = freshEnv();
+    await generateGuide(db, {
+      config: { ...config, uiLanguage: 'zh' }, provider: fakeProvider([GOOD]),
+      steam: fakeSteam(['A']), appid: '1',
+    });
+    assert.equal(allGuides(db)[0].lang, 'zh');
+
+    const again = await generateGuide(db, {
+      config: { ...config, uiLanguage: 'en' }, provider: fakeProvider([GOOD]),
+      steam: fakeSteam(['A']), appid: '1', overwrite: true,
+    });
+    assert.equal(again.ok, true);
+    assert.equal(allGuides(db)[0].lang, 'en');
+  });
+
+  test('a run that never lands records nothing', async () => {
+    // There is no row to write to on this path, and that is the point: the assertion is that the
+    // failure stays invisible to the guides table rather than half-registering
+    const { db, config } = freshEnv();
+    const r = await generateGuide(db, {
+      config: { ...config, uiLanguage: 'en' },
+      provider: fakeProvider([MISSING_B, MISSING_B, MISSING_B]), steam: fakeSteam(), appid: '1', rounds: 3,
+    });
+    assert.equal(r.ok, false);
+    assert.equal(allGuides(db).length, 0);
+  });
+
+  test('a failed rewrite leaves the recorded language alone', async () => {
+    // **This is the case the `ok` guard exists for.** A failed *new* guide has no row to write to,
+    // so the guard is invisible there; a failed *overwrite* has one, and the old guide is still
+    // sitting in it untouched. Stamping the new language on at that point would mark a Chinese
+    // guide as English — the panel then says the text is in a language it is not, which is worse
+    // than saying nothing, and nothing about the guide changed to explain it
+    const { db, config } = freshEnv();
+    await generateGuide(db, {
+      config: { ...config, uiLanguage: 'zh' }, provider: fakeProvider([GOOD]),
+      steam: fakeSteam(['A']), appid: '1',
+    });
+    assert.equal(allGuides(db)[0].lang, 'zh');
+
+    const failed = await generateGuide(db, {
+      config: { ...config, uiLanguage: 'en' },
+      provider: fakeProvider([MISSING_B, MISSING_B, MISSING_B]),
+      steam: fakeSteam(['A']), appid: '1', overwrite: true, rounds: 3,
+    });
+    assert.equal(failed.ok, false);
+    assert.equal(allGuides(db)[0].lang, 'zh', 'the guide is still the Chinese one, so the record has to say so');
   });
 });

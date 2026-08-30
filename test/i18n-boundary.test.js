@@ -287,34 +287,67 @@ describe('the messages in ' + TABLE_NAME, () => {
   });
 });
 
-describe('the prompt sent to the model stays Chinese', () => {
+describe('each language of the prompt is written in that language', () => {
   /**
-   * Translating this is not a cosmetic change: the rules are quoted back at the model, the guide
-   * format they describe is Chinese, and `SKILL.md` — which the disposition table in guidegen.js
-   * is checked against — is Chinese too. A translated prompt asks for something different, and the
-   * only evidence would be guides slowly coming out in a different shape.
+   * The prompt forks by language, and this guards the fork the only way a ratio can: **each variant
+   * has to be predominantly the language it claims.**
    *
-   * A ratio rather than a phrase: `guidegen.test.js` already pins the individual rules that must
-   * be present (`序号不是身份`, `写得出做法`, and the rest), and this catches the wholesale case
-   * those cannot — a pass that translates the prose around them.
+   * Parameterised over both rather than checking the Chinese one and exempting the English one. An
+   * exemption leaves the real hole open — a pass that translates *both* and reports itself fine —
+   * because the Chinese prompt would then be English and nothing would be looking at it. Two
+   * assertions pointing in opposite directions cannot both be satisfied by one sweeping translation.
+   *
+   * A ratio rather than a phrase: `guidegen.test.js` pins the individual rules that must be present
+   * (`序号不是身份`, `写得出做法`, and their English counterparts), and this catches the wholesale
+   * case those cannot.
    */
   const defs = [{
-    api_name: 'A', name_cn: '第一步', name_en: '', description: '完成第一关。',
-    game_name: '测试游戏', hidden: 0, icon: '',
+    api_name: 'A', name_cn: '第一步', name_en: 'First Step', description: '完成第一关。',
+    description_en: 'Finish the first level.', game_name: '测试游戏', hidden: 0, icon: '',
   }];
 
-  test('it is more than 40% Chinese', () => {
-    const p = buildSystemPrompt('测试游戏', '1', defs);
-    const ratio = cjkCount(p) / p.length;
-    assert.ok(ratio > 0.4,
-      `the system prompt is only ${Math.round(ratio * 100)}% Chinese (${cjkCount(p)} of ${p.length} characters). `
-      + 'It was excluded from the translation by hand because translating it changes what the model is asked for');
+  // The `target` branch is per backend and only one of the two is exercised by default, so both are
+  // walked here; `null` is the fallback used when the backend has not been decided yet
+  const VARIANTS = [undefined, 'notion', 'local'];
+
+  test('the Chinese prompt is more than 40% Chinese', () => {
+    for (const target of VARIANTS) {
+      const p = buildSystemPrompt('测试游戏', '1', defs, { target });
+      const ratio = cjkCount(p) / p.length;
+      assert.ok(ratio > 0.4,
+        `the ${target ?? 'default'} variant is only ${Math.round(ratio * 100)}% Chinese `
+        + `(${cjkCount(p)} of ${p.length} characters)`);
+    }
   });
 
-  test('both backend variants stay Chinese — the branch is per target, and only one of them is exercised by default', () => {
-    for (const target of ['notion', 'local']) {
-      const p = buildSystemPrompt('测试游戏', '1', defs, { target });
-      assert.ok(cjkCount(p) / p.length > 0.4, `the ${target} variant of the prompt is no longer mostly Chinese`);
+  test('the English prompt is almost entirely free of Chinese', () => {
+    // Not zero: the fixture's own achievement name and description are Chinese and are quoted into
+    // the list verbatim, which is rule 3 and rule 4 doing exactly what they are supposed to do. What
+    // the ceiling excludes is Chinese in the **rules**, which is where a half-finished fork shows up
+    for (const target of VARIANTS) {
+      const p = buildSystemPrompt('测试游戏', '1', defs, { target, lang: 'en' });
+      const ratio = cjkCount(p) / p.length;
+      assert.ok(ratio < 0.02,
+        `the English ${target ?? 'default'} variant is ${Math.round(ratio * 100)}% Chinese `
+        + `(${cjkCount(p)} of ${p.length} characters), so part of it was left untranslated`);
+    }
+  });
+
+  test('the two are actually different prompts', () => {
+    // Guards the cheapest way to satisfy both ratios at once: returning the Chinese prompt for both
+    // languages would fail the second test, but returning the *English* one for both would pass
+    // neither — while a stub returning an empty string for one would pass both vacuously
+    const zh = buildSystemPrompt('测试游戏', '1', defs, { target: 'notion' });
+    const en = buildSystemPrompt('测试游戏', '1', defs, { target: 'notion', lang: 'en' });
+    assert.notEqual(zh, en);
+    assert.ok(zh.length > 5000 && en.length > 5000, 'neither variant is a stub');
+  });
+
+  test("an unrecognised language falls back to Chinese rather than to nothing", () => {
+    // `lang` reaches here from config, and config is a file a person edits
+    for (const lang of ['fr', '', null, undefined, 'ZH']) {
+      const p = buildSystemPrompt('测试游戏', '1', defs, { target: 'notion', lang });
+      assert.ok(cjkCount(p) / p.length > 0.4, `lang=${JSON.stringify(lang)} produced a non-Chinese prompt`);
     }
   });
 });
