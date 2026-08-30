@@ -97,7 +97,9 @@ Still zero runtime dependencies: `Expand-Archive` ships with PowerShell, and `po
 
 **In the launcher, not the tracker.** The author himself uses the CLI plus `git pull`, while friends use the packaged build; putting it in the server would show CLI users a zip-download prompt for something they never use.
 
-The main process's `dialog` **is** usable — CLAUDE.md's "no `window.confirm`" rule is about the renderer, and native dialogs belong to the main process; that is the boundary between the two. `main.js` already uses `dialog.showErrorBox`.
+**The plan was wrong here, and the sentence is kept so the correction has something to point at.** It assumed the main process's `dialog` was usable — that the earlier `window.confirm` failure had been a *renderer* problem and native dialogs belonged to the main process. The rehearsals killed that: `showMessageBox` fails from the main process too, and the boundary is **native-vs-page, not renderer-vs-main** (see "The rehearsals were worth more than the rehearsal" below, and CLAUDE.md's "Known pitfalls"). **The prompt ended up being a web page for exactly this reason.**
+
+`main.js` still calls `dialog.showErrorBox` twice. That is a different shape — fire-and-forget, no return value — so the `response: 420` failure cannot apply to it, but whether the box is actually visible in the packaged build has never been rehearsed. Do not read those two calls as evidence that native dialogs work.
 
 Three details are fixed:
 

@@ -43,9 +43,11 @@ jobs:
           node-version: '24'
 
       # **There is no `npm install` here, and that absence is itself an assertion.**
-      # Zero runtime dependencies is a hard constraint of this repository (see "Stack constraints"
-      # in CLAUDE.md), so the day someone adds a real runtime dependency, the absence of this step
-      # makes the tests fail on the spot rather than quietly dropping the constraint.
+      # The runtime has no dependencies today (see "Stack constraints" in CLAUDE.md), so an
+      # *accidental* one fails here on the spot instead of quietly becoming a requirement.
+      # **It is not a ban.** The blanket "never add a dependency" rule was lifted; a deliberate
+      # dependency is allowed with an argument, and adding one means adding this step in the same
+      # pull request — otherwise CI goes red without saying why.
       # The devDependencies of launcher/ are used only for packaging and the tests never touch them.
       - name: full test suite
         run: node --test --test-reporter=dot
