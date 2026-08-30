@@ -3691,7 +3691,11 @@
         let av = a[sortKey], bv = b[sortKey];
         if (av === null || av === 'N/A') av = -1;
         if (bv === null || bv === 'N/A') bv = -1;
-        if (typeof av === 'string') return sortDir * av.localeCompare(bv);
+        // **Sorted in the interface's language, not the browser's.** A bare localeCompare()
+        // follows whatever locale the browser is set to, so the same library sorted differently
+        // on two machines showing the same page — and with names in two scripts mixed together
+        // that is the column where it shows
+        if (typeof av === 'string') return sortDir * av.localeCompare(bv, LANG === 'en' ? 'en' : 'zh-CN');
         return sortDir * ((av > bv) - (av < bv));
       });
 
