@@ -282,29 +282,29 @@ function makeSecretReader() {
  * 「数据库 ID 填错了」.
  */
 async function createGuideDbInteractively(io, probe) {
-  stdout.write('正在查询这个 connection 能访问的页面…');
+  stdout.write(clog('nb.querying'));
   const { pages, truncated } = await probe.searchPages();
   if (!pages.length) {
-    console.log('\r⚠️  这个 integration 一个页面都看不到                    ');
-    console.log('   token 是好的,所以缺的是共享:在 Notion 里打开要放攻略的那一页');
-    console.log('   → 右上角 ••• → Connections → 加上这个 integration,然后重跑一次');
+    console.log(clog('nb.noPages'));
+    console.log(clog('nb.noPagesWhy'));
+    console.log(clog('nb.noPagesHow'));
     return '';
   }
-  console.log(`\r能访问 ${pages.length} 个页面${truncated ? '(还有更多没列完)' : ''}:                    \n`);
+  console.log(clog('nb.canSee', { n: pages.length, more: truncated ? clog('nb.andMore') : '' }));
   pages.forEach((p, i) => console.log(`  ${String(i + 1).padStart(2)}. ${p.title}`));
 
-  const pick = Number(await io.ask(`\n建在哪一页下面?(1-${pages.length}): `));
+  const pick = Number(await io.ask(clog('nb.pick', { n: pages.length })));
   if (!Number.isInteger(pick) || pick < 1 || pick > pages.length) {
-    throw new Error('没选一个有效的编号,什么都没建');
+    throw new Error(clog('nb.badPick'));
   }
-  const title = (await io.ask('数据库名字(回车用「Steam 攻略」): ')) || 'Steam 攻略';
+  const title = (await io.ask(clog('nb.nameAsk'))) || 'Steam 攻略';
 
-  stdout.write('正在建…');
+  stdout.write(clog('nb.creating'));
   const db = await probe.createGuideDatabase({ parentPageId: pages[pick - 1].id, title });
-  console.log(`\r✅ 建好了:${db.url}        `);
-  console.log(`   状态选项:${db.options.join(' / ')}`);
-  console.log('   (四个选项都在 To-do 分组里 —— Notion 的 API 设不了分组,试过,静默无效。');
-  console.log('    不影响功能,想整理 board 视图的话自己在 Notion 里拖一下)');
+  console.log(clog('nb.created', { url: db.url }));
+  console.log(clog('nb.options', { options: db.options.join(' / ') }));
+  console.log(clog('nb.groupNote'));
+  console.log(clog('nb.groupNote2'));
   return db.id;
 }
 
@@ -325,25 +325,25 @@ async function cmdInitNotion() {
   const io = makeSecretReader();
   try {
     const cfg = loadConfig();
-    console.log('\n配置 Notion 攻略同步\n');
+    console.log(clog('in.title'));
     // The English terms are always copied verbatim from Notion's own UI, never conceptual names like
     // "Internal Integration" — those five words appear nowhere in Notion, so somebody looking for
     // them will not find them. Notion has renamed these more than once (it used to be New
     // integration / Internal Integration Secret), so what is copied is the wording of the current one
-    console.log('token 从哪来:打开 https://app.notion.com/developers/connections,点 New connection,');
-    console.log('在它的 Configuration 标签页里复制 Access token(ntn_ 开头)。然后把攻略页面(或它们');
-    console.log('共同的父页面)授权给它:Notion 页面右上角 ••• → Add connections → 选中它,');
-    console.log('否则 API 会返回 404。\n');
-    console.log('带图的完整步骤:docs/notion-setup.md\n');
+    console.log(clog('in.tokenWhere'));
+    console.log(clog('in.tokenWhere2'));
+    console.log(clog('in.tokenWhere3'));
+    console.log(clog('in.tokenWhere4'));
+    console.log(clog('in.tokenDocs'));
 
-    const token = await io.askSecret('Notion Integration Token(输入不会显示): ');
-    if (!token) throw new Error('没输入 token');
+    const token = await io.askSecret(clog('in.tokenAsk'));
+    if (!token) throw new Error(clog('in.tokenMissing'));
 
     const probe = new NotionClient({ notion: { token } });
 
-    stdout.write('\n正在验证 token…');
+    stdout.write(clog('in.verifying'));
     const me = await probe.request('get', '/users/me');
-    console.log(`\r✅ token 可用:integration「${me.name || me.bot?.workspace_name || '未命名'}」        `);
+    console.log(clog('in.tokenOk', { name: me.name || me.bot?.workspace_name || clog('in.unnamed') }));
 
     let dbId = '';
     let dbOk = false;
@@ -355,10 +355,10 @@ async function cmdInitNotion() {
       // far too easy
       const had = cfg.notion?.overviewDbId;
       if (had) {
-        console.log(`\n⚠️  已经配了攻略库:${had}`);
-        console.log('   新建一个会把配置改指到新库 —— 现有攻略一篇都不会丢,但工具会看不到它们。');
-        const yes = await io.ask('   确定还要建一个新的?(y/N) ');
-        if (!/^y/i.test(yes)) throw new Error('取消了,什么都没建');
+        console.log(clog('in.hasDb', { url: had }));
+        console.log(clog('in.hasDbWarn'));
+        const yes = await io.ask(clog('in.hasDbConfirm'));
+        if (!/^y/i.test(yes)) throw new Error(clog('in.cancelled'));
       }
       dbId = await createGuideDbInteractively(io, probe);
       dbOk = Boolean(dbId);
@@ -368,35 +368,35 @@ async function cmdInitNotion() {
       if (!dbId && had) dbId = had;
     } else {
       const dbDefault = cfg.notion?.overviewDbId || '';
-      dbId = (await io.ask(`攻略数据库 ID${dbDefault ? `(回车用 ${dbDefault})` : ''}: `)) || dbDefault;
+      dbId = (await io.ask(clog('in.dbIdAsk', { default: dbDefault ? clog('in.dbIdDefault', { id: dbDefault }) : '' }))) || dbDefault;
       if (!dbId) {
-        console.log('   (没有现成的库?`node tracker.js init --notion --create` 让程序建一个)');
+        console.log(clog('in.noDbHint'));
       } else {
-        stdout.write('正在验证数据库访问…');
+        stdout.write(clog('in.dbChecking'));
         try {
           const pages = await probe.queryGuideDatabase(dbId);
-          console.log(`\r✅ 数据库可访问:里面有 ${pages.length} 个页面        `);
+          console.log(clog('in.dbOk', { n: pages.length }));
           dbOk = true;
         } catch (err) {
           // **Connections cannot be the only thing mentioned** — that sends somebody who entered a
           // page ID off to check permissions over and over. Three faults, three fixes, said once
-          console.log(`\r⚠️  数据库访问失败:${err.message}`);
-          console.log('   token 本身是好的,所以问题在 ID 或权限:');
-          console.log('   · 它不是数据库 —— 要整页打开,取 URL 里 ?v= 之前那 32 位十六进制');
-          console.log('     (页面 ID、视图 ID、整条链接都不行)');
-          console.log('   · 还没共享 —— 打开它(或父页面)→ ••• → Connections → 加上这个 integration');
-          console.log('   · 压根还没有库 —— 改用 `init --notion --create`');
+          console.log(clog('in.dbFailed', { reason: err.message }));
+          console.log(clog('in.dbFailedWhy'));
+          console.log(clog('in.dbFailedA'));
+          console.log(clog('in.dbFailedA2'));
+          console.log(clog('in.dbFailedB'));
+          console.log(clog('in.dbFailedC'));
         }
       }
     }
 
     saveConfig({ notion: { token, overviewDbId: dbId } });
-    console.log(`\n✅ 已写入 ${CONFIG_PATH}(权限 600,已 gitignore,不会被提交)`);
-    console.log('\n接下来:');
-    console.log('  node tracker.js notion-check               ← 只读体检,确认这一侧全通了');
-    console.log('  node tracker.js guides --notion            ← 发现攻略页并登记');
-    console.log('  node tracker.js checkbox-sync --dry-run    ← 只算不写,先看会勾掉哪些');
-    if (!dbOk && dbId) console.log('\n(数据库那一步没通过的话,上面几条会失败,先按上面的提示修)');
+    console.log(clog('in.written', { path: CONFIG_PATH }));
+    console.log(clog('in.next'));
+    console.log(clog('in.nextCheck'));
+    console.log(clog('in.nextGuides'));
+    console.log(clog('in.nextCbs'));
+    if (!dbOk && dbId) console.log(clog('in.dbStepFailed'));
   } finally {
     io.close();
   }
@@ -451,8 +451,8 @@ async function cmdNotionCheck() {
   const dbId = config.notion?.overviewDbId;
 
   if (!token) {
-    console.log('❌ 没配 Notion token(config.json 的 notion.token)');
-    console.log('   跑 `node tracker.js init --notion` 配一下');
+    console.log(clog('nc.noToken'));
+    console.log(clog('nc.noTokenFix'));
     return;
   }
   const notion = new NotionClient(config);
@@ -473,56 +473,56 @@ async function cmdNotionCheck() {
   console.log(`✅ token:integration「${verdict.workspace}」`);
 
   if (problem(DB_PROBLEM.NO_DB_ID)) {
-    console.log('❌ 没配攻略数据库 ID(config.json 的 notion.overviewDbId)');
-    console.log('   `node tracker.js init --notion --create` 可以直接建一个');
+    console.log(clog('nc.noDbId'));
+    console.log(clog('nc.noDbIdFix'));
     return;
   }
 
   const unreadable = problem(DB_PROBLEM.DB_UNREADABLE);
   if (unreadable) {
     console.log(`❌ ${unreadable.message}`);
-    console.log('   两种可能,修法不一样:');
+    console.log(clog('nc.twoCauses'));
     for (const c of unreadable.causes) console.log(`   · ${c}`);
     return;
   }
-  console.log(`✅ 数据库:「${verdict.database.title}」`);
+  console.log(clog('nc.database', { title: verdict.database.title }));
   if (problem(DB_PROBLEM.NO_TITLE_PROP)) say(problem(DB_PROBLEM.NO_TITLE_PROP));
-  else console.log(`✅ 标题属性:${verdict.schema.titleProperty}`);
+  else console.log(clog('nc.titleProp', { name: verdict.schema.titleProperty }));
 
   const noStatus = problem(DB_PROBLEM.NO_STATUS_PROP);
   const missingOpts = problem(DB_PROBLEM.MISSING_OPTIONS);
   if (noStatus) {
-    console.log('ℹ️  没有状态属性 —— 合法。攻略照样能建、能同步勾选,只是');
-    console.log('   guide-status 那套(打满→Done、掉出 100%→Staged)没东西可写。');
-    console.log(`   想要的话加一个 Status 属性,选项:${noStatus.wanted.join(' / ')}`);
+    console.log(clog('nc.noStatus'));
+    console.log(clog('nc.noStatus2'));
+    console.log(clog('nc.noStatus3', { options: noStatus.wanted.join(' / ') }));
   } else if (missingOpts) {
-    console.log(`⚠️  状态属性:${missingOpts.property}(${missingOpts.type})`);
-    console.log(`   现有选项:${missingOpts.have.join(' / ') || '无'}`);
-    console.log(`   缺:${missingOpts.missing.join(' / ')}`);
-    console.log('   缺的那个会在程序真要写它的时候把命令拦下来:');
+    console.log(clog('nc.statusProp', { property: missingOpts.property, type: missingOpts.type }));
+    console.log(clog('nc.statusHave', { have: missingOpts.have.join(' / ') || clog('nc.statusNone') }));
+    console.log(clog('nc.statusMissing', { missing: missingOpts.missing.join(' / ') }));
+    console.log(clog('nc.statusBlocks'));
     if (missingOpts.missing.some((o) => ['Not started', 'In progress', 'Done'].includes(o))) {
-      console.log('     · guide-gen / guide-to-notion 建新页时按完成度写这三档');
+      console.log(clog('nc.statusUsedNew'));
     }
     if (missingOpts.missing.includes('Staged')) {
-      console.log('     · guide-status 把掉出 100% 的页面退回 Staged 时写它(每次开 Dashboard 都跑)');
+      console.log(clog('nc.statusUsedStaged'));
     }
     if (argv.includes('--fix')) {
       // Adding options **writes to the user's database**, so it only happens when explicitly asked,
       // and success is judged by the read-back rather than by the 200
       const r = await repairGuideDb(notion, dbId);
-      if (r.ok) console.log(`   🔧 已补上:${r.added.join(' / ')}(回读确认落地)`);
+      if (r.ok) console.log(clog('nc.fixed', { added: r.added.join(' / ') }));
       else if (r.reason === 'clobbered') {
-        console.log(`   ❌ 补的时候把已有选项冲掉了:${r.clobbered.join(' / ')} —— 请去 Notion 里加回来`);
+        console.log(clog('nc.clobbered', { names: r.clobbered.join(' / ') }));
       } else {
-        console.log(`   ❌ Notion 收下了请求但选项没落地,还缺:${r.stillMissing.join(' / ')}`);
-        console.log('      手动加:打开那个库 → 点这个属性 → 加选项,名字要一模一样(注意大小写)');
+        console.log(clog('nc.stillMissing', { names: r.stillMissing.join(' / ') }));
+        console.log(clog('nc.addByHand'));
       }
       reportReformat(r);
     } else {
-      console.log('   加 --fix 让程序试着补上,或者自己去 Notion 里加(名字要一模一样,注意大小写)');
+      console.log(clog('nc.tryFix'));
     }
   } else {
-    console.log(`✅ 状态属性:${verdict.schema.status.property}(${verdict.schema.status.type}),四个选项齐全`);
+    console.log(clog('nc.statusOk', { property: verdict.schema.status.property, type: verdict.schema.status.type }));
     // **A database built by an older version reaches this branch.** Its four options are all there,
     // and it is still out of date: everything grey, everything in one board column, no board view.
     // Gating --fix on a missing option would leave those users with a button that does nothing
@@ -534,16 +534,16 @@ async function cmdNotionCheck() {
     console.log(`❌ ${noWrite.message}`);
     console.log(`   ${noWrite.hint}`);
   } else if (argv.includes('--probe-write')) {
-    console.log('✅ 试写:建页 + 归档都通过(这个 integration 确实有写权限)');
+    console.log(clog('nc.probeOk'));
   }
   const stranded = problem(DB_PROBLEM.STRANDED_PROBE_PAGE);
   if (stranded) console.log(`⚠️  ${stranded.message}:${stranded.url}`);
 
   const pages = await notion.queryGuideDatabase(dbId);
   const registered = allGuides(db).filter((g) => g.kind === 'notion').length;
-  console.log(`✅ 库里 ${pages.length} 个页面,其中 ${registered} 个已登记进 guides 表`);
+  console.log(clog('nc.pages', { pages: pages.length, registered }));
   if (pages.length > registered) {
-    console.log(`   剩下 ${pages.length - registered} 个没有 \`appid: NNNNNN\` 行 —— 那是还没写的攻略,不是错误`);
+    console.log(clog('nc.unregistered', { n: pages.length - registered }));
   }
 }
 
@@ -559,19 +559,19 @@ const AI_PROVIDERS = [
   {
     key: 'deepseek',
     label: 'DeepSeek',
-    note: '有联网搜索。key 在 https://platform.deepseek.com/api_keys',
+    note: 'prov.deepseek',
     env: 'DEEPSEEK_API_KEY',
   },
   {
     key: 'anthropic',
     label: 'Anthropic (Claude)',
-    note: '有联网搜索。key 在 https://platform.claude.com/settings/keys',
+    note: 'prov.anthropic',
     env: 'ANTHROPIC_API_KEY',
   },
   {
     key: 'gemini',
     label: 'Google Gemini',
-    note: '有联网搜索。key 在 https://aistudio.google.com/apikey',
+    note: 'prov.gemini',
     env: 'GEMINI_API_KEY',
   },
 ];
@@ -588,41 +588,41 @@ const AI_PROVIDERS = [
 async function cmdInitAi() {
   const io = makeSecretReader();
   try {
-    console.log('\n配置 AI 攻略生成\n');
-    console.log('这个功能会调用 AI 联网查资料并写攻略。');
-    console.log('不用这个功能的话,整个项目的其他部分都不需要它。\n');
+    console.log(clog('ia.title'));
+    console.log(clog('ia.what'));
+    console.log(clog('ia.optional'));
 
     AI_PROVIDERS.forEach((p, i) => {
-      console.log(`  ${i + 1}) ${p.label.padEnd(20)} ${p.note}`);
+      console.log(`  ${i + 1}) ${p.label.padEnd(20)} ${clog(p.note)}`);
     });
-    const pick = (await io.ask(`\n选一个(1-${AI_PROVIDERS.length},回车用 1): `)) || '1';
+    const pick = (await io.ask(clog('ia.pick', { n: AI_PROVIDERS.length }))) || '1';
     const chosen = AI_PROVIDERS[Number(pick) - 1];
-    if (!chosen) throw new Error(`没有第 ${pick} 个选项`);
+    if (!chosen) throw new Error(clog('ia.badPick', { pick }));
 
-    const key = await io.askSecret(`${chosen.label} API Key(输入不会显示): `);
-    if (!key) throw new Error('没输入 key');
+    const key = await io.askSecret(clog('ia.keyAsk', { label: chosen.label }));
+    if (!key) throw new Error(clog('ia.keyMissing'));
 
-    const model = await io.ask('模型名(回车用这一家的默认值): ');
+    const model = await io.ask(clog('ia.modelAsk'));
 
     const ai = { provider: chosen.key, apiKey: key.trim(), model: model.trim() };
     const provider = await createProvider({ ai: { ...loadConfig().ai, ...ai } });
 
     // Send one real request. Minimised: no web tools attached, one character wanted back
-    stdout.write(`\n正在验证(模型 ${provider.model})…`);
-    const r = await provider.send({ messages: [{ role: 'user', content: '回复一个字:好' }] });
+    stdout.write(clog('ia.verifying', { model: provider.model }));
+    const r = await provider.send({ messages: [{ role: 'user', content: clog('ia.probe') }] });
     const verdict = checkResult(r);
-    if (!verdict.ok) throw new Error(`验证没通过:${verdict.reason}`);
-    console.log(`\r✅ 可用:${provider.name} / ${provider.model},回了「${r.text.trim().slice(0, 10)}」      `);
+    if (!verdict.ok) throw new Error(clog('ia.verifyFailed', { reason: verdict.reason }));
+    console.log(clog('ia.ok', { name: provider.name, model: provider.model, reply: r.text.trim().slice(0, 10) }));
     console.log(`   ${formatUsage(r.usage)}`);
 
     // An empty model is not written into the config, so the default in the code keeps applying (and
     // that one follows the version)
     saveConfig({ ai: model.trim() ? ai : { provider: ai.provider, apiKey: ai.apiKey } });
-    console.log(`\n✅ 已写入 ${CONFIG_PATH}(已 gitignore,不会被提交)`);
-    console.log('\n接下来:');
-    console.log('  node tracker.js ai-check              ← 验证联网搜索真的能用(重点看有没有发出搜索)');
-    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(开始之前会先问你一句)');
-    console.log(`\n(不想把 key 写进文件的话,也可以用环境变量 ${chosen.env}=… 临时覆盖)`);
+    console.log(clog('ia.written', { path: CONFIG_PATH }));
+    console.log(clog('in.next'));
+    console.log(clog('ia.nextCheck'));
+    console.log(clog('ia.nextGen'));
+    console.log(clog('ia.envNote', { env: chosen.env }));
   } finally {
     io.close();
   }
@@ -634,46 +634,46 @@ async function cmdInit() {
   const rl = createInterface({ input: stdin, output: stdout });
   try {
     const current = loadConfig();
-    console.log('\nSteam 成就追踪器 —— 本地版初始化\n');
+    console.log(clog('init.title'));
 
     if (current.steamApiKey && current.steamId) {
-      console.log(`已有配置:${CONFIG_PATH}`);
+      console.log(clog('init.hasConfig', { path: CONFIG_PATH }));
       console.log(`  STEAM_ID = ${current.steamId}`);
-      const again = await rl.question('要重新填一遍吗?(y/N) ');
+      const again = await rl.question(clog('init.again'));
       if (!/^y/i.test(again)) return;
     }
 
-    console.log('需要两个东西(都是一次性的):');
+    console.log(clog('init.needTwo'));
     console.log('  ① Steam Web API Key → https://steamcommunity.com/dev/apikey');
-    console.log('  ② SteamID64        → https://steamid.io(把你的个人资料链接粘进去)\n');
+    console.log(clog('init.needSteamId'));
 
     const key = (flagValue('key') ?? (await rl.question('① Steam Web API Key: '))).trim();
     const id = (flagValue('id') ?? (await rl.question('② SteamID64: '))).trim();
-    if (!key || !id) throw new Error('两项都要填写');
-    if (!/^\d{17}$/.test(id)) console.log('⚠️  SteamID64 一般是 17 位数字,你填的看起来不像,先存下了,同步失败的话回来检查这里');
+    if (!key || !id) throw new Error(clog('init.bothRequired'));
+    if (!/^\d{17}$/.test(id)) console.log(clog('init.oddId'));
 
     saveConfig({ steamApiKey: key, steamId: id });
     const config = loadConfig({ required: ['steam'] });
     openDb(config.dbPath);
-    console.log(`\n✅ 写入 ${CONFIG_PATH}(权限 600,已在 .gitignore 里)`);
-    console.log(`✅ 建好数据库 ${config.dbPath}`);
+    console.log(clog('init.written', { path: CONFIG_PATH }));
+    console.log(clog('init.dbMade', { path: config.dbPath }));
 
     // Verify with a real request immediately, so bad credentials are not discovered halfway through a
     // sync later
-    process.stdout.write('\n正在验证凭据…');
+    process.stdout.write(clog('init.verifying'));
     try {
       const steam = new SteamClient(config);
       const games = await steam.fetchOwnedGames(false);
-      console.log(`\r✅ 凭据可用:Steam 返回了 ${games.length} 款游戏          `);
+      console.log(clog('init.credsOk', { n: games.length }));
     } catch (err) {
-      console.log(`\r❌ 凭据验证失败:${err.message}`);
-      console.log('   检查一下 API Key 和 SteamID64,改 config.json 或者重跑 init 都行。');
+      console.log(clog('init.credsFailed', { reason: err.message }));
+      console.log(clog('init.credsFix'));
       return;
     }
 
-    console.log('\n接下来:');
-    console.log('  node tracker.js sync               ← 首次全量同步(库大的话要几分钟)');
-    console.log('  node tracker.js serve              ← 打开 Dashboard');
+    console.log(clog('in.next'));
+    console.log(clog('init.nextSync'));
+    console.log(clog('init.nextServe'));
   } finally {
     rl.close();
   }
@@ -1062,24 +1062,21 @@ async function cmdAiCheck() {
   if (flags.has('--models')) {
     const provider = await createProvider(config);
     if (typeof provider.listModels !== 'function') {
-      throw new Error(`${provider.name} 没有列模型的接口(目前只有 gemini 有)`);
+      throw new Error(clog('ac.noModelList', { name: provider.name }));
     }
     const models = await provider.listModels();
-    console.log(`\n${provider.name} 列出来的模型(${models.length} 个):\n`);
+    console.log(clog('ac.modelList', { name: provider.name, n: models.length }));
     for (const m of models) {
-      const limits = m.inputLimit ? `  输入上限 ${m.inputLimit} / 输出上限 ${m.outputLimit}` : '';
+      const limits = m.inputLimit ? clog('ac.modelLimits', { input: m.inputLimit, output: m.outputLimit }) : '';
       console.log(`  ${m.name.padEnd(34)}${m.display}${limits}`);
     }
     // Measured: the 2.5 series is no longer sold to new keys, yet it still appears in this list. This
     // endpoint says only "it exists", never "you can use it" — not saying so makes people try items
     // off the list over and over
     console.log(
-      `\n⚠️  列出来 ≠ 能用。这个接口只说模型存在,不反映你的 key 有没有权限或额度:\n` +
-        '    · 老版本可能已经"对新用户停止提供"(实测 2.5 系列)\n' +
-        '    · 有的在你这一档额度是 0(实测 Pro 系列在免费层)\n' +
-        '    真跑一次 `ai-check` 才知道。'
+      clog('ac.listedNotUsable')
     );
-    console.log(`\n当前用的是 ${provider.model}。临时换:--model <名字>;固定换:改 config.json 的 ai.model。`);
+    console.log(clog('ac.currentModel', { model: provider.model }));
     return;
   }
 
@@ -1088,31 +1085,34 @@ async function cmdAiCheck() {
   const def = target.defs.find((d) => d.description) ?? target.defs[0];
   const shownName = achName(def);
 
-  const system =
-    '你在帮一个 Steam 成就攻略作者做资料调研。回答用中文,只讲怎么达成,不要寒暄和总结段。';
+  // **The probe follows the interface language too.** It is a smoke test whose whole output the
+  // user reads, so a Chinese answer under an English interface is the same failure as a Chinese
+  // message would be — and it is the one place where the language reaches the model rather than the
+  // terminal
+  const system = clog('ac.probeSystem');
   const question =
     `游戏《${target.name}》(appid ${target.appid})的成就「${achName}」` +
     (def.description ? `,官方描述是「${def.description}」` : '') +
     // No specific tool is named: the two vendors call their tools different things, and hardcoding
     // one vendor's name leaves the other unable to understand it
-    '。请先上网搜一下这个成就的攻略,能抓到正文的话读一读,然后用三句话讲清楚怎么拿到它。';
+    clog('ac.probeTask');
 
   const provider = await providerFor(config, { needKey: !dry });
   const tools = provider.webTools();
 
   if (dry) {
     const body = provider.buildBody({ system, messages: [{ role: 'user', content: question }], tools });
-    console.log(`\n只组装不发送(--dry)。供应商 ${provider.name},模型 ${provider.model}。`);
-    console.log(`API key:${config.ai.apiKey ? '已配置(不打印)' : '**没配置**'}\n`);
-    console.log('请求体:');
+    console.log(clog('ac.dryRun', { name: provider.name, model: provider.model }));
+    console.log(clog(config.ai.apiKey ? 'ac.keySet' : 'ac.keyUnset'));
+    console.log(clog('ac.requestBody'));
     console.log(JSON.stringify(body, null, 2));
-    console.log('\n真跑一次:去掉 --dry。');
+    console.log(clog('ac.dryRunEnd'));
     return;
   }
 
-  console.log(`\n供应商 ${provider.name} · 模型 ${provider.model} · 联网工具 ${tools.length} 个`);
+  console.log(clog('ac.header', { name: provider.name, model: provider.model, tools: tools.length }));
   warnEnvOverrides();
-  console.log(`题目:《${target.name}》的成就「${achName}」\n`);
+  console.log(clog('ac.subject', { game: target.name, achievement: shownName }));
 
   const session = createSession(provider, { system, tools });
   const t0 = Date.now();
@@ -1121,7 +1121,7 @@ async function cmdAiCheck() {
       // With web access and deep thinking, several minutes of silence is normal. Printing the tool
       // activity is what separates "working" from "stuck"
       if (ev.type === 'tool') stdout.write(`\n  → ${ev.name} …`);
-      else if (ev.type === 'tool-result') stdout.write(ev.ok ? ' ok' : ` 失败(${ev.errorCode})`);
+      else if (ev.type === 'tool-result') stdout.write(ev.ok ? ' ok' : clog('ac.toolFailed', { code: ev.errorCode }));
       else if (ev.type === 'search') stdout.write(`\n  🔎 ${ev.query}`);
       else if (ev.type === 'text') stdout.write(ev.text);
     },
@@ -1130,10 +1130,13 @@ async function cmdAiCheck() {
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   const verdict = checkResult(r);
   console.log('\n\n' + '─'.repeat(60));
-  console.log(verdict.ok ? '✅ 端到端跑通' : `❌ 这轮不能用:${verdict.reason}`);
+  console.log(verdict.ok ? clog('ac.endToEnd') : clog('ac.roundUnusable', { reason: verdict.reason }));
   console.log(
-    `  stop_reason: ${r.stopReason}${r.rawStopReason && r.rawStopReason !== r.stopReason ? `(原值 ${r.rawStopReason})` : ''}` +
-      ` · 续跑 ${r.continuations} 次 · 耗时 ${secs}s`
+    clog('ac.stopReason', {
+      stop: r.stopReason,
+      raw: r.rawStopReason && r.rawStopReason !== r.stopReason ? clog('ac.rawStop', { raw: r.rawStopReason }) : '',
+      continuations: r.continuations, secs,
+    })
   );
   console.log('  ' + formatUsage(session.usage));
 
@@ -1141,16 +1144,16 @@ async function cmdAiCheck() {
   // did the model actually search**. Whether the free tier includes web access is not reliably
   // answerable from the docs, and the response is more reliable than the pricing page
   if (r.searchQueries?.length) {
-    console.log(`  🔎 实际发出 ${r.searchQueries.length} 次搜索:${r.searchQueries.slice(0, 5).join(' / ')}`);
+    console.log(clog('ac.searches', { n: r.searchQueries.length, queries: r.searchQueries.slice(0, 5).join(' / ') }));
   } else if (tools.length) {
-    console.log('  ⚠️  声明了联网工具,但这一轮一次搜索都没发出去 —— 可能是这个层级/模型不支持,');
-    console.log('      也可能是模型觉得不用查。攻略生成如果一直这样,内容就是它凭记忆编的');
+    console.log(clog('ac.noSearch'));
+    console.log(clog('ac.noSearch2'));
   }
   // A failed page fetch is normal on a per-URL basis; flagging it stops the next person who sees this
   // line from going off to investigate whether web access is broken
   for (const e of r.toolErrors ?? []) {
-    const tail = e.tool === 'fetch' ? '(逐个 URL 的常态,不影响这一轮)' : '';
-    console.log(`  ⚠️  ${e.tool === 'fetch' ? '抓页' : '搜索'}报错:${e.errorCode}${tail}`);
+    const tail = e.tool === 'fetch' ? clog('ac.toolFetchNote') : '';
+    console.log(clog('ac.toolError', { tool: clog(e.tool === 'fetch' ? 'ac.toolFetch' : 'ac.toolSearch'), code: e.errorCode, tail }));
   }
 }
 
@@ -1274,7 +1277,7 @@ async function cmdGuideGen() {
         : '\n这一步会联网研究并撰写,通常两到四分钟。继续?(y/N)'
     );
     io.close();
-    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+    if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
   }
 
   const provider = probe;
@@ -1510,7 +1513,7 @@ async function cmdGuidePatch(appid) {
       `\n这一步会联网研究并重写上面那 ${entries.length} 条,其余 ${pp.preflight.keeping} 个框一字不动。继续?(y/N)`
     );
     io.close();
-    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+    if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
   }
 
   const p = progressPrinter();
@@ -1592,7 +1595,7 @@ async function cmdGuidePatch(appid) {
  */
 async function cmdGuideToNotion() {
   const appid = positionalArgs()[0];
-  if (!appid) throw new Error('用法:node tracker.js guide-to-notion <appid> [--dry-run] [--yes]');
+  if (!appid) throw new Error(clog('gtn.usage'));
   // steam is for the page icon (a Steam game icon is added at creation time, matching the pages
   // guide-gen creates)
   const { config, db, steam } = withSteam();
@@ -1602,42 +1605,42 @@ async function cmdGuideToNotion() {
   const checked = plan.todos.filter((t) => t.checked).length;
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
-  console.log(`  来源:${plan.path}`);
-  console.log(`  ${plan.todos.length} 个 checkbox,其中 ${checked} 个已勾选(勾选状态原样带过去)`);
-  console.log('  转换成 ' + Object.entries(plan.byType).map(([k, n]) => `${n} 个 ${k}`).join('、'));
+  console.log(clog('gtn.source', { path: plan.path }));
+  console.log(clog('gtn.boxes', { n: plan.todos.length, checked }));
+  console.log(clog('gtn.converts', { breakdown: Object.entries(plan.byType).map(([k, n]) => clog('gtn.typeCount', { n, type: k })).join('、') }));
   console.log(
     plan.target.existingPage
-      ? `  写进 Notion 上已有的空页:${plan.target.existingPage.url}`
-      : '  在 Notion 攻略库里新建一页'
+      ? clog('gtn.intoExisting', { url: plan.target.existingPage.url })
+      : clog('gtn.intoNew')
   );
   if (plan.unconverted.length) {
-    console.log(`  ⚠️  ${plan.unconverted.length} 行 Notion 放不下原来的排版,会转为普通段落(文字不会丢失):`);
+    console.log(clog('gtn.unconverted', { n: plan.unconverted.length }));
     for (const line of plan.unconverted.slice(0, 8)) console.log(`       ${line}`);
   }
 
-  if (flags.has('--dry-run')) return console.log('\n--dry-run:什么都没写。');
+  if (flags.has('--dry-run')) return console.log(clog('gtn.dryRun'));
 
   if (!flags.has('--yes')) {
     const io = makeSecretReader();
-    const answer = await io.ask('\n搬过去?本地文件会挪进 guides/.migrated/(不删)(y/N)');
+    const answer = await io.ask(clog('gtn.confirm'));
     io.close();
-    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+    if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
   }
 
   const r = await migrateGuideToNotion(db, {
     notion, steam, config, appid, plan,
     onProgress(ev) {
-      if (ev.phase === 'create') console.log(`  建好页面,写 ${ev.blocks} 个块…`);
-      else if (ev.phase === 'fill') console.log(`  填进已有的空页,写 ${ev.blocks} 个块…`);
-      else if (ev.phase === 'verify') console.log('  回读逐条核对…');
+      if (ev.phase === 'create') console.log(clog('gtn.creating', { blocks: ev.blocks }));
+      else if (ev.phase === 'fill') console.log(clog('gtn.filling', { blocks: ev.blocks }));
+      else if (ev.phase === 'verify') console.log(clog('gtn.verifying'));
     },
   });
 
-  console.log(`\n✅ 搬完了,${r.count} 个 checkbox 逐条核对一致 → ${r.url}`);
+  console.log(clog('gtn.done', { n: r.count, url: r.url }));
   console.log(
     r.archivedTo
-      ? `  本地文件挪到 ${r.archivedTo}(没删)`
-      : '  ⚠️  本地文件没挪成,留在原地了 —— 不影响,发现逻辑不会把攻略抢回本地'
+      ? clog('gtn.archived', { path: r.archivedTo })
+      : clog('gtn.notArchived')
   );
 }
 
@@ -1751,8 +1754,8 @@ function cmdBackup() {
  */
 async function cmdRestore() {
   const file = positional[0];
-  if (!file) throw new Error('用法:node tracker.js restore <备份.zip>');
-  if (!existsSync(file)) throw new Error(`找不到 ${file}`);
+  if (!file) throw new Error(clog('restore.usage'));
+  if (!existsSync(file)) throw new Error(clog('restore.notFound', { file }));
 
   const buf = readFileSync(file);
   const { manifest, hasConfig, guideFiles } = inspectBackup(buf);
@@ -1760,26 +1763,31 @@ async function cmdRestore() {
   const { config, db } = withSteam({ requireSteam: false });
   const existing = countGames(db);
 
-  console.log('\n备份内容:');
+  console.log(clog('restore.contents'));
   if (manifest) {
-    console.log(`  备于 ${new Date(manifest.createdAt).toLocaleString('zh-CN')}` + (manifest.appVersion ? `(版本 ${manifest.appVersion})` : ''));
-    console.log(`  ${manifest.counts.games} 款游戏、${manifest.counts.achievements} 条成就、${manifest.counts.guides} 条攻略登记`);
+    console.log(clog('restore.madeAt', {
+      when: new Date(manifest.createdAt).toLocaleString(messageLanguage() === 'en' ? 'en-GB' : 'zh-CN'),
+      version: manifest.appVersion ? clog('restore.version', { version: manifest.appVersion }) : '',
+    }));
+    console.log(clog('restore.counts', {
+      games: manifest.counts.games, achievements: manifest.counts.achievements, guides: manifest.counts.guides,
+    }));
   } else {
-    console.log('  (没有清单,可能是手工改过的 zip —— 数据本身还是照读)');
+    console.log(clog('restore.noManifest'));
   }
-  console.log(`  ${guideFiles.length} 个攻略文件`);
-  console.log(`  ${hasConfig ? '含 config.json(本机密钥会被覆盖)' : '不含 config.json'}`);
+  console.log(clog('restore.guideFiles', { n: guideFiles.length }));
+  console.log('  ' + clog(hasConfig ? 'restore.hasConfig' : 'restore.noConfig'));
 
   const keepConfig = flags.has('--keep-config');
-  console.log('\n本机现在:');
-  console.log(`  ${existing} 款游戏 —— **会被替换成备份里的那些**`);
-  if (hasConfig && keepConfig) console.log('  --keep-config:本机密钥保留不动');
+  console.log(clog('restore.thisMachine'));
+  console.log(clog('restore.willReplace', { n: existing }));
+  if (hasConfig && keepConfig) console.log(clog('restore.keepConfig'));
 
   if (!flags.has('--yes')) {
     const rl = createInterface({ input: stdin, output: stdout });
     try {
-      const ans = (await rl.question('\n继续?(y/N) ')).trim().toLowerCase();
-      if (ans !== 'y' && ans !== 'yes') return console.log('没动任何东西。');
+      const ans = (await rl.question(clog('restore.confirm'))).trim().toLowerCase();
+      if (ans !== 'y' && ans !== 'yes') return console.log(clog('restore.aborted'));
     } finally {
       rl.close();
     }
@@ -1793,11 +1801,11 @@ async function cmdRestore() {
     restoreConfig: hasConfig && !keepConfig,
   });
 
-  console.log('\n✅ 恢复完成:');
-  for (const [t, n] of Object.entries(r.tables)) console.log(`  ${t} → ${n} 行`);
-  console.log(`  攻略文件 → ${r.guideFiles} 个`);
-  if (r.config) console.log('  config.json → 已覆盖(密钥来自备份)');
-  console.log('\n接着跑 `node tracker.js sync` 用 Steam 的最新数据刷一遍。');
+  console.log(clog('restore.done'));
+  for (const [t, n] of Object.entries(r.tables)) console.log(clog('restore.table', { table: t, n }));
+  console.log(clog('restore.guideFilesOut', { n: r.guideFiles }));
+  if (r.config) console.log(clog('restore.configOut'));
+  console.log(clog('restore.thenSync'));
 }
 
 function cmdLog() {
