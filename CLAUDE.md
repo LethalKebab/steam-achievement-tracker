@@ -374,6 +374,7 @@ Every one of these was paid for.
 | `version.test.js` | the four places a version is written, only one of which has a runtime reader |
 | `zip.test.js` / `backup.test.js` | the feature whose failure mode is losing the data it exists to save — CRC verified against published vectors, a corrupt file refused before any table is touched |
 | `cli-hints.test.js` | that terminal-only advice stays out of `lib/`'s thrown strings, and that every code carrying advice has an entry |
+| `i18n-boundary.test.js` | the split by audience — **everything a user reads at runtime is Chinese, everything a developer reads is English**. The comments were translated in one pass; this guards the runtime surfaces against a second one. Only `lib/`'s thrown messages are checked per string (85, no exemptions); the rest are density floors, because a per-string rule there needs an exemption list for command lines and brand words |
 
 **Every one of these fails quietly in production. That is the entry criterion.**
 
