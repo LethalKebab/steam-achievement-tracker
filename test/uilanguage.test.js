@@ -236,3 +236,106 @@ describe('the two keys stay two', () => {
     assert.doesNotMatch(html, /isEditMode[^\n]*\.lang\b/, 'and must not be gated on isEditMode');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Setup.html's own string table
+// ---------------------------------------------------------------------------
+
+/** Pull STRINGS out of the page and evaluate just that object — no DOM is involved in the table itself */
+function setupStrings() {
+  const html = read('Setup.html');
+  const at = html.indexOf('const STRINGS = {');
+  assert.ok(at > 0, 'STRINGS is gone from Setup.html');
+  const open = html.indexOf('{', at);
+  let depth = 0, i = open;
+  for (; i < html.length; i++) {
+    if (html[i] === '{') depth++;
+    else if (html[i] === '}' && --depth === 0) break;
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function('return ' + html.slice(open, i + 1))();
+}
+
+describe('the Setup.html string table', () => {
+  const STRINGS = setupStrings();
+  const html = read('Setup.html');
+  const script = strip(html.slice(html.indexOf('<script>', html.indexOf('</style>'))));
+  const keys = Object.keys(STRINGS);
+
+  test('every entry carries both languages', () => {
+    // A one-element entry falls back to Chinese and looks like a working page in English. This is
+    // the shape of a half-finished translation, and nothing at runtime reports it
+    const bad = keys.filter((k) => {
+      const v = STRINGS[k];
+      return !Array.isArray(v) || v.length !== 2 || !String(v[0]).length || !String(v[1]).length;
+    });
+    assert.deepEqual(bad, [], 'these entries are not a [zh, en] pair of non-empty strings');
+  });
+
+  test('a slot in one language is a slot in the other', () => {
+    // `{n}` dropped from one side does not throw — it renders the brace-less sentence, missing the
+    // number it existed to carry
+    const slots = (s) => (s.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
+    const mismatched = keys.filter((k) => slots(STRINGS[k][0]) !== slots(STRINGS[k][1]));
+    assert.deepEqual(mismatched, [], 'the two languages of these entries interpolate different things');
+  });
+
+  test('every key the page asks for exists', () => {
+    const asked = new Set();
+    for (const m of script.matchAll(/\bt\('([^']+)'/g)) asked.add(m[1]);
+    for (const m of html.matchAll(/data-t(?:-[a-z-]+)?="([^"]+)"/g)) asked.add(m[1]);
+    const missing = [...asked].filter((k) => !STRINGS[k]);
+    // t() returns the key itself for a miss, so this surfaces on screen as a dotted identifier
+    // rather than as an error — visible, but only to whoever happens to open that step
+    assert.deepEqual(missing, [], 'these keys are asked for but not defined');
+  });
+
+  test('every key defined is used', () => {
+    const used = new Set();
+    for (const m of script.matchAll(/\bt\('([^']+)'/g)) used.add(m[1]);
+    for (const m of html.matchAll(/data-t(?:-[a-z-]+)?="([^"]+)"/g)) used.add(m[1]);
+    // Set through dataset rather than written in the markup
+    for (const m of script.matchAll(/dataset\.t = '([^']+)'/g)) used.add(m[1]);
+    for (const m of script.matchAll(/setPageCopy\('([^']+)', '([^']*)', '([^']+)'\)/g)) {
+      used.add(m[1]); if (m[2]) used.add(m[2]); used.add(m[3]);
+    }
+    const orphans = keys.filter((k) => !used.has(k));
+    assert.deepEqual(orphans, [], 'these entries are translated but never shown — either wire them up or delete them');
+  });
+
+  test('no runtime Chinese is left loose in the script', () => {
+    // The table is the only place a user-facing string may live now. One left in the code is
+    // invisible in Chinese and shows up as a single Chinese line in an otherwise English page
+    const at = script.indexOf('const STRINGS = {');
+    const open = script.indexOf('{', at);
+    let depth = 0, i = open;
+    for (; i < script.length; i++) {
+      if (script[i] === '{') depth++;
+      else if (script[i] === '}' && --depth === 0) break;
+    }
+    const outside = script.slice(0, at) + script.slice(i + 1);
+    const loose = [...outside.matchAll(/'([^'\n]*[一-鿿][^'\n]*)'|`([^`]*[一-鿿][^`]*)`/g)].map((m) => m[1] ?? m[2]);
+    assert.deepEqual(loose, [], 'these strings have to move into STRINGS');
+  });
+
+  test('every Chinese run in the markup is keyed', () => {
+    // <style> has to go first: the CSS comments in this page quote Chinese labels to explain the
+    // rules they belong to, and a scan that keeps them is fed by the explanation rather than by
+    // the markup — the pit CLAUDE.md records for every source assertion in this repo
+    const markup = html
+      .slice(0, html.indexOf('<script>', html.indexOf('</style>')))
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/g, '')
+      .replace(/<!--[\s\S]*?-->/g, '');
+    const unkeyed = [];
+    // Each element that owns Chinese text of its own has to carry data-t, or it is frozen in
+    // Chinese however the interface is set
+    for (const m of markup.matchAll(/<(\w+)([^>]*)>([^<]*[一-鿿][^<]*)</g)) {
+      const [, tag, attrs, text] = m;
+      if (tag === 'title') continue;                       // set by applyStrings through docTitleKey
+      if (/data-t=/.test(attrs)) continue;
+      if (text.trim() === '中文') continue;                 // the language option, written in its own language on purpose
+      unkeyed.push(tag + ': ' + text.trim().slice(0, 40));
+    }
+    assert.deepEqual(unkeyed, [], 'these markup strings are not in the table');
+  });
+});

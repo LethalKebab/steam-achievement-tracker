@@ -1650,9 +1650,20 @@ describe('the bulk delete of guide backups', () => {
     const i = js.indexOf('arm(wipe,');
     assert.ok(i > 0, 'cannot find arm(wipe, ...)');
     const call = js.slice(i, js.indexOf('\n', i));
-    assert.match(call, /永久删除/);
-    assert.match(call, /\$\{list\.length\} 份/, 'it has to say how many are being deleted');
-    assert.match(call, /\$\{kb\(bytes\)\}/, 'it has to say how much is freed');
+    // The wording moved into the page's string table when the page became switchable. The rule is
+    // the same and is now checked in two halves: this line still has to pass **both** numbers, and
+    // the entry itself still has to spend them on stating the consequence
+    assert.match(call, /t\('arc\.wipe\.armed'/, 'the armed label has to come from the table');
+    assert.match(call, /n: list\.length/, 'it has to say how many are being deleted');
+    assert.match(call, /size: kb\(bytes\)/, 'it has to say how much is freed');
+    const armed = js.match(/'arc\.wipe\.armed':\s*\[([^\]]*)\]/);
+    assert.ok(armed, "cannot find the 'arc.wipe.armed' entry in STRINGS");
+    assert.match(armed[1], /永久删除/);
+    assert.match(armed[1], /for good|permanently/i, 'the English has to be as plain about it as the Chinese');
+    for (const slot of ['{n}', '{size}']) {
+      assert.ok(armed[1].split(slot).length - 1 >= 2,
+        `both languages have to spend ${slot} — one of them dropping it is how a confirmation stops stating the consequence`);
+    }
     assert.doesNotMatch(call, /确定/, 'the second click states the consequence, not 「确定」');
   });
 
@@ -1690,7 +1701,7 @@ describe('the bulk delete of guide backups', () => {
     const i = js.indexOf("const wipe = $('arc-wipe')");
     assert.ok(i > 0, 'cannot find the definition of wipe');
     const block = js.slice(i, js.indexOf('arm(wipe,', i));
-    assert.match(block, /wipe\.textContent = '全部删除'/, 'without a reset it stays on 永久删除 N 份');
+    assert.match(block, /wipe\.textContent = t\('arc\.wipe'\)/, 'without a reset it stays on 永久删除 N 份');
     assert.match(block, /wipe\.classList\.remove\('armed'\)/);
   });
 
@@ -1924,8 +1935,15 @@ describe('the exit from the setup page', () => {
     const i = code.indexOf('arm(back,');
     assert.ok(i > 0, 'cannot find arm(back, ...)');
     const line = code.slice(i, code.indexOf('\n', i));
-    assert.match(line, /放弃未保存的修改/, 'it has to say plainly what is being lost');
-    assert.doesNotMatch(line, /确定/, 'the same rule as the archive buttons');
+    // The copy moved into the string table when the page became switchable, so the rule is now
+    // enforced on the entry rather than on this line — but the line still has to be **reading**
+    // that entry, or the table is decoration and the wording lives wherever it used to
+    assert.match(line, /t\('act\.discard'\)/, 'the armed label has to come from the table');
+    const entry = code.match(/'act\.discard':\s*\[([^\]]*)\]/);
+    assert.ok(entry, "cannot find the 'act.discard' entry in STRINGS");
+    assert.match(entry[1], /放弃未保存的修改/, 'it has to say plainly what is being lost');
+    assert.match(entry[1], /Discard unsaved/i, 'and say it in English too, not merely differently');
+    assert.doesNotMatch(entry[1], /确定/, 'the same rule as the archive buttons');
   });
 
   test('with nothing changed it goes straight through — stopping every time trains the confirmation into something dismissed reflexively', () => {

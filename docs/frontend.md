@@ -437,6 +437,22 @@ It is the first-run gate **and** the settings page. Served instead of `Dashboard
 
 **Secret fields blank = keep current**, never = clear.
 
+### Every string on this page comes from a table
+
+`Setup.html` is the first surface converted for `uiLanguage`, so nothing on it is a literal any more. Two routes, and they are not interchangeable:
+
+- **Static markup** carries `data-t` (or `data-t-placeholder` / `data-t-value` / `data-t-aria-label`) and is repainted by `applyStrings`. The Chinese stays inline as the pre-JS default, so the page reads correctly before the script runs.
+- **Anything composed at runtime** calls `t(key, values)`, with `{slot}` for the interpolated parts.
+
+Four rules the tests pin, each of which fails silently:
+
+- **A whole sentence is one entry.** Several messages used to be spliced from a prefix, a joined list and a full stop. That works while one language is involved and breaks the moment word order moves — so `'已完成:' + list + '。'` became `msg.done.some`, and the list separator is its own entry because `;` and `; ` are not the same character.
+- **A line that mixes our words with an `<a>` or a `<code>` keeps its elements** and gives each text run its own key, rather than storing markup in the table. That pins the word order to the Chinese one, so the English for those runs is written to fit the same slots. It is the price of never putting a table string through `innerHTML` — the restore preview is on this page, and it renders a not-yet-trusted file.
+- **The page's own heading is set as a key, not as text.** It renames itself four times (fork, wizard, restore, settings); assigned as text, the next `applyStrings` repaints it from whichever key the markup shipped with and the page silently goes back to calling itself 初始设置.
+- **Interpolated text has to be repainted explicitly.** `applyStrings` cannot help it — there is no key on the element, because the value was spliced in when it was painted. Those painters register in `REPAINT`. Leaving one out is invisible in Chinese: the guide-archive line went on reading 「0 份 · 0 B」 in an otherwise entirely English page.
+
+Switching language repaints in place and **does not reload** — a reload would cost whichever step you were on.
+
 ### The first screen is a fork, and it is the one thing the program has to ask
 
 No config and no data looks **identical** for "first time ever" and "already a user, new machine" — nothing on disk distinguishes them, so this is the single question that cannot be inferred.
