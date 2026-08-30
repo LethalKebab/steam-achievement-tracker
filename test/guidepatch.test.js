@@ -1023,7 +1023,7 @@ describe('landPatchNotion (fake Notion)', () => {
 
   // **This pins whether what the user pasted in themselves survives.**
   // For a hidden-object game, positions have to be explained with screenshots, and the model
-  // cannot produce reliable in-game screenshots (SKILL_RULE_DISPOSITION's 「规则二」 records why
+  // cannot produce reliable in-game screenshots (SKILL_RULE_DISPOSITION's 「rule-2」 records why
   // that is not attempted). What is left is the user pasting images under the achievement — so a
   // partial rewrite must not delete them while it is there.
   //

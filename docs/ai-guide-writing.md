@@ -224,7 +224,7 @@ Three guards, each pinned by a test:
 
 - **A fully-unlocked game skips nothing.** What you'd save there is the entire guide, leaving a list of names and official descriptions that the Steam page already has. Someone generating a guide for a 100% game wants precisely the content.
 - **An overwrite skips nothing.** The guide already holds prose that was paid for, and "they unlocked it since" is not a reason to delete that text — there is nowhere to get it back. Only a fresh guide writes brief entries.
-- **A one-line entry is still a checkbox.** SKILL.md rule 一 forbids merging a group of achieved entries into checkbox-less prose; brief entries keep each `- [ ]` line and simply omit the body. Without that line `checkbox-sync` can never tick it, and the linter reports `missing-checkbox` immediately.
+- **A one-line entry is still a checkbox.** SKILL.md rule-1 forbids merging a group of achieved entries into checkbox-less prose; brief entries keep each `- [ ]` line and simply omit the body. Without that line `checkbox-sync` can never tick it, and the linter reports `missing-checkbox` immediately.
 
 Asking a shard what to write has **exactly one exit** (`chunkMessage`). With the two call sites each passing it separately, the one that forgot the skip-list would not error and would not lose content — that shard's list would just quietly vanish, on the path that is hardest to reach (a whole shard has to fail first).
 
@@ -462,7 +462,7 @@ Both of these were hit while measuring quality:
 
 ## Explicitly not doing
 
-- **Screenshots** (SKILL.md rule 二) — the model cannot produce reliable in-game screenshots.
+- **Screenshots** (SKILL.md rule-2) — the model cannot produce reliable in-game screenshots.
 - **Cost estimation** — waiting on measured data for search billing.
 - **Mandatory source citations** — decided against.
 - **Resuming across a process boundary** (Ctrl+C, a crash) — would require persisting the shard boundaries along with the prose, and the session context cannot be reused. With per-shard draft writes, one failure loses at most one shard, so the remaining value is small.

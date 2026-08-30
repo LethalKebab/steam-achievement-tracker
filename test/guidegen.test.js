@@ -832,34 +832,28 @@ test('an opening fence with no closing fence still has to be extracted cleanly (
 describe('the prompt and SKILL.md must not drift apart quietly', () => {
   const skillPath = new URL('../.claude/skills/achievement-guide-writing/SKILL.md', import.meta.url);
 
-  /** Rule headings in SKILL.md: `## 规则一:…` yields 「规则一」, `### 3.1 …` yields 「3.1」 */
   /**
    * Every entry in SKILL.md that needs a position taken on it.
    *
-   * **Unnumbered `###` subsections count too — that was added later.** It used to capture only
-   * `## 规则N` and `### N.N`, so adding an unnumbered subsection under any rule left the
-   * disposition table completely silent. Measured once: rule 二's disposition said 「没进 —— 截图
-   * 不在 v1 范围」, while the subsection added later, 「贴不了截图的时候:带时间点的视频链接」,
-   * **did go into the prompt**, so the disposition changed with nothing to prompt an update — and
-   * that passage in SKILL.md said 「(见「规则二」的处置)」, pointing at a record that says it did
-   * not go in.
+   * **The identifier lives in the heading as `[id]`, and never in its prose.** That is what lets the
+   * document be reworded — or translated — without moving a disposition key or any of the ~30
+   * citations of one in `CLAUDE.md`, `docs/ai-guide-writing.md`, `lib/ai-anthropic.js`,
+   * `lib/config.js`, `lib/guidelint.js`, `lib/notionblocks.js` and three tests. A heading's wording
+   * is prose; its id is an interface.
    *
-   * A subsection is keyed as `规则N/标题`. Changing a heading turns this test red, which is the
-   * intent: changing a subsection heading is exactly the moment to confirm whether it went into
-   * the prompt.
+   * **Every `##` and `###` needs one**, subsections included — an unnumbered subsection with no id
+   * is invisible here, and the disposition table then stays silent about a section that may well
+   * have gone into the prompt while the parent rule's entry says it did not.
+   *
+   * Adding a heading turns this test red, which is the intent: a new section is exactly the moment
+   * to say whether it went into the prompt.
    */
   function skillRuleKeys() {
     const text = readFileSync(skillPath, 'utf8');
     const keys = new Set();
-    let rule = null;
     for (const line of text.split('\n')) {
-      let m = line.match(/^##\s+(规则[一二三四五六七八九十]+)/);
-      if (m) { rule = m[1]; keys.add(rule); continue; }
-      m = line.match(/^###\s+(.+?)\s*$/);
-      if (!m) continue;
-      const title = m[1];
-      const numbered = title.match(/^(\d+\.\d+)/);
-      keys.add(numbered ? numbered[1] : `${rule}/${title}`);
+      const m = line.match(/^#{2,3}\s+\[([^\]]+)\]/);
+      if (m) keys.add(m[1]);
     }
     return keys;
   }
