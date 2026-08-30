@@ -244,6 +244,12 @@ The Dashboard's 搜索游戏名… and the rewrite dialog's 搜索成就 share o
 
 Esc only intercepts when the field has text, so an empty filter still lets the dialog close. `html-smoke.test.js` pins all four, mutation-tested.
 
+### A game has two names, and 搜索游戏名… matches either
+
+`games.name` is the localised title — the sync hunts for a Chinese one — so an English term matches none of the third of a library stored that way. The miss is not a blank table: `libHit === false` is the switch that sends the query on to the store, the store matches the English term perfectly well, and a game already owned comes back under 「Steam 上的结果」, where clicking it is refused as a duplicate.
+
+`name_en` is carried beside it for exactly this ([data.md](data.md)), and **both search tests go through `nameMatches`**: `hidingFilter` decides what the table draws, `libHit` decides whether to go to Steam at all. Judged separately they drift, and the drift presents as a row plainly in the table while the code reports the library as empty. The row still displays `name` only. `gamename.test.js` pins the shared route and the matching itself, mutation-tested.
+
 ---
 
 ## 9. The achievement panel

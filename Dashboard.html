@@ -2797,6 +2797,25 @@
     }
 
     /**
+     * Does this game answer to this search term? Matches **either** of its two names.
+     *
+     * `name` is deliberately the localised title — the sync hunts for a Chinese one — so an
+     * English term is `indexOf === -1` against it for a third of the library. `nameEn` is the same
+     * game's English store title, carried for exactly this test and empty when Steam has none.
+     *
+     * **Both callers have to come through here.** One decides what the table draws, the other
+     * whether to go to Steam at all; judged separately they drift, and the drift shows up as a row
+     * plainly in the table while the code believes the library has nothing — which is the state
+     * that offers to add a game already owned.
+     */
+    function nameMatches(g, needle) {
+      const q = String(needle || '').toLowerCase();
+      if (!q) return true;
+      return g.name.toLowerCase().indexOf(q) !== -1
+        || (g.nameEn || '').toLowerCase().indexOf(q) !== -1;
+    }
+
+    /**
      * The filter hiding this row, or null when nothing hides it.
      *
      * It returns **the control itself** rather than a boolean, because two callers want
@@ -2823,7 +2842,7 @@
       // **adding a game you already own all over again**
       if (f.search) {
         const box = document.getElementById('searchBox');
-        return g.name.toLowerCase().indexOf(f.search) === -1 ? { el: box, label: '搜索框' } : null;
+        return nameMatches(g, f.search) ? null : { el: box, label: '搜索框' };
       }
       // **Several chips intersect rather than union.** 「只看喜爱」 and 「只看家庭」 together =
       // favourited family games, which may well leave nothing — and that is correct: the five
@@ -4546,7 +4565,7 @@
       // things: 「找到了东西」 is not 「找到了你要的那个东西」. Somebody wanting to add Silksong
       // types silk, the library happens to contain a Silkroad — and the route to adding vanishes,
       // **without it being visible that it vanished**.
-      libHit = allGames.some(function(g) { return g.name.toLowerCase().indexOf(query.toLowerCase()) !== -1; });
+      libHit = allGames.some(function(g) { return nameMatches(g, query); });
       // Nothing in the library ⇒ Steam's results are the answer, so clear the space first and draw
       // the skeletons;
       // something in the library ⇒ stay quiet and decide whether to appear once the results are

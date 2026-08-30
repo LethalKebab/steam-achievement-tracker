@@ -204,7 +204,7 @@ function progressPrinter() {
   };
 }
 
-const PHASE_LABEL = { library: '检查新游戏', achievements: '刷新成就完成数', schema: '同步成就详情' };
+const PHASE_LABEL = { library: '检查新游戏', 'library-en': '补英文名', achievements: '刷新成就完成数', schema: '同步成就详情' };
 
 function makeProgressHandler(p) {
   return (ev) => {
@@ -701,7 +701,12 @@ async function cmdSync() {
   if (only.length === 0) {
     const r = await fullSync(db, steam, { onProgress, selection });
     p.done();
-    console.log(`  库:owned ${r.library.ownedCount} 款(Unvetted ${r.library.unvettedCount} 款),新增 ${r.library.added.length} 款,Unvetted 标记更新 ${r.library.restamped} 处`);
+    console.log(
+      `  库:owned ${r.library.ownedCount} 款(Unvetted ${r.library.unvettedCount} 款),新增 ${r.library.added.length} 款,Unvetted 标记更新 ${r.library.restamped} 处` +
+        // Only when something moved: after the first run this is 0 on every sync, and a permanent
+        // 「补英文名 0 款」 is noise on the one line that has to stay readable
+        (r.library.namedEn ? `,补英文名 ${r.library.namedEn} 款` : '')
+    );
     if (r.library.added.length) console.log(`     新增:${r.library.added.map((a) => a.name).join('、')}`);
     console.log(`  成就完成数:更新 ${r.stats.updated} 款,无成就系统 ${r.stats.noSystem} 款,留待重试 ${r.stats.retried} 款`);
     const s = r.stats.selection;
@@ -713,7 +718,10 @@ async function cmdSync() {
   } else {
     if (only.includes('library')) {
       const r = await syncLibrary(db, steam, { onProgress });
-      p.done(`  库:新增 ${r.added.length} 款,Unvetted 标记更新 ${r.restamped} 处`);
+      p.done(
+        `  库:新增 ${r.added.length} 款,Unvetted 标记更新 ${r.restamped} 处` +
+          (r.namedEn ? `,补英文名 ${r.namedEn} 款` : '')
+      );
     }
     if (only.includes('achievements')) {
       const r = await syncAchievementStats(db, steam, { onProgress });

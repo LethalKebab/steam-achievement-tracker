@@ -10,7 +10,7 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 
 | Table | Holds |
 |---|---|
-| `games` | one row per appid: name, achieved/total, completion rate, status, ♥/★/family flags |
+| `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
 | `achievements` | per-achievement detail — CN + EN names, description, hidden flag, icon URL |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) |
 | `sync_log` | every checkbox change, skip and failure, for after-the-fact auditing |
@@ -18,9 +18,9 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
+`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
 
-Five decisions worth knowing before you write queries:
+Six decisions worth knowing before you write queries:
 
 - **"This game has no achievements" is `has_achievements = 0` with `NULL` counts** — not a `0` total, and not a string like `N/A` sitting in a numeric column. `total IS NULL AND has_achievements IS NULL` means "not synced yet", which is a different thing.
 - **`status` and `sync_locked` are separate columns.** `status` is the label you see and sort by (`''`, `Unvetted`, `Manual`); `sync_locked` is what actually makes a sync skip the row. The Dashboard moves both together, but you can keep the label while re-enabling the daily refresh:
@@ -44,6 +44,16 @@ Five decisions worth knowing before you write queries:
   Both are stamped inside `updateGameStats`, which is the only moment the previous values are still visible. A row that has dropped below 100% looks exactly like a row that was never at 100%, and `has_achievements` is overwritten with `1` the instant new stats arrive — so neither event can be reconstructed afterwards from the row itself. That is also why the notifications start out empty on an existing database: nothing recorded these events before the columns existed, and there is no way to backfill them.
 
   A repeat of either event overwrites the stamp with the newer time, so "how long ago" always refers to the most recent occurrence.
+
+- **`name` is the localised title and `name_en` is the English one.** The sync hunts for a Chinese name for `name`, which is what the Dashboard displays; roughly a third of a Chinese-language library ends up stored under a title that contains no English at all. `name_en` exists so search can still match an English term — the row's appearance never changes.
+
+  Owned games get it free: `GetOwnedGames` ignores `l=` and answers in English either way, so one response fills the whole owned library. Rows that never appear there (family-shared, delisted, hand-added) cost one `appdetails?l=english` call each, once.
+
+  `''` means "no English title on record", and it is deliberately not a copy of `name` — those are two different facts, and a display layer needs to tell them apart to know whether a second name exists. `name_en = name` is a real and normal state: it is what an English-titled game stores, and also what a game published only in Japanese stores, since `l=english` answers with its Japanese title. Clearing it is safe — the next sync re-fills it:
+
+  ```sql
+  UPDATE games SET name_en = '' WHERE appid = '...';
+  ```
 
 - **`cover_url` is a cache, and it is normally `NULL`.** The Dashboard builds a cover URL from the appid — `cdn.akamai.steamstatic.com/steam/apps/<appid>/header.jpg` — which works for the large majority of a library and costs no extra request. It fails for games whose store art Steam has moved under a content-hash path (`store_item_assets/steam/apps/<appid>/<hash>/header.jpg`); that hash cannot be derived from anything we hold, and it differs per asset, so the header's hash tells you nothing about the capsule's. Measured over 314 games in August 2026: 9 failed, every one of them a recent appid, and four alternative host/path spellings 404'd for all of them.
 
