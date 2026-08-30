@@ -56,7 +56,7 @@ if (existsSync(unpacked)) {
   } catch (err) {
     console.error(
       `[postbuild] 收尾失败(${err.code}):先关掉正在运行的「${PRODUCT}」再 build。\n` +
-        `           dist/ 里现在是**上一次**的产物,没有被这次 build 更新。`
+        `           dist/ 里现在还是**上一次**的产物,这次 build 没有更新它。`
     );
     process.exit(1);
   }

@@ -18,7 +18,7 @@ Those pages live in a Notion **database**, not a plain page. The tool reads it w
 
 Already have a database you want to use? Run `node tracker.js init --notion` instead and paste its ID: open the database as a full page and take the 32-character hex string from the URL, the part *before* `?v=` (that part is the view ID, not the database).
 
-In the packaged app, step 3 is the **④ Notion 攻略同步** section of the setup page — reachable on first run, and afterwards from the **设置** button on the Dashboard. It has the same **帮我建一个** flow, and the same manual field if you already have a database. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
+In the packaged app, step 3 is the **第 3 步 · Notion 攻略同步** section of the setup page — reachable on first run, and afterwards from the **设置** button on the Dashboard. It has the same **新建一个攻略数据库** flow, and the same manual field if you already have a database. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
 
 ### What the database needs
 
@@ -311,7 +311,7 @@ the dialog: adjacent rows here often differ only by a timestamp, so moving the q
 from the row it is about is exactly the wrong thing to do. An armed button stays armed until
 you click elsewhere, press Escape, or close the panel — it does not time out.
 
-### Settings → Step 4 → 攻略备份
+### 设置 → 第 4 步 → 攻略备份
 
 The same files, sorted **biggest first**, with 查看 and 删除 — plus a **全部删除** at the foot
 of the list. This view answers a different question — what is taking up space, since every

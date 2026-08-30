@@ -99,7 +99,7 @@ Three things about it are load-bearing, and each fails silently if changed:
 
 Restoring **replaces** the tables — it is a restore, not a merge, so rows on this machine that aren't in the backup are gone. Guide *files* are the exception: they are written over, never deleted, because losing a hand-written `.md` is unrecoverable while an extra unreferenced file costs nothing.
 
-`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides, and any of them can be written back from that game's 备份 button on the Dashboard, so they are worth carrying to a new machine. It also means the zip grows with every overwrite (a Notion page dumps as ~120 KB of block JSON); Settings → Step 4 → 攻略备份 lists them biggest-first for pruning, with a 全部删除 at the foot of the list.
+`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides, and any of them can be written back from that game's 备份 button on the Dashboard, so they are worth carrying to a new machine. It also means the zip grows with every overwrite (a Notion page dumps as ~120 KB of block JSON); 设置 → 第 4 步 → 攻略备份 lists them biggest-first for pruning, with a 全部删除 at the foot of the list.
 
 ## Exporting to a spreadsheet
 

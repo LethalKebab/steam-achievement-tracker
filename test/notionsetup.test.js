@@ -1,5 +1,5 @@
 /**
- * Auto-creating the guide database (`init --notion --create` / the setup page's 「帮我建一个」)
+ * Auto-creating the guide database (`init --notion --create` / the setup page's 「新建一个攻略数据库」)
  * ------------------------------------------------
  * This file guards **a class of failure that surfaces very late**: the creation step reports
  * success, but what it created is not the kind of database the program can use. The user only

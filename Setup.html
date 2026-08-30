@@ -652,7 +652,7 @@
          gate, and there should be no exit before the credentials are filled in.
          `type="button"` must not be dropped — it is inside a <form>, where the
          default type is submit -->
-    <button type="button" class="back" id="back-btn" hidden>← 返回 Dashboard</button>
+    <button type="button" class="back" id="back-btn" hidden>← 返回面板</button>
     <!-- The way back from the fork. **Not the same thing** as `#back-btn`: that
          one goes to the Dashboard and is armed only in settings mode, while this
          one appears only during first-run setup and goes back to the two choices
@@ -687,7 +687,7 @@
     </ol>
 
     <section class="step" data-step="1">
-      <h2 class="step-title">Step 1 · Steam<span class="tag req">必填</span></h2>
+      <h2 class="step-title">第 1 步 · Steam<span class="tag req">必填</span></h2>
       <div class="hint">
         ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
         ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>(把你的个人资料链接粘进去查)
@@ -705,7 +705,7 @@
     </section>
 
     <section class="step" data-step="2" hidden>
-      <h2 class="step-title">Step 2 · AI 攻略生成<span class="tag opt">可选</span><span class="configured" id="ai-set" hidden>已配置</span></h2>
+      <h2 class="step-title">第 2 步 · AI 攻略生成<span class="tag opt">可选</span><span class="configured" id="ai-set" hidden>已配置</span></h2>
       <div class="hint">给没有攻略的游戏联网查资料、写一份。<strong>内容准不准没法自动检查,生成完自己读一遍。</strong></div>
       <label for="ai-provider">供应商</label>
       <select id="ai-provider" name="ai-provider">
@@ -721,11 +721,11 @@
            to be empty than to be wrong -->
       <input id="ai-key" name="ai-key" type="password" autocomplete="off">
       <label for="ai-model">模型(可选)</label>
-      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用这一家的默认模型">
+      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用默认模型">
     </section>
 
     <section class="step" data-step="3" hidden>
-      <h2 class="step-title">Step 3 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
+      <h2 class="step-title">第 3 步 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
       <!-- **Every <code> holds the literal wording from Notion's UI**, not what
            the thing is called — somebody following along is scanning the screen
            for those exact characters, and a conceptual name (「Internal
@@ -763,7 +763,7 @@
         <select id="notion-parent"></select>
         <label for="notion-title">数据库名字</label>
         <input id="notion-title" type="text" value="Steam 攻略">
-        <button type="button" class="btn-sub btn-wide" id="notion-make-go">建立</button>
+        <button type="button" class="btn-sub btn-wide" id="notion-make-go">创建</button>
       </div>
       <div class="msg" id="notion-msg" role="status"></div>
     </section>
@@ -773,7 +773,7 @@
          the first screen's fork — the library is empty then, and 「立即备份」
          would be meaningless -->
     <section class="step" data-step="4" hidden>
-      <h2 class="step-title" id="backup-title">Step 4 · 备份与恢复<span class="tag opt">可选</span></h2>
+      <h2 class="step-title" id="backup-title">第 4 步 · 备份与恢复<span class="tag opt">可选</span></h2>
 
       <!-- The three lines after a backup **are in order**: first what was
            produced (how many games, how large), then where it is, and only then
@@ -803,7 +803,7 @@
         <h2 class="step-title" id="restore-title">从备份恢复</h2>
         <div class="drop" id="drop" role="button" tabindex="0">
           <b>把备份 .zip 拖到这里</b>
-          或点一下选文件
+          或点击选择文件
         </div>
         <input type="file" id="bk-file" accept=".zip" hidden>
         <div class="bk-info" id="bk-info" hidden></div>
@@ -940,7 +940,7 @@
       }
       const skip = document.createElement('button');
       skip.type = 'button';
-      skip.textContent = '先这样,进 Dashboard';
+      skip.textContent = '先这样,进入面板';
       skip.onclick = () => { window.location.href = '/'; };
       bar.appendChild(skip);
       msg.appendChild(bar);
@@ -995,7 +995,7 @@
       $('id').value = s.steamId || '';
       $('notion-db').value = s.notionDbId || '';
       loadedNotionDb = s.notionDbId || '';
-      // With a database already configured, collapse 「帮我建一个」: the server-side
+      // With a database already configured, collapse 「新建一个攻略数据库」: the server-side
       // guard will always refuse it (creating a new one would repoint the config
       // at an empty database), and a button destined to be refused is the same
       // class of problem as a button that does nothing when pressed.
@@ -1021,7 +1021,7 @@
       if (isEditMode) {
         armBack();
         $('page-title').textContent = '设置';
-        $('page-subtitle').textContent = '点上面的标签跳到要改的那一节;没动的项目留空即可';
+        $('page-subtitle').textContent = '点上面的步骤跳到要改的那一节;没动的项目留空即可';
         document.title = '设置 · Steam 成就追踪器';
         // Not queried during first-run setup: the library is empty then, so the
         // archive directories necessarily are too, and the startRestore() path is
@@ -1337,12 +1337,12 @@
       $('backup-title').hidden = true;
       $('restore-title').hidden = true;
       $('page-title').textContent = '从备份恢复';
-      $('page-subtitle').textContent = '恢复后直接进 Dashboard,不用重新设置';
+      $('page-subtitle').textContent = '恢复后直接进入面板,不用重新设置';
       document.querySelector('.step[data-step="4"]').hidden = false;
     }
 
     /**
-     * 「帮我建一个」. Two steps: list the pages this integration can see, pick one,
+     * 「新建一个攻略数据库」. Two steps: list the pages this connection can see, pick one,
      * then create.
      *
      * The two steps are not only a matter of flow — **an empty list is itself a
@@ -1359,14 +1359,14 @@
     $('notion-make').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setNotionMsg('正在看这个 integration 能访问哪些页面…');
+      setNotionMsg('正在查询这个 connection 能访问的页面…');
       const r = await call('listNotionParents', [$('notion-token').value.trim()]);
       b.disabled = false;
       if (r.error) return setNotionMsg(r.error, 'error');
       if (!r.pages.length) {
         return setNotionMsg(
-          'token 有效,但这个 integration 一个页面都看不到 —— 上面第 2 步还没做:'
-            + '在 Notion 里打开要放攻略的页面 → ••• → Connections → 加上它,然后再点一次。',
+          'token 有效,但这个 connection 一个页面都看不到 —— 上面第 2 步还没做:'
+            + '在 Notion 里打开要放攻略的页面 → ••• → Add connections → 加上它,然后再点一次。',
           'error'
         );
       }
@@ -1381,13 +1381,13 @@
       }
       $('notion-create').hidden = false;
       setNotionMsg('找到 ' + r.pages.length + ' 个可用页面'
-        + (r.truncated ? '(还有更多没列完)' : '') + ',选一个再点建立。');
+        + (r.truncated ? '(还有更多没列完)' : '') + ',选一个再点创建。');
     });
 
     $('notion-make-go').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setNotionMsg('正在建…');
+      setNotionMsg('正在创建…');
       const r = await call('createNotionGuideDb', [
         $('notion-token').value.trim(), $('notion-parent').value, $('notion-title').value.trim(),
       ]);
@@ -1404,8 +1404,8 @@
       // change made at the same moment (a half-edited SteamID, say)
       markSaved('notion-db');
       $('notion-create').hidden = true;
-      setNotionMsg('建好了:「' + r.title + '」,状态选项 ' + r.options.join(' / ')
-        + '。ID 已填好并存盘。', 'ok');
+      setNotionMsg('创建成功:「' + r.title + '」,状态选项 ' + r.options.join(' / ')
+        + '。ID 已填好并保存。', 'ok');
     });
 
     // ---- Backup ------------------------------------------------------------
@@ -1504,7 +1504,7 @@
         put(when, true);
         put(' 的备份');
         br();
-        put(`${num(c.games)} 款游戏 · ${num(c.achievements)} 条成就 · ${num(r.guideFiles)} 个攻略文件`);
+        put(`${num(c.games)} 款游戏 · ${num(c.achievements)} 个成就 · ${num(r.guideFiles)} 个攻略文件`);
         br();
         put(r.hasConfig ? '包含密钥,恢复后不用重新设置' : '不含密钥,恢复后要重填 Steam API Key');
         // Only say things will be cleared when the library already holds
@@ -1512,7 +1512,7 @@
         // as scaremongering
         if (r.currentGames > 0) {
           br();
-          put(`本机现有的 ${num(r.currentGames)} 款游戏会被替换`, true);
+          put(`本机现有的 ${num(r.currentGames)} 款游戏将被替换`, true);
         }
         box.hidden = false;
         $('bk-restore').hidden = false;
@@ -1666,7 +1666,7 @@
         view.disabled = false;
         const body = document.createElement('pre');
         body.className = 'arc-body';
-        body.textContent = r.error ? r.error : r.text || '(空的)';
+        body.textContent = r.error ? r.error : r.text || '(内容为空)';
         li.appendChild(body);
         view.textContent = '收起';
       };
@@ -1758,7 +1758,7 @@
       // loud along with the way out (add the game back). With no orphans this line
       // is empty and collapsed by `:empty`, leaving no gap with margins
       $('arc-sum').textContent = orphans.length
-        ? `最上面 ${orphans.length} 份的游戏已经不在库里了,行上够不着 —— 想覆盖回去先把游戏加回来。`
+        ? `最上面 ${orphans.length} 份的游戏已从库里删除,面板上没有对应行 —— 想覆盖回去,先把游戏加回来。`
         : '';
 
       // 「全部删除」 deletes **the batch that was just painted**, so the ids are
@@ -1781,7 +1781,7 @@
         if (r.error) return setArcMsg(r.error, 'error');
         const bad = r.failed?.length ?? 0;
         setArcMsg(
-          `删了 ${r.deleted} 份,腾出 ${kb(r.bytes)}` + (bad ? `;${bad} 份没删掉` : ''),
+          `删了 ${r.deleted} 份,腾出 ${kb(r.bytes)}` + (bad ? `;${bad} 份删除失败` : ''),
           bad ? 'error' : 'ok');
         loadArchives();
       });
@@ -1840,7 +1840,7 @@
           const r = await call('saveAiConfig', [aiProvider, aiKey, aiModel]);
           if (r.error) throw new Error('AI:' + r.error);
           done.push(
-            `AI 可用(${r.provider} / ${r.model}${r.canSearch ? '' : ',注意这家没有联网搜索'})`
+            `AI 可用(${r.provider} / ${r.model}${r.canSearch ? '' : ',注意:该供应商不支持联网搜索'})`
           );
         }
 
@@ -1865,7 +1865,7 @@
         }
 
         msg.className = 'msg ok';
-        msg.textContent = '✅ ' + done.join(';') + ',正在打开 Dashboard…';
+        msg.textContent = '✅ ' + done.join(';') + ',正在打开面板…';
         // With Electron present, its getSetupStatus poll sees the configuration
         // complete and navigates the window back — completeSetup has already
         // updated config/steam in place, so no child-process restart is needed.

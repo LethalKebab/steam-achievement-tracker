@@ -138,7 +138,7 @@ If you have Node installed and want to check from a terminal:
 node tracker.js notion-check                # read-only health check: token, database, title property, status options, page count
 node tracker.js notion-check --fix          # try to add the missing status options
 node tracker.js notion-check --probe-write  # create a page and archive it, to prove write access
-node tracker.js init --notion --create      # the command-line version of 「帮我建一个」
+node tracker.js init --notion --create      # the command-line version of 「新建一个攻略数据库」
 ```
 
 Users of the packaged build need none of this — 「保存并验证」 on the settings page runs the same checks.

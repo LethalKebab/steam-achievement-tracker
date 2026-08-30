@@ -2414,16 +2414,16 @@
          clicked" becomes a pattern recognisable at a glance -->
     <div class="subtitle-row">
       <div class="topbar-status">
-        <div class="subtitle" id="lastUpdated">加载中...</div>
+        <div class="subtitle" id="lastUpdated">加载中…</div>
         <span class="sync-msg" id="syncMsg"></span>
       </div>
       <div class="topbar-actions">
         <button class="icon-btn" id="syncNowBtn"
-                title="立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。"
+                title="立即从 Steam 拉取最新数据。刷新页面只重读本地数据,不会联网。"
                 aria-label="立即同步"><span class="icon-glyph"><svg class="ic"><use href="#i-sync"/></svg></span></button>
         <!-- The packaged build has no address bar, and without an entry point here the settings page becomes unreachable after first-run setup -->
         <a class="icon-btn" href="/setup"
-           title="改 Steam 凭据、配置 AI 攻略生成和 Notion 攻略同步、备份与恢复"
+           title="修改 Steam 凭据、配置 AI 攻略生成和 Notion 攻略同步、备份与恢复"
            aria-label="设置"><span class="icon-glyph"><svg class="ic"><use href="#i-settings"/></svg></span></a>
         <span class="bell-wrap">
           <button class="icon-btn" id="bellBtn" type="button"
@@ -2547,7 +2547,7 @@
            API rather than the user's; the database column is still called Unvetted (it
            reaches CSV and is a compatibility surface). The explanation goes in a title and
            takes no screen space -->
-      <button type="button" class="chip" data-filter="unvetted" data-state="not" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上面那个平均完成率 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label">受限</span></button>
+      <button type="button" class="chip" data-filter="unvetted" data-state="not" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label">受限</span></button>
       <!-- Excluded at startup, for the same reason as 「已完成」: this page answers 「还有
            什么值得打」, and a game with no achievement system contributes nothing to it —
            it does not even have one target to aim at.
@@ -2567,7 +2567,7 @@
     thing, with CSS deciding which shows.
   -->
   <div id="gen-bar" role="status">
-    <button type="button" class="gen-close" id="genToggle" title="收起(任务还在跑)" aria-label="收起"><svg class="ic"><use href="#i-chevron"/></svg></button>
+    <button type="button" class="gen-close" id="genToggle" title="收起(任务仍在进行)" aria-label="收起"><svg class="ic"><use href="#i-chevron"/></svg></button>
     <button type="button" class="gen-close" id="genClose" title="关闭" aria-label="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
   </div>
@@ -2578,7 +2578,7 @@
 
   <div class="modal-overlay" id="addConfirmModal">
     <div class="modal-box">
-      <div style="font-size:13px; color:var(--text-3); margin-bottom:8px;">确认将这款游戏添加到列表？</div>
+      <div style="font-size:13px; color:var(--text-3); margin-bottom:8px;">将这款游戏添加到列表？</div>
       <div class="game-name" id="confirmGameName"></div>
       <!-- Ticked by default: the vast majority of manual additions are family-shared or
            gifted games — anything bought outright is already in GetOwnedGames and needs no
@@ -2693,7 +2693,7 @@
       </tr>
     </thead>
     <tbody id="gameTableBody">
-      <tr><td colspan="4" class="loading">正在读取数据...</td></tr>
+      <tr><td colspan="4" class="loading">正在读取数据…</td></tr>
     </tbody>
   </table>
   <div id="gallery" class="gallery" hidden></div>
@@ -3393,7 +3393,7 @@
         // changed
         const manualBadgeClass = 'badge-btn ' + (g.manual ? 'badge-btn-on' : 'badge-btn-off');
         const manualBadge = '<button class="' + manualBadgeClass + '" data-manual-appid="' + g.appid + '" title="'
-          + (g.manual ? '已锁定:不参与自动同步,数字由你自己填。点一下解锁' : '锁定这一行:停止自动同步')
+          + (g.manual ? '已锁定:不参与自动同步,数据需手动填写。点击解锁' : '锁定这一行:停止自动同步')
           + '" aria-label="' + (g.manual ? '已锁定' : '未锁定') + '">'
           + icon(g.manual ? 'lock' : 'unlock') + '</button>';
         const familyBadgeClass = 'badge-btn ' + (g.family ? 'badge-btn-family-on' : 'badge-btn-off');
@@ -3513,7 +3513,7 @@
           // A locked row is never synced automatically, so 「数据同步中」 would be a lie for it — it is waiting for you to fill it in
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">还没填数字</td></tr>';
         } else if (g.total === null) {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中...</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中…</td></tr>';
         } else {
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '">'
             + '<td>' + gameCell + '</td>'
@@ -3692,7 +3692,7 @@
       const gameName = game ? game.name : '';
       let inner;
       if (!data || data.loading) {
-        inner = '<div class="missing-header">正在查询缺失成就...</div>';
+        inner = '<div class="missing-header">正在查询缺失成就…</div>';
       } else if (data.error) {
         inner = '<div class="missing-header">' + escapeHtml(data.error) + '</div>';
       } else if (data.missingCount === 0) {
@@ -3851,7 +3851,7 @@
       if (!game) return;
       const ok = await askConfirm({
         title: '删除《' + game.name + '》?',
-        body: '从本地数据库删掉这一行,无法撤销。',
+        body: '从本地删掉这一行,无法撤销。',
         okText: '删除',
         danger: true,
       });
@@ -4079,7 +4079,7 @@
         view.disabled = false;
         const body = document.createElement('pre');
         body.className = 'arc-body';
-        body.textContent = r && r.error ? r.error : ((r && r.text) || '(空的)');
+        body.textContent = r && r.error ? r.error : ((r && r.text) || '(内容为空)');
         li.appendChild(body);
         view.textContent = '收起';
       };
@@ -4099,8 +4099,8 @@
         // over again
         setArcMsg(
           (r.kind === 'notion' ? '整页写回 ' + r.count + ' 条' : '写回 ' + r.file)
-            + (r.unregisteredNotion ? ',Notion 那一页不再是登记的攻略' : '')
-            + (r.backedUpTo ? ';被顶掉的那份已存进这个列表' : ''),
+            + (r.unregisteredNotion ? ';Notion 那一页不再是登记的攻略' : '')
+            + (r.backedUpTo ? ';原来那份已存进这个列表' : ''),
           'ok'
         );
         await refreshArchives();
@@ -4137,7 +4137,7 @@
       for (const e of list) ul.appendChild(arcRow(e));
       const bytes = list.reduce(function(n, e){ return n + e.bytes; }, 0);
       document.getElementById('arcSum').textContent = list.length
-        ? list.length + ' 份 · ' + arcKb(bytes) + ' · 覆盖会先把现在那一份也存进来'
+        ? list.length + ' 份 · ' + arcKb(bytes) + ' · 覆盖前会先备份当前版本'
         : '这个游戏没有备份了';
     }
 
@@ -4291,7 +4291,7 @@
 
       const hidden = hidingFilter(game, currentFilters());
       btn.textContent = hidden
-        ? '已添加: ' + game.name + '(被「' + hidden.label + '」挡住了,点这里查看)'
+        ? '已添加: ' + game.name + ' (被「' + hidden.label + '」挡住了,点这里查看)'
         : '已添加: ' + game.name + ' —— 点这里查看';
       btn.title = '跳到这一行';
       btn.addEventListener('click', function() {
@@ -4321,7 +4321,7 @@
     }
 
     function addSelectedGame(appid, name, family) {
-      setAddMsg('添加中...');
+      setAddMsg('添加中…');
 
       rpc.withSuccessHandler(function(result) {
         if (result && result.error) {
@@ -5108,7 +5108,7 @@
       syncStarting = true;
       syncBtn.disabled = true;
       syncMsg.className = 'sync-msg';
-      syncMsg.textContent = '正在启动...';
+      syncMsg.textContent = '正在启动…';
 
       rpc.withSuccessHandler(function(res) {
         if (res && res.error) {
@@ -5156,16 +5156,16 @@
       syncBtn.classList.toggle('spinning', Boolean(s.running));
       syncBtn.title = s.running
         ? '正在同步…'
-        : '立刻向 Steam 拉一次最新数据。刷新页面只会重读本地数据库,不会联网。';
+        : '立即从 Steam 拉取最新数据。刷新页面只重读本地数据,不会联网。';
 
-      // Only progress notices like "正在启动..." are cleared. An error has to stay: the poll comes
+      // Only progress notices like "正在启动…" are cleared. An error has to stay: the poll comes
       // every 3 seconds, and clearing unconditionally would wash away an error that has just
       // appeared, which is the click's only feedback.
       // (A scenario that genuinely happens: the CLI or another tab has just started a sync and the
       // button is clicked before its poll notices)
       if (s.running && !syncMsg.classList.contains('error')) syncMsg.textContent = '';
 
-      // Conversely, once a sync finishes, "同步已经在跑了" is out of date — leaving it up is a false
+      // Conversely, once a sync finishes, "同步正在进行" is out of date — leaving it up is a false
       // alarm.
       if (wasSyncRunning && !s.running) {
         syncMsg.className = 'sync-msg';
@@ -5576,7 +5576,7 @@
             '本地文件挪进 guides/.migrated/,不会删。',
           ];
           if (p.unconverted && p.unconverted.length) {
-            lines.push(GEN_WARN + ' ' + p.unconverted.length + ' 行排版会降级成普通段落,文字不丢。');
+            lines.push(GEN_WARN + ' ' + p.unconverted.length + ' 行特殊排版会转为普通段落,文字不会丢失。');
           }
           const goMigrate = await askConfirm({
             title: '把《' + p.game + '》的攻略搬到 Notion?',
@@ -5598,7 +5598,7 @@
               showGen(
                 GEN_OK + ' 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
                   '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开 Notion 页面</a>' +
-                  (r.archivedTo ? '<br><span class="warn">本地文件在 guides/.migrated/</span>' : ''),
+                  (r.archivedTo ? '<br><span class="warn">本地文件已移入 guides/.migrated/</span>' : ''),
                 false, false
               );
               // The success path used to release nothing — it relied on loadDashboard() repainting a
@@ -5731,7 +5731,7 @@
             b.disabled = false;
             armed = false;
             b.classList.remove('armed');
-            b.textContent = '恢复不了:' + err.message;
+            b.textContent = '恢复失败:' + err.message;
           }).restoreGuideArchive(b.getAttribute('data-restore-backup'));
         });
       });
@@ -5764,7 +5764,7 @@
             b.disabled = false;
             armed = false;
             b.classList.remove('armed');
-            b.textContent = '删不掉:' + err.message;
+            b.textContent = '删除失败:' + err.message;
           }).deleteGuideArchive(b.getAttribute('data-drop-backup'));
         });
       });
@@ -5780,7 +5780,7 @@
             if (res && res.error) b.textContent = res.error;
           }).withFailureHandler(function(err) {
             b.disabled = false;
-            b.textContent = '打不开:' + err.message;
+            b.textContent = '打开失败:' + err.message;
           }).revealGuideFile(appid);
         });
       });
@@ -5851,7 +5851,7 @@
         const failed = (r.chunkFailures || [])
           .map(function (c) {
             return '<br><span class="warn">第 ' + c.chunk + '/' + c.of + ' 段(' + c.count +
-              ' 个成就)没写出来:' + escapeHtml(String(c.reason).split('\n')[0]) + '</span>';
+              ' 个成就)未生成:' + escapeHtml(String(c.reason).split('\n')[0]) + '</span>';
           })
           .join('');
         return '<span class="warn">' + GEN_WARN + ' 《' + game +
@@ -5931,7 +5931,7 @@
       // like the sync being broken. Listing the names is what tells them which
       const unsyncable = (r.unsyncable || []).length
         ? '<br><span class="warn">' + GEN_WARN + ' ' + r.unsyncable.length +
-          ' 个成就同名、Steam 上描述是空的,自动勾选认不出它们,要手动勾:' +
+          ' 个成就同名、Steam 上描述是空的,自动勾选认不出它们,需手动勾选:' +
           escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
           (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
         : '';
@@ -5943,10 +5943,10 @@
       const pat = r.patched;
       const preExisting = pat && pat.preExisting
         ? '<br><span class="warn">' + GEN_WARN + ' 攻略里还有 ' + pat.preExisting +
-          ' 条本来就有的校验问题,这次没碰</span>'
+          ' 条原有的校验问题,本次未处理</span>'
         : '';
       const headline = pat
-        ? GEN_OK + ' 《' + game + '》已改 ' + pat.rewrote + ' 条 · 其余没动 · ' + where + restoreBackup + dropBackup
+        ? GEN_OK + ' 《' + game + '》已改 ' + pat.rewrote + ' 条 · 其余不变 · ' + where + restoreBackup + dropBackup
         : GEN_OK + ' 《' + game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where + restoreBackup + dropBackup;
       return headline + noResearch + unsyncable + preExisting + warnLines(f.warnings) +
         '<br><span class="warn">内容需要你自己过一遍。</span>';

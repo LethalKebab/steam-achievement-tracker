@@ -401,10 +401,10 @@ describe('begin must not erase the previous result either', () => {
     // that result
     const s = createGuideGenState();
     s.begin('1', 'A', 3);
-    s.warn('第 3 段没写出来');
+    s.warn('第 3 段未生成');
     s.end(null, { ok: true });
     s.begin('2', 'B', 3);
-    assert.deepEqual(s.snapshot().finished[0].warnings, ['第 3 段没写出来']);
+    assert.deepEqual(s.snapshot().finished[0].warnings, ['第 3 段未生成']);
     assert.deepEqual(s.snapshot().warnings, [], 'after begin the current round should not carry the previous round warnings');
   });
 
