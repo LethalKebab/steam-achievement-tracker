@@ -1281,8 +1281,20 @@ describe('the 「生成」 button on the Dashboard', () => {
   // one word of them. This test exists to stop it growing back — every time someone wants to add
   // "let me explain while we are here", it fails first
   test('a confirmation dialog is short — no bulleted lists, no explanations', () => {
-    const bodies = [...html.matchAll(/askConfirm\(\{[\s\S]{0,120}?body:\s*'([^']*)'/g)].map((m) => m[1]);
-    assert.ok(bodies.length >= 1, 'at least one string body should be caught (the delete dialog)');
+    // The bodies moved into the page's string table, so they are read from there — the rule is
+    // about the shape of a confirmation, not about where the sentence is stored
+    const table = html.slice(html.indexOf('const STRINGS = {'));
+    const keys = [...html.matchAll(/askConfirm\(\{[\s\S]{0,160}?body:\s*t\('([^']+)'/g)].map((m) => m[1]);
+    assert.ok(keys.length >= 1, 'at least one table-backed body should be caught (the delete dialog)');
+    const bodies = keys.flatMap((k) => {
+      // Sliced by hand rather than built into a RegExp: the key contains a dot, and every attempt
+      // to escape one through a generated pattern in this repo has produced a broken expression
+      const at = table.indexOf("'" + k + "':");
+      assert.ok(at > 0, `cannot find the '${k}' entry in STRINGS`);
+      const entry = table.slice(at, table.indexOf('],', at));
+      // both languages: a confirmation that grew a bulleted list in translation is just as bad
+      return [...entry.matchAll(/'([^']*)'/g)].map((x) => x[1]).slice(1);
+    });
     for (const b of bodies) {
       const lines = b.split('\\n').filter((l) => l.trim());
       assert.ok(lines.length <= 3, `a confirmation is at most three lines, this one has ${lines.length}: ${b.slice(0, 60)}`);
@@ -1291,8 +1303,8 @@ describe('the 「生成」 button on the Dashboard', () => {
   });
 
   test('the generate dialog is one question with no body — generating is reversible, so there is nothing to state first', () => {
-    const call = html.slice(html.indexOf("askConfirm({ title: '为《'"), html.indexOf("okText: '生成'") + 20);
-    assert.ok(call.includes("title: '为《'"), 'the generate dialog is still there');
+    const call = html.slice(html.indexOf("askConfirm({ title: t('gen.title'"), html.indexOf("okText: t('gen.ok')") + 20);
+    assert.ok(call.includes("title: t('gen.title'"), 'the generate dialog is still there');
     assert.ok(!/\bbody:/.test(call), 'the generate dialog should no longer have a body');
     // But "the content is unverified" must not disappear entirely; it moved to the result line
     assert.match(html, /内容需要你自己过一遍/, 'once a guide is written it still has to say honestly that the content is unverified');

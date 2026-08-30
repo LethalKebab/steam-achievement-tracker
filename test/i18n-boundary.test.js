@@ -164,6 +164,40 @@ describe('nothing lib/ says to a user is a loose literal any more', () => {
     assert.deepEqual(stale, [], 'these exemptions no longer match anything in the file: ' + stale.join(' | '));
   });
 
+  /**
+   * **The rule above reaches `new Error` and `{error: …}` and nothing else.** `lib/api.js` also hands
+   * the Dashboard user-facing text in ordinary data fields — the last-synced line, a game with no
+   * name, the placeholder for a hidden achievement — and one of those was still Chinese in an
+   * otherwise entirely English page until a browser showed it. Nothing in the suite could have.
+   *
+   * So this file is checked whole: every Chinese literal in it is either composed through `msg` or
+   * named here with its reason.
+   */
+  test('lib/api.js hands out no Chinese it did not compose', () => {
+    const KEEP = {
+      // Sent **to the model**, not to the user: a one-character reply is the cheapest probe that
+      // proves a key works, and asking in another language changes what is being tested
+      '回复一个字:好': 'the AI verification prompt',
+      // The default title of a database created **in the user's Notion**. It is content, not
+      // interface, and the settings page sends its own title through anyway
+      'Steam 攻略': 'the default Notion database title',
+    };
+    // **Line-based on purpose.** Two attempts to pull the string literals out of the source both
+    // produced false positives — a scan that pairs quotes straddles a regex literal containing
+    // Chinese, and one that pairs backticks straddles two unrelated template literals, reporting
+    // everything in between. Asking "does this line carry Chinese, and does it compose it" needs no
+    // parsing at all and cannot straddle anything.
+    const loose = stripComments(read(join('lib', 'api.js')))
+      .split('\n')
+      .filter((l) => CJK.test(l))
+      .filter((l) => !l.includes('msg('))
+      .filter((l) => !Object.keys(KEEP).some((k) => l.includes(k)))
+      .map((l) => l.trim().slice(0, 70));
+    assert.deepEqual(loose, [],
+      'these reach the Dashboard as text without going through lib/messages.js, so they stay Chinese '
+      + 'while everything around them switches: ' + loose.join(' | '));
+  });
+
   test('the exempt strings are still Chinese', () => {
     // They are outside the table, so the table's own check cannot reach them — but they are read by
     // the same person, and the original rule still applies to whatever has not moved yet

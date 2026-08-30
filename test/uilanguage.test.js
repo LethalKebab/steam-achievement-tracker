@@ -241,11 +241,11 @@ describe('the two keys stay two', () => {
 // Setup.html's own string table
 // ---------------------------------------------------------------------------
 
-/** Pull STRINGS out of the page and evaluate just that object — no DOM is involved in the table itself */
-function setupStrings() {
-  const html = read('Setup.html');
+/** Pull STRINGS out of a page and evaluate just that object — no DOM is involved in the table itself */
+function pageStrings(file) {
+  const html = read(file);
   const at = html.indexOf('const STRINGS = {');
-  assert.ok(at > 0, 'STRINGS is gone from Setup.html');
+  assert.ok(at > 0, 'STRINGS is gone from ' + file);
   const open = html.indexOf('{', at);
   let depth = 0, i = open;
   for (; i < html.length; i++) {
@@ -256,9 +256,42 @@ function setupStrings() {
   return new Function('return ' + html.slice(open, i + 1))();
 }
 
-describe('the Setup.html string table', () => {
-  const STRINGS = setupStrings();
-  const html = read('Setup.html');
+/**
+ * The two copies of the i18n mechanism are one copy
+ * ------------------------------------------------
+ * **Zero dependencies allows no shared script** (CLAUDE.md's stack constraints: no build step, a
+ * page is one big string), so `t` / `applyStrings` / `REPAINT` are stored once in each page — the
+ * same arrangement the `:root` design tokens already live under, and pinned the same way.
+ *
+ * Two hand-copied things will certainly diverge, and the divergence is silent: a fix to the slot
+ * substitution or the attribute list lands on one page, the other keeps the old behaviour, and
+ * nothing anywhere reports it. What is compared is the text with whitespace collapsed — both pages
+ * indent this block identically, but a reflow should not be a false alarm.
+ */
+describe('the i18n mechanism in the two pages is one copy', () => {
+  const block = (file) => {
+    const html = read(file);
+    const a = html.indexOf("    let LANG = 'zh';");
+    assert.ok(a > 0, `cannot find the mechanism in ${file}`);
+    const b = html.indexOf('function repaintInterpolated', a);
+    assert.ok(b > a, `cannot find the end of the mechanism in ${file}`);
+    const end = html.indexOf('    }', b) + '    }'.length;
+    return html.slice(a, end).replace(/\s+/g, ' ').trim();
+  };
+
+  test('Setup.html and Dashboard.html carry the same mechanism', () => {
+    const a = block('Setup.html');
+    const b = block('Dashboard.html');
+    assert.ok(a.length > 800, `only ${a.length} characters were caught; the extraction is broken, not the rule satisfied`);
+    assert.equal(a, b,
+      'the i18n mechanism has diverged between the two pages — one was fixed and the other forgotten, '
+      + 'and the symptom is that a slot stops being substituted, or an attribute stops being repainted, on one page only');
+  });
+});
+
+for (const PAGE of ['Setup.html', 'Dashboard.html']) describe('the ' + PAGE + ' string table', () => {
+  const STRINGS = pageStrings(PAGE);
+  const html = read(PAGE);
   const script = strip(html.slice(html.indexOf('<script>', html.indexOf('</style>'))));
   const keys = Object.keys(STRINGS);
 
@@ -296,6 +329,11 @@ describe('the Setup.html string table', () => {
     for (const m of html.matchAll(/data-t(?:-[a-z-]+)?="([^"]+)"/g)) used.add(m[1]);
     // Set through dataset rather than written in the markup
     for (const m of script.matchAll(/dataset\.t = '([^']+)'/g)) used.add(m[1]);
+    // Keys are also reached indirectly — `t(cond ? 'a' : 'b')`, a lookup table of keys, a
+    // dataset assignment. Rather than enumerate every shape, count a key as used if the script
+    // mentions it as a quoted string at all: the question here is whether an entry is dead
+    // weight, and a key that appears nowhere in the file certainly is
+    for (const m of script.matchAll(/'([a-z][\w.]*)'/g)) used.add(m[1]);
     for (const m of script.matchAll(/setPageCopy\('([^']+)', '([^']*)', '([^']+)'\)/g)) {
       used.add(m[1]); if (m[2]) used.add(m[2]); used.add(m[3]);
     }

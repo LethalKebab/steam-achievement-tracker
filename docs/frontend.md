@@ -431,6 +431,18 @@ Every armed rule in both pages is therefore written as a pair (`.x.armed, .x.arm
 
 ---
 
+## 12b. Both pages read their text from a table
+
+`Setup.html` and `Dashboard.html` each hold a `STRINGS` table of `[zh, en]` pairs and the same ~56-line mechanism (`t`, `applyStrings`, `REPAINT`). **Zero dependencies allows no shared script**, so the mechanism is stored twice — the same arrangement as the `:root` design tokens, and `uilanguage.test.js` compares the two copies the same way. A divergence is silent: a fix to slot substitution lands on one page and not the other.
+
+Pairs rather than two locale files, deliberately. A key missing from a second file falls back and looks fine; a pair makes a half-translation a structural fact the tests can see — both halves present, the Chinese half genuinely Chinese, the `{slots}` matching, no key used-but-undefined or defined-but-unused, and no Chinese left loose outside the table.
+
+The two pages differ in one way. `Setup.html` repaints in place on a language change, so it needs a `REPAINT` registry for text that was interpolated when it was painted — leaving one out is invisible in Chinese and shows up as a single stale line in an otherwise English page, which is how the guide-archive counter was found still reading 「0 份 · 0 B」. The Dashboard needs no such registry: `render()` rebuilds the whole table from `allGames`, and there is no toggle on the page — it lives on `/setup`, and coming back is a full navigation.
+
+**Dates follow the interface, not the machine.** `lastUpdated` is formatted server-side against `uiLanguage`; a page reading in English with a `zh-CN` timestamp on it is the one line that looks like a bug rather than a choice.
+
+---
+
 ## 13. The setup page (`Setup.html`)
 
 It is the first-run gate **and** the settings page. Served instead of `Dashboard.html` when `config.json` has no Steam credentials; reachable any time from the Dashboard's 设置 button. `getSettings` drives the two modes.
