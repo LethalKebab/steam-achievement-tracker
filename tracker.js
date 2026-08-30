@@ -274,7 +274,7 @@ function makeSecretReader() {
  * 「数据库 ID 填错了」.
  */
 async function createGuideDbInteractively(io, probe) {
-  stdout.write('正在看这个 integration 能访问哪些页面…');
+  stdout.write('正在查询这个 connection 能访问的页面…');
   const { pages, truncated } = await probe.searchPages();
   if (!pages.length) {
     console.log('\r⚠️  这个 integration 一个页面都看不到                    ');
@@ -603,7 +603,7 @@ async function cmdInit() {
 
     const key = (flagValue('key') ?? (await rl.question('① Steam Web API Key: '))).trim();
     const id = (flagValue('id') ?? (await rl.question('② SteamID64: '))).trim();
-    if (!key || !id) throw new Error('两个都得填');
+    if (!key || !id) throw new Error('两项都要填写');
     if (!/^\d{17}$/.test(id)) console.log('⚠️  SteamID64 一般是 17 位数字,你填的看起来不像,先存下了,同步失败的话回来检查这里');
 
     saveConfig({ steamApiKey: key, steamId: id });
@@ -1216,7 +1216,7 @@ async function cmdGuideGen() {
         // **A degradation has to speak up.** Each shard opens its own headings, and without unifying
         // them same-kind achievements end up scattered across several sections — a visible regression
         // in the finished product. Unsaid, the user only concludes 「这次的分区怎么乱七八糟」
-        p.done(`  ⚠️  分区没统一成(${ev.reason}),保留各段自己分的结果`);
+        p.done(`  ⚠️  分区统一失败(${ev.reason}),保留各段自己分的结果`);
       } else if (ev.phase === 'regroup-merged') {
         // This is the program **overriding the classification the model gave**, and the finished
         // product does not show who changed it. Say plainly how many places were changed
@@ -1244,7 +1244,7 @@ async function cmdGuideGen() {
       else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
       else if (ev.phase === 'notion-clear') p.update(`  清掉页面上原来的 ${ev.blocks} 个块…`);
       else if (ev.phase === 'resplit') {
-        p.done(`  第 ${ev.chunk} 段没写出来(${ev.from} 个成就),切成两半重问(${ev.to} 个)`);
+        p.done(`  第 ${ev.chunk} 段未生成(${ev.from} 个成就),拆成两半重问(${ev.to} 个)`);
       } else if (ev.phase === 'retry') {
         p.done(`  第 ${ev.chunk} 段没拿到正文,原样再问一次(第 ${ev.attempt}/${ev.of} 次)`);
       } else if (ev.phase === 'chunk-failed') {
@@ -1291,7 +1291,7 @@ async function cmdGuideGen() {
     // the truth is the whole shard never came back. The other order buries the real reason under
     // fifteen identical sentences
     for (const c of r.chunkFailures ?? []) {
-      console.log(`\n  ⚠️  第 ${c.chunk}/${c.of} 段没写出来(${c.count} 个成就:${c.first} … ${c.last})`);
+      console.log(`\n  ⚠️  第 ${c.chunk}/${c.of} 段未生成(${c.count} 个成就:${c.first} … ${c.last})`);
       console.log(`      ${c.reason.replace(/\n/g, '\n      ')}`);
       console.log('      下面那些"缺 checkbox"里,这一段的部分是这个原因,不是模型漏写');
     }
@@ -1422,7 +1422,7 @@ async function cmdGuidePatch(appid) {
     console.log('─'.repeat(70));
     console.log(buildPatchMessage(entries, { instruction }));
     console.log('─'.repeat(70));
-    console.log('\n(system 提示词和整篇生成是同一份,看它请跑 guide-gen --dry-run)');
+    console.log('\n(system 提示词和整篇生成是同一份,想看就跑 guide-gen --dry-run)');
     return;
   }
 
@@ -1488,12 +1488,12 @@ async function cmdGuidePatch(appid) {
   // **Not blocking does not mean not mentioning.** The old guide's pre-existing problems were not
   // touched this run, but they are still there
   if (r.preExisting.length) {
-    console.log(`\n  ℹ️  这份攻略还有 ${r.preExisting.length} 条本来就有的校验问题(这次没碰,也没拦路):`);
+    console.log(`\n  ℹ️  这份攻略还有 ${r.preExisting.length} 条原有的校验问题(本次未处理,也没拦路):`);
     for (const f of r.preExisting.slice(0, 5)) console.log(`       ${f.message}`);
     if (r.preExisting.length > 5) console.log(`       …… 还有 ${r.preExisting.length - 5} 条`);
   }
   if (r.unapplied.extra.length) {
-    console.log(`\n  ⚠️  模型多写了 ${r.unapplied.extra.length} 条没点名的成就,**已忽略**(只贴回点名的那几条)`);
+    console.log(`\n  ⚠️  模型多写了 ${r.unapplied.extra.length} 条没要求的成就,**已忽略**(只贴回点名的那几条)`);
   }
   if (r.unapplied.unresolved.length) {
     console.log(`  ⚠️  ${r.unapplied.unresolved.length} 条交回来的条目认不出是哪个成就,已忽略`);
@@ -1533,7 +1533,7 @@ async function cmdGuideToNotion() {
       : '  在 Notion 攻略库里新建一页'
   );
   if (plan.unconverted.length) {
-    console.log(`  ⚠️  ${plan.unconverted.length} 行 Notion 放不下原来的排版,会降级成普通段落(文字不丢):`);
+    console.log(`  ⚠️  ${plan.unconverted.length} 行 Notion 放不下原来的排版,会转为普通段落(文字不会丢失):`);
     for (const line of plan.unconverted.slice(0, 8)) console.log(`       ${line}`);
   }
 

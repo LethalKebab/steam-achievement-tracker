@@ -168,7 +168,7 @@ describe('checkFidelity — pure comparison', () => {
   test('same text but a changed checked state → reported separately, the most hidden kind of damage', () => {
     const r = checkFidelity([{ text: '甲', checked: false }], [{ text: '甲', checked: true }]);
     assert.equal(r.ok, false);
-    assert.match(r.problems[0], /勾选状态被改了/);
+    assert.match(r.problems[0], /勾选状态变了/);
   });
 
   test('too many problems are truncated rather than flooding the terminal', () => {
@@ -255,7 +255,7 @@ describe('migrateGuideToNotion — move, then check entry by entry', () => {
   test('the read-back has ticked a box that was not ticked → throws, the local file is still there', async () => {
     const { db, config, dir, file } = freshEnv();
     const notion = fakeNotion({ corrupt: (todos) => todos.map((t) => ({ ...t, checked: true })) });
-    await assert.rejects(run(db, config, notion), /勾选状态被改了/);
+    await assert.rejects(run(db, config, notion), /勾选状态变了/);
     assert.equal(existsSync(join(dir, file)), true);
   });
 

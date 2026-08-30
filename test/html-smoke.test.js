@@ -1609,7 +1609,7 @@ describe('the guide backup section does not explain itself', () => {
   });
 
   test('the orphan sentence stays — it is a dead end plus a way out, not an explanation', () => {
-    assert.match(js, /行上够不着/);
+    assert.match(js, /面板上没有对应行/);
     assert.match(js, /先把游戏加回来/, 'having said it cannot be reached, it has to say what to do');
   });
 
@@ -1914,7 +1914,7 @@ describe('the exit from the setup page', () => {
   });
 
   test('the label says where it goes, not what it undoes', () => {
-    assert.match(tag[1], /Dashboard/, 'the button has to say where it goes');
+    assert.match(tag[1], /面板/, 'the button has to say where it goes');
     assert.doesNotMatch(tag[1], /取消/,
       'six controls on this page take effect before a save (creating the Notion database saves on the spot, backup now, restore, delete archive), '
       + 'and 「取消」 promises a whole-page rollback while all it can take back is a few input boxes');
