@@ -108,7 +108,7 @@ More on what is stored and what Steam does not expose: [data.md](data.md).
 | `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, verifying it arrived intact | Notion |
 | `guide-to-notion --dry-run` | Previews the conversion, writes nothing | Notion |
 | `notion-check` | Checks token, database, title property, status options, page count | Notion |
-| `notion-check --fix` | Appends missing status options, then re-reads to confirm | Notion |
+| `notion-check --fix` | Appends missing status options, sorts them into board columns, adds the board view, then re-reads to confirm | Notion |
 | `notion-check --probe-write` | Creates and archives one page to prove write access | Notion |
 | `drafts` | Lists what has piled up in `guides/.drafts/` | — |
 | `drafts --clean` | Removes it; `--older-than N` limits to drafts older than N days | — |

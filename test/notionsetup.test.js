@@ -42,21 +42,95 @@ import { createApi } from '../lib/api.js';
 // Scaffolding: swap out request, never touch the network
 // ---------------------------------------------------------------------------
 
-const statusProps = (options) => ({
-  Name: { type: 'title', title: {} },
-  Status: { type: 'status', status: { options: options.map((name) => ({ name })) } },
-});
+/**
+ * The colours and columns the program expects, **written out here rather than imported**. A test
+ * that imports the table it is checking passes whatever the table says; these four lines are the
+ * only place a wrong colour can be caught.
+ */
+const EXPECTED_STYLE = {
+  'Not started': { color: 'default', group: 'To-do' },
+  'In progress': { color: 'blue', group: 'In progress' },
+  Staged: { color: 'purple', group: 'In progress' },
+  Done: { color: 'green', group: 'Complete' },
+};
+
+const GROUP_NAMES = ['To-do', 'In progress', 'Complete'];
+
+/**
+ * A status property in the current format. **A real one always carries ids, colours and groups**,
+ * and a stub without them leaves "is this option in the right column" unanswerable — which is the
+ * question repairGuideDb now has to ask.
+ */
+const statusProps = (options) => {
+  const opts = options.map((name) => ({
+    id: 'id-' + name,
+    name,
+    color: EXPECTED_STYLE[name]?.color ?? 'default',
+  }));
+  return {
+    Name: { type: 'title', title: {} },
+    Status: {
+      id: 'prop-Status',
+      type: 'status',
+      status: {
+        options: opts,
+        groups: GROUP_NAMES.map((name) => ({
+          id: 'g-' + name,
+          name,
+          color: 'default',
+          option_ids: opts.filter((o) => (EXPECTED_STYLE[o.name]?.group ?? 'To-do') === name).map((o) => o.id),
+        })),
+      },
+    },
+  };
+};
+
+/**
+ * What a database built by the *older* version looks like: all four options present, every one of
+ * them grey, and all of them dumped in To-do. This is the shape the migration has to recognise —
+ * "complete" by the old definition and out of date by the new one.
+ */
+const legacyStatusProps = () => {
+  const opts = GUIDE_STATUS_OPTIONS.map((name) => ({ id: 'id-' + name, name, color: 'default' }));
+  return {
+    Name: { type: 'title', title: {} },
+    Status: {
+      id: 'prop-Status',
+      type: 'status',
+      status: {
+        options: opts,
+        groups: [
+          { id: 'g1', name: 'To-do', color: 'gray', option_ids: opts.map((o) => o.id) },
+          { id: 'g2', name: 'In progress', color: 'blue', option_ids: [] },
+          { id: 'g3', name: 'Complete', color: 'green', option_ids: [] },
+        ],
+      },
+    },
+  };
+};
 
 /** Fake client for creation. `sent` collects the payloads actually sent, so the assertion can be "the request really carried those four" */
-function stubCreate({ readBackProps }) {
+function stubCreate({ readBackProps, viewFails = false, dataSources = [{ id: 'ds1' }] }) {
   const c = new NotionClient({ notion: { token: 't' } });
   c.sent = [];
-  c.request = async (method, path, payload) => {
+  c.views = [];
+  c.versions = [];
+  c.request = async (method, path, payload, opts) => {
+    c.versions.push({ method, path, version: opts?.version });
     if (method === 'post' && path === '/databases') {
       c.sent.push(payload);
       return { id: 'AAAAAAAA-bbbb-cccc-dddd-eeeeeeeeeeee', url: 'https://notion.so/x' };
     }
-    if (method === 'get' && path.startsWith('/databases/')) return { properties: readBackProps };
+    // A freshly created database has exactly one data source; the board view is built from it
+    if (method === 'get' && path.startsWith('/databases/')) {
+      return { properties: readBackProps, data_sources: dataSources };
+    }
+    if (method === 'get' && path.startsWith('/data_sources/')) return { properties: readBackProps };
+    if (method === 'post' && path === '/views') {
+      if (viewFails) throw new Error('views API said no');
+      c.views.push(payload);
+      return { id: 'view1', type: 'board' };
+    }
     throw new Error(`unexpected request: ${method} ${path}`);
   };
   return c;
@@ -157,6 +231,137 @@ describe('createGuideDatabase', () => {
     await assert.rejects(c.createGuideDatabase({ parentPageId: '' }), /父页面/);
     assert.equal(c.sent.length, 0);
   });
+
+  test('every option carries its colour and its board column', async () => {
+    const c = stubCreate({ readBackProps: full() });
+    await c.createGuideDatabase({ parentPageId: 'p1' });
+    const sent = c.sent[0].properties.Status.status.options;
+    for (const [name, want] of Object.entries(EXPECTED_STYLE)) {
+      const o = sent.find((x) => x.name === name);
+      assert.equal(o.color, want.color, `${name} should be ${want.color}`);
+      assert.equal(o.group, want.group, `${name} belongs in the ${want.group} column`);
+    }
+  });
+
+  test('the grouping goes on each option, never as a top-level groups array', async () => {
+    // The array is what Notion ignores — 200 and nothing changes. Sending it would look correct in
+    // review and do nothing at all, which is why this is pinned rather than left to the comment
+    const c = stubCreate({ readBackProps: full() });
+    await c.createGuideDatabase({ parentPageId: 'p1' });
+    assert.equal(c.sent[0].properties.Status.status.groups, undefined);
+  });
+
+  test('a board view is created, as the first tab, on the views API version', async () => {
+    const c = stubCreate({ readBackProps: full() });
+    const db = await c.createGuideDatabase({ parentPageId: 'p1' });
+    assert.deepEqual(db.boardView, { ok: true });
+    assert.equal(c.views.length, 1);
+    assert.equal(c.views[0].type, 'board');
+    assert.deepEqual(c.views[0].position, { type: 'start' }, 'appended instead of first, the table still opens');
+    assert.equal(c.views[0].configuration.group_by.type, 'status');
+    // The property's id, not its name: the name belongs to the user and they may rename it
+    assert.equal(c.views[0].configuration.group_by.property_id, 'prop-Status');
+    const viewCalls = c.versions.filter((v) => v.path.startsWith('/views') || v.path.startsWith('/data_sources'));
+    assert.ok(viewCalls.length > 0);
+    for (const call of viewCalls) {
+      assert.equal(call.version, '2026-03-11', 'the views API is served on no other version');
+    }
+  });
+
+  test('the client is not moved onto the new version wholesale — only the view calls carry it', async () => {
+    const c = stubCreate({ readBackProps: full() });
+    await c.createGuideDatabase({ parentPageId: 'p1' });
+    const create = c.versions.find((v) => v.path === '/databases');
+    assert.equal(create.version, undefined, 'creating the database must stay on the pinned version');
+  });
+
+  test('the board view failing does not fail the setup — the database is usable without it', async () => {
+    const c = stubCreate({ readBackProps: full(), viewFails: true });
+    const db = await c.createGuideDatabase({ parentPageId: 'p1' });
+    assert.equal(db.id, 'aaaaaaaabbbbccccddddeeeeeeeeeeee', 'the database still came back');
+    assert.equal(db.boardView.ok, false);
+    assert.match(db.boardView.error, /views API said no/, 'and it says what went wrong rather than going quiet');
+  });
+
+  test('no data source on the created database → reported, still not fatal', async () => {
+    const c = stubCreate({ readBackProps: full(), dataSources: [] });
+    const db = await c.createGuideDatabase({ parentPageId: 'p1' });
+    assert.equal(db.boardView.ok, false);
+    assert.match(db.boardView.error, /data source/);
+  });
+});
+
+describe('repairGuideDb — bringing a database built by the older version up to date', () => {
+  test('all four options present but grey and all in To-do → still repaired, not "nothing to do"', async () => {
+    const c = stubDb({ properties: legacyStatusProps() });
+    const r = await repairGuideDb(c, 'db1');
+    assert.notEqual(r.reason, 'nothing-to-do', 'the old definition of complete was options only');
+    assert.deepEqual(r.added, [], 'nothing was missing — this is a reformat, not a repair');
+    assert.deepEqual(r.regrouped.sort(), ['Done', 'In progress', 'Staged'], 'Not started was already in To-do');
+    assert.deepEqual(r.stillWrongGroup, []);
+  });
+
+  test('the colours it cannot change are named, and do not count as failure', async () => {
+    // Notion refuses to recolour an existing option outright. Skipping them quietly would leave
+    // somebody staring at a grey board wondering what the button did
+    const c = stubDb({ properties: legacyStatusProps() });
+    const r = await repairGuideDb(c, 'db1');
+    assert.deepEqual(r.wrongColour.sort(), ['Done', 'In progress', 'Staged'], 'Not started is grey on purpose');
+    assert.equal(r.ok, true, 'a colour Notion will not change is not a failed repair');
+  });
+
+  test('it never tries to recolour an existing option — the API refuses, and the stub refuses too', async () => {
+    const c = stubDb({ properties: legacyStatusProps() });
+    await repairGuideDb(c, 'db1');
+    const sent = c.log.filter((x) => x.method === 'patch' && x.path.startsWith('/databases/'));
+    for (const o of sent[0].payload.properties.Status.status.options) {
+      if (o.id) assert.equal(o.color, undefined, `carrying a colour on existing option ${o.name} earns a 400`);
+    }
+  });
+
+  test('options the user added themselves keep their colour and their column', async () => {
+    const legacy = legacyStatusProps();
+    legacy.Status.status.options.push({ id: 'id-Paused', name: 'Paused', color: 'yellow' });
+    legacy.Status.status.groups[0].option_ids.push('id-Paused');
+    const c = stubDb({ properties: legacy });
+    const r = await repairGuideDb(c, 'db1');
+    assert.equal(r.ok, true);
+    const sent = c.log.find((x) => x.method === 'patch' && x.path.startsWith('/databases/'));
+    const paused = sent.payload.properties.Status.status.options.find((o) => o.name === 'Paused');
+    assert.equal(paused.group, undefined, 'an omitted group is what leaves it where the user put it');
+    assert.equal(paused.color, undefined, 'and an omitted colour is what stops the 400');
+  });
+
+  test('a board view is added to the older database too', async () => {
+    const c = stubDb({ properties: legacyStatusProps() });
+    const r = await repairGuideDb(c, 'db1');
+    assert.deepEqual(r.boardView, { ok: true, created: true });
+    assert.equal(c.views.length, 1);
+    assert.equal(c.views[0].type, 'board');
+  });
+
+  test('a database that already has a board does not get a second one', async () => {
+    const c = stubDb({ properties: legacyStatusProps(), existingViews: [{ id: 'v9', type: 'board' }] });
+    const r = await repairGuideDb(c, 'db1');
+    assert.deepEqual(r.boardView, { ok: true, created: false });
+    assert.equal(c.views.length, 0, 'two boards is worse than one table');
+  });
+
+  test('the board view failing does not fail the repair either', async () => {
+    const c = stubDb({ properties: legacyStatusProps(), viewFails: true });
+    const r = await repairGuideDb(c, 'db1');
+    assert.equal(r.ok, true);
+    assert.equal(r.boardView.ok, false);
+  });
+
+  test('a database already in the current format is left completely alone', async () => {
+    const c = stubDb({ properties: full(), existingViews: [{ id: 'v9', type: 'board' }] });
+    const r = await repairGuideDb(c, 'db1');
+    assert.equal(r.reason, 'nothing-to-do');
+    assert.deepEqual(r.wrongColour, []);
+    assert.equal(c.log.filter((x) => x.method === 'patch').length, 0);
+    assert.equal(c.views.length, 0);
+  });
 });
 
 describe('createNotionGuideDb guardrails — all of them stop before a request goes out', () => {
@@ -241,9 +446,13 @@ function stubDb({
   patchDb = 'honors',
   createFails = false,
   archiveFails = false,
+  existingViews = [],
+  viewFails = false,
+  dataSources = [{ id: 'ds1' }],
 } = {}) {
   const c = new NotionClient({ notion: { token: 't', overviewDbId: 'db1' } });
   c.log = [];
+  c.views = [];
   let current = properties;
   c.request = async (method, path, payload) => {
     c.log.push({ method, path, payload });
@@ -251,15 +460,17 @@ function stubDb({
       if (tokenFails) throw new Error('API token is invalid');
       return { name: '我的工作区' };
     }
-    if (method === 'get' && path.startsWith('/databases/')) {
+    if (method === 'get' && path.startsWith('/databases/') && !path.includes('?')) {
       if (dbFails) throw new Error('Could not find database');
-      return { id: 'db1', title: [{ plain_text: '攻略库' }], url: 'https://notion.so/db1', properties: current };
+      // data_sources is what the views API needs; a real database created either way has one
+      return { id: 'db1', title: [{ plain_text: '攻略库' }], url: 'https://notion.so/db1', properties: current, data_sources: dataSources };
     }
+    if (method === 'get' && path.startsWith('/data_sources/')) return { properties: current };
     if (method === 'patch' && path.startsWith('/databases/')) {
       const [prop, body] = Object.entries(payload.properties)[0];
       const type = Object.keys(body)[0];
       // Three temperaments. The second is the one this project actually ran into
-      if (patchDb === 'honors') current = { ...current, [prop]: { type, [type]: body[type] } };
+      if (patchDb === 'honors') current = honorPatch(current, prop, type, body[type]);
       else if (patchDb === 'clobbers')
         current = { ...current, [prop]: { type, [type]: { options: [{ name: 'Staged' }] } } };
       // 'silently-ignores': returns 200, current does not change one character
@@ -273,9 +484,64 @@ function stubDb({
       if (archiveFails) throw new Error('conflict');
       return {};
     }
+    if (method === 'get' && path.startsWith('/views?')) return { results: existingViews };
+    if (method === 'get' && path.startsWith('/views/')) {
+      return existingViews.find((v) => path.endsWith(v.id)) ?? { type: 'table' };
+    }
+    if (method === 'post' && path === '/views') {
+      if (viewFails) throw new Error('views API said no');
+      c.views.push(payload);
+      return { id: 'view1', type: 'board' };
+    }
     throw new Error(`unexpected request: ${method} ${path}`);
   };
   return c;
+}
+
+/**
+ * What Notion actually does with a status-property PATCH, as measured against the real API on
+ * 2026-08-30. Echoing the request back would make every read-back check pass without proving
+ * anything, so the two behaviours that matter are modelled here:
+ *
+ * 1. **Grouping goes in as `group` on each option and comes back as a `groups` array** keyed by
+ *    option id. An option sent without `group` keeps the group it already had.
+ * 2. **The colour of an option that already exists cannot be changed** — `400 Cannot update color
+ *    of select with id: …`. Modelled so that an attempt to recolour fails here rather than against
+ *    somebody's own database, where the failure costs a support round.
+ */
+function honorPatch(current, prop, type, body) {
+  const sent = body.options ?? [];
+  const before = current[prop]?.[type]?.options ?? [];
+
+  for (const o of sent) {
+    if (!o.id || o.color === undefined) continue;
+    const was = before.find((x) => x.id === o.id);
+    if (was && was.color !== o.color) {
+      throw new Error(`Cannot update color of select with id: ${o.id}.`);
+    }
+  }
+
+  if (type !== 'status') return { ...current, [prop]: { type, [type]: body } };
+
+  const prevGroupOf = Object.fromEntries(
+    (current[prop]?.status?.groups ?? []).flatMap((g) => (g.option_ids ?? []).map((id) => [id, g.name]))
+  );
+  const rows = sent.map((o) => ({ ...o, id: o.id ?? 'id-' + o.name }));
+  return {
+    ...current,
+    [prop]: {
+      type,
+      status: {
+        options: rows.map((o) => ({ id: o.id, name: o.name, color: o.color ?? 'default' })),
+        groups: GROUP_NAMES.map((name) => ({
+          id: 'g-' + name,
+          name,
+          color: 'default',
+          option_ids: rows.filter((o) => (o.group ?? prevGroupOf[o.id] ?? 'To-do') === name).map((o) => o.id),
+        })),
+      },
+    },
+  };
 }
 
 const full = () => statusProps(GUIDE_STATUS_OPTIONS);

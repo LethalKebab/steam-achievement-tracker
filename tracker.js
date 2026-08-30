@@ -43,6 +43,7 @@ import {
   GUIDE_STATUS_OPTIONS,
   inspectGuideDb,
   repairGuideDb,
+  GUIDE_STATUS_STYLE,
   DB_PROBLEM,
 } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
@@ -404,6 +405,29 @@ async function cmdInitNotion() {
  * three are easily merged into one sentence, and the last would not surface until the first
  * `guide-gen` without a check.
  */
+/**
+ * The half of a repair that is not about missing options: board columns, the board view, and the
+ * colours only a human can change.
+ *
+ * **Silence here would be the bug.** Notion refuses to recolour an option that already exists, so
+ * the program can bring an older database most of the way and no further; saying nothing leaves
+ * somebody looking at a grey board wondering what the command did.
+ */
+function reportReformat(r) {
+  if (r.regrouped?.length) console.log(`   🔧 归进正确的看板分组:${r.regrouped.join(' / ')}`);
+  if (r.stillWrongGroup?.length) console.log(`   ❌ 分组没落地:${r.stillWrongGroup.join(' / ')}`);
+  if (r.boardView?.created) console.log('   🔧 已加看板视图,并放在第一个标签页');
+  else if (r.boardView && !r.boardView.ok) {
+    console.log(`   ⚠️  看板视图没建成:${r.boardView.error}`);
+    console.log('      库照常能用,攻略生成和勾选都不受影响');
+  }
+  if (r.wrongColour?.length) {
+    const want = r.wrongColour.map((n) => `${n} → ${GUIDE_STATUS_STYLE[n].color}`).join(',');
+    console.log(`   ⚠️  这几个选项的颜色只能你自己改:${want}`);
+    console.log('      Notion 不允许改已有选项的颜色(改新加的可以)。打开那个库 → 点状态属性 → 逐个挑颜色');
+  }
+}
+
 async function cmdNotionCheck() {
   const { config, db } = withSteam({ requireSteam: false });
   const token = config.notion?.token;
@@ -476,11 +500,16 @@ async function cmdNotionCheck() {
         console.log(`   ❌ Notion 收下了请求但选项没落地,还缺:${r.stillMissing.join(' / ')}`);
         console.log('      手动加:打开那个库 → 点这个属性 → 加选项,名字要一模一样(注意大小写)');
       }
+      reportReformat(r);
     } else {
       console.log('   加 --fix 让程序试着补上,或者自己去 Notion 里加(名字要一模一样,注意大小写)');
     }
   } else {
     console.log(`✅ 状态属性:${verdict.schema.status.property}(${verdict.schema.status.type}),四个选项齐全`);
+    // **A database built by an older version reaches this branch.** Its four options are all there,
+    // and it is still out of date: everything grey, everything in one board column, no board view.
+    // Gating --fix on a missing option would leave those users with a button that does nothing
+    if (argv.includes('--fix')) reportReformat(await repairGuideDb(notion, dbId));
   }
 
   const noWrite = problem(DB_PROBLEM.NO_WRITE);

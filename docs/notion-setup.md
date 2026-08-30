@@ -67,12 +67,12 @@ Paste the token from step ① into **Access token**. From there, two routes:
 
 ```mermaid
 flowchart TD
-    S["Access token pasted"] --> L["No database yet<br/>▸ click 「＋ 新建一个攻略数据库」<br/>▸ pick a parent page → name it → create<br/>ID filled in automatically, properties configured"]
+    S["Access token pasted"] --> L["No database yet<br/>▸ click 「＋ 新建一个攻略数据库」<br/>▸ pick a parent page → name it → create<br/>ID filled in, properties configured,<br/>opens as a colour-coded board"]
     S --> R["Already have a guide database<br/>▸ fill in 「攻略数据库 ID」 by hand<br/>needs the 32 hex chars from the URL, see below"]
     style L stroke-width:3px
 ```
 
-**The left route never touches a URL and cannot be filled in wrong** — take it if you have no existing database. The program creates the database along with all four status options and writes the ID straight into the config.
+**The left route never touches a URL and cannot be filled in wrong** — take it if you have no existing database. The program creates the database along with all four status options, gives each one a colour and a board column, adds a board view as the tab that opens, and writes the ID straight into the config.
 
 ### If you take the right route: getting the database ID
 
@@ -115,11 +115,30 @@ If everything passes, it returns to the Dashboard automatically. If anything fai
 
 ### About the status options
 
-The program writes four statuses to guide pages: `Not started`, `In progress`, `Staged`, `Done`.
+The program writes four statuses to guide pages, each with a colour and a board column:
 
-Three of those — `Not started` / `In progress` / `Done` — are **Notion's own defaults** when you create a status property, so a hand-made database is usually short only `Staged`, which is exactly the case 「帮我补上」 handles in one click.
+| Status | Colour | Board column |
+|---|---|---|
+| `Not started` | grey | To-do |
+| `In progress` | blue | In progress |
+| `Staged` | purple | In progress |
+| `Done` | green | Complete |
 
-**Statuses you added yourself (say `Paused`) are never touched.** Validation only asks whether the value being written this time is among the options; it does not care what else is in there.
+Three of the names — `Not started` / `In progress` / `Done` — are **Notion's own defaults** when you create a status property, so a hand-made database is usually short only `Staged`, which is exactly the case 「帮我补上」 handles in one click.
+
+**Statuses you added yourself (say `Paused`) are never touched** — not their colour, not their column. Validation only asks whether the value being written this time is among the options; it does not care what else is in there.
+
+### If your database was made by an older version
+
+Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. Press **「帮我补上」** (or run `node tracker.js notion-check --fix`) and it brings most of it up to date in one go:
+
+- the four options are sorted into their board columns
+- a board view is added and put first, so the database opens as a board
+- anything you added yourself stays exactly where you put it
+
+**The colours are the one thing it cannot do for you.** Notion does not allow the colour of an existing option to be changed through the API — only of one being created. The program says which options are the wrong colour and what each should be; setting them is four clicks in Notion: open the database → click the status property → pick a colour per option.
+
+Nothing here affects how the program works. A grey, ungrouped database generates guides and ticks checkboxes exactly like a colour-coded one — this is about reading it at a glance.
 
 ---
 
