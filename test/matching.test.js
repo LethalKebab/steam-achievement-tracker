@@ -884,3 +884,73 @@ describe('flatCompare: fold the spelling, never the content', () => {
     assert.match(lint, /const flat = flatCompare/, 'the linter flat has to be flatCompare itself');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stage 1 matches a description in either language
+// ---------------------------------------------------------------------------
+
+/**
+ * The description stage is the precise one — it claims a checkbox before name matching could, and
+ * it is the **only** way to tell apart two achievements that share a name. Matching one language
+ * only means it silently never fires on a guide written in the other, and every one of those falls
+ * through to the name stage, where a shared name resolves to nothing at all.
+ *
+ * It is not fixed by consulting the guide's recorded language: that value would have to be right,
+ * and rows written before it existed carry an assumed one. Comparing against both needs no answer.
+ */
+describe('resolveTodoToAchievement stage 1 — either language', () => {
+  const A = {
+    api_name: 'A', name_cn: '第一个', name_en: 'The First',
+    description: '解锁第一个成就。', description_en: 'Unlock the first achievement.',
+  };
+  const B = {
+    api_name: 'B', name_cn: '第二个', name_en: 'The Second',
+    description: '再来一次。', description_en: 'Do it again.',
+  };
+
+  test('a Chinese guide quoting the Chinese description still resolves', () => {
+    const hit = resolveTodoToAchievement('**第一个**<br>解锁第一个成就。<br>随手就有', [A, B]);
+    assert.equal(hit?.def.api_name, 'A');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('an English guide quoting the English description resolves the same way', () => {
+    const hit = resolveTodoToAchievement('**The First**<br>Unlock the first achievement.<br>trivial', [A, B]);
+    assert.equal(hit?.def.api_name, 'A');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('two achievements sharing a name are told apart by the English description', () => {
+    // The case this stage exists for. Both are called the same thing, so the name stage refuses
+    // (hit.size !== 1) and returns null — only the description can separate them
+    const dupA = { ...A, name_cn: '收集', name_en: 'Collect' };
+    const dupB = { ...B, name_cn: '收集', name_en: 'Collect' };
+    const hit = resolveTodoToAchievement('**Collect**<br>Do it again.<br>later', [dupA, dupB]);
+    assert.equal(hit?.def.api_name, 'B');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('a description shared by two achievements still refuses, across languages', () => {
+    // Uniqueness is what makes this stage safe, and it has to hold over the union of both
+    // languages — otherwise an English description colliding with another achievement's Chinese one
+    // would match wrongly, which is worse than not matching
+    const collide = { ...B, description: 'Unlock the first achievement.' };
+    assert.equal(resolveTodoToAchievement('Unlock the first achievement.', [A, collide]), null);
+  });
+
+  test('**one achievement whose two descriptions are the same string still matches**', () => {
+    // Counting occurrences rather than achievements reads this as a collision with itself and
+    // refuses a match that is in fact unambiguous. Some games ship identical text in both schemas
+    const same = { api_name: 'S', name_cn: '同文', name_en: 'Same', description: 'Do the thing.', description_en: 'Do the thing.' };
+    const hit = resolveTodoToAchievement('**Same**<br>Do the thing.', [same, B]);
+    assert.equal(hit?.def.api_name, 'S');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('an achievement with only a Chinese description is unaffected', () => {
+    // Every guide written before description_en existed is in this state
+    const old = { api_name: 'O', name_cn: '旧的', name_en: 'Old', description: '只有中文描述。' };
+    assert.equal(resolveTodoToAchievement('**旧的**<br>只有中文描述。', [old, B])?.def.api_name, 'O');
+  });
+});
+
