@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 
 import { buildSystemPrompt } from '../lib/guidegen.js';
 import { MESSAGES } from '../lib/messages.js';
+import { CLI_MESSAGES } from '../lib/cli-messages.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -218,9 +219,16 @@ describe('nothing lib/ says to a user is a loose literal any more', () => {
  * nothing shows. Together they add up to "every message a user can see is available in both
  * languages"; either alone can be satisfied by something broken.
  */
-describe('the messages that moved into lib/messages.js', () => {
+// Two tables, two composers: `msg` reads MESSAGES, `clog` reads CLI_MESSAGES. The checks are the
+// same for both, so the call name is a parameter — scanning for the wrong one reports every key
+// in the other table as an undefined translation
+for (const [TABLE_NAME, TABLE, FN] of [
+  ['lib/messages.js', MESSAGES, 'msg'],
+  ['lib/cli-messages.js', CLI_MESSAGES, 'clog'],
+])
+describe('the messages in ' + TABLE_NAME, () => {
   test('every entry has both languages, and the Chinese half really is Chinese', () => {
-    const bad = Object.entries(MESSAGES).filter(([, v]) => {
+    const bad = Object.entries(TABLE).filter(([, v]) => {
       if (!Array.isArray(v) || v.length !== 2) return true;
       const [zh, en] = v;
       // A translation pass that took the runtime surface with it shows up here and nowhere else:
@@ -232,7 +240,7 @@ describe('the messages that moved into lib/messages.js', () => {
 
   test('a slot in one language is a slot in the other', () => {
     const slots = (x) => (x.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
-    const mismatched = Object.entries(MESSAGES)
+    const mismatched = Object.entries(TABLE)
       .filter(([, [zh, en]]) => slots(zh) !== slots(en))
       .map(([k]) => k);
     // A dropped slot does not throw — it renders the sentence without the value it existed to carry
@@ -242,9 +250,9 @@ describe('the messages that moved into lib/messages.js', () => {
   test('every key asked for exists, and every key defined is asked for', () => {
     const asked = new Set();
     for (const f of readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))) {
-      for (const m of stripComments(read(join('lib', f))).matchAll(/msg\('([^']+)'/g)) asked.add(m[1]);
+      for (const m of stripComments(read(join('lib', f))).matchAll(new RegExp(FN + "\\('([^']+)'", 'g'))) asked.add(m[1]);
     }
-    for (const m of stripComments(read('tracker.js')).matchAll(/msg\('([^']+)'/g)) asked.add(m[1]);
+    for (const m of stripComments(read('tracker.js')).matchAll(new RegExp(FN + "\\('([^']+)'", 'g'))) asked.add(m[1]);
     /**
      * **The two directions need different sets, and mixing them is what broke this once.**
      *
@@ -260,7 +268,7 @@ describe('the messages that moved into lib/messages.js', () => {
     for (const f of [...readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))]) {
       for (const m of stripComments(read(join('lib', f))).matchAll(/'([a-z][\w.]*)'/g)) mentioned.add(m[1]);
     }
-    const defined = new Set(Object.keys(MESSAGES));
+    const defined = new Set(Object.keys(TABLE));
     // msg() returns the key for a miss, so a typo reaches the user as a dotted identifier in the
     // floating bar rather than as an error anybody sees first
     assert.deepEqual([...asked].filter((k) => !defined.has(k)), [], 'these keys are used but not defined');
