@@ -1197,8 +1197,12 @@ describe('the wording in the confirmation dialog', () => {
      * prints the hand ticks that will be lost, one by one (guideoverwrite.test.js pins that). A
      * command line is for someone who typed a flag and can afford detail; the interface has to be
      * short — one set of wording forced to serve both suits neither.
+     *
+     * **The one thing the title carries beyond the question is the language**, when the guide being
+     * replaced is in the other one. That is not a sentence being smuggled back in: it is part of
+     * what is being asked, and it goes in the title precisely because there is nowhere else.
      */
-    const call = js.slice(js.indexOf("title: t('rw.title'"));
+    const call = js.slice(js.indexOf("? 'rw.titleLang' : 'rw.title'"));
     const args = call.slice(0, call.indexOf('\n      });')).replace(/\/\*[\s\S]*?\*\//g, '');
     assert.match(args, /picker: picker/, '(first confirm the slice really is the rewrite dialog)');
     assert.doesNotMatch(args, /body:/, 'the scope, the count and the instruction are all on controls; a body could only restate them');

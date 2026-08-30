@@ -32,7 +32,7 @@ import {
   UI_LANGUAGES, DEFAULT_UI_LANGUAGE, normalizeUiLanguage,
   achievementName, achievementDescription, gameName, gameNamePair,
 } from '../lib/lang.js';
-import { openDb, insertGame } from '../lib/db.js';
+import { openDb, insertGame, upsertGuide, setGuideLang, getGuide } from '../lib/db.js';
 
 // **saveUiLanguage really writes config.json**, and CONFIG_PATH is fixed at the moment
 // lib/config.js is imported — so TRACKER_DATA_DIR has to be set before the **dynamic** import of
@@ -375,5 +375,111 @@ for (const PAGE of ['Setup.html', 'Dashboard.html']) describe('the ' + PAGE + ' 
       unkeyed.push(tag + ': ' + text.trim().slice(0, 40));
     }
     assert.deepEqual(unkeyed, [], 'these markup strings are not in the table');
+  });
+});
+
+/**
+ * A guide has a language of its own, and it is **only** a display fact
+ * ----------------------------------------------------------------------
+ * The column exists so two surfaces can say something true: the achievement panel marks a guide
+ * written in the other language, and the rewrite dialog names what it is about to write.
+ *
+ * **Nothing about matching reads it.** Stage 1 and `paraphrased-description` both accept either
+ * language's description, which was chosen precisely so that a wrong value here cannot mis-tick a
+ * box — the 115 guides that predate the column carry an assumed value, not a recorded one. The
+ * tests below are the counterpart of that decision: they pin the two consumers, and pin that the
+ * default is a fact about this library rather than a guess.
+ */
+describe("a guide's own language", () => {
+  const withGuide = (lang) => {
+    const db = openDb(':memory:');
+    upsertGuide(db, { appid: '400', name: 'Portal', url: 'portal.md', kind: 'local' });
+    if (lang) setGuideLang(db, '400', lang);
+    return db;
+  };
+
+  test('a guide registered before the column existed reads as Chinese', () => {
+    // Not a default in the "had to pick something" sense: every guide in this library at the time
+    // the column was added was Chinese, so the migration's value is the recorded truth
+    assert.equal(getGuide(withGuide(null), '400').lang, 'zh');
+  });
+
+  test('the language round-trips, both ways', () => {
+    const db = withGuide('en');
+    assert.equal(getGuide(db, '400').lang, 'en');
+    setGuideLang(db, '400', 'zh');
+    assert.equal(getGuide(db, '400').lang, 'zh');
+  });
+
+  test('anything that is not en is stored as zh', () => {
+    // The column feeds a two-way comparison; a third value would make the marker unreachable
+    // rather than wrong, which is the harder failure to notice
+    for (const junk of ['EN', 'english', '', null, undefined, 'fr']) {
+      assert.equal(getGuide(withGuide(junk), '400').lang, 'zh', String(junk));
+    }
+  });
+
+  test('writing to an appid with no guide reports that it changed nothing', () => {
+    assert.equal(setGuideLang(openDb(':memory:'), '400', 'en'), false);
+  });
+
+  describe('the marker in the achievement panel', () => {
+    const html = read('Dashboard.html');
+    const body = strip(html);
+
+    test('is drawn only when the guide disagrees with the interface', () => {
+      // Both halves matter and only one of them is obvious. Rendering it unconditionally would
+      // put 「中文攻略」 on every guide in a Chinese interface: a label that is always present is
+      // read once and then never again, which is the state this marker exists to escape
+      assert.match(body, /data\.guide\.lang\s*&&\s*data\.guide\.lang\s*!==\s*LANG/);
+    });
+
+    test('names the guide\'s language rather than the interface\'s', () => {
+      assert.match(body, /data\.guide\.lang\s*===\s*'en'\s*\?\s*'ach\.guideLangEn'\s*:\s*'ach\.guideLangZh'/);
+    });
+
+    test('both keys name both languages in both halves', () => {
+      // The trap this closes: a table holding only 「英文攻略」/「Chinese guide」 reads correctly
+      // today purely because of the mismatch condition guarding it. Move the render and the string
+      // silently starts lying. Each entry has to be true standing on its own
+      const table = html.slice(html.indexOf("'ach.guideLangZh'"), html.indexOf("'ach.searchGuide'"));
+      assert.match(table, /'ach\.guideLangZh':\s*\['中文攻略'/);
+      assert.match(table, /'ach\.guideLangZh':\s*\[[^\]]*'Chinese guide'\]/);
+      assert.match(table, /'ach\.guideLangEn':\s*\['英文攻略'/);
+      assert.match(table, /'ach\.guideLangEn':\s*\[[^\]]*'English guide'\]/);
+    });
+
+    test('is read in the panel header and nowhere else', () => {
+      // Decided rather than overlooked: on the row button it would be one word repeated down the
+      // column. Sliced between two real anchors rather than counted — a count is satisfied by the
+      // right number of occurrences in the wrong places
+      const open = body.indexOf('const hasGuide');
+      const close = body.indexOf('class=\"ach-grid\"');
+      assert.ok(open > 0 && close > open, 'both anchors still exist');
+      const header = body.slice(open, close);
+      const reads = [...body.matchAll(/'ach\.guideLang(?:Zh|En)'/g)].map((m) => m.index);
+      const table = body.indexOf("'ach.guideLangZh':");
+      const outside = reads.filter((i) => (i < table || i > table + 200) && (i < open || i > close));
+      assert.deepEqual(outside, [], 'the marker is read outside the panel header');
+      assert.match(header, /ach\.guideLang/, 'and it really is read inside it');
+    });
+  });
+
+  describe('the rewrite dialog', () => {
+    const body = strip(read('Dashboard.html'));
+
+    // That it goes in the **title** rather than a new sentence is html-smoke.test.js's
+    // 「the rewrite confirmation writes no body」, which owns that claim for every dialog
+    test('names the language when the existing guide is in the other one', () => {
+      assert.match(body, /p\.existing\.lang\s*!==\s*LANG\s*\?\s*'rw\.titleLang'\s*:\s*'rw\.title'/);
+    });
+
+  });
+
+  test('the panel is handed the language, defaulted at the boundary', () => {
+    // `guides.lang` is NOT NULL DEFAULT 'zh', so the `|| 'zh'` is for a row that predates the
+    // migration in someone else's restored backup rather than for a column that can be null
+    assert.match(strip(read('lib/api.js')), /lang:\s*guideRow\.lang\s*\|\|\s*'zh'/);
+    assert.match(strip(read('lib/server.js')), /lang:\s*plan\.existing\.lang\s*\|\|\s*'zh'/);
   });
 });

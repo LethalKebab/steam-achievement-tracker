@@ -2826,6 +2826,13 @@
       'ach.allDone':          ['所有成就都已解锁', 'Every achievement is unlocked'],
       'ach.remaining':        ['还差 {n} / {total} 个成就', '{n} of {total} achievements to go'],
       'ach.written':          [' · 攻略里已写 {written} / {n} 条', ' · {written} of {n} written up'],
+      // Both languages are spelled out in **both** halves, and that is not redundancy. The marker
+      // is only drawn when the guide's language differs from the interface's, so a table holding
+      // only 「英文攻略」/「Chinese guide」 would be correct solely under that condition — the string
+      // would be right because of where it is rendered rather than because of what it says. These
+      // state the guide's language outright and stay true wherever they are put
+      'ach.guideLangZh':      ['中文攻略', 'Chinese guide'],
+      'ach.guideLangEn':      ['英文攻略', 'English guide'],
       'ach.searchGuide':      ['搜攻略', 'Search'],
       'ach.notWritten':       ['攻略里还没写这条', 'Not written up yet'],
       'ach.openInGuide':      ['在攻略中打开', 'Open in the guide'],
@@ -2911,6 +2918,15 @@
       'rw.requirements':      ['重写要求', 'What to change'],
       'rw.placeholder':       ['留空 = 重新查着写。也可以:写详细点、标出易错过', 'Blank = research and write it again. Or say: more detail, flag the easy-to-miss ones'],
       'rw.title':             ['重写《{game}》的攻略?', 'Rewrite the guide for {game}?'],
+      // Shown in place of `rw.title` when the existing guide is in the **other** language, so that
+      // the one dialog standing between a click and a paid run says what it is about to produce.
+      //
+      // Each half names its own language rather than taking a slot, and that is load-bearing rather
+      // than lazy: a generated guide follows the interface language, so the Chinese half can only
+      // ever be read by an interface that is about to write Chinese. Should generating into the
+      // other language ever become its own action, this key stops being true — that is the design
+      // change to look for, not a wording bug
+      'rw.titleLang':         ['用中文重写《{game}》的攻略?', 'Rewrite the guide for {game} in English?'],
       'rw.ok':                ['重写', 'Rewrite'],
       'rw.running':           ['⏳ 重写《{game}》…', '⏳ Rewriting {game}…'],
       'gen.style':            ['写法', 'How to write it'],
@@ -4077,6 +4093,13 @@
         if (hasGuide) {
           const written = data.missing.filter(function(a) { return a.guide; }).length;
           head += t('ach.written', { written: written, n: data.missingCount });
+          // A guide written in the other language says so **here and nowhere else**. This panel is
+          // the one place the guide's own text is on screen, so it is the one place the mismatch is
+          // about to matter. On the row button it would be a badge on most rows carrying the same
+          // word, which stops being information the second time it is seen
+          if (data.guide.lang && data.guide.lang !== LANG) {
+            head += ' · ' + t(data.guide.lang === 'en' ? 'ach.guideLangEn' : 'ach.guideLangZh');
+          }
         } else if (data.guide && data.guide.error) {
           head += ' · ' + data.guide.error;
         }
@@ -5821,7 +5844,7 @@
       };
 
       const ok = await askConfirm({
-        title: t('rw.title', { game: name }),
+        title: t(p.existing && p.existing.lang && p.existing.lang !== LANG ? 'rw.titleLang' : 'rw.title', { game: name }),
         /**
          * **This dialog has no body.** Four rounds of cutting left not one sentence, because every
          * one of them restated something already on screen:
