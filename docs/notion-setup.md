@@ -107,7 +107,7 @@ Press **「保存并验证」**. The program asks everything it needs to ask rig
 | Whether the ID really points at a database | Reports "not a database" and "not shared" separately |
 | Whether there is a title property | States exactly what is missing |
 | Whether the status options are complete | If not, a **「帮我补上」** button appears — one click fills them in |
-| Whether the database is still in the older format | If so, a **「帮我整理成看板」** button appears — see below |
+| Whether the database is still on the older template | If so, it asks 「这个库还是旧模版,要套用新的吗?」 with a **「套用」** button — see below |
 | Whether it can actually write | Creates a page and immediately archives it; a read-only connection is reported on the spot |
 
 If everything passes, it returns to the Dashboard automatically. If anything fails the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
@@ -131,7 +131,7 @@ Three of the names — `Not started` / `In progress` / `Done` — are **Notion's
 
 ### If your database was made by an older version
 
-Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. The settings page notices and offers **「帮我整理成看板」** (the same thing `node tracker.js notion-check --fix` does), which brings the whole thing up to date in one press:
+Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. The settings page notices and asks 「这个库还是旧模版,要套用新的吗?」 — pressing **「套用」** does the same thing `node tracker.js notion-check --fix` does, and brings the whole thing up to date in one press:
 
 - the four statuses get their colours
 - they are sorted into their board columns

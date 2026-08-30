@@ -925,13 +925,14 @@
         // **标签跟着它这次要做的事走。** 「帮我补上」是从「补缺失的选项」来的;老库一个选项都不缺,
         // 要做的是排分组和加看板,那句话就没在说实话了
         const reformat = problems.some((p) => p.code === 'outdated-format');
-        const label = reformat ? '帮我整理成看板' : '帮我补上';
+        // 问句在上面,按钮只放动词
+        const label = reformat ? '套用' : '帮我补上';
         const fix = document.createElement('button');
         fix.type = 'button';
         fix.textContent = label;
         fix.onclick = async () => {
           fix.disabled = true;
-          fix.textContent = reformat ? '整理…' : '补…';
+          fix.textContent = reformat ? '套用…' : '补…';
           const r = await call('repairNotionGuideDb', []);
           if (r.error) {
             fix.disabled = false;
@@ -947,15 +948,12 @@
           if ((again.problems || []).length) {
             showNotionProblems(again.problems, again.fixable, []);
           } else {
-            // **从真的做掉的事情里拼。** 原来这里写死成「补上了 X」,而一个老库一个选项都不缺,
-            // X 是空的 —— 那一屏会显示「补上了 ,这个库现在可用了」
-            const did = [];
-            if ((r.added || []).length) did.push('补上 ' + r.added.join(' / '));
-            if ((r.regrouped || []).length) did.push('排好了看板分组');
-            if (r.colour && (r.colour.recoloured || []).length) did.push('换好了状态颜色');
-            if (r.boardView && r.boardView.created) did.push('加了看板视图');
+            // **一句话说完。** 三件事逐条报出来是把日志搬到了界面上;这一屏之后就跳走了,读的人
+            // 要的是「成了」。要看做了哪几件事的是命令行,那边照旧逐条打印
             msg.className = 'msg ok';
-            msg.textContent = did.length ? did.join(',') + '。' : '这个库本来就是好的。';
+            msg.textContent = (r.added || []).length
+              ? '补上 ' + r.added.join(' / ') + '。'
+              : '已套用新模版。';
             setTimeout(() => { window.location.href = '/'; }, 1500);
           }
         };
@@ -963,6 +961,8 @@
       }
       const skip = document.createElement('button');
       skip.type = 'button';
+      // 页面自己已经定义了「整宽的次要按钮」这个变体,用它 —— 两个实心主按钮并排,等于没有主次
+      skip.className = 'btn-sub btn-wide';
       skip.textContent = '先这样,进入面板';
       skip.onclick = () => { window.location.href = '/'; };
       bar.appendChild(skip);
