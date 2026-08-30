@@ -793,10 +793,13 @@ describe('the rare threshold has exactly one line', () => {
     assert.doesNotMatch(lineOf('刚好在线外'), /🟠|🔴/, 'the one outside must not be tagged — the two lines have drifted apart');
   });
 
-  test('the CLI help text prints this same number', () => {
-    const src = read('../tracker.js');
-    const hits = [...src.matchAll(/全球解锁率 <(\d+)%/g)].map((m) => Number(m[1]));
-    assert.ok(hits.length >= 2, 'both pieces of help text have to mention the threshold');
+  test('the CLI help text prints this same number, in both languages', () => {
+    // `help` is written inline in tracker.js; the `--only` advice lives in the message table, and
+    // its two halves each state the threshold in their own words. All three have to agree with
+    // RARE_PCT, or the interface calls something rare that the program does not
+    const src = read('../tracker.js') + read('../lib/tracker-messages.js');
+    const hits = [...src.matchAll(/(?:全球解锁率|unlock rate) <(\d+)%/g)].map((m) => Number(m[1]));
+    assert.ok(hits.length >= 3, `only ${hits.length} places state the threshold; the help text, and both halves of the advice, all have to`);
     for (const n of hits) assert.equal(n, RARE_PCT);
   });
 

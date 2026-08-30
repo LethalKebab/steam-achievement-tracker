@@ -35,8 +35,9 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSystemPrompt } from '../lib/guidegen.js';
-import { MESSAGES } from '../lib/messages.js';
-import { CLI_MESSAGES } from '../lib/cli-messages.js';
+import { MESSAGES, setMessageLanguage } from '../lib/messages.js';
+import { CLI_MESSAGES, clog } from '../lib/cli-messages.js';
+import { TRACKER_MESSAGES } from '../lib/tracker-messages.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -51,25 +52,6 @@ const stripComments = (s) =>
     .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1')
     .replace(/\/\*[\s\S]*?\*\//g, '');
 
-/**
- * A named const's initialiser, sliced by brace balancing.
- *
- * Not `indexOf(name)` plus a byte count, and not up to the next `\n};` — the latter silently runs
- * to the end of the file for a one-line object, which is how an early version of this check read
- * 1824 Chinese characters out of a three-entry label map.
- */
-function constBlock(src, name) {
-  const at = src.indexOf(`const ${name} = `);
-  assert.ok(at > 0, `cannot find ${name} — the extraction is broken, not the rule gone`);
-  const open = src.indexOf('{', at);
-  assert.ok(open > at, `${name} does not open a block`);
-  let depth = 0;
-  for (let i = open; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}' && --depth === 0) return src.slice(at, i + 1);
-  }
-  assert.fail(`the initialiser of ${name} does not close`);
-}
 
 /**
  * Everything `lib/` says to a user now comes out of `lib/messages.js`, and the rule below is what
@@ -222,9 +204,13 @@ describe('nothing lib/ says to a user is a loose literal any more', () => {
 // Two tables, two composers: `msg` reads MESSAGES, `clog` reads CLI_MESSAGES. The checks are the
 // same for both, so the call name is a parameter — scanning for the wrong one reports every key
 // in the other table as an undefined translation
-for (const [TABLE_NAME, TABLE, FN] of [
-  ['lib/messages.js', MESSAGES, 'msg'],
-  ['lib/cli-messages.js', CLI_MESSAGES, 'clog'],
+for (const [TABLE_NAME, TABLE, FN, OWN_FILES] of [
+  ['lib/messages.js', MESSAGES, 'msg', ['messages.js']],
+  // `clog` reads both terminal tables as one, so the checks below have to see one too — the
+  // merged view is what the composer actually resolves against. Split apart, every key living
+  // in the other half is reported as an undefined translation
+  ['the terminal tables', { ...CLI_MESSAGES, ...TRACKER_MESSAGES }, 'clog',
+    ['cli-messages.js', 'tracker-messages.js']],
 ])
 describe('the messages in ' + TABLE_NAME, () => {
   test('every entry has both languages, and the Chinese half really is Chinese', () => {
@@ -264,15 +250,29 @@ describe('the messages in ' + TABLE_NAME, () => {
      * `msg(cond ? 'a' : 'b')` puts it nowhere near the call. The question there is only whether an
      * entry is dead weight, and one that appears nowhere in the source certainly is.
      */
+    // **The table's own file is excluded, and without that this whole half is vacuous**: every key
+    // appears as a quoted literal in the table that defines it, so `defined - mentioned` is empty
+    // whatever else is true and a dead entry is never reported. tracker.js is scanned because
+    // CLI_HINTS maps an error code to a message key there as a bare string rather than a `clog` call
     const mentioned = new Set(asked);
-    for (const f of [...readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))]) {
-      for (const m of stripComments(read(join('lib', f))).matchAll(/'([a-z][\w.]*)'/g)) mentioned.add(m[1]);
+    const scan = [...readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js') && !OWN_FILES.includes(x))]
+      .map((f) => join('lib', f))
+      .concat(['tracker.js', 'Dashboard.html', 'Setup.html']);
+    for (const f of scan) {
+      for (const m of stripComments(read(f)).matchAll(/'([a-z][\w.]*)'/g)) mentioned.add(m[1]);
     }
     const defined = new Set(Object.keys(TABLE));
     // msg() returns the key for a miss, so a typo reaches the user as a dotted identifier in the
     // floating bar rather than as an error anybody sees first
     assert.deepEqual([...asked].filter((k) => !defined.has(k)), [], 'these keys are used but not defined');
     assert.deepEqual([...defined].filter((k) => !mentioned.has(k)), [], 'these entries are translated but never used');
+  });
+
+  test('the two terminal tables never define the same key', () => {
+    // A merged table hides a collision: one half silently wins and the other entry is unreachable,
+    // which reads as "that message never got translated" a long way from the cause
+    const both = Object.keys(CLI_MESSAGES).filter((k) => k in TRACKER_MESSAGES);
+    assert.deepEqual(both, [], 'these keys are defined in both terminal tables');
   });
 
   test('the language is actually set at both entry points', () => {
@@ -352,34 +352,52 @@ describe('each language of the prompt is written in that language', () => {
   });
 });
 
-describe('what the CLI prints stays Chinese', () => {
+describe('what the CLI prints is available in both languages', () => {
   /**
-   * Source assertions: `tracker.js` is the CLI entry point and runs a command on import, so these
-   * constants cannot be imported out — the same reason `cli-hints.test.js` reads it as text.
+   * The CLI's copy moved into `lib/tracker-messages.js`, so these are table checks rather than
+   * source assertions. The generic table checks — both halves present, the Chinese half Chinese,
+   * matching slots, no key used-but-undefined or defined-but-unused — already run over the merged
+   * terminal table above. What is left here is what those cannot see: **that particular groups of
+   * entries did not lose their substance to the translation.**
    *
-   * `CLI_HINTS` is a density check because its entries legitimately contain command lines
-   * (`Remove-Item Env:…`) that are not Chinese and must not be. `PHASE_LABEL` is small and every
-   * value is a label, so that one is checked per string.
+   * A density floor rather than a per-string rule for the advice, because those entries legitimately
+   * contain command lines (`Remove-Item Env:…`) which are not Chinese and must not be. The phase and
+   * lint labels are short and every value is a label, so those are checked per string in both halves.
    */
-  const tracker = () => stripComments(read('tracker.js'));
+  const entries = (prefix) => Object.entries(TRACKER_MESSAGES).filter(([k]) => k.startsWith(prefix));
 
-  test('the terminal-only advice is still written in Chinese', () => {
-    const cjk = cjkCount(constBlock(tracker(), 'CLI_HINTS'));
+  test('the terminal-only advice carries real prose in both languages', () => {
+    const rows = entries('hint.');
+    assert.ok(rows.length >= 15, `only ${rows.length} advice entries were found — the extraction is broken, not the rule satisfied`);
+    const cjk = cjkCount(rows.map(([, v]) => v[0]).join(''));
     assert.ok(cjk > 250,
-      `CLI_HINTS holds only ${cjk} Chinese characters. This is the advice printed beside a failure, `
-      + 'and it is read by the same person reading the rest of the terminal output');
+      `the Chinese half of the advice holds only ${cjk} Chinese characters. This is what is printed `
+      + 'beside a failure, and it is read by the same person reading the rest of the terminal output');
+    // The English half cannot be measured the same way, so it is measured by its own absence of
+    // Chinese plus a length floor — an entry left as the Chinese string in both slots fails the first,
+    // and an entry cut down to a stub fails the second
+    for (const [k, [zh, en]] of rows) {
+      assert.ok(!CJK.test(en.replace(/[""「」]/g, '')), `${k}: the English half still contains Chinese`);
+      assert.ok(en.length > zh.length * 0.6, `${k}: the English half is far shorter than the Chinese one and has probably lost something`);
+    }
   });
 
-  test('the error labels are still written in Chinese', () => {
-    const cjk = cjkCount(constBlock(tracker(), 'CODE_LABELS'));
-    assert.ok(cjk > 40, `CODE_LABELS holds only ${cjk} Chinese characters`);
+  test('every lint-code label is a real sentence in both languages', () => {
+    const rows = entries('code.');
+    assert.ok(rows.length >= 8, `only ${rows.length} lint labels were found — the extraction is broken`);
+    for (const [k, [zh, en]] of rows) {
+      assert.ok(CJK.test(zh), `${k}: the Chinese half is not Chinese`);
+      assert.ok(en.length > 10 && !CJK.test(en), `${k}: the English half is missing or still Chinese`);
+    }
   });
 
-  test('every sync phase label is Chinese', () => {
-    const block = constBlock(tracker(), 'PHASE_LABEL');
-    const values = [...block.matchAll(/:\s*'([^']+)'/g)].map((m) => m[1]);
-    assert.ok(values.length >= 3, `only ${values.length} phase labels were found — the extraction is broken, not the rule satisfied`);
-    for (const v of values) assert.ok(CJK.test(v), `the phase label ${JSON.stringify(v)} is not Chinese`);
+  test('every sync phase label is a real label in both languages', () => {
+    const rows = entries('phase.');
+    assert.ok(rows.length >= 3, `only ${rows.length} phase labels were found — the extraction is broken`);
+    for (const [k, [zh, en]] of rows) {
+      assert.ok(CJK.test(zh), `the phase label ${JSON.stringify(zh)} is not Chinese`);
+      assert.ok(en && !CJK.test(en), `${k}: the English phase label is missing or still Chinese`);
+    }
   });
 });
 
@@ -398,4 +416,40 @@ describe('the copy on the two pages stays Chinese', () => {
         + 'The interface copy is deliberately Chinese; a drop of this size means it was translated wholesale');
     });
   }
+});
+
+describe('clog resolves against both terminal tables at runtime', () => {
+  /**
+   * The static checks above compare key sets. **None of them notices the composer looking at only
+   * one table** — every key still exists, every entry still has both languages, and `clog` simply
+   * returns the key itself for anything in the half it stopped reading. That reaches a terminal as
+   * a dotted identifier where a sentence belongs, which nothing else here would report.
+   */
+  const SAMPLES = [
+    ['srv.listening', 'from lib/cli-messages.js'],
+    ['phase.library', 'from lib/tracker-messages.js'],
+  ];
+
+  for (const lang of ['zh', 'en']) {
+    test(`a key from each table resolves in ${lang}`, () => {
+      setMessageLanguage(lang);
+      for (const [key, where] of SAMPLES) {
+        const out = clog(key);
+        assert.notEqual(out, key, `clog returned the key itself for ${key} (${where})`);
+        assert.ok(out.length > 2, `${key} resolved to something too short to be the message`);
+      }
+    });
+  }
+
+  test('the two languages really differ', () => {
+    // Guards the cheapest way to pass the two tests above: a composer that ignores the language
+    setMessageLanguage('zh');
+    const zh = SAMPLES.map(([k]) => clog(k));
+    setMessageLanguage('en');
+    const en = SAMPLES.map(([k]) => clog(k));
+    for (const [i, [key]] of SAMPLES.entries()) {
+      assert.notEqual(zh[i], en[i], `${key} renders identically in both languages`);
+    }
+    setMessageLanguage('zh');
+  });
 });

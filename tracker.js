@@ -38,6 +38,7 @@ import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
 import { setMessageLanguage, achName } from './lib/messages.js';
 import { serve } from './lib/server.js';
+import { clog } from './lib/cli-messages.js';
 import {
   NotionClient,
   pickGuideDbProperties,
@@ -205,11 +206,13 @@ function progressPrinter() {
   };
 }
 
-const PHASE_LABEL = { library: '检查新游戏', 'library-en': '补英文名', achievements: '刷新成就完成数', schema: '同步成就详情' };
+// The label is a key now; the text lives in `lib/tracker-messages.js` like everything else the
+// CLI prints. A phase with no entry still falls through to its own raw name below
+const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', achievements: 'phase.achievements', schema: 'phase.schema' };
 
 function makeProgressHandler(p) {
   return (ev) => {
-    const label = PHASE_LABEL[ev.phase] ?? ev.phase ?? '';
+    const label = PHASE_LABEL[ev.phase] ? clog(PHASE_LABEL[ev.phase]) : (ev.phase ?? '');
     const count = ev.total ? ` ${ev.done}/${ev.total}` : ev.added ? ` +${ev.added}` : '';
     p.update(`  ${label}${count} ${ev.name ?? ''}`);
   };
@@ -911,15 +914,18 @@ async function cmdAudit() {
 
 /** guidelint's code → a human sentence. The per-guide summary and the totals share one set, so the two cannot disagree on naming */
 const CODE_LABELS = {
-  'missing-checkbox': '成就没有 checkbox,永远勾不上',
-  'merged-line': '一行里写了多个 checkbox',
-  'ambiguous-no-description': '同名成就没抄描述,分不出是哪一个',
-  'checked-mismatch': '勾选状态和真实解锁不一致',
-  'missing-title': '本地攻略缺 `# 游戏名`',
-  'paraphrased-description': '描述不是原文照抄,audit 反查不了',
-  'stats-in-heading': '节标题里有会过期的统计数字',
-  'data-source-note': '写了勾选状态的数据来源',
+  'missing-checkbox': 'code.missingCheckbox',
+  'merged-line': 'code.mergedLine',
+  'ambiguous-no-description': 'code.ambiguousNoDesc',
+  'checked-mismatch': 'code.checkedMismatch',
+  'missing-title': 'code.missingTitle',
+  'paraphrased-description': 'code.paraphrased',
+  'stats-in-heading': 'code.statsInHeading',
+  'data-source-note': 'code.dataSourceNote',
 };
+
+/** A lint code as a sentence, falling back to the raw code so a new one is still legible */
+const codeLabel = (code) => (CODE_LABELS[code] ? clog(CODE_LABELS[code]) : code);
 
 /**
  * Read-only validation: whether the guide itself is written correctly (three different things from
@@ -971,7 +977,7 @@ async function cmdGuideLint() {
     const byCode = new Map();
     for (const f of findings) byCode.set(f.code, (byCode.get(f.code) ?? 0) + 1);
     for (const [code, n] of [...byCode].sort((a, b) => b[1] - a[1])) {
-      console.log(`     ${String(n).padStart(4)}  ${CODE_LABELS[code] ?? code}`);
+      console.log(`     ${String(n).padStart(4)}  ${codeLabel(code)}`);
     }
   }
   if (!detail && results.some((r) => !r.skipped && r.lint.findings.length)) {
@@ -993,7 +999,7 @@ async function cmdGuideLint() {
   if (entries.length) {
     console.log(`\n  按问题类型:`);
     for (const [code, n] of entries) {
-      console.log(`    ${String(n).padStart(4)}  ${CODE_LABELS[code] ?? code}`);
+      console.log(`    ${String(n).padStart(4)}  ${codeLabel(code)}`);
     }
   }
   if (totals.errors === 0) console.log('\n没有 error。');
@@ -1873,7 +1879,7 @@ const COMMANDS = {
 
 const fn = COMMANDS[command];
 if (!fn) {
-  console.error(`未知命令:${command}\n`);
+  console.error(clog('cli.unknown', { command }));
   cmdHelp();
   process.exit(1);
 }
@@ -1890,71 +1896,33 @@ if (!fn) {
  * It hangs here rather than in each command: every command's errors leave through the catch below,
  * so one place is enough.
  */
-const GEMINI_MODEL_HINT =
-  '  换模型:--model <名字>,或者改 config.json 的 ai.model。\n' +
-  '  有哪些可用跑 `node tracker.js ai-check --models` —— 但注意列出来 ≠ 能用,\n' +
-  '  停售的模型照样出现在那个列表里。';
-
 const CLI_HINTS = {
-  'provider-model-mismatch': (d) =>
-    `  要用这个模型:加 --provider ${d.belongsTo}\n` +
-    `  要用 ${d.provider}:换成它自己的模型(--model <名字>,或改 config.json 的 ai.model)\n` +
-    '  注意环境变量会盖掉 config.json,清掉:\n' +
-    '    Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue',
-  'too-many-achievements': (d) =>
-    `  真要写就调大 config.json 的 ai.maxAchievements(当前 ${d.max},这款要 ${d.count})。`,
-  // Every Gemini model-name problem funnels to the same advice: ask the API for the list, then change
-  // the model
-  'gemini-model-retired': () => GEMINI_MODEL_HINT,
-  'gemini-model-unknown': () => GEMINI_MODEL_HINT,
-  'gemini-no-allowance': () => GEMINI_MODEL_HINT,
-  'gemini-429-no-detail': () =>
-    '  换个具体模型试:AI_MODEL=gemini-2.5-flash —— 别用 -latest 别名,\n' +
-    '  别名可能解析到一个不在免费层的新模型。',
-  'gemini-tool-rejected': () =>
-    '  改 config.json 的 ai.geminiTools,默认值是 ["google_search"];去掉 url_context 再试。',
-  'bad-api-key': (d) =>
-    `  注意环境变量 ${d.envVar} 会盖掉 config.json,清掉再试:\n` +
-    `    Remove-Item Env:${d.envVar} -ErrorAction SilentlyContinue`,
-  'deepseek-length': () =>
-    '  也可以把 config.json 的 ai.maxTokens 调小(DeepSeek 的上限比另外两家小)。',
-  'guide-exists': () =>
-    '  要整篇重写加 --overwrite(会先备份,并给出新旧对照)。\n' +
-    '  只想改其中几条:--only <选择器>(rare / locked /\n' +
-    '  section:小节名 / 成就名或 api_name 的逗号列表),配 --note "要求"。',
-  'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
+  'provider-model-mismatch': 'hint.providerModelMismatch',
+  'too-many-achievements': 'hint.tooManyAchievements',
+  // Every Gemini model-name problem funnels to the same advice: ask the API for the list, then
+  // change the model. Three codes, one entry — three copies of one sentence drift
+  'gemini-model-retired': 'hint.geminiModel',
+  'gemini-model-unknown': 'hint.geminiModel',
+  'gemini-no-allowance': 'hint.geminiModel',
+  'gemini-429-no-detail': 'hint.gemini429NoDetail',
+  'gemini-tool-rejected': 'hint.geminiToolRejected',
+  'bad-api-key': 'hint.badApiKey',
+  'deepseek-length': 'hint.deepseekLength',
+  'guide-exists': 'hint.guideExists',
+  'file-exists': 'hint.fileExists',
   // ---- Partial rewrite (--only) ----
-  'no-guide-to-patch': () =>
-    '  --only 是改已有攻略里的几条。这一款还没有攻略,先生成一份:\n' +
-    '  去掉 --only 直接跑 guide-gen。',
-  'unknown-achievements': () =>
-    '  名字要和 Steam 上一字不差(中文名或英文名都行)。同名的成就按名字点不动 ——\n' +
-    '  用 api_name 点它,`node tracker.js guide-lint <appid>` 里能看到。',
-  'empty-scope-result': (d) =>
-    `  「${d.selector}」一条都没选中。放宽阈值试试:--only rare:30,\n` +
-    '  或者直接点名:--only "成就名A,成就名B"。',
-  'nothing-locatable': () =>
-    '  点名的成就在攻略里都没有对应的 checkbox —— 那是"压根没写",不是"写得不好"。\n' +
-    '  这种要整篇重写(--overwrite),局部重写没有可以替换的位置。',
-  'no-rarity': () =>
-    '  Steam 这次没给出全球解锁率(限流或临时故障),等会儿再试,\n' +
-    '  或者换个不依赖它的选择器:--only thin / --only locked。',
-  'section-needs-local': () =>
-    '  命令行这条路按小节挑需要本地攻略全文。\n' +
-    '  Notion 上的攻略要按小节挑,去 Dashboard 点 ♻ 重写 →「自选…」——\n' +
-    '  那边读的是整页的块,小节结构在(点小节标题就是整节选中)。',
-  'bad-scope': () => '  选择器的写法:rare[:百分比] / locked / section:小节名。',
+  'no-guide-to-patch': 'hint.noGuideToPatch',
+  'unknown-achievements': 'hint.unknownAchievements',
+  'empty-scope-result': 'hint.emptyScopeResult',
+  'nothing-locatable': 'hint.nothingLocatable',
+  'no-rarity': 'hint.noRarity',
+  'section-needs-local': 'hint.sectionNeedsLocal',
+  'bad-scope': 'hint.badScope',
   // Nothing at all after `--only`. **Kept separate from bad-scope**: that one is a wrong spelling,
   // this one is nothing written — the former needs the spelling corrected, the latter needs to know
   // which spellings exist in the first place
-  'empty-scope': () =>
-    '  --only 后面要跟选择器:rare[:百分比] 稀有成就(全球解锁率 <10%)/\n' +
-    '  locked 还没打的 / section:小节名,或者「成就名A,成就名B」直接点名。\n' +
-    '  想整篇重写的话用 --overwrite,不要 --only。',
-  'chunk-too-small': (d) =>
-    `  别急着调大 ai.maxTokens —— 它是 thinking + 正文的总额,而一段只剩 ${d.size} 个成就\n` +
-    '  还写不完,说明吃掉额度的是思考,调大只会让它想得更久(CLAUDE.md 有实测)。\n' +
-    '  能压住思考的只有官方端点(ai.anthropicExtras 那几个参数兼容端点不收)。',
+  'empty-scope': 'hint.emptyScope',
+  'chunk-too-small': 'hint.chunkTooSmall',
 };
 
 try {
@@ -1962,7 +1930,7 @@ try {
 } catch (err) {
   console.error('\n❌ ' + (err.message ?? err));
   const hint = CLI_HINTS[err.code];
-  if (hint) console.error(hint(err.detail ?? {}));
+  if (hint) console.error(clog(hint, err.detail ?? {}));
   if (process.env.DEBUG) console.error(err.stack);
   // **Do not use process.exit().** Forcing an exit interrupts libuv while sockets and timers are
   // still being torn down, which on Windows shows up as
