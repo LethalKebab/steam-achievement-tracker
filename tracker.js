@@ -855,7 +855,7 @@ async function cmdCheckboxSync() {
   if (r.checked === 0) {
     console.log('  (没有符合条件的游戏:需要有攻略登记、有成就系统、且还没 100% 完成)');
   } else if (dryRun) {
-    const willCheck = r.logs.filter((l) => l.result.startsWith('【预演】')).length;
+    const willCheck = r.logs.filter((l) => l.code === 'would-tick').length;
     console.log(
       `\n预演结束:会勾选 ${willCheck} 个 checkbox。确认没问题就去掉 --dry-run 再跑一次。` +
         '\n(Notion 的勾选没法自动撤销,建议先只跑一款游戏:checkbox-sync <appid>)'

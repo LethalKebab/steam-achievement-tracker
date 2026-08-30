@@ -245,11 +245,26 @@ describe('the messages that moved into lib/messages.js', () => {
       for (const m of stripComments(read(join('lib', f))).matchAll(/msg\('([^']+)'/g)) asked.add(m[1]);
     }
     for (const m of stripComments(read('tracker.js')).matchAll(/msg\('([^']+)'/g)) asked.add(m[1]);
+    /**
+     * **The two directions need different sets, and mixing them is what broke this once.**
+     *
+     * "Asked for but not defined" has to stay narrow — only a real `msg('key')` call — or every
+     * quoted string in `lib/` becomes a supposed key and the check reports `'end_turn'` and
+     * `'max_tokens'` as missing translations.
+     *
+     * "Defined but never used" has to be wide, because a key is often reached indirectly:
+     * `msg(cond ? 'a' : 'b')` puts it nowhere near the call. The question there is only whether an
+     * entry is dead weight, and one that appears nowhere in the source certainly is.
+     */
+    const mentioned = new Set(asked);
+    for (const f of [...readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))]) {
+      for (const m of stripComments(read(join('lib', f))).matchAll(/'([a-z][\w.]*)'/g)) mentioned.add(m[1]);
+    }
     const defined = new Set(Object.keys(MESSAGES));
     // msg() returns the key for a miss, so a typo reaches the user as a dotted identifier in the
     // floating bar rather than as an error anybody sees first
     assert.deepEqual([...asked].filter((k) => !defined.has(k)), [], 'these keys are used but not defined');
-    assert.deepEqual([...defined].filter((k) => !asked.has(k)), [], 'these entries are translated but never used');
+    assert.deepEqual([...defined].filter((k) => !mentioned.has(k)), [], 'these entries are translated but never used');
   });
 
   test('the language is actually set at both entry points', () => {
