@@ -83,6 +83,8 @@ Environment variables win over both, and they are looked up **by the vendor bein
 
 `uiLanguage` needs no network at all: both languages are already on disk (`games.name` / `name_en`, `achievements.name_cn` / `name_en` and `description` / `description_en`), so it only chooses between them. Where one is missing it falls back to the other silently, with no marker — a game with no English title shows the name that was stored.
 
+Error messages follow it too. The ones `lib/` composes live in `lib/messages.js` and are picked at composition time, so they arrive in whichever language the interface is set to — `serve` sets it at startup, the toggle sets it again, and the CLI sets it from the same key so one error never reads in two languages depending on which entry point hit it.
+
 Guides are not affected. Ones already generated stay exactly as they are.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.

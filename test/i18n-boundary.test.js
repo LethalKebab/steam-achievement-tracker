@@ -35,6 +35,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSystemPrompt } from '../lib/guidegen.js';
+import { MESSAGES } from '../lib/messages.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -103,6 +104,84 @@ describe('every message thrown from lib/ is Chinese', () => {
     assert.deepEqual(english, [],
       'these messages are thrown from lib/ in English, and they render verbatim in the Dashboard floating bar:\n  '
       + english.join('\n  '));
+  });
+});
+
+/**
+ * The same rule, for the messages that have moved into a table.
+ *
+ * The check above can only see a Chinese literal handed to `new Error`. A message composed through
+ * `msg('key')` is invisible to it — so as files convert, that rule would quietly cover less and
+ * less while still reporting green. **`CONVERTED` is what keeps the two halves adding up**: a file
+ * on this list must hold no user-facing Chinese literals at all, and every string it used to hold
+ * has to be in `MESSAGES` with a Chinese half. A file off the list is still governed by the literal
+ * rule above.
+ *
+ * That list is the point. "Deliberately converted" and "quietly emptied" look identical from
+ * outside, and the failure of the second is that the Dashboard's floating bar starts coming back
+ * with an English identifier where a sentence used to be.
+ */
+describe('the messages that moved into lib/messages.js', () => {
+  const CONVERTED = ['api.js', 'server.js', 'reveal.js'];
+
+  test('every entry has both languages, and the Chinese half really is Chinese', () => {
+    const bad = Object.entries(MESSAGES).filter(([, v]) => {
+      if (!Array.isArray(v) || v.length !== 2) return true;
+      const [zh, en] = v;
+      // A translation pass that took the runtime surface with it shows up here and nowhere else:
+      // both halves present, both readable, and the Chinese one no longer Chinese
+      return !zh || !en || !CJK.test(zh);
+    }).map(([k]) => k);
+    assert.deepEqual(bad, [], 'these entries are not a [zh, en] pair with a Chinese first half');
+  });
+
+  test('a slot in one language is a slot in the other', () => {
+    const slots = (x) => (x.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
+    const mismatched = Object.entries(MESSAGES)
+      .filter(([, [zh, en]]) => slots(zh) !== slots(en))
+      .map(([k]) => k);
+    // A dropped slot does not throw — it renders the sentence without the value it existed to carry
+    assert.deepEqual(mismatched, [], 'the two languages of these entries interpolate different things');
+  });
+
+  test('every key asked for exists, and every key defined is asked for', () => {
+    const asked = new Set();
+    for (const f of readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))) {
+      for (const m of stripComments(read(join('lib', f))).matchAll(/msg\('([^']+)'/g)) asked.add(m[1]);
+    }
+    for (const m of stripComments(read('tracker.js')).matchAll(/msg\('([^']+)'/g)) asked.add(m[1]);
+    const defined = new Set(Object.keys(MESSAGES));
+    // msg() returns the key for a miss, so a typo reaches the user as a dotted identifier in the
+    // floating bar rather than as an error anybody sees first
+    assert.deepEqual([...asked].filter((k) => !defined.has(k)), [], 'these keys are used but not defined');
+    assert.deepEqual([...defined].filter((k) => !asked.has(k)), [], 'these entries are translated but never used');
+  });
+
+  test('a converted file holds no user-facing Chinese literal of its own', () => {
+    const offenders = [];
+    for (const f of CONVERTED) {
+      const src = stripComments(read(join('lib', f)));
+      const thrown = [...src.matchAll(/new Error\(\s*(['"`])((?:[^\\]|\\.)*?)\1/g)].map((m) => m[2]);
+      const returned = [...src.matchAll(/error:\s*(['`])((?:[^\\]|\\.)*?)\1/g)].map((m) => m[2]);
+      for (const t of [...thrown, ...returned]) {
+        if (CJK.test(t)) offenders.push(`lib/${f}: ${JSON.stringify(t.slice(0, 60))}`);
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'these are back to being literals in a file that is supposed to compose through msg(); '
+      + 'one message left behind reads in the old language while everything around it switched: '
+      + offenders.join(' | '));
+  });
+
+  test('the language is actually set at both entry points', () => {
+    // The table defaults to Chinese, so forgetting this is silent: the interface switches to
+    // English and every message from lib/ keeps answering in Chinese
+    assert.match(stripComments(read(join('lib', 'server.js'))), /setMessageLanguage\(config\.uiLanguage\)/,
+      'serve has to set it before anything can fail');
+    assert.match(stripComments(read('tracker.js')), /setMessageLanguage\(config\.uiLanguage\)/,
+      'the CLI shares these messages with the Dashboard and has to agree with it');
+    assert.match(stripComments(read(join('lib', 'api.js'))), /setMessageLanguage\(lang\)/,
+      'saveUiLanguage has to move the messages too, or the toggle changes the page and not the errors');
   });
 });
 

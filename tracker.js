@@ -36,6 +36,7 @@ import {
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
+import { setMessageLanguage } from './lib/messages.js';
 import { serve } from './lib/server.js';
 import {
   NotionClient,
@@ -216,6 +217,11 @@ function makeProgressHandler(p) {
 
 function withSteam({ requireSteam = true } = {}) {
   const config = loadConfig({ required: requireSteam ? ['steam'] : [] });
+  // The CLI's own output is not switchable (see #86 — its audience and the Dashboard's need not be
+  // one decision), but the messages **lib/ throws** are shared with the Dashboard and come from a
+  // table now. Setting it here keeps one error from reading in two languages depending on which
+  // entry point hit it
+  setMessageLanguage(config.uiLanguage);
   const db = openDb(config.dbPath);
   const steam = new SteamClient(config, { log: () => {} });
   return { config, db, steam };
