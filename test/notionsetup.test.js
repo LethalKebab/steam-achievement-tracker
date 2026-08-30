@@ -558,6 +558,48 @@ describe('inspectGuideDb — ask everything worth asking at the moment the datab
     assert.equal(r.database.title, '攻略库');
   });
 
+  test('a database from the older version: flagged, offered a fix, and still perfectly usable', async () => {
+    // The gate this replaces was "fixable = an option is missing", and an older database is missing
+    // nothing — so the very users who need the migration were shown no button at all
+    const r = await inspectGuideDb(stubDb({ properties: legacyStatusProps() }), 'db1');
+    assert.deepEqual(codes(r), [DB_PROBLEM.OUTDATED_FORMAT]);
+    assert.equal(r.fixable, true, 'no button means no migration for anyone not on the CLI');
+    assert.equal(r.ok, true, 'a grey database generates guides and ticks boxes — setup must not be blocked over how it looks');
+    assert.equal(r.problems[0].severity, 'warn');
+    assert.deepEqual(r.problems[0].outdated.sort(), ['Done', 'In progress', 'Staged']);
+  });
+
+  test('once only the colours are left the button goes away — pressing it again would do nothing', async () => {
+    // The state after 「帮我补上」: groups fixed, board added, colours still refused by Notion. Left as
+    // one problem this stayed lit and clickable forever
+    const props = legacyStatusProps();
+    props.Status.status.groups = [
+      { id: 'g1', name: 'To-do', color: 'gray', option_ids: ['id-Not started'] },
+      { id: 'g2', name: 'In progress', color: 'blue', option_ids: ['id-In progress', 'id-Staged'] },
+      { id: 'g3', name: 'Complete', color: 'green', option_ids: ['id-Done'] },
+    ];
+    const r = await inspectGuideDb(stubDb({ properties: props }), 'db1');
+    assert.deepEqual(codes(r), [DB_PROBLEM.COLOUR_BY_HAND]);
+    assert.equal(r.fixable, false, 'a button that cannot change anything is worse than none');
+    assert.equal(r.ok, true);
+    assert.match(r.problems[0].message, /In progress → blue/, 'it has to say which colour, or it is unactionable');
+  });
+
+  test('a database already in the current format raises nothing and offers no button', async () => {
+    const r = await inspectGuideDb(stubDb({ properties: full() }), 'db1');
+    assert.deepEqual(r.problems, []);
+    assert.equal(r.fixable, false, 'a button that would do nothing is worse than no button');
+  });
+
+  test('the format check costs no extra request', async () => {
+    // It reads the property payload already in hand. Checking the board view here would put a call
+    // on the other API version into every 保存并验证
+    const c = stubDb({ properties: legacyStatusProps() });
+    await inspectGuideDb(c, 'db1');
+    assert.equal(c.log.filter((x) => x.path.startsWith('/views')).length, 0);
+    assert.equal(c.log.filter((x) => x.path.startsWith('/data_sources')).length, 0);
+  });
+
   test('the token does not work → stop right there rather than asking about a database with an ID that is bound to fail', async () => {
     const c = stubDb({ properties: full(), tokenFails: true });
     const r = await inspectGuideDb(c, 'db1');
