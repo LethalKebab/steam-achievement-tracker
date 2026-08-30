@@ -876,92 +876,180 @@ describe('the prompt and SKILL.md must not drift apart quietly', () => {
     );
   });
 
-  // **The disposition table matches "headings", not "content".** Rule 一 is marked as included,
-  // while its three conditions exist as two hand-copied versions, in SKILL.md and in RULES —
-  // change one and forget the other and the disposition table stays completely silent, leaving two
-  // differently worded rules, which is documentation and code saying different things all over
-  // again.
-  // The one real case changed condition 2, so this pins all three conditions to one wording.
-  test('the three nesting conditions have to be worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /序号不是身份/, `${name} is missing condition 1`);
-      assert.match(text, /写得出做法/, `${name} condition 2 has to use "does this line have content" as its criterion`);
-      assert.match(text, /互相替代/, `${name} is missing condition 3`);
-      assert.doesNotMatch(text, /游戏自己不替你数/,
-        `${name} still carries the old criterion — "no nesting when the game counts for you" keeps the whole collect-everything class out`);
+  /**
+   * **The disposition table matches headings, not content.** rule-1 is marked as included, while its
+   * three conditions exist as separate hand-copied versions — in SKILL.md and in the prompt, and the
+   * prompt now in two languages. Change one and forget the others and the disposition table stays
+   * completely silent, leaving differently worded copies of one rule: documentation and code saying
+   * different things, which this project has been bitten by before.
+   *
+   * So each row below pins one rule to **one wording per copy**, and the row exists because that
+   * rule has already been got wrong once. `skill` and `en` share a language and therefore share
+   * their sentences outright; `zh` is the same rule in Chinese, and its phrases are what the
+   * measured Chinese prompt actually says.
+   *
+   * A row is not a style rule. Every one of them is load-bearing:
+   */
+  const SHARED_RULES = [
+    {
+      // The one real case changed condition 2, so all three conditions are pinned to one wording.
+      // The old criterion — "no nesting when the game counts for you" — kept the entire
+      // collect-everything class out, which is the class nesting exists for
+      what: 'the three nesting conditions',
+      skill: [/A number is not an identity/, /beyond "which one it is"/, /alternatives/],
+      en: [/A number is not an identity/, /beyond "which one it is"/, /alternatives/],
+      zh: [/序号不是身份/, /写得出做法/, /互相替代/],
+      absent: { zh: /游戏自己不替你数/ },
+    },
+    {
+      // One real case: 613 characters in **one paragraph**. The content was right, and the model
+      // itself wrote 「前置准备:…」 and 「流程:1)…6)」, all crammed into the same `<br>` segment —
+      // not one bit of the structure reached the page. The rules had never said the notes segment
+      // has to be broken up: hard rule 1 fixes only the three parts and says nothing about what the
+      // notes look like inside, so "write in detail" was carried out as "write long"
+      what: 'the line-breaking rule for the notes segment',
+      skill: [/prerequisites, steps and warnings on separate lines/, /one step per line/, /not how long it is/],
+      en: [/prerequisites, steps and warnings on separate lines/, /one step per line/, /not how long it is/],
+      zh: [/前置、步骤、警告分行写/, /一步一行/, /不是字数/],
+    },
+    {
+      // The same achievement exposed a second thing: the nesting section gives collectible examples
+      // from beginning to end (shrines, recipes, side quests, entries), so it reads as "how to write
+      // collectibles" — while 「创造」 is a six-stage process that satisfies all three conditions.
+      // The lower bound matters as much: without it a two-step achievement gets split into sub-boxes
+      what: 'a chain of steps is a nesting candidate too',
+      skill: [/write the process itself as sub-checkboxes/, /Three steps or fewer/, /specific action/],
+      en: [/write the process itself as sub-checkboxes/, /Three steps or fewer/, /specific action/],
+      zh: [/把流程本身写成子 checkbox/, /三步以内的写在心得里就够/, /具体动作/],
+    },
+    {
+      // One real rewrite produced 14 sub-boxes, every one starting with 「前置:」 or 「步骤:」 — the
+      // same word fourteen times to say two things. The "why" is pinned along with the rule because
+      // **it is a mechanical requirement rather than a style choice**, and a rule that only says
+      // "write it this way" gets changed by the next person who finds it verbose
+      what: 'how a group label is written',
+      skill: [/label goes on its own line/, /do not repeat it in front of every entry/, /plain bullet/, /five or six go flat/],
+      en: [/label goes on its own line/, /do not repeat it in front of every entry/, /plain bullet/, /five or six go flat/],
+      zh: [/标签单独占一行/, /不要在每一条前面重复/, /不能写成普通 bullet/, /五六条以内直接平铺/],
+    },
+    {
+      // Rule 5 once said only "a very long list" gets folded, with no number — while the group-label
+      // side had a five-or-six lower bound and the folding side had none: two rulers in one guide.
+      // Folding a three-line table only hides the information
+      what: 'folding has a line-count lower bound',
+      skill: [/10 lines/],
+      en: [/10 lines/],
+      zh: [/10 行/],
+    },
+    {
+      // **The starting point of a whole round of rework, and the spec once said nothing about it.**
+      // Four 「将吉祥物替换为 X」 achievements were split between two sections — each defensible on
+      // its own, and a bug taken together. The program half (`lib/guidecluster.js`) runs only when
+      // the guide **was sharded**, while more than half the library has fewer achievements than
+      // `ai.chunkSize` and is written in one pass, with no fallback but this rule
+      what: 'one kind of thing lives in one section',
+      skill: [/Things of the same kind belong in the same section/, /not by how they unlock/],
+      en: [/Things of the same kind belong in the same section/, /not by how they unlock/],
+      zh: [/同一类事必须在同一个小节里/, /不看.{0,4}解锁途径|不看是怎么解锁的/],
+    },
+    {
+      // A line count answers "fold or not", never "fold what". Without this a whole section of
+      // achievements gets packed into one fold (measured: the 13 entries under one game's
+      // `## 世界全清`), and that section opens empty on Notion. `unwrapAchievementToggles` takes it
+      // apart, but **that is no reason to drop the rule** — a program fallback is the last line, not
+      // the first. Saying only "do not fold an achievement" leaves it unclear whether the supporting
+      // material counts as one, so what a fold *does* hold is pinned alongside
+      what: 'an achievement itself never goes into a fold',
+      skill: [/never goes inside a fold/, /supporting material/],
+      en: [/never goes inside a fold/, /supporting material/],
+      zh: [/成就本身那一行永远不进折叠|成就那一行永远不进折叠/, /折叠装的是.{0,12}辅料/],
+    },
+    {
+      // Location achievements in a hidden-object game: prose cannot explain where 30 mushrooms are,
+      // and the screenshot route is explicitly excluded (rule-2's disposition — the model cannot
+      // produce reliable in-game screenshots). Measured by rewriting those entries: the substitute
+      // the model found by itself was a video link with a timestamp. The catch-all phrasing is
+      // blocked **by name**, because saying only "write concretely" does not stop it
+      what: 'the fallback for a location achievement',
+      skill: [/timestamp/, /check the corners/],
+      en: [/timestamp/, /check the corners/],
+      zh: [/时间点/, /留意角落/],
+    },
+  ];
+
+  for (const rule of SHARED_RULES) {
+    test(`${rule.what} — one wording per copy, and the copies stay in step`, () => {
+      const skill = readFileSync(skillPath, 'utf8');
+      const defs = [def('A', '第一步', '完成第一关。')];
+      const copies = [
+        ['SKILL.md', skill, rule.skill],
+        ['the English prompt', buildSystemPrompt('测试游戏', '1', defs, { lang: 'en' }), rule.en],
+        ['the Chinese prompt', buildSystemPrompt('测试游戏', '1', defs), rule.zh],
+      ];
+      for (const [name, text, patterns] of copies) {
+        for (const p of patterns) {
+          assert.match(text, p, `${name} no longer carries ${p} — ${rule.what}`);
+        }
+      }
+      for (const [lang, pattern] of Object.entries(rule.absent ?? {})) {
+        const text = copies.find(([n]) => n.endsWith(lang === 'zh' ? 'Chinese prompt' : 'English prompt'))[1];
+        assert.doesNotMatch(text, pattern, `the ${lang} copy still carries superseded wording`);
+      }
+    });
+  }
+
+  test('every shared rule really is checked against all three copies', () => {
+    // Without this, a row with an empty pattern list passes vacuously and the rule it names is
+    // guarded by nothing — the failure mode of every table-driven test
+    for (const rule of SHARED_RULES) {
+      for (const key of ['skill', 'en', 'zh']) {
+        assert.ok(Array.isArray(rule[key]) && rule[key].length > 0, `${rule.what} has no ${key} patterns`);
+      }
+      assert.equal(rule.skill.length, rule.en.length, `${rule.what}: the two English copies are checked unevenly`);
+      assert.equal(rule.zh.length, rule.en.length, `${rule.what}: the Chinese copy is checked unevenly`);
     }
   });
 
-  // One real case: 613 characters in **one paragraph**. The content was in fact right, and the
-  // model itself wrote 「前置准备:…」 and 「流程:1)…6)」, but all crammed into the same `<br>`
-  // segment — not one bit of the structure reached the page, and a reader cannot tell which
-  // sentence is preparation, which is an action and which is a trap.
-  //
-  // The rules never said the notes segment has to be broken into lines: hard rule 1 only fixes the
-  // three segments 「名字<br>描述<br>心得」 and says nothing about what the notes look like inside,
-  // so "write in detail" was executed as "write long".
-  test('the line-breaking rule for the notes segment has to be worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /前置、步骤、警告分行写/, `${name} is missing the line-breaking rule`);
-      assert.match(text, /一步一行/, `${name} has to say that with many steps it becomes one step per line`);
-      assert.match(text, /不是字数/,
-        `${name} criterion has to be "are two kinds of thing mixed in" — a character count cuts short what should be long`);
+  test('the two English copies are pinned to the same sentences, not merely to similar ones', () => {
+    // SKILL.md and the English prompt share a language, so there is no reason for them to word one
+    // rule two ways — and every row above is a rule already got wrong once by exactly that drift.
+    // The Chinese prompt is the one copy that cannot share a string, which is what the section
+    // table and the hard-rule parity tests cover instead
+    for (const rule of SHARED_RULES) {
+      assert.deepEqual(rule.skill.map(String), rule.en.map(String), rule.what);
     }
   });
 
-  // The same achievement exposed a second thing: the nesting section gives collectible examples
-  // from beginning to end (shrines, recipes, side quests, entries), so the model read it as "how
-  // to write collectibles", while 「创造」 is a six-stage long process — which in fact satisfies all
-  // three conditions.
-  test('a chain of steps is a nesting candidate too, worded identically in both copies', () => {
+  /**
+   * Where the copies are **supposed** to differ, and why each difference has to be pinned too.
+   *
+   * The table above pins what the copies share. These are the two places they deliberately part
+   * company — and an unpinned deliberate difference is read by the next person as a contradiction
+   * and deleted, or worse, harmonised in the wrong direction.
+   */
+  test('SKILL.md keeps the Notion-side exception the prompt cannot carry', () => {
     const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /把流程本身写成子 checkbox/, `${name} does not say a long process can be nested too`);
-      assert.match(text, /三步以内的写在心得里就够/,
-        `${name} is missing the lower bound — without it, a two-step achievement gets split into sub-boxes`);
-      assert.match(text, /具体动作/,
-        `${name} has to block the contentless 步骤一/步骤二 form of splitting`);
-    }
+    // The prompt does not know which backend a guide will land on when `target` does not reach it,
+    // so it can only give the checkbox-label form that is safe on both. SKILL.md is for editing a
+    // page on a *known* backend by hand, and on Notion `fetchAllToDoBlocks` treats a toggle as a
+    // transparent container, so a folded label does not break attribution
+    assert.match(skill, /transparent containers/,
+      'SKILL.md lost the Notion-side exception — a folded label is safe there, and that is the reason');
+    assert.match(skill, /it falls back to the checkbox-label form/,
+      'SKILL.md lost the fallback direction — the cost of guessing wrong is asymmetric, so the default has to be the checkbox label');
   });
-  // One real rewrite produced 14 sub-boxes, every one of them starting with 「前置:」 or
-  // 「步骤:」 — the same word fourteen times, saying only two things. A group label belongs on its
-  // own line.
-  test('how a group label is written has to be worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /标签单独占一行/, `${name} is missing the group-label rule`);
-      assert.match(text, /不要在每一条前面重复/, `${name} is missing the "do not repeat it" half — which is the disease this rule treats`);
-      // **This one is a mechanical requirement, not a style choice**, so both sides have to state
-      // the "why" — a rule that only says "write it this way" gets changed by the next person who
-      // finds it verbose
-      assert.match(text, /不能写成普通 bullet/,
-        `${name} does not say a label line has to be a checkbox too — that is the precondition for a partial rewrite to locate anything`);
-      assert.match(text, /五六条以内直接平铺/,
-        `${name} is missing the lower bound; wrapping three entries only adds two empty boxes`);
-    }
 
-    // The two copies diverge here, deliberately. RULES does not know which backend this guide will
-    // land on (the comment in `guidegen.js`), so it can only give the checkbox label form that is
-    // safe on both sides; SKILL.md is for editing pages on a known backend by hand, and on the
-    // Notion side `fetchAllToDoBlocks` treats a toggle as a transparent container, so a
-    // collapsible label does not break attribution.
-    // **Pin the divergence itself** — otherwise the next person either deletes the Notion passage
-    // as a contradiction, or moves it into RULES, and the latter silently breaks `todoSpans` for
-    // local md.
-    assert.match(skill, /toggle \/ column 当\*\*透明容器\*\*/,
-      'SKILL.md is missing the Notion-side exception — a collapsible label is safe on Notion, and that is the reason');
-    assert.match(skill, /target. 传不到时退回 checkbox 标签版/,
-      'SKILL.md is missing the fallback direction — the cost of guessing wrong is asymmetric, so the default has to be the checkbox label');
-    // `rules` here is given no target, so what comes back is the fallback version. **The fallback
-    // has to be the one that survives on both sides.**
-    assert.match(rules, /标签行必须也是/,
-      'with no target, RULES has to give the checkbox label form — a collapsible written into local md silently breaks the range');
+  test('each copy keeps its own strongest sentence on the location fallback', () => {
+    // 「时间点」 / "timestamp" appears several times on every side, so the shared row above survives
+    // the deletion of any one occurrence. These pin the sentence that carries the rule
+    const skill = readFileSync(skillPath, 'utf8');
+    const defs = [def('A', '第一步', '完成第一关。')];
+    const zh = buildSystemPrompt('测试游戏', '1', defs);
+    const en = buildSystemPrompt('测试游戏', '1', defs, { lang: 'en' });
+    assert.match(zh, /写不出具体位置时/, 'the Chinese prompt lost the rule itself');
+    assert.match(zh, /时间点是关键/, 'the Chinese prompt lost "a bare video id makes people scrub from the start"');
+    assert.match(en, /The timestamp is the point/, 'the English prompt lost the same sentence');
+    assert.match(skill, /When a screenshot is not possible/, 'SKILL.md lost this section');
   });
 
   // The group label is the one rule in the prompt that branches by backend. On Notion,
@@ -995,76 +1083,6 @@ describe('the prompt and SKILL.md must not drift apart quietly', () => {
       assert.match(text, /标签单独占一行/, `the ${name} version lost the overall group-label rule`);
       assert.match(text, /五六条以内直接平铺/, `the ${name} version lost the lower bound for grouping`);
     }
-  });
-
-  // Rule 五 used to say only "a very long list" gets collapsed, with no number — while the group
-  // label side has a 「五六条」 lower bound and the collapsible side had none, two rulers in one
-  // guide. Collapsing a three-to-five-line table only hides the information.
-  test('collapsing has a line-count lower bound, worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /10 行/,
-        `${name} is missing the lower bound for collapsing — without it a three-line table gets collapsed and the information is hidden instead`);
-    }
-  });
-
-  /**
-   * A line-count bound answers "collapse or not", never "collapse what". Without this rule a whole
-   * section of achievements gets packed into one collapsible (measured: the 13 entries under one
-   * game's `## 世界全清`), and that section opens empty on Notion.
-   * `unwrapAchievementToggles` takes it apart, but **that is no reason to drop this prompt rule** —
-   * a program fallback is the last line, not the first.
-   */
-  /**
-   * **This one is the starting point of a whole round of rework, and the spec once said nothing
-   * about it at all.** In one game, four 「将吉祥物替换为 X」 achievements were split between
-   * 「宝石与商店」 and 「吉祥物替换」 — each defensible on its own, and a bug taken together. The
-   * program half (`lib/guidecluster.js`) runs only when the guide **was sharded**, while more than
-   * half the games in the library have fewer achievements than `ai.chunkSize` and are written in
-   * one pass — they have no fallback, only this rule.
-   */
-  test('one kind of thing has to live in one section, worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /同一类事必须在同一个小节里/, `${name} is missing this rule`);
-      assert.match(text, /不看.{0,4}解锁途径|不看是怎么解锁的/,
-        `${name} has to say the criterion is the official description rather than how it unlocks — grouping by unlock route is what split them apart in the first place`);
-    }
-  });
-
-  test('an achievement itself never goes into a collapsible, worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    assert.match(rules, /成就本身那一行永远不进折叠/, 'RULES is missing this rule');
-    assert.match(skill, /成就那一行永远不进折叠/, 'SKILL.md is missing this rule');
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /折叠装的是.{0,12}辅料/,
-        `${name} has to say what a collapsible holds — saying only "do not collapse an achievement" leaves the model unable to tell whether supporting material counts as one`);
-    }
-  });
-
-  // Location achievements in a hidden-object game: prose cannot explain "where these 30 mushrooms
-  // are", and the screenshot route is explicitly excluded (rule 二's disposition: the model cannot
-  // produce reliable in-game screenshots).
-  // Measured by rewriting those entries: the substitute the model found by itself was **a video
-  // link with a timestamp** (「对照 B站 BV1KFwzzCEsc 的 5-2 段落(01:56)」) — which is what belongs
-  // in the rule.
-  test('the fallback for a location achievement is worded identically in both copies', () => {
-    const skill = readFileSync(skillPath, 'utf8');
-    const rules = buildSystemPrompt('测试游戏', '1', [def('A', '第一步', '完成第一关。')]);
-    for (const [name, text] of [['SKILL.md', skill], ['RULES', rules]]) {
-      assert.match(text, /时间点/, `${name} is missing "a video link has to carry a timestamp"`);
-      assert.match(text, /留意角落/,
-        `${name} has to block the catch-all phrasing by name — saying only "write concretely" does not stop it`);
-    }
-    // **The two sides are worded differently, and one shared assertion pins only the weaker of
-    // them.** Pin the most important sentence of each separately — 「时间点」 appears several times
-    // on both sides, so deleting any one occurrence leaves it there
-    assert.match(rules, /写不出具体位置时/, 'RULES is missing this rule itself');
-    assert.match(rules, /时间点是关键/, 'RULES is missing "giving only the video id makes people scrub from the start"');
-    assert.match(skill, /贴不了截图的时候/, 'SKILL.md is missing this section');
   });
 
   test('the disposition table must not carry entries SKILL.md has already deleted', () => {
