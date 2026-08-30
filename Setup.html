@@ -303,6 +303,39 @@
   .back.armed,
   .back.armed:hover:not(:disabled) { color: var(--danger); }
 
+  /* ---- Interface language --------------------------------------------
+     **It sits above everything it governs.** This is the one control on the page
+     that decides how every other line on it reads, so it belongs with the title
+     rather than inside a step — and it is present during first-run setup too,
+     not only in settings mode: somebody who cannot read the wizard needs this
+     before the wizard, not after finishing it.
+
+     Real radios rather than two buttons. Arrow-key navigation between the
+     options, the checked state and the focus ring are all then the browser's job,
+     and "pick exactly one of these" is precisely what a radio group is. The input
+     is moved out of sight rather than `display:none`, which would take it out of
+     the tab order along with it. */
+  .lang { display: flex; gap: var(--s2); margin: 0 0 var(--s5); }
+  .lang-opt { position: relative; display: inline-flex; margin: 0; }
+  .lang-opt input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; border: none; opacity: 0; }
+  .lang-opt span {
+    display: block;
+    padding: 7px var(--s3);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: border-color var(--dur-1), background var(--dur-1), color var(--dur-1);
+  }
+  .lang-opt span:hover { border-color: var(--accent); color: var(--text); }
+  .lang-opt input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--text-hi); }
+  /* The global :focus-visible rule cannot reach a control that is out of sight, so the ring is
+     drawn on the label standing in for it — without this the group is keyboard-operable but
+     invisible while being operated */
+  .lang-opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   /* ---- The first-screen fork ----------------------------------------
      The program cannot tell 「第一次用」 from 「老用户换了台电脑」 — in both cases
      there is no config and no data. This is **the one thing that can only be
@@ -664,6 +697,15 @@
     <button type="button" class="back" id="gate-back" hidden>← 重新选择</button>
     <h1 id="page-title">初始设置</h1>
     <div class="subtitle" id="page-subtitle">只填一次,密钥只存在这台电脑上</div>
+    <!-- Each option is written in its own language, so neither needs the other to
+         be readable — the one label on this page that works before the setting
+         it changes has taken effect. `aria-label` carries both for the same
+         reason. **Not `config.language`**: that one decides what is fetched from
+         Steam and changing it would need a full re-sync, see lib/lang.js -->
+    <div class="lang" role="radiogroup" aria-label="界面语言 / Interface language">
+      <label class="lang-opt"><input type="radio" name="uiLang" value="zh"><span>中文</span></label>
+      <label class="lang-opt"><input type="radio" name="uiLang" value="en"><span>English</span></label>
+    </div>
     <!-- The first-run fork. **The question is not 「你是不是新用户」** — that
          would require guessing what this program considers 「新」. The question is
          whether there is anything to bring across, and that is something the
@@ -976,6 +1018,50 @@
     }
     const $ = (id) => document.getElementById(id);
 
+    const langInputs = () => document.querySelectorAll('.lang-opt input');
+
+    /** Reflect the stored setting. Nothing is checked in the markup, so a failed read shows neither option selected rather than the wrong one */
+    function paintLanguage(lang) {
+      langInputs().forEach((r) => { r.checked = r.value === lang; });
+    }
+
+    /**
+     * **Takes effect on the spot, and does not navigate.** It joins the several controls on this
+     * page that act immediately rather than waiting for 「保存并验证」 — there is nothing to
+     * validate here and no request to make of anyone, only a choice between two things already on
+     * disk.
+     *
+     * It deliberately does not reload either. A reload would send somebody on step 3 back to step
+     * 1 to change one setting, and the page's own copy is not yet translated, so it would cost
+     * that and show nothing for it.
+     *
+     * A refusal puts the selection back. The control **is** the state, so leaving it showing a
+     * language that was not saved would be the interface lying about what it did; the message says
+     * what happened, and the selection says what is true.
+     */
+    function initLanguage() {
+      langInputs().forEach((radio) => {
+        radio.addEventListener('change', async () => {
+          const chosen = radio.value;
+          let res;
+          try {
+            res = await call('saveUiLanguage', [chosen]);
+          } catch {
+            res = { error: '连不上后台服务,刷新一下页面' };
+          }
+          if (res && res.error) {
+            msg.className = 'msg error';
+            msg.textContent = res.error;
+            const previous = await call('getSettings', []).catch(() => ({}));
+            paintLanguage(previous.uiLanguage);
+            return;
+          }
+          if (msg.classList.contains('error')) { msg.className = 'msg'; msg.textContent = ''; }
+        });
+      });
+    }
+    initLanguage();
+
     const call = async (method, args) => {
       const res = await fetch('/api/' + method, {
         method: 'POST',
@@ -1021,6 +1107,7 @@
       if (s.error) { initSteps(); return; }
       isEditMode = s.hasSteamKey && Boolean(s.steamId);
 
+      paintLanguage(s.uiLanguage);
       $('id').value = s.steamId || '';
       $('notion-db').value = s.notionDbId || '';
       loadedNotionDb = s.notionDbId || '';

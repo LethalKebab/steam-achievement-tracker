@@ -283,7 +283,7 @@ describe('addGame', () => {
     assert.equal(getGame(db, '2185060').name_en, 'Two Point Museum');
     // The frontend pushes this object straight into allGames and re-renders, so a missing nameEn
     // here means the game just added cannot be found by English until the page is reloaded
-    assert.equal(r.nameEn, 'Two Point Museum');
+    assert.equal(r.nameAlt, 'Two Point Museum');
     assert.equal(r.name, '双点博物馆');
   });
 
@@ -321,7 +321,7 @@ describe('addGame', () => {
     const { api } = envWith(steamFor(calls));
     await api.addGame('2185060', '双点博物馆');
     const g = api.getDashboardData().games.find((x) => x.appid === '2185060');
-    assert.equal(g.nameEn, 'Two Point Museum');
+    assert.equal(g.nameAlt, 'Two Point Museum');
   });
 
   test('a row with nothing on record reports "" rather than undefined', () => {
@@ -332,9 +332,9 @@ describe('addGame', () => {
       startBackgroundSync: null, guideGenState: null, startGuideGen: null,
       planGuidePreflight: null, maybeAutoSync: null,
     });
-    // nameMatches does `(g.nameEn || '')`, so undefined would not throw — it would silently
+    // nameMatches does `(g.nameAlt || '')`, so undefined would not throw — it would silently
     // never match, which is the failure being fixed, wearing a different hat
-    assert.equal(api.getDashboardData().games.find((x) => x.appid === '294100').nameEn, '');
+    assert.equal(api.getDashboardData().games.find((x) => x.appid === '294100').nameAlt, '');
   });
 });
 
@@ -395,7 +395,7 @@ function liftFunction(name) {
 
 describe('nameMatches', () => {
   const nameMatches = liftFunction('nameMatches');
-  const wukong = { name: '黑神话:悟空', nameEn: 'Black Myth: Wukong' };
+  const wukong = { name: '黑神话:悟空', nameAlt: 'Black Myth: Wukong' };
 
   test('the reported bug: an English term finds a game stored under its Chinese title', () => {
     assert.equal(nameMatches(wukong, 'Black Myth'), true);
@@ -407,11 +407,11 @@ describe('nameMatches', () => {
 
   test('case does not matter on either side', () => {
     assert.equal(nameMatches(wukong, 'BLACK myth'), true);
-    assert.equal(nameMatches({ name: 'RimWorld', nameEn: '' }, 'rimworld'), true);
+    assert.equal(nameMatches({ name: 'RimWorld', nameAlt: '' }, 'rimworld'), true);
   });
 
   test('a game with nothing on record still matches by the name it has', () => {
-    assert.equal(nameMatches({ name: 'RimWorld', nameEn: '' }, 'rim'), true);
+    assert.equal(nameMatches({ name: 'RimWorld', nameAlt: '' }, 'rim'), true);
     assert.equal(nameMatches({ name: 'RimWorld' }, 'rim'), true, 'a row from before the column existed must not throw');
   });
 
@@ -447,6 +447,6 @@ describe('the two search tests must not drift apart', () => {
   test('nameEn reaches the frontend at all', () => {
     // The two above pass perfectly well with the column never leaving the backend, and then
     // every nameEn is undefined and the search behaves exactly as it did before the fix
-    assert.match(strip(read('lib/api.js')), /nameEn: row\.name_en/);
+    assert.match(strip(read('lib/api.js')), /nameAlt: alt/);
   });
 });

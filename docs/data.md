@@ -45,7 +45,7 @@ Six decisions worth knowing before you write queries:
 
   A repeat of either event overwrites the stamp with the newer time, so "how long ago" always refers to the most recent occurrence.
 
-- **`name` is the localised title and `name_en` is the English one.** The sync hunts for a Chinese name for `name`, which is what the Dashboard displays; roughly a third of a Chinese-language library ends up stored under a title that contains no English at all. `name_en` exists so search can still match an English term — the row's appearance never changes.
+- **`name` is the localised title and `name_en` is the English one.** The sync hunts for a Chinese name for `name`; roughly a third of a Chinese-language library ends up stored under a title that contains no English at all. Which of the two a row *displays* is `uiLanguage`'s decision (see [configuration.md](configuration.md)); search matches either, whichever is on screen.
 
   Owned games get it free: `GetOwnedGames` ignores `l=` and answers in English either way, so one response fills the whole owned library. Rows that never appear there (family-shared, delisted, hand-added) cost one `appdetails?l=english` call each, once.
 

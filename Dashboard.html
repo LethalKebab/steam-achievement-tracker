@@ -2799,9 +2799,10 @@
     /**
      * Does this game answer to this search term? Matches **either** of its two names.
      *
-     * `name` is deliberately the localised title — the sync hunts for a Chinese one — so an
-     * English term is `indexOf === -1` against it for a third of the library. `nameEn` is the same
-     * game's English store title, carried for exactly this test and empty when Steam has none.
+     * `name` is whichever name the interface is currently showing, and `nameAlt` is the stored one
+     * it is not showing — empty when there is no distinct second one. Matching only `name` misses a
+     * third of the library either way round: in Chinese an English term finds nothing, and in
+     * English a Chinese one finds nothing.
      *
      * **Both callers have to come through here.** One decides what the table draws, the other
      * whether to go to Steam at all; judged separately they drift, and the drift shows up as a row
@@ -2812,7 +2813,7 @@
       const q = String(needle || '').toLowerCase();
       if (!q) return true;
       return g.name.toLowerCase().indexOf(q) !== -1
-        || (g.nameEn || '').toLowerCase().indexOf(q) !== -1;
+        || (g.nameAlt || '').toLowerCase().indexOf(q) !== -1;
     }
 
     /**

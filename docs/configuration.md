@@ -9,7 +9,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "steamApiKey": "…",         // from https://steamcommunity.com/dev/apikey
   "steamId": "…",             // your SteamID64, 17 digits
 
-  "language": "schinese",     // language for game + achievement names from Steam
+  "language": "schinese",     // language for game + achievement names fetched from Steam
+  "uiLanguage": "zh",         // language the interface is in — "zh" or "en"; set it from /setup
   "port": 8777,               // Dashboard port
   "syncStaleHours": 12,       // auto-sync when opening the Dashboard if data is older; 0 = never
   "syncGuidesOnServe": true,  // also look for new guide pages when opening the Dashboard
@@ -74,7 +75,15 @@ The older flat `ai.apiKey` / `ai.model` still work and need no edit. They are tr
 
 Environment variables win over both, and they are looked up **by the vendor being asked for** rather than by the one written in the file.
 
-**`language`** — passed to Steam as the `l=` parameter, so it changes the names you see for games and achievements. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
+**`language`** — passed to Steam as the `l=` parameter, so it changes the names that are **fetched and stored**. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
+
+**`uiLanguage`** — `"zh"` or `"en"`, the language the interface is in. Set it from the two buttons at the top of `/setup`; editing the file by hand works too, and an unrecognised value reads as `"zh"` rather than refusing to start.
+
+**These are two different questions and are deliberately two keys.** `language` decides what gets asked of Steam and written to the database, so changing it makes the stored data the wrong language — and since `insertGame` is `ON CONFLICT DO NOTHING`, existing rows would not even update. A toggle pointed at that key would either appear to do nothing or force a full re-sync.
+
+`uiLanguage` needs no network at all: both languages are already on disk (`games.name` / `name_en`, `achievements.name_cn` / `name_en` and `description` / `description_en`), so it only chooses between them. Where one is missing it falls back to the other silently, with no marker — a game with no English title shows the name that was stored.
+
+Guides are not affected. Ones already generated stay exactly as they are.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
 

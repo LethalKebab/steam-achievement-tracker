@@ -246,9 +246,11 @@ Esc only intercepts when the field has text, so an empty filter still lets the d
 
 ### A game has two names, and 搜索游戏名… matches either
 
-`games.name` is the localised title — the sync hunts for a Chinese one — so an English term matches none of the third of a library stored that way. The miss is not a blank table: `libHit === false` is the switch that sends the query on to the store, the store matches the English term perfectly well, and a game already owned comes back under 「Steam 上的结果」, where clicking it is refused as a duplicate.
+A game row carries two: `name`, whichever one the interface is currently showing, and `nameAlt`, the stored name it is not showing. Matching only `name` misses about a third of a library either way round — in Chinese an English term finds nothing, and in English a Chinese one finds nothing. The miss is not a blank table: `libHit === false` is the switch that sends the query on to the store, the store matches perfectly well, and a game already owned comes back under 「Steam 上的结果」, where clicking it is refused as a duplicate.
 
-`name_en` is carried beside it for exactly this ([data.md](data.md)), and **both search tests go through `nameMatches`**: `hidingFilter` decides what the table draws, `libHit` decides whether to go to Steam at all. Judged separately they drift, and the drift presents as a row plainly in the table while the code reports the library as empty. The row still displays `name` only. `gamename.test.js` pins the shared route and the matching itself, mutation-tested.
+**`nameAlt` is "the other one", not "the English one",** and that distinction is load-bearing. A field named by language carries the English name in both modes, so the day the interface could be switched to English every Chinese title stopped being findable — the same bug arriving from the opposite side. `lib/lang.js`'s `gameNamePair` decides both values together, and `addGame` returns them through it too, because its result is pushed straight into the table without a reload.
+
+**Both search tests go through `nameMatches`**: `hidingFilter` decides what the table draws, `libHit` decides whether to go to Steam at all. Judged separately they drift, and the drift presents as a row plainly in the table while the code reports the library as empty. `gamename.test.js` and `uilanguage.test.js` pin the shared route and the matching itself, mutation-tested.
 
 ---
 
