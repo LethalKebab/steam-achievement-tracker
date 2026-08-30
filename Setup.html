@@ -1179,6 +1179,8 @@
      * language change needs no reload and does not lose which step you were on.
      */
     let LANG = 'zh';
+    /** The key for <title>. Empty on a page that never renames itself; applyStrings leaves the tag alone then */
+    let docTitleKey = '';
 
     /**
      * One string, with `{slot}` filled from `values`.
@@ -1213,7 +1215,7 @@
           if (attr === 'value') el.value = t(key); else el.setAttribute(attr, t(key));
         });
       });
-      document.title = t(docTitleKey);
+      if (docTitleKey) document.title = t(docTitleKey);
       // The document's own language, so a screen reader announces it correctly and the browser
       // picks the right line-breaking rules
       document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
@@ -1244,7 +1246,6 @@
      * An empty `subKey` means the subtitle is deliberately blank, which is the fork's state: the two
      * choices there explain themselves and the wizard's subtitle is not true of both.
      */
-    let docTitleKey = 'title.setup';
     function setPageCopy(titleKey, subKey, docKey) {
       $('page-title').dataset.t = titleKey;
       const sub = $('page-subtitle');
