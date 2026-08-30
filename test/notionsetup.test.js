@@ -32,6 +32,7 @@ import {
   GUIDE_STATUS_OPTIONS,
   inspectGuideDb,
   repairGuideDb,
+  migrateGuideStatusColours,
   probeGuideDbWrite,
   DB_PROBLEM,
 } from '../lib/notion.js';
@@ -569,9 +570,10 @@ describe('inspectGuideDb — ask everything worth asking at the moment the datab
     assert.deepEqual(r.problems[0].outdated.sort(), ['Done', 'In progress', 'Staged']);
   });
 
-  test('once only the colours are left the button goes away — pressing it again would do nothing', async () => {
-    // The state after 「帮我补上」: groups fixed, board added, colours still refused by Notion. Left as
-    // one problem this stayed lit and clickable forever
+  test('groups already right but the colours still grey → one problem, and it still has a button', async () => {
+    // Colours were briefly reported as their own unfixable thing, on the finding that Notion
+    // refuses to change one. That is true of an *update*; removing the option and creating it
+    // again gets there, so this is repairable and belongs with the rest
     const props = legacyStatusProps();
     props.Status.status.groups = [
       { id: 'g1', name: 'To-do', color: 'gray', option_ids: ['id-Not started'] },
@@ -579,11 +581,10 @@ describe('inspectGuideDb — ask everything worth asking at the moment the datab
       { id: 'g3', name: 'Complete', color: 'green', option_ids: ['id-Done'] },
     ];
     const r = await inspectGuideDb(stubDb({ properties: props }), 'db1');
-    assert.deepEqual(codes(r), [DB_PROBLEM.COLOUR_BY_HAND]);
-    assert.equal(r.fixable, false, 'a button that cannot change anything is worse than none');
-    assert.equal(r.ok, true);
-    // The colour word is the one on Notion's own picker, which is Chinese in a Chinese workspace
-    assert.match(r.problems[0].message, /In progress 蓝/, 'it has to say which colour, or it is unactionable');
+    assert.deepEqual(codes(r), [DB_PROBLEM.OUTDATED_FORMAT]);
+    assert.equal(r.fixable, true);
+    assert.deepEqual(r.problems[0].outdated, [], 'the groups are fine');
+    assert.deepEqual(r.problems[0].colours.sort(), ['Done', 'In progress', 'Staged']);
   });
 
   test('a database already in the current format raises nothing and offers no button', async () => {
@@ -765,5 +766,143 @@ describe('repairGuideDb — a 200 is not evidence of success, the read-back is',
     assert.equal(r.ok, false);
     assert.equal(r.reason, 'no-status-prop');
     assert.equal(c.log.filter((x) => x.method === 'patch').length, 0);
+  });
+});
+
+
+/**
+ * A client for the colour migration alone. It models the two behaviours that make this operation
+ * what it is, both measured against the live API on 2026-08-30:
+ *
+ * - **an existing option's colour cannot be changed** — carrying `color` on an option that has an
+ *   id is a 400, which is the whole reason the migration removes and recreates instead;
+ * - **a page whose option disappears falls back to the first option**, and comes back on its own
+ *   when an option of that name exists again. `stranded` makes one page *not* come back, which is
+ *   the case the snapshot exists for.
+ */
+function stubColour({ options, pages, stranded = [] }) {
+  const c = new NotionClient({ notion: { token: 't', overviewDbId: 'db1' } });
+  c.patches = [];
+  c.written = [];
+  let opts = options.map((o) => ({ ...o }));
+  let rows = pages.map((p) => ({ ...p }));
+  c.request = async (method, path, payload) => {
+    if (method === 'get' && path.startsWith('/databases/')) {
+      return { properties: { Status: { id: 'prop-Status', type: 'status', status: { options: opts, groups: [] } } } };
+    }
+    if (method === 'patch' && path.startsWith('/databases/')) {
+      const sent = payload.properties.Status.status.options;
+      for (const o of sent) {
+        if (o.id && o.color !== undefined) throw new Error(`Cannot update color of select with id: ${o.id}.`);
+      }
+      c.patches.push(sent);
+      const names = new Set(sent.map((o) => o.name));
+      // Pages whose option vanished fall back to the first surviving option
+      for (const r of rows) if (r.status && !names.has(r.status)) { r.fell = r.status; r.status = sent[0]?.name ?? null; }
+      // …and come back when a same-named option exists again, unless this page is stranded
+      for (const r of rows) if (r.fell && names.has(r.fell) && !stranded.includes(r.id)) { r.status = r.fell; r.fell = null; }
+      opts = sent.map((o) => ({ id: o.id ?? 'new-' + o.name, name: o.name, color: o.color ?? 'default' }));
+      return {};
+    }
+    if (method === 'post' && path.endsWith('/query')) {
+      return { results: rows.map((r) => ({
+        id: r.id,
+        url: 'u',
+        properties: {
+          Name: { type: 'title', title: [{ plain_text: r.title }] },
+          Status: { type: 'status', status: r.status ? { name: r.status } : null },
+        },
+      })) };
+    }
+    if (method === 'patch' && path.startsWith('/pages/')) {
+      const id = path.split('/').pop();
+      const row = rows.find((r) => r.id === id);
+      row.status = payload.properties.Status.status.name;
+      c.written.push({ id, status: row.status });
+      return {};
+    }
+    throw new Error(`unexpected request: ${method} ${path}`);
+  };
+  return c;
+}
+
+const greyFour = () => [
+  { id: 'o1', name: 'Not started', color: 'default' },
+  { id: 'o2', name: 'In progress', color: 'default' },
+  { id: 'o3', name: 'Staged', color: 'default' },
+  { id: 'o4', name: 'Done', color: 'default' },
+  { id: 'o5', name: 'Paused', color: 'yellow' },
+];
+
+describe('migrateGuideStatusColours — the one operation here that is not additive', () => {
+  const pages = () => [
+    { id: 'p1', title: '攻略甲', status: 'Staged' },
+    { id: 'p2', title: '攻略乙', status: 'Done' },
+    { id: 'p3', title: '攻略丁', status: 'Paused' },
+  ];
+
+  test('it removes the options and creates them again — an update would be a 400', async () => {
+    const c = stubColour({ options: greyFour(), pages: pages() });
+    const r = await migrateGuideStatusColours(c, 'db1', ['In progress', 'Staged', 'Done']);
+    assert.equal(r.ok, true);
+    assert.equal(c.patches.length, 2, 'remove, then re-add');
+    const removed = c.patches[0].map((o) => o.name);
+    assert.deepEqual(removed.sort(), ['Not started', 'Paused'], 'the three go away first');
+  });
+
+  test('a surviving option never carries a colour — that is what earns the 400', async () => {
+    const c = stubColour({ options: greyFour(), pages: pages() });
+    await migrateGuideStatusColours(c, 'db1', ['Done']);
+    for (const sent of c.patches) {
+      for (const o of sent) {
+        if (o.id) assert.equal(o.color, undefined, `${o.name} kept its colour in the payload`);
+      }
+    }
+  });
+
+  test('the recreated options carry the colour and the board column', async () => {
+    const c = stubColour({ options: greyFour(), pages: pages() });
+    await migrateGuideStatusColours(c, 'db1', ['Staged']);
+    const fresh = c.patches[1].find((o) => o.name === 'Staged');
+    assert.equal(fresh.id, undefined, 'a new option, not an update');
+    assert.equal(fresh.color, 'purple');
+    assert.equal(fresh.group, 'In progress');
+  });
+
+  test('options the user added themselves are not touched', async () => {
+    const c = stubColour({ options: greyFour(), pages: pages() });
+    await migrateGuideStatusColours(c, 'db1', ['In progress', 'Staged', 'Done']);
+    assert.ok(c.patches[0].some((o) => o.name === 'Paused'), 'Paused survives the removal');
+    assert.equal(c.written.length, 0, 'and no page needed putting back');
+  });
+
+  test('a page that does not come back on its own is written back from the snapshot', async () => {
+    // The whole reason the statuses are read before anything is removed
+    const c = stubColour({ options: greyFour(), pages: pages(), stranded: ['p1'] });
+    const r = await migrateGuideStatusColours(c, 'db1', ['In progress', 'Staged', 'Done']);
+    assert.deepEqual(r.restored, ['攻略甲']);
+    assert.deepEqual(c.written, [{ id: 'p1', status: 'Staged' }], 'put back to what the snapshot said');
+  });
+
+  test('success is decided by reading the colours back, not by the 200', async () => {
+    const c = stubColour({ options: greyFour(), pages: pages() });
+    // Make the re-add land without colours, the way a silently-ignored write would
+    const real = c.request;
+    c.request = async (m, p, payload) => {
+      if (m === 'patch' && p.startsWith('/databases/') && payload.properties.Status.status.options.length > 2) {
+        for (const o of payload.properties.Status.status.options) delete o.color;
+      }
+      return real(m, p, payload);
+    };
+    const r = await migrateGuideStatusColours(c, 'db1', ['Done']);
+    assert.equal(r.ok, false);
+    assert.deepEqual(r.stillWrong, ['Done']);
+  });
+
+  test('nothing to recolour → not one request', async () => {
+    const c = stubColour({ options: greyFour(), pages: pages() });
+    const r = await migrateGuideStatusColours(c, 'db1', []);
+    assert.equal(r.ok, true);
+    assert.equal(c.patches.length, 0);
   });
 });

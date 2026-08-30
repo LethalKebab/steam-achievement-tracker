@@ -422,10 +422,20 @@ function reportReformat(r) {
     console.log(`   ⚠️  看板视图没建成:${r.boardView.error}`);
     console.log('      库照常能用,攻略照样生成,复选框照样勾');
   }
-  if (r.wrongColour?.length) {
-    const want = r.wrongColour.map((n) => `${n} ${COLOUR_ZH[GUIDE_STATUS_STYLE[n].color]}`).join(',');
-    console.log(`   ⚠️  这几个状态的颜色要你自己去 Notion 里挑:${want}`);
-    console.log('      已经建好的选项,Notion 只让人在界面里改颜色。打开那个库 → 点状态属性 → 逐个挑一次');
+  if (r.colour?.recoloured?.length) {
+    const done = r.colour.recoloured.map((n) => `${n} ${COLOUR_ZH[GUIDE_STATUS_STYLE[n].color]}`).join(',');
+    console.log(`   🔧 换好颜色:${done}`);
+    // Say it out loud. Pages that had to be written back are pages Notion did not bring back on its
+    // own, and that is the one number telling you the snapshot earned its keep
+    if (r.colour.restored?.length) {
+      console.log(`      有 ${r.colour.restored.length} 页的状态是照快照写回去的:${r.colour.restored.slice(0, 5).join('、')}`);
+    }
+  }
+  if (r.colour?.stillWrong?.length) {
+    const want = r.colour.stillWrong.map((n) => `${n} ${COLOUR_ZH[GUIDE_STATUS_STYLE[n].color]}`).join(',');
+    console.log(`   ⚠️  这几个状态的颜色没换成:${want}`);
+    if (r.colour.error) console.log(`      ${r.colour.error}`);
+    console.log('      也可以自己来:打开那个库 → 点状态属性 → 逐个挑一次');
   }
 }
 

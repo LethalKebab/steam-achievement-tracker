@@ -131,13 +131,14 @@ Three of the names — `Not started` / `In progress` / `Done` — are **Notion's
 
 ### If your database was made by an older version
 
-Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. The settings page notices and offers **「帮我整理成看板」** (the same thing `node tracker.js notion-check --fix` does), which brings most of it up to date in one go:
+Guide databases created before this existed have all four options, all grey, all sitting in one board column, and no board view. The settings page notices and offers **「帮我整理成看板」** (the same thing `node tracker.js notion-check --fix` does), which brings the whole thing up to date in one press:
 
-- the four options are sorted into their board columns
+- the four statuses get their colours
+- they are sorted into their board columns
 - a board view is added and put first, so the database opens as a board
-- anything you added yourself stays exactly where you put it
+- anything you added yourself stays exactly where you put it, colour included
 
-**The colours are the one thing it cannot do for you.** Notion does not allow the colour of an existing option to be changed through the API — only of one being created. The program says which options are the wrong colour and what each should be; setting them is four clicks in Notion: open the database → click the status property → pick a colour per option.
+**About the colours specifically.** Notion will not let a program change the colour of an option that already exists, so the program removes those four and creates them again with the right colour. Your guide pages keep their status through it — Notion reattaches them, and the program takes a snapshot of every page's status first and puts back by hand anything that does not come back. Statuses you added yourself are never removed and never recoloured.
 
 Nothing here affects how the program works. A grey, ungrouped database generates guides and ticks checkboxes exactly like a colour-coded one — this is about reading it at a glance.
 

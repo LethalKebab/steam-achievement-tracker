@@ -952,6 +952,7 @@
             const did = [];
             if ((r.added || []).length) did.push('补上 ' + r.added.join(' / '));
             if ((r.regrouped || []).length) did.push('排好了看板分组');
+            if (r.colour && (r.colour.recoloured || []).length) did.push('换好了状态颜色');
             if (r.boardView && r.boardView.created) did.push('加了看板视图');
             msg.className = 'msg ok';
             msg.textContent = did.length ? did.join(',') + '。' : '这个库本来就是好的。';
