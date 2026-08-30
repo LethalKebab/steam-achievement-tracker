@@ -205,6 +205,14 @@ Note it can lag: the app calls `api.github.com` **unauthenticated**, and that pa
 
 Build from a clean, committed tree so the tag actually corresponds to the binary — `dist/` is gitignored, so nothing else ties them together.
 
+**Release notes follow one fixed shape, and every published release has been normalised to it.** Drift here is visible to everyone: three releases had a prose title while the other eleven showed only the tag, and the section layout differed release to release.
+
+- **No title.** `gh release create` without `--title`, or `--title "v<version>"` — GitHub then displays the tag. Do not write a descriptive title.
+- **Sections, in this order, omitting any that would be empty:** a one-sentence lead paragraph stating the theme → `## Features` → `## Performance` → `## Fixes` → one of `## Notes` / `## Known limitations` / `## Removed` → `## Installation` → `## Upgrading`.
+- **Features and fixes are separated**, never interleaved. A bullet opens with a bold clause naming the change, then states the behaviour.
+- **Neutral, formal register.** No `## Also` heading, no colloquial connectives, no second-person asides. Chinese is used only where a control's own wording is being quoted.
+- **No asset sizes in prose** — the release page already shows them, and a stale figure is worse than none.
+
 Release notes must cover, at minimum: the **SmartScreen warning** (unsigned build — "更多信息 → 仍要运行"), that the app needs no Node install, and that a **manual** upgrade means **quitting from the tray** first (closing the window leaves the exe running, and Windows won't let it be replaced).
 
 From 1.1.4 on the app updates itself, so the manual instruction is a fallback rather than the main path — but it still has to be there: everyone on ≤1.1.3 has to make that one hop by hand, since those builds have no updater in them at all.

@@ -1,13 +1,13 @@
 /**
- * Electron 启动器主进程
+ * Electron launcher main process
  * ------------------------------------------------
- * 本身不含任何业务逻辑——只是把已有的 tracker.js serve 当子进程拉起来,
- * 起一个窗口指向它的本地地址。真正的服务器、数据库、Steam/Notion 调用
- * 全部原样跑在子进程里,和 `node tracker.js serve` 完全一样。
+ * Holds no business logic of its own — it just spawns the existing `tracker.js serve` as a child
+ * process and opens a window pointed at its local address. The real server, database and
+ * Steam/Notion calls all run inside that child process exactly as `node tracker.js serve` does.
  *
- * 子进程用 Electron 自带的 Node(ELECTRON_RUN_AS_NODE=1 让 electron.exe
- * 表现得像普通 node 可执行文件)——已经验证过 node:sqlite 在这条路径下能跑,
- * 不需要额外打包一份独立的 Node 运行时。
+ * The child runs on Electron's bundled Node (ELECTRON_RUN_AS_NODE=1 makes electron.exe behave like
+ * an ordinary node executable) — node:sqlite has been verified to work along that path, so no
+ * separate Node runtime needs packaging.
  */
 import { app, BrowserWindow, dialog, shell, Tray, Menu, nativeImage } from 'electron';
 import { spawn } from 'node:child_process';
@@ -39,43 +39,50 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PORT = 8777;
 const BASE_URL = `http://127.0.0.1:${PORT}/`;
 
-/** 启动后隔一会儿再查,别和服务器启动、首次同步抢带宽 */
+/** Wait a while after launch before checking, so it does not compete with the server starting and the first sync */
 const UPDATE_CHECK_DELAY_MS = 10_000;
 /**
- * 之后每天查一次。**不能只在启动时查** —— 收进托盘之后进程可以连着跑几天,
- * 「启动」变成了很稀少的事件(和 maybeAutoSync 当初被迫从进程启动搬到窗口显示
- * 是同一个原因)。挂在窗口显示上则太吵:一天开合十次不该查十次。
+ * Then once a day. **Checking only at startup is not enough** — once it lives in the tray the
+ * process can run for days, making "startup" a very rare event (the same reason maybeAutoSync was
+ * forced to move from process start to window show). Hanging it off window show is too noisy: ten
+ * open/close cycles a day should not mean ten checks.
  */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 /**
- * 窗口还没建好就查不了(要拿它当对话框的父窗口),过一分钟再来 —— 不能直接
- * 跳到 24 小时后:服务器启动慢的时候(waitForServer 最多等 15 秒)窗口会晚于
- * 第一次检查出现,那样等于白白丢掉这一天唯一的机会,而且不会有任何征兆。
+ * With no window built yet there is nothing to check against (it is needed as the dialog's parent),
+ * so come back in a minute — jumping straight to 24 hours is not acceptable: when the server starts
+ * slowly (waitForServer waits up to 15 seconds) the window appears after the first check, and that
+ * would throw away the day's only opportunity with no sign of it at all.
  */
 const UPDATE_CHECK_RETRY_MS = 60_000;
 /**
- * 等 helper 报到的上限。PowerShell 冷启动一两秒是常事,给到 15 秒;
- * 等不到就换备用路子,再等不到就报错并且**不退出**。
+ * The limit for the helper reporting in. A PowerShell cold start commonly takes a second or two, so
+ * this allows 15; failing that it tries the fallback route, and failing that it reports an error and
+ * **does not exit**.
  */
 const HELPER_ALIVE_TIMEOUT_MS = 15_000;
 
-// 开发模式(`npm start`)下核心文件就在上一级目录;打包后由 electron-builder 的
-// extraResources 复制进 resources/tracker(见 package.json 的 build 配置)。
+// In dev mode (`npm start`) the core files are one directory up; once packaged, electron-builder's
+// extraResources copies them into resources/tracker (see the build config in package.json).
 const TRACKER_ROOT = app.isPackaged ? join(process.resourcesPath, 'tracker') : join(__dirname, '..');
 
 /**
- * 把打包版指回一份已有 CLI 数据的开关。**优先找 exe 旁边那份**,而不是
- * app.getPath('userData')(%APPDATA%\<productName>):userData 看着更"正规",
- * 但它在用户配置文件目录下,容易被各种沙箱/虚拟化机制重定向——同一个绝对路径,
- * 不同来源的进程看到的内容可能不一样,排查起来极其费劲(这个坑真踩过一次)。
- * exe 旁边这份跟着程序本体走,谁启动都是同一个文件,没有第二种解释。
+ * The switch that points the packaged build at an existing CLI data set. **The copy next to the exe
+ * is looked for first**, rather than app.getPath('userData') (%APPDATA%\<productName>): userData
+ * looks more "official", but it sits under the user profile directory where any number of
+ * sandboxing/virtualisation mechanisms can redirect it — the same absolute path can hold different
+ * content depending on which process is looking, and that is extremely painful to diagnose (a trap
+ * genuinely stepped on once). The copy next to the exe travels with the program itself, so whoever
+ * launches it sees the same file and there is no second interpretation.
  *
- * userData 仍然作为备选保留:想让配置活过"删掉整个文件夹重新解压"的话可以放那儿。
- * 两处都没有(分发给别人的包就是这种情况)就返回 null,数据落在 exe 旁边,
- * 和没有这个功能时完全一样。
+ * userData is still kept as a fallback: put it there to have the config survive "delete the whole
+ * folder and unzip again". With neither present (which is the case for a build handed to somebody
+ * else) it returns null and the data lands next to the exe, exactly as it would without this
+ * feature.
  *
- * dist/ 每次 build 都会重建,所以 exe 旁边那份由 package.json 的 build 脚本
- * 从 launcher/local.config.json 自动复制过去——源文件在 launcher/ 下,不受 build 影响。
+ * dist/ is rebuilt on every build, so the copy next to the exe is placed there automatically by the
+ * build script in package.json, copied from launcher/local.config.json — the source file lives under
+ * launcher/ and is unaffected by the build.
  */
 function localConfigCandidates() {
   return [
@@ -91,9 +98,10 @@ function loadDataDirOverride() {
     try {
       const dataDir = JSON.parse(readFileSync(path, 'utf8')).dataDir || null;
       if (!dataDir) continue;
-      // 指到一个不存在的目录就当没配过。整个文件夹被拷到另一台机器、或者那份 CLI
-      // checkout 被移走时会是这样——这时候退回"数据放 exe 旁边"能正常打开,
-      // 总好过拿着一个死路径去建数据库然后启动失败。
+      // Pointing at a directory that does not exist is treated as not configured. That is what it
+      // looks like when the whole folder was copied to another machine, or the CLI checkout was moved
+      // away — and in that case falling back to "data next to the exe" opens normally, which beats
+      // taking a dead path, creating a database there and failing to start.
       if (!existsSync(dataDir)) {
         console.warn(`[launcher] local.config.json 指向的目录不存在,忽略:${dataDir}`);
         continue;
@@ -131,26 +139,30 @@ function startServer() {
         ...(dataDir ? { TRACKER_DATA_DIR: dataDir } : {}),
       },
       /**
-       * stderr 走管子而不是 inherit。**打包版根本没有控制台** —— 子进程死之前
-       * 打的那句话原样落进一个不存在的终端,于是启动器手里只剩一个退出码,
-       * 错误框也就只能说「代码 1」,而那句话本来是唯一说得清原因的东西。
-       * 收下来只为了在框里复述它;stdout 仍然 inherit,dev 模式的日志照旧。
+       * stderr goes through a pipe rather than inherit. **A packaged build has no console at all** —
+       * the sentence the child prints before dying lands verbatim in a terminal that does not exist,
+       * leaving the launcher holding only an exit code, so the error box can only say 「代码 1」 while
+       * that sentence was the one thing capable of explaining the cause.
+       * It is captured solely to be repeated in the box; stdout stays on inherit, so dev-mode logging
+       * is unchanged.
        */
       stdio: ['inherit', 'inherit', 'pipe'],
     }
   );
 
-  // setEncoding 不是顺手写的:中文报错在字节边界上被切开时,拼字符串会拼出乱码
+  // setEncoding is not incidental: when a Chinese error message is cut at a byte boundary,
+  // concatenating strings produces mojibake
   serverProcess.stderr.setEncoding('utf8');
   let stderrTail = '';
   serverProcess.stderr.on('data', (chunk) => {
-    process.stderr.write(chunk); // dev 模式下 `npm start` 的终端照样看得见
-    stderrTail = (stderrTail + chunk).slice(-2000); // 只留尾巴,要的是最后那句话
+    process.stderr.write(chunk); // still visible in `npm start`'s terminal in dev mode
+    stderrTail = (stderrTail + chunk).slice(-2000); // keep only the tail; what matters is the last sentence
   });
 
   serverProcess.on('exit', (code) => {
-    // 主动关闭时 app.isQuitting 已经置位,这里只处理"子进程自己意外挂了"的情况——
-    // 没有服务器就没有 Dashboard 可看,留着空窗口不如直接退出并说明原因
+    // On a deliberate shutdown app.isQuitting is already set, so this only handles "the child died on
+    // its own" — with no server there is no Dashboard to look at, and leaving an empty window open is
+    // worse than exiting and saying why
     if (app.isQuitting) return;
     const reason = lastErrorLine(stderrTail);
     dialog.showErrorBox(
@@ -164,29 +176,30 @@ function startServer() {
 }
 
 /**
- * 从子进程 stderr 里挑出**一句能给人看的话**。
+ * Picks **one sentence fit for a person to read** out of the child's stderr.
  *
- * `tracker.js` 的顶层 catch 打的是 `❌ <message>`(端口被占、配置读不了、
- * 数据库打不开都走这条),所以有 ❌ 就取最后一条 ❌。
+ * `tracker.js`'s top-level catch prints `❌ <message>` (a taken port, an unreadable config, an
+ * unopenable database all go through it), so when there is a ❌ the last one is taken.
  *
- * 没有 ❌ 的是 Node 自己崩了那种,这时候要的是堆栈的**头一行**(`Error: …`)。
- * 「取最后一行非空」在这里恰恰是最差的选择,实测过:堆栈的末尾是 `at Module._load`
- * 或者一个光秃秃的 `}`,说的是崩在哪儿,不是崩了什么 —— 拿它当错误框的正文,
- * 等于把唯一那句人话跳过去。两条都落空才退回最后一行:**宁可给一行看不懂的东西,
- * 也好过只给一个「代码 1」**,前者能搜、能贴给开发者,后者连搜都没得搜。
+ * No ❌ means Node itself crashed, and there what is wanted is the stack's **first** line
+ * (`Error: …`). "Take the last non-empty line" is precisely the worst choice here, measured: the end
+ * of a stack is `at Module._load` or a bare `}`, which says where it broke, not what broke — using
+ * that as the error box's body skips over the one human sentence there is. The last line is the
+ * fallback only when both fail: **better one incomprehensible line than nothing but 「代码 1」**, since
+ * the former can be searched and pasted to a developer while the latter cannot even be searched.
  */
 function lastErrorLine(text) {
   const lines = String(text).split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   if (!lines.length) return '';
   const marked = lines.filter((l) => l.startsWith('❌'));
   const thrown = lines.find((l) => /^[\w.$]*Error\b/.test(l));
-  // 挑完就把 ❌ 去掉:它是 CLI 用来在一屏日志里标出这行的,而错误框自带一个红叉,
-  // 留着就是同一句话说两遍
+  // Strip the ❌ once picked: it is what the CLI uses to mark this line out in a screen of logs, while
+  // the error box comes with its own red cross, so keeping it says the same thing twice
   const line = (marked.at(-1) ?? thrown ?? lines.at(-1)).replace(/^❌\s*/, '');
   return line.length > 300 ? `${line.slice(0, 300)}…` : line;
 }
 
-/** 轮询直到服务器有响应(不关心状态码,能连上就算活着) */
+/** Polls until the server responds (the status code does not matter; connecting at all counts as alive) */
 async function waitForServer(timeoutMs = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -201,9 +214,10 @@ async function waitForServer(timeoutMs = 15000) {
 }
 
 /**
- * 停在 /setup 页面时轮询 getSetupStatus——一旦配置完成就跳回 Dashboard。
- * 不需要重启子进程:lib/api.js 的 completeSetup 会当场把 config/steam 的内存状态
- * 也改掉,这个正在跑的子进程立刻就是可用状态。
+ * While stopped on the /setup page, polls getSetupStatus and jumps back to the Dashboard as soon as
+ * configuration is complete.
+ * The child process does not need restarting: lib/api.js's completeSetup updates config/steam's
+ * in-memory state on the spot, so the running child is immediately usable.
  */
 function pollSetupStatus() {
   setupPollTimer = setInterval(async () => {
@@ -221,7 +235,7 @@ function pollSetupStatus() {
         mainWindow?.loadURL(BASE_URL);
       }
     } catch {
-      // 单次轮询失败(服务器正忙)跳过,下一轮再试
+      // One failed poll (the server is busy) is skipped; the next round tries again
     }
   }, 1000);
 }
@@ -243,15 +257,16 @@ async function createWindow() {
   });
 
   /**
-   * 页面里 `target="_blank"` 的链接(攻略、Notion 页面)一律交给系统浏览器。
+   * Links in the page with `target="_blank"` (guides, Notion pages) always go to the system browser.
    *
-   * **不设这个的话 Electron 会自己开一个裸窗口**,而那个窗口:标题回落成
-   * package.json 里的 `steam-achievement-tracker-launcher`(用户看到的就是这个),
-   * 没有地址栏、没有后退,更要命的是**没有用户的 Notion 登录态** —— 攻略页在里面
-   * 打不开,只会显示登录墙。这些链接指向的本来就是站外内容,归浏览器管。
+   * **Without this Electron opens a bare window of its own**, and that window: falls back to the
+   * title `steam-achievement-tracker-launcher` from package.json (which is what the user sees), has
+   * no address bar and no back button, and worst of all **carries none of the user's Notion login
+   * state** — so a guide page will not open in it and only shows the login wall. These links point at
+   * off-site content in the first place, which is the browser's business.
    *
-   * 只放行 http/https:`deny` 之外还要挡住 file:// 之类的协议,别把本地文件
-   * 交给系统去执行。
+   * Only http/https is let through: besides `deny`, protocols like file:// have to be blocked so a
+   * local file is never handed to the system to execute.
    */
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) shell.openExternal(url);
@@ -260,24 +275,27 @@ async function createWindow() {
 
   await mainWindow.loadURL(BASE_URL);
 
-  // / 在没配置时会 302 到 /setup——loadURL 完成后 getURL() 是跳转后的最终地址
+  // / 302s to /setup when unconfigured — after loadURL completes, getURL() is the final address after
+  // the redirect
   if (mainWindow.webContents.getURL().includes('/setup')) {
     console.log('[launcher] landed on /setup, polling for completion');
     pollSetupStatus();
   }
 
   /**
-   * 关窗口 = 收进托盘,不退出。真正的退出只有托盘菜单那一条路,`app.isQuitting`
-   * 是两者的分界 —— 退出流程里这个 close 事件还会再来一次,那次必须放行,
-   * 否则 preventDefault 会把 app 卡在"永远退不掉"。
+   * Closing the window = going to the tray, not exiting. The only real exit is through the tray menu,
+   * and `app.isQuitting` is the boundary between the two — during the exit flow this close event
+   * fires once more, and that time it must be allowed through, or preventDefault leaves the app stuck
+   * "impossible to quit".
    */
   mainWindow.on('close', (e) => {
     if (app.isQuitting) return;
     e.preventDefault();
     mainWindow.hide();
 
-    // 后台运行最经典的抱怨是"我关了它怎么还在跑"。托盘图标在 Windows 上默认被
-    // 折叠进溢出区,不主动说一次,用户根本不知道该去哪找它。只提示一次。
+    // The classic complaint about background operation is "I closed it, why is it still running". On
+    // Windows the tray icon is collapsed into the overflow area by default, and without saying so
+    // once the user has no idea where to look for it. Shown only once.
     if (!hideHintShown) {
       hideHintShown = true;
       tray?.displayBalloon({
@@ -289,14 +307,15 @@ async function createWindow() {
   });
 
   /**
-   * **自动同步的触发点是"窗口显示",不是"进程启动"。** 服务器启动上那次
-   * (`startupJobs` 里的 `maybeAutoSync`)只在进程新起时响一次,而收进托盘之后进程
-   * 可以连着跑几天 —— 那条触发就再也不会响,数据一直停在打开那天,不报错,只是
-   * Dashboard 上的数字不动了。
+   * **The automatic sync's trigger is "the window is shown", not "the process started".** The one at
+   * server startup (`maybeAutoSync` inside `startupJobs`) fires only when the process is new, and once
+   * it lives in the tray the process can run for days — so that trigger never fires again and the
+   * data stays frozen at the day it was opened, with no error, just numbers that stop moving on the
+   * Dashboard.
    *
-   * 挂在窗口显示上语义不变:打开面板时查一次
-   * 新鲜度。`syncStaleHours` 的闸门还在 maybeAutoSync 里,所以频繁开关窗口
-   * 不会变成频繁同步。
+   * Hanging it off window show keeps the semantics: check freshness when the panel is opened. The
+   * `syncStaleHours` gate is still inside maybeAutoSync, so opening and closing the window frequently
+   * does not become syncing frequently.
    */
   mainWindow.on('show', () => {
     fetch(`${BASE_URL}api/maybeSync`, {
@@ -304,7 +323,8 @@ async function createWindow() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ args: [] }),
     }).catch(() => {
-      // 服务器正忙或刚起来,下次显示窗口再说——这不是用户需要知道的事
+      // The server is busy or has only just started; it will be picked up the next time the window is
+      // shown — not something the user needs to know
     });
   });
 
@@ -324,10 +344,11 @@ function showWindow() {
 }
 
 /**
- * 自动更新的开关 —— 设计文档三个死细节里的「要能关掉」。
+ * The auto-update switch — the "it has to be turnable off" of the design doc's three hard details.
  *
- * 放在 local.config.json:那已经是 launcher 唯一的本机配置文件,不值得为一个
- * 布尔值再开第二处。没写就是开着。
+ * It lives in local.config.json: that is already the launcher's only per-machine config file, and one
+ * boolean does not justify opening a second.
+ * Absent means on.
  */
 function autoUpdateEnabled() {
   for (const path of localConfigCandidates()) {
@@ -336,20 +357,21 @@ function autoUpdateEnabled() {
       const v = JSON.parse(readFileSync(path, 'utf8')).autoUpdate;
       if (typeof v === 'boolean') return v;
     } catch {
-      // 坏文件跳过,和 loadDataDirOverride 一个态度
+      // A broken file is skipped, the same attitude as loadDataDirOverride
     }
   }
   return true;
 }
 
 /**
- * 更新器这一半的日志。
+ * The updater's half of the logging.
  *
- * helper 从一开始就有日志,app 这一半没有 —— 于是第一次真实排练里「弹窗闪了
- * 一下就没了」只能靠猜,一个来回才问出它到底走了哪个分支。这条日志就是为了
- * 让下一次失败直接变成证据。写在 helper 日志旁边,出事只要看一个目录。
+ * The helper has had logging from the start and the app half had none — so in the first real
+ * rehearsal 「弹窗闪了一下就没了」 could only be guessed at, and it took a round trip to establish
+ * which branch it had actually taken. This log exists so the next failure is evidence straight away.
+ * It is written next to the helper's log, so a problem means looking in one directory.
  *
- * 写不进去就算了:日志失败绝不能反过来把更新弄挂。
+ * A failed write is simply dropped: logging must never be what breaks the update.
  */
 function logUpdater(msg) {
   const line = `${new Date().toISOString().slice(11, 23)} ${msg}`;
@@ -359,19 +381,20 @@ function logUpdater(msg) {
     mkdirSync(dir, { recursive: true });
     appendFileSync(join(dir, 'updater.log'), `${line}\n`);
   } catch {
-    // 没日志也得继续
+    // It has to carry on without a log
   }
 }
 
 /**
- * 问用户要不要更新。
+ * Asks the user whether to update.
  *
- * 用一个小的 BrowserWindow 装一张网页,**不用 `dialog.showMessageBox`** ——
- * 那个在这个项目里立不住,实测见 updater.js 里 renderUpdatePromptHtml 的注释。
- * 这个窗口就是普通网页,和 Dashboard 是同一种东西,不存在"打包版里不一样"。
+ * Uses a small BrowserWindow holding a web page, **not `dialog.showMessageBox`** — that does not
+ * hold up in this project; the measurement is in the comment on renderUpdatePromptHtml in updater.js.
+ * This window is an ordinary web page, the same kind of thing as the Dashboard, so there is no "it
+ * behaves differently in the packaged build".
  *
- * 关掉窗口(点 X)当作「以后再说」:问一个问题却因为用户关了窗口就卡住,
- * 比问都不问更糟。
+ * Closing the window (clicking X) counts as 「以后再说」: asking a question and then hanging because
+ * the user closed the window is worse than not asking at all.
  */
 function askUpdate({ version, sizeMb }) {
   return new Promise((resolve) => {
@@ -396,8 +419,9 @@ function askUpdate({ version, sizeMb }) {
       resolve(choice);
     };
 
-    // 页面把选择写进 document.title 回传 —— 不用 preload,也就不用给这个窗口
-    // 开任何特权。认不出来的标题变化直接忽略(页面自己的 <title> 就会先来一次)
+    // The page returns the choice by writing it into document.title — no preload, and therefore no
+    // privileges to grant this window at all. An unrecognised title change is simply ignored (the
+    // page's own <title> arrives first)
     win.webContents.on('page-title-updated', (e, title) => {
       const choice = parsePromptChoice(title);
       if (choice) {
@@ -414,16 +438,19 @@ function askUpdate({ version, sizeMb }) {
 }
 
 /**
- * 查一次更新;有新版就问,答应了就下载、校验、交给 helper、退出。
+ * Checks for an update once; asks when there is a new version, and on a yes downloads, verifies,
+ * hands over to the helper and exits.
  *
- * 整条路径见 docs/self-update.md 第四节。这里只做到「写好 helper 脚本并退出」,
- * 真正的删除和解压发生在进程死掉之后 —— 因为 Windows 不让替换正在运行的 exe,
- * 而托盘改动之后「关掉窗口」并不等于退出(约束 3)。
+ * The whole path is in section four of docs/self-update.md. This only goes as far as "write the
+ * helper script and exit"; the actual deletion and extraction happen after the process is dead —
+ * because Windows will not let a running exe be replaced, and since the tray change 「关掉窗口」 no
+ * longer means exiting (constraint 3).
  *
- * 返回 false 表示「这一轮根本没查成」(窗口还没建好),调用方据此早点再来一次。
+ * Returning false means "this round never got to check at all" (the window is not built yet), and the
+ * caller uses that to come back sooner.
  */
 async function checkForUpdate() {
-  // dev 模式(npm start)根本没有可替换的 zip 目录,整套逻辑无从谈起
+  // Dev mode (npm start) has no replaceable zip directory at all, so none of this logic applies
   if (!app.isPackaged || updateBusy || app.isQuitting) return true;
 
   const appDir = dirname(process.execPath);
@@ -432,8 +459,9 @@ async function checkForUpdate() {
   const userAgent = `SteamAchievementTracker/${app.getVersion()}`;
 
   /**
-   * 排练开关(设计文档第五节):指定 tag 时跳过「是不是更新」的判断,于是可以
-   * 让它「降级」到 v1.1.2,不发新版就把整条路径跑一遍。
+   * The rehearsal switch (design doc, section five): naming a tag skips the "is this an update"
+   * decision, so it can be made to "downgrade" to v1.1.2 and run the whole path without cutting a
+   * release.
    *
    *   $env:TRACKER_UPDATE_FORCE_TAG = 'v1.1.2'
    *   & .\dist\SteamAchievementTracker\SteamAchievementTracker.exe
@@ -441,21 +469,23 @@ async function checkForUpdate() {
   const forcedTag = process.env.TRACKER_UPDATE_FORCE_TAG || null;
 
   /**
-   * 对话框必须挂在一个**已经显示出来的**窗口上。
+   * The dialog has to hang off a window that is **already displayed**.
    *
-   * 第一版是无父窗口的 `dialog.showMessageBox(options)`,理由是「窗口多半藏在
-   * 托盘里,挂上去就是个看不见的模态框」。顾虑没错,解法错了 —— 打包版里那个
-   * 没有归属的框**自己闪一下就消失**,promise 立刻带着一个非法的 response 返回
-   * (实测在拿不到交互桌面时会返回 420 这种根本不在按钮范围里的值),于是代码
-   * 读成「以后再说」,静默地什么也没做。这正是 CLAUDE.md 里 `window.confirm`
-   * 那道疤的同一种病:原生对话框需要一个归属,没有归属就立不住。
+   * The first version used a parentless `dialog.showMessageBox(options)`, justified by "the window is
+   * probably hidden in the tray, and attaching to it would be an invisible modal". The concern was
+   * right and the solution was wrong — in a packaged build that unowned box **flashes and disappears
+   * by itself**, and the promise returns immediately with an invalid response (measured: with no
+   * interactive desktop available it returns values like 420, entirely outside the button range), so
+   * the code reads it as 「以后再说」 and silently does nothing. This is the same illness as the
+   * `window.confirm` scar in CLAUDE.md: a native dialog needs an owner, and without one it does not
+   * hold up.
    *
-   * 正确的解法是把两件事都做了:先把窗口叫到前面来,再挂一个正经的模态框。
-   * 顺带也更合理 —— 要问用户问题,一个在托盘里躺了几天的程序本来就该自己
-   * 冒出来,而不是从背后弹一个孤儿框。
+   * The correct fix does both: bring the window to the front first, then attach a proper modal. It is
+   * also more reasonable — a program that has been sitting in the tray for days and wants to ask the
+   * user something should surface itself rather than pop an orphan box from behind.
    */
   if (!mainWindow) {
-    // 服务器起得慢的时候会走到这儿(createWindow 还在 waitForServer 里)
+    // This is reached when the server starts slowly (createWindow is still inside waitForServer)
     logUpdater('窗口还没建好,这一轮跳过,过一分钟再来');
     return false;
   }
@@ -464,8 +494,8 @@ async function checkForUpdate() {
   try {
     release = await fetchRelease({ tag: forcedTag, userAgent });
   } catch (err) {
-    // **检查失败必须静默。** 离线是常态,没网不该弹错误框——这是设计文档
-    // 三个死细节的第一条
+    // **A failed check has to be silent.** Being offline is normal and having no network should not
+    // raise an error box — this is the first of the design doc's three hard details
     logUpdater(`检查更新失败(忽略):${err.message}`);
     return true;
   }
@@ -492,8 +522,8 @@ async function checkForUpdate() {
   }
   logUpdater(`附件:${zip.name}${manifest ? ` + ${manifest.name}` : '(没有清单,会走覆盖回退)'}`);
 
-  // 复用托盘「打开面板」那条路径,别把 restore/show/focus 再抄一遍 ——
-  // 上面已经确认过 mainWindow 存在,所以这里不会走进它建窗口的分支
+  // Reuse the tray's 「打开面板」 path rather than copying restore/show/focus out again — mainWindow
+  // has been confirmed to exist above, so this cannot fall into its window-creating branch
   showWindow();
 
   const choice = await askUpdate({
@@ -503,7 +533,8 @@ async function checkForUpdate() {
   logUpdater(`用户选择:${choice.update ? '立即更新' : '以后再说'}${choice.skip ? '(并勾了不再提示)' : ''}`);
 
   if (!choice.update) {
-    // 记住跳过的版本(第三个死细节)。不记的话每次开都弹一遍,两天就被训练成无视
+    // Remember the skipped version (the third hard detail). Without it the prompt appears on every
+    // open, and within two days the user is trained to ignore it
     if (choice.skip) writeUpdateState(statePath, { skippedVersion: remoteVersion });
     return true;
   }
@@ -521,19 +552,22 @@ async function checkForUpdate() {
 
   try {
     mkdirSync(stageDir, { recursive: true });
-    // 校验在退出之前做完:验不过就当无事发生,程序还好好地开着
+    // Verification finishes before the exit: a failed check is treated as nothing having happened,
+    // with the program still running perfectly well
     await downloadVerified(zip, zipPath, { userAgent });
     if (manifest) {
       await downloadVerified(manifest, newManifestPath, { userAgent });
-      // 整份校验一次再让它落到 app 目录里。清单唯一的用途是喂删除循环,
-      // 有一条越界路径就整份拒收,而不是逐条过滤
+      // Validate the whole thing once before letting it reach the app directory. The manifest's only
+      // use is feeding the deletion loop, so one out-of-bounds path rejects the whole file rather than
+      // being filtered out entry by entry
       parseManifest(readFileSync(newManifestPath, 'utf8'));
     }
   } catch (err) {
     updateBusy = false;
     logUpdater(`下载/校验失败:${err.message}`);
-    // **这一步的失败不静默。** 静默那条规则管的是"检查"——离线是常态;
-    // 这里是用户自己点的更新,他正在等结果,没有回音才是最坏的
+    // **A failure at this step is not silent.** The silence rule governs the *check* — being offline
+    // is normal; here the user clicked update themselves and is waiting for a result, and no answer
+    // is the worst outcome
     dialog.showErrorBox(
       'Steam 成就追踪器',
       `更新失败:${err.message}\n\n数据没有受到影响。可以稍后再试,或到 ${RELEASES_PAGE} 手动下载。`
@@ -555,18 +589,20 @@ async function checkForUpdate() {
     aliveMarkerPath,
   });
   writeHelperScript(scriptPath, renderedScript);
-  rmSync(aliveMarkerPath, { force: true }); // 上一次留下的标记不能算数
+  rmSync(aliveMarkerPath, { force: true }); // a marker left over from last time must not count
 
   /**
-   * 启动 helper,**并且确认它真的活着**,然后才退出。
+   * Launch the helper, **and confirm it is really alive**, and only then exit.
    *
-   * 「启动了」和「活着」是两回事,这一条是拿一次真实事故换来的:第一版用
-   * `spawn(..., { detached: true })`,日志写着「helper 已启动」,实际上它随着
-   * app.quit() 一起被杀了(Electron 的子进程在一个 kill-on-close 的作业对象里,
-   * `detached` 逃不出去)。用户得到的是一个自己关掉、再也不回来的程序。
+   * "Launched" and "alive" are two different things, and this one was bought with a real incident:
+   * the first version used `spawn(..., { detached: true })`, the log said 「helper 已启动」, and in
+   * fact it was killed along with app.quit() (Electron's child processes sit in a kill-on-close job
+   * object, which `detached` cannot escape). What the user got was a program that closed itself and
+   * never came back.
    *
-   * 现在:helper 起来的第一件事是写一个标记文件,我们等到那个文件出现才退出。
-   * 等不到就**不退**,把失败说出来 —— 更新没成、程序还在,这个降级是可接受的。
+   * Now: the first thing the helper does is write a marker file, and we wait for that file to appear
+   * before exiting. Failing to see it means **not exiting** and saying the failure out loud — the
+   * update did not happen and the program is still here, which is an acceptable degradation.
    */
   const launched = await launchHelper({ scriptPath, renderedScript, aliveMarkerPath });
   if (!launched) {
@@ -583,7 +619,7 @@ async function checkForUpdate() {
   return true;
 }
 
-/** 等标记文件出现,最多 timeoutMs */
+/** Waits for the marker file to appear, for at most timeoutMs */
 async function waitForAlive(markerPath, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -594,8 +630,9 @@ async function waitForAlive(markerPath, timeoutMs) {
 }
 
 /**
- * 两条启动路子,主路不行就换备用 —— 理由见 updater.js 里 fallbackLaunch 的注释:
- * 这个组件坏掉的那一版已经在用户机器上了,修复要靠它自己送过去。
+ * Two launch routes, falling back to the second when the first fails — the reasoning is in the
+ * comment on fallbackLaunch in updater.js: the version where this component is broken is already on
+ * users' machines, and the fix has to be delivered by that same component.
  */
 async function launchHelper({ scriptPath, renderedScript, aliveMarkerPath }) {
   const attempts = [
@@ -607,8 +644,8 @@ async function launchHelper({ scriptPath, renderedScript, aliveMarkerPath }) {
     logUpdater(`启动 helper(${name})`);
     try {
       const child = spawn(file, args, { stdio: 'ignore', windowsHide: true });
-      // spawn 的启动失败是**异步**的 error 事件,不是抛异常。没有这个监听,
-      // 「找不到 powershell」会表现成"启动成功"然后石沉大海
+      // A spawn launch failure is an **async** error event, not a throw. Without this listener,
+      // "powershell not found" presents as a successful launch and then nothing more
       child.on('error', (err) => logUpdater(`${name} 启动失败:${err.message}`));
       child.unref();
     } catch (err) {
@@ -626,9 +663,10 @@ async function launchHelper({ scriptPath, renderedScript, aliveMarkerPath }) {
 }
 
 /**
- * 自己续自己的定时器:一次只会有一个检查在跑,也只需要清理一个句柄。
+ * The timer renews itself: only one check ever runs at a time, and only one handle needs cleaning up.
  *
- * 没查成(窗口还没建好)就用短间隔重来,别把这一天唯一的机会丢掉。
+ * A round that never got to check (no window yet) comes back on the short interval, so the day's only
+ * opportunity is not thrown away.
  */
 function scheduleUpdateCheck(delayMs) {
   updateTimer = setTimeout(async () => {
@@ -638,9 +676,9 @@ function scheduleUpdateCheck(delayMs) {
 }
 
 function createTray() {
-  // createFromPath 而不是把路径直接交给 Tray:路径错了它会返回一张空图,
-  // 而空图在托盘里是**看不见的图标** —— 那时候关窗口又不退出,用户就只剩
-  // 任务管理器一条路了。所以这里显式检查。
+  // createFromPath rather than handing the path straight to Tray: given a wrong path it returns an
+  // empty image, and an empty image in the tray is an **invisible icon** — combined with closing the
+  // window not exiting, the user is left with nothing but Task Manager. So this checks explicitly.
   const icon = nativeImage.createFromPath(ICON_PATH);
   if (icon.isEmpty()) {
     dialog.showErrorBox(
@@ -663,21 +701,24 @@ function createTray() {
 }
 
 /**
- * 只允许一个实例。**这不是洁癖,是 8777 写死带来的硬约束**(见 README 的
- * 「已知取舍」):第二个实例照样会去 spawn 一份 `serve`,那份必然撞 EADDRINUSE
- * 秒退,而 `serverProcess.on('exit')` 分不清「端口被自己的另一份占着」和
- * 「服务真的崩了」—— 于是双击第二次 exe 得到的是一个
- * 「后台服务意外退出(代码 1)」的错误框。那条信息哪一半都不成立:它没说原因,
- * 而照它说的「请重新打开程序」做,只会一模一样地再来一次。更难看的是弹框之前
- * `waitForServer` 会**连上第一个实例的服务器**并且真把窗口开出来,所以用户看到的
- * 是"窗口闪一下,然后一个报错" —— 程序看起来是坏的,其实它好好地在托盘里跑着。
+ * Only one instance is allowed. **This is not fastidiousness, it is a hard constraint imposed by the
+ * hardcoded 8777** (see 「已知取舍」 in the README): a second instance would spawn its own `serve`,
+ * that one necessarily hits EADDRINUSE and dies instantly, and `serverProcess.on('exit')` cannot tell
+ * "the port is held by another copy of ourselves" from "the service really crashed" — so
+ * double-clicking the exe a second time produces a 「后台服务意外退出(代码 1)」 error box. Neither
+ * half of that message holds: it does not state the cause, and doing what it says — 「请重新打开程序」
+ * — produces exactly the same thing again. Worse still, before the box appears `waitForServer`
+ * **connects to the first instance's server** and really does open a window, so what the user sees is
+ * "a window flashes, then an error" — the program looks broken while it is running perfectly well in
+ * the tray.
  *
- * 判断必须包住 `whenReady` 的**注册**,不能挪进回调里去判:ready 之前调
- * `app.quit()` 只是排了个队,ready 回调照样会先跑一遍 `startServer`,那就白防了。
+ * The check has to wrap the `whenReady` **registration** and cannot be moved inside the callback:
+ * calling `app.quit()` before ready only queues it, and the ready callback still runs `startServer`
+ * first, defeating the whole guard.
  *
- * 双击 exe 的人想要的是「把面板拿出来」,不是「再开一个」,所以第一个实例收到
- * `second-instance` 就走托盘那条 `showWindow` —— restore/show/focus 只此一份,
- * 两个入口共用,不会有一天走岔。
+ * Somebody double-clicking the exe wants 「把面板拿出来」, not 「再开一个」, so the first instance
+ * receiving `second-instance` goes down the tray's `showWindow` path — restore/show/focus exists in
+ * exactly one copy, shared by both entry points, so they cannot diverge one day.
  */
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -686,26 +727,28 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     startServer();
-    createTray(); // 必须在窗口之前:关窗口会去读 tray 发气泡提示
+    createTray(); // must come before the window: closing the window reads tray to show the balloon
     createWindow();
-    // dev 模式没有可替换的目录,连定时器都不用起
+    // Dev mode has no replaceable directory, so not even the timer is needed
     if (app.isPackaged && autoUpdateEnabled()) scheduleUpdateCheck(UPDATE_CHECK_DELAY_MS);
   });
 }
 
 /**
- * 窗口全关了不再等于退出 —— 那只是收进了托盘。留成空实现是有意的:
- * Electron 在没有这个监听时的默认行为(非 macOS)就是退出,而那正是要改掉的。
+ * All windows being closed no longer means exiting — it only means going to the tray. Leaving this
+ * an empty implementation is deliberate: Electron's default behaviour without this listener (outside
+ * macOS) is to quit, and that is exactly what has to be changed.
  */
 app.on('window-all-closed', () => {});
 
 /**
- * 所有退出路径的唯一汇合点:托盘「退出」、子进程意外挂掉后的 app.quit()、
- * Windows 关机。清理放这里而不是 window-all-closed,后者现在根本不再触发退出。
+ * The single convergence point for every exit path: the tray's 「退出」, the app.quit() after the
+ * child dies unexpectedly, and a Windows shutdown. The cleanup lives here rather than in
+ * window-all-closed, which no longer triggers an exit at all.
  *
- * 顺序是死的:**先置 isQuitting 再 kill**。子进程的 exit 监听靠这个标志区分
- * "我们主动关的"和"它自己挂了",反过来的话每次正常退出都会先弹一个
- * 「后台服务意外退出」的错误框。
+ * The order is fixed: **set isQuitting before kill**. The child's exit listener uses that flag to
+ * separate "we closed it deliberately" from "it died on its own", and the other way round every
+ * normal exit would first pop a 「后台服务意外退出」 error box.
  */
 app.on('before-quit', () => {
   app.isQuitting = true;

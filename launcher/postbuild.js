@@ -1,19 +1,23 @@
 /**
- * build 之后的收尾,四件事:
+ * The post-build wrap-up, four things:
  *
- * 1. electron-builder 固定把解包目录叫 win-unpacked,改成产品名——放在仓库根目录的
- *    dist/ 下,总得让人一眼看出这是什么。
- * 2. **写更新清单**:这一版装了哪些文件。自更新靠它决定删什么(见下面的注释,
- *    以及 docs/self-update.md)。
- * 3. 把本机专属的 local.config.json 复制到 exe 旁边。源文件在 launcher/ 下,
- *    dist/ 每次 build 都重建,不复制的话每次都得手动放回去。
- *    没有这个文件(别人 clone 下来 build)就跳过——分发出去的包不该带任何人的本机路径。
- * 4. 在仓库根目录放一个快捷方式,双击即可,不用一层层点进 dist/。
- *    .lnk 里存的是绝对路径,所以它和 local.config.json 一样是本机专属、不进仓库的。
+ * 1. electron-builder always names the unpacked directory win-unpacked; rename it to the product
+ *    name — sitting under dist/ in the repository root, it has to be recognisable at a glance.
+ * 2. **Write the update manifest**: which files this version installed. Self-update uses it to decide
+ *    what to delete (see the comments below, and docs/self-update.md).
+ * 3. Copy the machine-specific local.config.json next to the exe. The source file lives under
+ *    launcher/, dist/ is rebuilt on every build, and without the copy it would have to be put back
+ *    by hand every time.
+ *    Absent (somebody else cloned and built) it is skipped — a build meant for distribution should
+ *    carry nobody's local paths.
+ * 4. Put a shortcut in the repository root, so it can be double-clicked without navigating into
+ *    dist/. A .lnk stores absolute paths, so like local.config.json it is machine-specific and does
+ *    not go into the repository.
  *
- * **2 必须排在 3 前面。** 清单是照着 appDir 现有内容生成的,而 3 会往里面放一份
- * local.config.json —— 顺序反过来,那份本机配置就会进清单,下次更新时被当作
- * 程序文件删掉,用户的数据目录会静默地跳回默认位置。下面有一条断言守着这件事。
+ * **2 has to come before 3.** The manifest is generated from appDir's existing contents, and 3 puts a
+ * local.config.json into it — the other way round, that machine-specific config would enter the
+ * manifest and be deleted as a program file at the next update, silently reverting the user's data
+ * directory to its default location. There is an assertion below guarding exactly this.
  */
 import { copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -22,27 +26,30 @@ import { fileURLToPath } from 'node:url';
 
 import { buildManifest, machineLocalEntries } from './updater.js';
 
-/** PowerShell 单引号字符串:内部的单引号写成两个 */
+/** A PowerShell single-quoted string: an inner single quote is written twice */
 const psQuote = (s) => `'${s.replace(/'/g, "''")}'`;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, '..');
 const distDir = join(repoRoot, 'dist');
 
-// 和 package.json 的 build.productName 一致,必须是 ASCII——理由见那边的注释
+// Matches build.productName in package.json and has to be ASCII — the reasoning is in the comment
+// there
 const PRODUCT = 'SteamAchievementTracker';
 const unpacked = join(distDir, 'win-unpacked');
 const appDir = join(distDir, PRODUCT);
 const exePath = join(appDir, `${PRODUCT}.exe`);
 
-// --- 1. win-unpacked → 产品名 ---
+// --- 1. win-unpacked → the product name ---
 if (existsSync(unpacked)) {
-  // **删和改名要在同一个 try 里。** 程序开着的时候目录被占用,这两步会因为完全
-  // 相同的原因失败,而先执行的是删 —— 只保护改名的话,真出问题时抛的是一句裸
-  // EPERM 栈,那句写好的提示("先关掉正在运行的…")永远轮不到。
-  // 更糟的是 build 看起来"跑完了":dist/ 里躺着上一次的产物,时间戳都还挺新
+  // **The delete and the rename have to be in the same try.** With the program running the directory
+  // is in use and both steps fail for exactly the same reason, and the delete runs first — so
+  // guarding only the rename means a real problem throws a bare EPERM stack and the message written
+  // for it ("close the running … first") never gets its turn.
+  // Worse, the build then looks like it "finished": dist/ holds the previous build's output, with
+  // reasonably fresh timestamps
   try {
-    // 上一次 build 留下的同名目录先清掉,不然 rename 会失败
+    // Clear the same-named directory left by the previous build first, or the rename fails
     if (existsSync(appDir)) rmSync(appDir, { recursive: true, force: true });
     renameSync(unpacked, appDir);
     console.log(`[postbuild] ${unpacked} → ${appDir}`);
@@ -58,21 +65,25 @@ if (existsSync(unpacked)) {
   process.exit(1);
 }
 
-// --- 2. 更新清单 ---
-// 「上一版装了哪些文件」。自更新只按这份名单删,绝不按「保留名单」——用户数据和
-// 程序文件同层(resources/tracker/),保留名单漏一项就是删掉用户的数据库,而清单
-// 漏一项只是留下一个多余文件。两种写法的失败方向相反,这就是全部理由。
+// --- 2. The update manifest ---
+// "Which files the previous version installed". Self-update deletes strictly by this list, never by a
+// "keep list" — user data sits at the same level as the program files (resources/tracker/), so a keep
+// list missing one entry deletes the user's database while a manifest missing one entry merely leaves
+// a spare file behind. The two forms fail in opposite directions, and that is the entire reason.
 //
-// 读的是解包目录而不是去解析 zip:那个目录**就是** zip 的内容,也正是用户解压
-// 之后磁盘上的样子。清单本身不在 zip 里(zip 早在 electron-builder 那步就封好了,
-// 让清单描述一个包含它自己的 zip 是循环的),所以它作为单独的发布附件跟 zip 一起
-// 上传,由更新脚本在解压后写进 app 目录。副作用正好是想要的:全新解压的用户手上
-// 没有清单,第一次更新自然退回覆盖,不需要为此写特例。
+// It reads the unpacked directory rather than parsing the zip: that directory **is** the zip's
+// contents, and it is exactly what ends up on disk after the user extracts it. The manifest itself is
+// not inside the zip (the zip was sealed back at the electron-builder step, and having a manifest
+// describe a zip containing itself is circular), so it is uploaded alongside the zip as a separate
+// release asset and written into the app directory by the update script after extraction. The side
+// effect is exactly the one wanted: a user with a fresh extraction has no manifest, so their first
+// update naturally falls back to overwriting with no special case needed.
 const version = JSON.parse(readFileSync(join(here, 'package.json'), 'utf8')).version;
 const manifest = buildManifest(appDir, version);
 
-// local.config.json 进了清单就等于下次更新会删掉它。第 3 步还没跑,这里本该
-// 干干净净——但顺序是人改的,所以显式验一次,别让它变成一个静默的坑
+// local.config.json entering the manifest means the next update deletes it. Step 3 has not run yet, so
+// this should be clean — but orderings get changed by people, so verify explicitly rather than
+// letting it become a silent trap
 const leaked = machineLocalEntries(manifest.files);
 if (leaked.length > 0) {
   console.error(
@@ -90,7 +101,7 @@ const manifestPath = join(distDir, `${PRODUCT}-${version}-manifest.json`);
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`[postbuild] 更新清单:${manifest.files.length} 个文件 → ${manifestPath}`);
 
-// --- 3. 本机数据目录配置 ---
+// --- 3. The machine's data-directory config ---
 const localCfg = join(here, 'local.config.json');
 if (existsSync(localCfg)) {
   copyFileSync(localCfg, join(appDir, 'local.config.json'));
@@ -99,13 +110,14 @@ if (existsSync(localCfg)) {
   console.log('[postbuild] 没有 local.config.json,跳过(分发用的 build 就该是这样)');
 }
 
-// --- 4. 仓库根目录的快捷方式 ---
+// --- 4. The shortcut in the repository root ---
 const shortcut = join(repoRoot, `${PRODUCT}.lnk`);
 try {
-  // Node 建不了 .lnk(那是 COM 对象),借 PowerShell 的 WScript.Shell 来做。
-  // **必须用 -EncodedCommand**:直接用 -Command 传参时,路径里的中文会按控制台
-  // 代码页转换,产品名会变成一串 ?????,建出来的快捷方式指向一个不存在的路径。
-  // -EncodedCommand 收的是 UTF-16LE 的 base64,和代码页完全无关。
+  // Node cannot create a .lnk (that is a COM object), so PowerShell's WScript.Shell does it.
+  // **-EncodedCommand is mandatory**: passing arguments through -Command directly converts Chinese
+  // characters in the path through the console code page, turning the product name into a run of
+  // ????? and producing a shortcut pointing at a path that does not exist.
+  // -EncodedCommand takes UTF-16LE base64, which is entirely independent of the code page.
   const ps =
     `$s = (New-Object -ComObject WScript.Shell).CreateShortcut(${psQuote(shortcut)});` +
     `$s.TargetPath = ${psQuote(exePath)};` +
@@ -119,6 +131,7 @@ try {
   ]);
   console.log(`[postbuild] 快捷方式已放在仓库根目录:${PRODUCT}.lnk`);
 } catch (err) {
-  // 快捷方式只是方便,建不出来不该让整个 build 算失败——exe 本身好好的
+  // The shortcut is only a convenience, and failing to create it should not fail the whole build —
+  // the exe itself is fine
   console.warn('[postbuild] 快捷方式没建成(不影响程序本身):', err.message);
 }

@@ -1,21 +1,31 @@
 /**
- * 覆盖已有攻略(「动手顺序」第 8 步)的测试
+ * Tests for overwriting an existing guide (step 8 of the "order of operations")
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这个文件守的失败类是**不可逆地弄丢用户已经写好的攻略**。前面的文件守"没验过的东西
- * 别溜进笔记",这里守的是反过来那一半:验过的新东西盖上去的时候,旧的那份得还拿得回来。
+ * The failure class this file guards is **irreversibly losing a guide the user has already
+ * written**. The earlier files guard "nothing unvalidated slips into the notes"; this one
+ * guards the other half: when something validated is written over the top, the old copy has
+ * to still be recoverable.
  *
- *  - **没有 `--overwrite` 就不许覆盖**。默认拒绝是这条路唯一的安全边界
- *  - **备份失败 ⇒ 整件事停下**。和 `guidemigrate` 的归档不一样:那边归档失败可以放过
- *    (东西已经安全落地了),这边备份是覆盖的**前置条件**,没备份的覆盖就是删除
- *  - **删 Notion 页面内容之前必须已经拿到备份**,而且删的就是备份里那一批 block ——
- *    分两次读页面,中间被人动过,备份里就少一块,而少的那块已经被删了
- *  - **覆盖本地攻略不会顺手把它搬去 Notion**。换后端是另一条命令的事
- *  - **手动勾上的子步骤框会丢,而且必须在花钱之前就说出来**。成就框会被机械打勾按
- *    数据库勾回原样,子步骤框匹配不到任何成就,重新生成之后一律变回未勾选
+ *  - **No `--overwrite`, no overwriting.** Refusing by default is this path's only safety
+ *    boundary
+ *  - **A failed backup ⇒ the whole thing stops.** Unlike `guidemigrate`'s archiving: there a
+ *    failed archive can be let through (the content has already landed safely), while here
+ *    the backup is a **precondition** of overwriting, and an overwrite with no backup is a
+ *    deletion
+ *  - **The backup has to exist before a Notion page's content is deleted**, and what is
+ *    deleted is exactly the batch of blocks in the backup — reading the page twice, with
+ *    somebody touching it in between, leaves the backup one block short, and that block has
+ *    already been deleted
+ *  - **Overwriting a local guide does not move it to Notion in passing.** Changing backend is
+ *    another command's job
+ *  - **Hand-ticked sub-step boxes are lost, and that has to be said before any money is
+ *    spent.** Achievement boxes are ticked back exactly as they were by the mechanical pass
+ *    from the database, while sub-step boxes match no achievement and come back unticked
+ *    after regeneration
  *
- * 不联网:Notion 和 Steam 都是假的。
+ * Offline: both Notion and Steam are fakes.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -37,7 +47,7 @@ import {
 } from '../lib/guidebackup.js';
 
 // ---------------------------------------------------------------------------
-// 脚手架
+// Scaffolding
 // ---------------------------------------------------------------------------
 
 const def = (apiName, nameCn, description = '') => ({
@@ -95,7 +105,7 @@ function freshEnv({ text = GUIDE, file = 'test_guide.md', kind = 'local', regist
   return { db, config: { guidesDir: dir, ai: { maxAchievements: 100 } }, dir, file };
 }
 
-/** Steam:只提供机械打勾要的解锁状态和解锁率 */
+/** Steam: supplies only the unlock state and unlock rates the mechanical tick pass needs */
 const fakeSteam = () => ({
   async fetchPlayerAchievements() {
     return { achievements: [{ apiname: 'A', achieved: 1 }] };
@@ -126,38 +136,41 @@ const fakeNotion = ({ blocks = null } = {}) => ({
 
 // ---------------------------------------------------------------------------
 
-describe('planGuide —— 覆盖这道闸门', () => {
+describe('planGuide — the overwrite gate', () => {
   /**
-   * 「不只说不行,还要说怎么办」这条要求没变,变的是**谁来说**。
+   * The requirement "do not only say no, say what to do" has not changed; what changed is
+   * **who says it**.
    *
-   * 终端的下一步是加 `--overwrite`,Dashboard 上那一行有个「重写」按钮 —— 不是同一个
-   * 动作。把其中一个写进消息正文,对另一边就是一句做不到的建议。所以正文只陈述事实,
-   * 带上 code 和 detail,让两个界面各自说各自的下一步(终端那半由 cli-hints.test.js 钉)。
+   * The terminal's next step is adding `--overwrite`, while the Dashboard has a 「重写」
+   * button on that row — not the same action. Writing either into the message body makes it
+   * advice the other surface cannot act on. So the body states facts only and carries a code
+   * and a detail, letting each surface state its own next step (the terminal half is pinned
+   * by cli-hints.test.js).
    */
-  test('已经有攻略、没加 --overwrite → 拒绝,并且带上让界面自己接话的信息', async () => {
+  test('a guide already exists and --overwrite was not given → refused, carrying enough for a surface to continue the sentence', async () => {
     const { db, config } = freshEnv();
     await assert.rejects(
       planGuide(db, { config, steam: fakeSteam(), appid: '1' }),
       (err) => {
         assert.match(err.message, /已经有攻略了/);
-        assert.equal(err.code, 'guide-exists', '光说"已经有攻略了"不够,界面得知道这是哪一类拒绝');
+        assert.equal(err.code, 'guide-exists', 'saying only "a guide already exists" is not enough; the surface has to know which kind of refusal this is');
         assert.equal(err.detail.kind, 'local');
-        assert.ok(err.detail.url, '要能指出是哪一份');
-        assert.doesNotMatch(err.message, /--overwrite/, 'Dashboard 上没有命令行可敲');
+        assert.ok(err.detail.url, 'it has to be able to point at which one');
+        assert.doesNotMatch(err.message, /--overwrite/, 'there is no command line to type on the Dashboard');
         return true;
       }
     );
   });
 
-  test('加了 --overwrite → 放行,并把旧攻略一起带出来给差异预览用', async () => {
+  test('with --overwrite → allowed, and the old guide comes back with it for the diff preview', async () => {
     const { db, config } = freshEnv();
     const plan = await planGuide(db, { config, steam: fakeSteam(), appid: '1', overwrite: true });
     assert.equal(plan.existing.kind, 'local');
-    assert.equal(plan.oldTodos.length, 4, '三个成就框 + 一个子步骤框');
+    assert.equal(plan.oldTodos.length, 4, 'three achievement boxes plus one sub-step box');
     assert.ok(plan.oldText.includes('第一步'));
   });
 
-  test('覆盖本地攻略不会顺手搬去 Notion —— 换后端是 guide-to-notion 的事', async () => {
+  test('overwriting a local guide does not move it to Notion in passing — changing backend is guide-to-notion\'s job', async () => {
     const { db, config } = freshEnv();
     const plan = await planGuide(db, {
       config: { ...config, notion: { overviewDbId: 'db1' } },
@@ -166,16 +179,16 @@ describe('planGuide —— 覆盖这道闸门', () => {
       notion: { configured: true },
       overwrite: true,
     });
-    assert.equal(plan.target, 'local', 'Notion 连着也不该改变一份本地攻略的落点');
+    assert.equal(plan.target, 'local', 'Notion being connected should not change where a local guide lands');
   });
 
-  test('覆盖时写回原来那个文件,不按游戏名另起一个', async () => {
+  test('an overwrite writes back to the original file rather than starting a new one from the game name', async () => {
     const { db, config, file } = freshEnv({ file: '手起的名字.md' });
     const plan = await planGuide(db, { config, steam: fakeSteam(), appid: '1', overwrite: true });
     assert.equal(plan.fileName, file);
   });
 
-  test('guides 表指着一个已经不在的文件 → 当场报,不等花完钱', async () => {
+  test('the guides table points at a file that is gone → reported on the spot, not after the money is spent', async () => {
     const { db, config } = freshEnv({ register: false });
     upsertGuide(db, { appid: '1', name: '测试游戏', url: '根本没有这个.md', kind: 'local' });
     await assert.rejects(
@@ -184,16 +197,16 @@ describe('planGuide —— 覆盖这道闸门', () => {
     );
   });
 
-  test('文件在、但没登记进 guides 表 → 也算覆盖,一样要先拦下来', async () => {
+  test('the file exists but is not registered in the guides table → still an overwrite, and still blocked first', async () => {
     const { db, config } = freshEnv({ register: false });
-    // 中文游戏名削不出 ASCII slug,guideFileName 会退回 app_<appid>_achievements.md
+    // A Chinese game name produces no ASCII slug, so guideFileName falls back to app_<appid>_achievements.md
     writeFileSync(join(config.guidesDir, 'app_1_achievements.md'), GUIDE);
     await assert.rejects(
       planGuide(db, { config, steam: fakeSteam(), appid: '1' }),
       (err) => {
         assert.equal(err.code, 'file-exists');
-        // 「加 --overwrite」搬去终端那一侧了(见 cli-hints.test.js):同一句话
-        // 会原样出现在 Dashboard 上,而那边没有命令行可敲
+        // 「加 --overwrite」 moved to the terminal side (see cli-hints.test.js): the same
+        // sentence appears verbatim on the Dashboard, where there is no command line to type
         assert.doesNotMatch(err.message, /--overwrite|--file/);
         return true;
       }
@@ -201,19 +214,19 @@ describe('planGuide —— 覆盖这道闸门', () => {
   });
 });
 
-describe('backupGuide —— 覆盖的前置条件', () => {
-  test('本地攻略:原样拷进 .backups/,原件一个字都不动', async () => {
+describe('backupGuide — the overwrite\'s precondition', () => {
+  test('a local guide: copied verbatim into .backups/, with the original untouched', async () => {
     const { db: _db, config, dir, file } = freshEnv();
     const b = await backupGuide(config, { guide: { kind: 'local', url: file }, appid: '1' });
 
     assert.ok(existsSync(b.path));
-    assert.equal(readFileSync(b.path, 'utf8'), GUIDE, '备份的必须是原文');
-    assert.equal(readFileSync(join(dir, file), 'utf8'), GUIDE, '原件不该被动过');
+    assert.equal(readFileSync(b.path, 'utf8'), GUIDE, 'what is backed up has to be the original');
+    assert.equal(readFileSync(join(dir, file), 'utf8'), GUIDE, 'the original should not have been touched');
     assert.ok(b.path.includes(BACKUPS_DIR));
     assert.ok(b.bytes > 0);
   });
 
-  test('本地攻略不见了 → 抛,不要写一个空备份', async () => {
+  test('the local guide is gone → throw rather than writing an empty backup', async () => {
     const { config } = freshEnv();
     await assert.rejects(
       backupGuide(config, { guide: { kind: 'local', url: '没有这个.md' }, appid: '1' }),
@@ -221,7 +234,7 @@ describe('backupGuide —— 覆盖的前置条件', () => {
     );
   });
 
-  test('Notion:存原样 block JSON,而且把 block 一起交出来给删除用', async () => {
+  test('Notion: stores the raw block JSON, and hands the blocks back for the deletion', async () => {
     const { config } = freshEnv({ kind: 'notion' });
     const notion = fakeNotion();
     const b = await backupGuide(config, {
@@ -231,14 +244,14 @@ describe('backupGuide —— 覆盖的前置条件', () => {
     });
 
     assert.equal(b.count, 2);
-    assert.equal(b.blocks.length, 2, '要拿回 block 本身,不只是个数 —— 紧接着就按它删');
+    assert.equal(b.blocks.length, 2, 'the blocks themselves have to come back, not only a count — the deletion goes by them immediately after');
     const saved = JSON.parse(readFileSync(b.path, 'utf8'));
     assert.equal(saved.blocks.length, 2);
     assert.equal(saved.appid, '1');
-    assert.ok(saved.savedAt, '存下来的东西要能说出自己是什么时候的');
+    assert.ok(saved.savedAt, 'what is stored has to be able to say when it is from');
   });
 
-  test('页面一个 block 都读不到 → 抛。空备份等于没备份', async () => {
+  test('not one block could be read from the page → throw. An empty backup is no backup', async () => {
     const { config } = freshEnv({ kind: 'notion' });
     await assert.rejects(
       backupGuide(config, {
@@ -250,7 +263,7 @@ describe('backupGuide —— 覆盖的前置条件', () => {
     );
   });
 
-  test('Notion 没配置 → 抛,不要静悄悄跳过备份', async () => {
+  test('Notion is not configured → throw rather than silently skipping the backup', async () => {
     const { config } = freshEnv({ kind: 'notion' });
     await assert.rejects(
       backupGuide(config, {
@@ -262,13 +275,13 @@ describe('backupGuide —— 覆盖的前置条件', () => {
     );
   });
 
-  test('时间戳可排序,同一秒之外不会互相覆盖', () => {
+  test('the timestamp sorts, and does not collide outside the same second', () => {
     assert.match(timeStamp(new Date(2026, 7, 11, 15, 57, 12)), /^20260811-155712$/);
     assert.ok(timeStamp(new Date(2026, 0, 2)) < timeStamp(new Date(2026, 0, 3)));
   });
 });
 
-describe('差异预览 —— 说清楚会失去什么', () => {
+describe('the diff preview — stating clearly what will be lost', () => {
   const oldTodos = loadTodosFrom(GUIDE);
 
   function loadTodosFrom(text) {
@@ -278,35 +291,36 @@ describe('差异预览 —— 说清楚会失去什么', () => {
     return loadTodos(p);
   }
 
-  test('coverageOf 把成就框和子步骤框分开', () => {
+  test('coverageOf separates achievement boxes from sub-step boxes', () => {
     const { byApiName, orphans } = coverageOf(oldTodos, DEFS);
     assert.equal(byApiName.size, 3);
     assert.equal(orphans.length, 1);
     assert.equal(orphans[0].text.trim(), '手动勾上的子步骤');
   });
 
-  test('手动勾上的子步骤框被点名 —— 这是覆盖唯一真正丢掉的用户数据', () => {
-    // **命令行现在是唯一说这件事的地方。** Dashboard 那个确认框的正文已经删光了
-    // (界面上要短,而且"重写"两个字本身就含这个意思,备份也还在)。这里再删,
-    // 就没有任何一处提过它了 —— 而它确实是覆盖唯一拿不回来的用户数据
+  test('hand-ticked sub-step boxes are named — the one piece of user data an overwrite genuinely loses', () => {
+    // **The command line is now the only place that says this.** The Dashboard confirm
+    // dialog's body has been cut down to nothing (the interface has to be short, 「重写」 by
+    // itself already implies it, and the backup still exists). Cutting it here too would leave
+    // nowhere mentioning it — and it really is the only user data an overwrite cannot get back
     const p = overwritePreflight({ oldTodos, defs: DEFS, oldText: GUIDE });
     assert.equal(p.atRiskTicks.length, 1);
     assert.match(formatPreflight(p), /手动勾上的子步骤框会变回未勾选/);
   });
 
-  test('成就框的勾不算"会丢" —— 机械打勾会按数据库勾回原样', () => {
-    // 「第一步」在旧攻略里是勾上的,而且它是个成就 → 不该出现在 atRiskTicks 里
+  test('a ticked achievement box does not count as "will be lost" — the mechanical pass ticks it back from the database', () => {
+    // 「第一步」 is ticked in the old guide and is an achievement → it should not appear in atRiskTicks
     const p = overwritePreflight({ oldTodos, defs: DEFS });
     assert.ok(!p.atRiskTicks.some((t) => t.text.includes('第一步')));
   });
 
-  test('没有子步骤勾选时,明说没有东西会丢', () => {
+  test('with no ticked sub-steps, it says outright that nothing will be lost', () => {
     const todos = loadTodosFrom('- [x] **第一步**<br>完成第一关。\n');
     const out = formatPreflight(overwritePreflight({ oldTodos: todos, defs: DEFS }));
     assert.match(out, /没有手动勾选会丢失/);
   });
 
-  test('新版少了一个成就的框 → 报出来,这是真的退化', () => {
+  test('the new version is missing an achievement\'s box → reported, because that is a genuine regression', () => {
     const newTodos = loadTodosFrom(
       '- [ ] **第一步**<br>完成第一关。\n- [ ] **第二步**<br>完成第二关。\n'
     );
@@ -315,7 +329,7 @@ describe('差异预览 —— 说清楚会失去什么', () => {
     assert.equal(d.lostAchievements[0].name, '第三步');
   });
 
-  test('三个成就都在 → 不报丢失,但要说正文整份换掉了', () => {
+  test('all three achievements present → nothing reported lost, but it has to say the prose was replaced wholesale', () => {
     const newTodos = loadTodosFrom(
       '- [ ] **第一步**<br>完成第一关。<br>换了个写法\n' +
         '- [ ] **第二步**<br>完成第二关。<br>也换了\n' +
@@ -326,7 +340,7 @@ describe('差异预览 —— 说清楚会失去什么', () => {
     assert.equal(d.newCovered, 3);
   });
 
-  test('字数变化算得出来 —— 拿三千字换掉九千字要当场看见', () => {
+  test('the change in length is computed — trading nine thousand characters for three thousand has to be visible on the spot', () => {
     const d = diffGuides({
       oldTodos,
       newTodos: oldTodos,

@@ -1,19 +1,22 @@
 /**
- * 两个限流旋钮不许被合回一个
+ * The two rate-limit knobs must not be merged back into one
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * `requestDelayMs` 管 api.steampowered.com,`storeRequestDelayMs` 管
- * store.steampowered.com。它们**曾经是同一个值**,而这正是问题所在:
- * Web API 实测能扛住 11 次/秒(400 个请求、间隔 0ms、36 秒、零 429),
- * 商店接口严得多,而且撞上去是 **IP 级封禁**,不是 key 级限流。
+ * `requestDelayMs` governs api.steampowered.com and `storeRequestDelayMs` governs
+ * store.steampowered.com. They **used to be the same value**, and that is the problem:
+ * the Web API is measured to withstand 11 requests/second (400 requests, 0ms apart, 36
+ * seconds, zero 429s), while the store endpoint is far stricter and hitting it earns an
+ * **IP-level ban** rather than a key-level throttle.
  *
- * 所以危险的改动不是「调错数字」,是**把商店那条路的 sleep 换回 this.delay**:
- * 什么都不会报错,同步照跑,只是商店接口从每 300ms 一次变成每 100ms 一次,
- * 后果要等到被封了才看得见。下面的源码断言钉的就是这件事。
+ * So the dangerous edit is not "the wrong number", it is **putting this.delay back on the
+ * store path's sleep**: nothing errors, the sync runs, and the store endpoint simply goes
+ * from once per 300ms to once per 100ms, with the consequence invisible until something is
+ * banned. The source assertions below pin exactly that.
  *
- * 注释必须先剥,而且**先剥行注释再剥块注释**(见 CLAUDE.md):这个文件要断言的
- * 两个标识符都在解释性注释里出现过,不剥的话断言会被注释本身满足。
+ * Comments have to be stripped first, and **line comments before block comments** (see
+ * CLAUDE.md): both identifiers this file asserts on appear in explanatory comments, and
+ * without stripping, the assertions would be satisfied by the comments themselves.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,81 +24,81 @@ import { readFileSync } from 'node:fs';
 import { SteamClient } from '../lib/steam.js';
 
 const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
-/** 先行注释、再块注释 —— 反过来的话 `//` 里的 `/*` 会吃掉真代码 */
+/** Line comments first, then block comments — the other way round, a `/*` inside a `//` eats real code */
 const strip = (s) => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
 
-/** 在 from 之后、to 之前那一段。两个锚点都必须真的存在,少一个就是响亮的失败 */
+/** The span after from and before to. Both anchors have to genuinely exist; a missing one is a loud failure */
 function between(src, from, to) {
   const a = src.indexOf(from);
-  assert.ok(a >= 0, `锚点不见了: ${from}`);
+  assert.ok(a >= 0, `anchor gone: ${from}`);
   const b = src.indexOf(to, a + from.length);
-  assert.ok(b > a, `锚点不见了: ${to}`);
+  assert.ok(b > a, `anchor gone: ${to}`);
   return src.slice(a, b);
 }
 
-describe('SteamClient — 两个独立的间隔', () => {
-  test('默认值:Web API 100ms,商店 300ms', () => {
+describe('SteamClient — two independent delays', () => {
+  test('defaults: 100ms for the Web API, 300ms for the store', () => {
     const c = new SteamClient({ steamApiKey: 'k', steamId: 's' });
-    assert.equal(c.delay, 100, 'Web API 实测能扛 11 次/秒,100ms 留了一半余量');
-    assert.equal(c.storeDelay, 300, '商店那条没有实测数据,保持保守');
+    assert.equal(c.delay, 100, 'the Web API is measured to withstand 11/s, and 100ms leaves a 2x margin');
+    assert.equal(c.storeDelay, 300, 'the store path has no measurement, so it stays conservative');
   });
 
-  test('两个字段各读各的配置项,不会互相串', () => {
+  test('the two fields read their own config options and never cross', () => {
     const c = new SteamClient({ requestDelayMs: 42, storeRequestDelayMs: 999 });
     assert.equal(c.delay, 42);
     assert.equal(c.storeDelay, 999);
   });
 
-  test('只给一个,另一个仍回落到自己的默认值', () => {
+  test('giving only one still leaves the other at its own default', () => {
     const onlyWeb = new SteamClient({ requestDelayMs: 5 });
     assert.equal(onlyWeb.delay, 5);
-    assert.equal(onlyWeb.storeDelay, 300, '调快 Web API 不该顺手把商店也调快');
+    assert.equal(onlyWeb.storeDelay, 300, 'speeding up the Web API must not speed up the store in passing');
 
     const onlyStore = new SteamClient({ storeRequestDelayMs: 5000 });
     assert.equal(onlyStore.delay, 100);
     assert.equal(onlyStore.storeDelay, 5000);
   });
 
-  test('0 是合法值,不该被 ?? 当成"没给"', () => {
+  test('0 is a legal value and must not be read as "not given" by ??', () => {
     const c = new SteamClient({ requestDelayMs: 0, storeRequestDelayMs: 0 });
     assert.equal(c.delay, 0);
     assert.equal(c.storeDelay, 0);
   });
 });
 
-describe('商店那条路必须用 storeDelay(源码断言)', () => {
-  test('fetchAppName 里两次商店调用之间用的是 storeDelay', () => {
+describe('the store path has to use storeDelay (source assertions)', () => {
+  test('the delay between the two store calls in fetchAppName is storeDelay', () => {
     const src = strip(read('../lib/steam.js'));
     const body = between(src, 'async fetchAppName(appid) {', 'async fetchStoreHeaderImage(');
-    assert.match(body, /sleep\(this\.storeDelay\)/, 'appdetails 和商店页 HTML 都在 store.steampowered.com');
-    assert.doesNotMatch(body, /sleep\(this\.delay\)/, 'Web API 的间隔不该用在商店调用上');
+    assert.match(body, /sleep\(this\.storeDelay\)/, 'both appdetails and the store page HTML are on store.steampowered.com');
+    assert.doesNotMatch(body, /sleep\(this\.delay\)/, 'the Web API delay must not be used on a store call');
   });
 
-  test('sync.js 里每个 fetchAppName 之后的那次 sleep 都是 storeDelay', () => {
+  test('every sleep after a fetchAppName in sync.js is storeDelay', () => {
     const src = strip(read('../lib/sync.js'));
     const calls = [...src.matchAll(/steam\.fetchAppName\(/g)];
-    assert.ok(calls.length >= 2, `sync.js 里应当有至少两处 fetchAppName,实际 ${calls.length}`);
+    assert.ok(calls.length >= 2, `sync.js should hold at least two fetchAppName calls, found ${calls.length}`);
     for (const m of calls) {
-      // 从这次调用往后找**下一个** sleep —— 不用固定字节窗口,代码长胖也不会漂
+      // Look forward from this call for the **next** sleep — no fixed byte window, so it does not drift as the code grows
       const rest = src.slice(m.index);
       const s = rest.match(/await sleep\(([^)]*)\)/);
-      assert.ok(s, `fetchAppName(位置 ${m.index})后面没有 sleep`);
+      assert.ok(s, `no sleep after fetchAppName (at offset ${m.index})`);
       assert.equal(s[1].trim(), 'steam.storeDelay',
-        `fetchAppName 走的是商店接口,后面该是 steam.storeDelay,实际是 ${s[1]}`);
+        `fetchAppName goes to the store endpoint, so this should be steam.storeDelay, found ${s[1]}`);
     }
   });
 
-  test('Web API 的两个循环仍然用快的那个', () => {
+  test('the two Web API loops still use the fast one', () => {
     const src = strip(read('../lib/sync.js'));
-    // 第二阶段:成就计数。GetPlayerAchievements,就是实测过的那个接口
+    // Phase two: achievement counts. GetPlayerAchievements, the endpoint that was measured
     const stats = between(src, 'export async function syncAchievementStats(', 'export async function');
-    assert.match(stats, /await sleep\(steam\.delay\)/, '第二阶段是 Web API,该用快的');
-    // 第三阶段:成就明细。GetSchemaForGame,同样是 Web API
+    assert.match(stats, /await sleep\(steam\.delay\)/, 'phase two is the Web API and should use the fast one');
+    // Phase three: achievement detail. GetSchemaForGame, likewise the Web API
     const schema = between(src, 'export async function syncAchievementSchema(', 'export async function');
-    assert.match(schema, /await sleep\(steam\.delay\)/, '第三阶段也是 Web API');
+    assert.match(schema, /await sleep\(steam\.delay\)/, 'phase three is the Web API too');
   });
 
-  test('两个旋钮在 steam.js 里都真的被读了 —— 少读一个等于悄悄合并', () => {
+  test('both knobs are genuinely read in steam.js — reading one fewer is a silent merge', () => {
     const src = strip(read('../lib/steam.js'));
     assert.match(src, /cfg\.requestDelayMs/);
     assert.match(src, /cfg\.storeRequestDelayMs/);

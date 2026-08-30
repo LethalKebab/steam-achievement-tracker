@@ -1,24 +1,28 @@
 /**
- * 自更新
+ * Self-update
  * ------------------------------------------------
- * 这个文件保的是**一次坏掉就没法补救**的那部分。更新器的特殊之处在于:出问题的
- * 那一版已经装到用户机器上了,而修好的那一版要靠坏掉的更新器送过去。
+ * This file guards the part that **cannot be repaired once it breaks**. What makes the updater
+ * special is that the broken version is already installed on the user's machine, and the fixed
+ * version has to be delivered by the broken updater.
  *
- * 按 docs/self-update.md 第五节分两半:
+ * Split in two, following section 5 of docs/self-update.md:
  *
- * - **可单测的**:清单生成、版本比对、sha256 校验、跳过版本的记忆。都在
- *   `launcher/updater.js` 里,那个文件故意不 import electron,所以能直接加载。
- * - **不可单测的**:真正的文件替换。靠排练(让它指向 v1.1.2 做一次「降级」)。
- *   这里能做的是把生成出来的 PowerShell **拿去解析一遍**,以及断言那段脚本的
- *   结构没有违反三条约束 —— 脚本跑在一个没有控制台、也没人看着的进程里,
- *   语法错了不会有任何人看到,表现只是"程序自己退了,再也没起来"。那句话不是
- *   比喻:真实排练里就发生过一次,而当时 app 的日志还写着「helper 已启动」。
+ * - **Unit-testable**: manifest generation, version comparison, sha256 verification, remembering
+ *   a skipped version. All in `launcher/updater.js`, a file that deliberately does not import
+ *   electron so it can be loaded directly.
+ * - **Not unit-testable**: the actual file replacement. Covered by a rehearsal (pointing it at
+ *   v1.1.2 for a "downgrade"). What can be done here is **parsing the generated PowerShell** and
+ *   asserting that the script's structure does not violate the three constraints — the script
+ *   runs in a process with no console and nobody watching, so a syntax error is seen by nobody
+ *   and presents only as "the program quit itself and never came back". That is not a figure of
+ *   speech: it happened once in a real rehearsal, while the app log said the helper had started.
  *
- * `launcher/main.js` 要 Electron 才能加载,所以那半只能用**源码断言**,和
- * `test/tray.test.js` 同源。
+ * `launcher/main.js` needs Electron to load, so that half can only be **source assertions**, the
+ * same family as `test/tray.test.js`.
  *
- * ⚠️ 源码断言必须先去注释再匹配 —— 这个仓库注释密度很高,不去注释的话断言会被
- * 自己旁边的注释满足。tray.test.js 里那条就真的空跑过。
+ * ⚠️ A source assertion has to strip comments before matching — this repository has a high
+ * comment density, and without stripping, an assertion gets satisfied by the comment beside it.
+ * The one in tray.test.js really did run empty.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -51,7 +55,7 @@ import {
   writeUpdateState,
 } from '../launcher/updater.js';
 
-// --- 源码断言的两个工具。和 tray.test.js 里的同一份,理由见那边的长注释 ---
+// --- The two helpers for source assertions. The same copy as in tray.test.js; the reasoning is in the long comment there ---
 
 const stripComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
@@ -62,28 +66,30 @@ const postbuildSrc = stripComments(
 );
 
 /**
- * 从 needle 起按大括号配平截出整块 —— 固定长度切片会随上下文增删而错位。
+ * Slice out a whole block from needle by brace balancing — a fixed-length slice drifts as the
+ * surrounding code grows and shrinks.
  *
- * **找 `{` 要从 needle 结束之后开始找,不是从它开头。** 不然
- * `function askUpdate({ version, sizeMb })` 这种解构参数的第一个 `{` 就是参数
- * 本身,配平在参数列表就闭合了,截出来只有一行签名 —— 于是断言对着一行签名
- * 做匹配,恒假(或者更糟,恒真)。tray.test.js 里那份没踩到只是因为它的 needle
- * 都不含大括号;needle 要带上参数列表才能定位到函数体。
+ * **The search for `{` has to start after the end of needle, not at its start.** Otherwise the
+ * first `{` of something like `function askUpdate({ version, sizeMb })` is the destructured
+ * parameter itself, balancing closes at the parameter list, and what is sliced out is one line
+ * of signature — so the assertion matches against a signature line, always false (or worse,
+ * always true). The copy in tray.test.js never hit this only because none of its needles carry a
+ * brace; a needle has to include the parameter list to reach the function body.
  */
 function blockFrom(src, needle, label = needle) {
   const start = src.indexOf(needle);
-  assert.ok(start > 0, `找不到 ${label} —— 这条检查失去了目标,不是通过了`);
+  assert.ok(start > 0, `cannot find ${label} — this check has lost its target rather than passed`);
   const open = src.indexOf('{', start + needle.length);
-  assert.ok(open > start, `${label} 后面没有代码块`);
+  assert.ok(open > start, `there is no code block after ${label}`);
   let depth = 0;
   for (let i = open; i < src.length; i++) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}' && --depth === 0) return src.slice(start, i + 1);
   }
-  assert.fail(`${label} 的代码块没有闭合`);
+  assert.fail(`the code block for ${label} does not close`);
 }
 
-/** await fn 之后才清理 —— 少了这个 await,异步用例的临时目录会在断言跑完之前就没了 */
+/** Clean up only after awaiting fn — without that await, an async case's temp directory is gone before its assertions run */
 async function withTempDir(fn) {
   const dir = mkdtempSync(join(tmpdir(), 'selfupdate-'));
   try {
@@ -93,66 +99,67 @@ async function withTempDir(fn) {
   }
 }
 
-// ================================================================ 版本比对
+// ================================================================ version comparison
 
-describe('版本比对', () => {
-  test('按数字段比,不是按字符串比', () => {
-    // 字符串比较下 '1.1.9' > '1.2.0',于是 1.2.0 发出去没人收得到,
-    // 而且不会有任何报错 —— 只是永远没有人升级
-    assert.ok(compareVersions('1.2.0', '1.1.9') > 0, '1.2.0 必须比 1.1.9 新');
-    assert.ok(compareVersions('1.10.0', '1.9.0') > 0, '1.10.0 必须比 1.9.0 新');
+describe('version comparison', () => {
+  test('compares numeric segments, not strings', () => {
+    // Under string comparison '1.1.9' > '1.2.0', so 1.2.0 goes out and nobody receives it,
+    // with no error at all — simply nobody ever upgrades
+    assert.ok(compareVersions('1.2.0', '1.1.9') > 0, '1.2.0 has to be newer than 1.1.9');
+    assert.ok(compareVersions('1.10.0', '1.9.0') > 0, '1.10.0 has to be newer than 1.9.0');
     assert.ok(compareVersions('2.0.0', '1.99.99') > 0);
     assert.equal(compareVersions('1.1.3', '1.1.3'), 0);
   });
 
-  test('tag 的 v 前缀两边都容忍', () => {
-    // 一边是 release 的 tag_name(v1.1.3),一边是 app.getVersion()(1.1.3)
+  test('the v prefix on a tag is tolerated on both sides', () => {
+    // One side is the release tag_name (v1.1.3), the other is app.getVersion() (1.1.3)
     assert.equal(compareVersions('v1.1.3', '1.1.3'), 0);
     assert.ok(compareVersions('v1.1.4', 'v1.1.3') > 0);
   });
 
-  test('段数不齐按 0 补', () => {
+  test('uneven segment counts are padded with 0', () => {
     assert.equal(compareVersions('1.1', '1.1.0'), 0);
     assert.ok(compareVersions('1.1.1', '1.1') > 0);
   });
 
-  test('同版本和更老的版本都不弹', () => {
+  test('neither the same version nor an older one prompts', () => {
     const now = '1.1.3';
     assert.equal(shouldOffer({ currentVersion: now, remoteVersion: '1.1.3' }), false);
-    // 老版本被重新发布 / latest 指回去了,不该把用户降级
+    // An older version was re-published / latest was pointed back: the user must not be downgraded
     assert.equal(shouldOffer({ currentVersion: now, remoteVersion: '1.1.2' }), false);
     assert.equal(shouldOffer({ currentVersion: now, remoteVersion: '1.1.4' }), true);
   });
 
-  test('tag_name 缺失时不弹', () => {
+  test('a missing tag_name does not prompt', () => {
     assert.equal(shouldOffer({ currentVersion: '1.1.3', remoteVersion: '' }), false);
   });
 });
 
-// ================================================================ 跳过版本的记忆
+// ================================================================ remembering a skipped version
 
-describe('跳过版本的记忆', () => {
-  test('跳过之后同一个版本不再弹,更新的版本照弹', () => {
-    // 设计文档三个死细节之一。不记的话每次开都弹一遍,两天就被训练成无视
+describe('remembering a skipped version', () => {
+  test('after skipping, that same version does not prompt again while a newer one still does', () => {
+    // One of the three fatal details in the design document. Without remembering, it prompts on
+    // every launch and two days later the user is trained to ignore it
     const base = { currentVersion: '1.1.3', skippedVersion: '1.2.0' };
-    assert.equal(shouldOffer({ ...base, remoteVersion: '1.2.0' }), false, '跳过的版本又弹了');
+    assert.equal(shouldOffer({ ...base, remoteVersion: '1.2.0' }), false, 'the skipped version prompted again');
     assert.equal(
       shouldOffer({ ...base, remoteVersion: '1.2.1' }),
       true,
-      '跳过 1.2.0 不该连 1.2.1 一起吃掉 —— 那等于永久关闭了更新'
+      'skipping 1.2.0 should not swallow 1.2.1 as well — that would turn updates off permanently'
     );
   });
 
-  test('写了能读回来', () =>
+  test('what is written can be read back', () =>
     withTempDir((dir) => {
       const p = join(dir, STATE_NAME);
       assert.equal(writeUpdateState(p, { skippedVersion: '1.2.0' }), true);
       assert.deepEqual(readUpdateState(p), { skippedVersion: '1.2.0' });
     }));
 
-  test('文件不存在 / 内容坏掉都当作没跳过,不能抛', () =>
+  test('a missing file and a corrupt one both count as "nothing skipped" and must not throw', () =>
     withTempDir((dir) => {
-      // 抛出去的话第一次运行(还没有这个文件)就炸在检查更新里
+      // Throwing would blow up inside the update check on the very first run (before the file exists)
       assert.deepEqual(readUpdateState(join(dir, 'nope.json')), { skippedVersion: null });
 
       const broken = join(dir, 'broken.json');
@@ -164,36 +171,36 @@ describe('跳过版本的记忆', () => {
       assert.deepEqual(readUpdateState(wrongShape), { skippedVersion: null });
     }));
 
-  test('写不进去返回 false,不能抛', () =>
+  test('an unwritable path returns false rather than throwing', () =>
     withTempDir((dir) => {
-      // app 目录只读(比如解压到 Program Files)时会走到这里。
-      // 记不住跳过是小事,为此弹一个错误框才是大事
+      // This is reached when the app directory is read-only (unzipped into Program Files, say).
+      // Failing to remember a skip is a small thing; popping an error box over it is not
       const path = join(dir, 'no-such-dir', 'state.json');
       assert.doesNotThrow(() => writeUpdateState(path, { skippedVersion: '1.2.0' }));
       assert.equal(writeUpdateState(path, { skippedVersion: '1.2.0' }), false);
     }));
 });
 
-// ================================================================ sha256 校验
+// ================================================================ sha256 verification
 
-describe('sha256 校验', () => {
+describe('sha256 verification', () => {
   const hex = 'a'.repeat(64);
 
-  test('认得 GitHub 的 digest 格式', () => {
+  test('the GitHub digest format is recognised', () => {
     assert.equal(sha256FromDigest(`sha256:${hex}`), hex);
     assert.equal(sha256FromDigest(`SHA256:${hex.toUpperCase()}`), hex);
   });
 
-  test('认不出来一律返回 null', () => {
+  test('anything unrecognised returns null', () => {
     assert.equal(sha256FromDigest(null), null);
     assert.equal(sha256FromDigest(undefined), null);
     assert.equal(sha256FromDigest(''), null);
-    assert.equal(sha256FromDigest(`md5:${'a'.repeat(32)}`), null, 'md5 不该被当成 sha256');
-    assert.equal(sha256FromDigest(`sha256:${'a'.repeat(63)}`), null, '长度不对就是不对');
-    assert.equal(sha256FromDigest(`sha256:${'z'.repeat(64)}`), null, '非 hex 字符');
+    assert.equal(sha256FromDigest(`md5:${'a'.repeat(32)}`), null, 'md5 must not be taken for sha256');
+    assert.equal(sha256FromDigest(`sha256:${'a'.repeat(63)}`), null, 'a wrong length is wrong');
+    assert.equal(sha256FromDigest(`sha256:${'z'.repeat(64)}`), null, 'non-hex characters');
   });
 
-  test('算出来的和 crypto 一致', async () =>
+  test('what it computes matches crypto', async () =>
     withTempDir(async (dir) => {
       const p = join(dir, 'blob.bin');
       const payload = Buffer.from('成就追踪器'.repeat(1000));
@@ -201,10 +208,11 @@ describe('sha256 校验', () => {
       assert.equal(await hashFile(p), createHash('sha256').update(payload).digest('hex'));
     }));
 
-  test('没有 digest 必须拒绝安装,而不是跳过校验', async () =>
+  test('with no digest it has to refuse to install rather than skip verification', async () =>
     withTempDir(async (dir) => {
-      // 最重要的一条。"验不了就不验"意味着让用户执行一份没验过的 133MB 可执行
-      // 文件;宁可更新不了。而且这个退化不会有任何征兆——更新照样"成功"
+      // The most important one. "Cannot verify, so do not verify" means letting the user run an
+      // unverified 133MB executable; better not to update at all. And that degradation gives no
+      // sign whatsoever — the update still "succeeds"
       let fetched = false;
       const asset = { name: 'x-win.zip', browser_download_url: 'https://example/x', digest: null };
       await assert.rejects(
@@ -217,10 +225,10 @@ describe('sha256 校验', () => {
           }),
         /没有可用的 sha256/
       );
-      assert.equal(fetched, false, '连下载都不该开始');
+      assert.equal(fetched, false, 'the download should not even start');
     }));
 
-  test('内容对得上就通过,对不上就拒绝', async () =>
+  test('matching content passes, mismatching content is refused', async () =>
     withTempDir(async (dir) => {
       const payload = Buffer.from('真正的安装包');
       const digest = `sha256:${createHash('sha256').update(payload).digest('hex')}`;
@@ -241,10 +249,10 @@ describe('sha256 校验', () => {
       );
     }));
 
-  test('校验不过的半截文件要删掉', async () =>
+  test('a half-written file that fails verification has to be deleted', async () =>
     withTempDir(async (dir) => {
-      // 这里下的是 133MB。反复失败会在 temp 里堆出几百兆,而一个校验不过的包
-      // 留在磁盘上没有任何用处
+      // What is downloaded here is 133MB. Repeated failures pile up hundreds of megabytes in
+      // temp, and a package that fails verification is of no use on disk at all
       const dest = join(dir, 'bad.zip');
       await assert.rejects(() =>
         downloadVerified(
@@ -253,42 +261,43 @@ describe('sha256 校验', () => {
           { fetchImpl: async () => new Response(Buffer.from('垃圾')) }
         )
       );
-      assert.equal(existsSync(dest), false, '校验失败的文件被留在了磁盘上');
+      assert.equal(existsSync(dest), false, 'a file that failed verification was left on disk');
     }));
 });
 
-// ================================================================ 发布附件
+// ================================================================ release assets
 
-describe('发布附件的挑选', () => {
+describe('picking the release assets', () => {
   const assets = [
     { name: 'SteamAchievementTracker-1.1.4-win.zip' },
     { name: 'SteamAchievementTracker-1.1.4-manifest.json' },
     { name: 'source.tar.gz' },
   ];
 
-  test('挑得出 zip 和清单', () => {
+  test('the zip and the manifest are picked out', () => {
     const { zip, manifest } = pickAssets(assets);
     assert.equal(zip.name, 'SteamAchievementTracker-1.1.4-win.zip');
     assert.equal(manifest.name, 'SteamAchievementTracker-1.1.4-manifest.json');
   });
 
-  test('老发布没有清单,不算错', () => {
-    // 1.1.3 及以前发布的包里就没有清单。那种情况照常更新,只是做完之后
-    // app 目录里不留清单,下一次再走一遍覆盖
+  test('an older release has no manifest, and that is not an error', () => {
+    // Packages published up to and including 1.1.3 carry no manifest. That case updates as usual,
+    // only leaving no manifest in the app directory afterwards, so the next one does a plain
+    // overwrite again
     const { zip, manifest } = pickAssets([{ name: 'SteamAchievementTracker-1.1.3-win.zip' }]);
     assert.ok(zip);
     assert.equal(manifest, null);
   });
 
-  test('附件为空不抛', () => {
+  test('an empty asset list does not throw', () => {
     assert.deepEqual(pickAssets(), { zip: null, manifest: null });
     assert.deepEqual(pickAssets([]), { zip: null, manifest: null });
   });
 });
 
-// ================================================================ 清单生成
+// ================================================================ manifest generation
 
-describe('清单生成', () => {
+describe('manifest generation', () => {
   const makeTree = (root) => {
     mkdirSync(join(root, 'locales'), { recursive: true });
     mkdirSync(join(root, 'resources', 'tracker', 'lib'), { recursive: true });
@@ -298,7 +307,7 @@ describe('清单生成', () => {
     writeFileSync(join(root, 'resources', 'tracker', 'lib', 'db.js'), 'js');
   };
 
-  test('列出全部文件,相对路径,正斜杠', () =>
+  test('every file is listed, as a relative path with forward slashes', () =>
     withTempDir((dir) => {
       makeTree(dir);
       const { files } = buildManifest(dir, '1.1.4');
@@ -310,10 +319,10 @@ describe('清单生成', () => {
       ]);
     }));
 
-  test('只收文件,不收目录', () =>
+  test('only files, never directories', () =>
     withTempDir((dir) => {
-      // 目录进了清单,删除阶段就有机会删掉一个**非空**目录 ——
-      // 而 resources/tracker/data/ 里躺着用户的数据库
+      // A directory in the manifest gives the deletion phase a chance to remove a **non-empty**
+      // directory — and the user's database sits in resources/tracker/data/
       makeTree(dir);
       const { files } = buildManifest(dir, '1.1.4');
       assert.equal(files.includes('locales'), false);
@@ -321,23 +330,24 @@ describe('清单生成', () => {
       assert.equal(files.includes('resources/tracker'), false);
     }));
 
-  test('清单里带版本号', () =>
+  test('the manifest carries the version', () =>
     withTempDir((dir) => {
       makeTree(dir);
       assert.equal(buildManifest(dir, '1.1.4').version, '1.1.4');
     }));
 
-  test('生成出来的清单能被自己解析', () =>
+  test('a generated manifest can be parsed by its own parser', () =>
     withTempDir((dir) => {
       makeTree(dir);
       const m = buildManifest(dir, '1.1.4');
       assert.deepEqual(parseManifest(JSON.stringify(m)), m);
     }));
 
-  test('用户数据不在包里,所以天然不进清单', () =>
+  test('user data is not in the package, so it naturally never reaches the manifest', () =>
     withTempDir((dir) => {
-      // 安全是构造出来的,不是过滤出来的:清单照着解包目录生成,而
-      // config.json / data/ 从来就不在解包目录里(extraResources 是白名单)
+      // The safety is constructed, not filtered: the manifest is generated from the unpacked
+      // directory, and config.json / data/ were never in the unpacked directory at all
+      // (extraResources is an allow-list)
       makeTree(dir);
       const { files } = buildManifest(dir, '1.1.4');
       assert.equal(
@@ -347,17 +357,17 @@ describe('清单生成', () => {
     }));
 });
 
-// ================================================================ 清单校验
+// ================================================================ manifest validation
 
-describe('清单路径校验', () => {
-  test('正常的相对路径放行', () => {
+describe('manifest path validation', () => {
+  test('ordinary relative paths pass', () => {
     for (const p of ['App.exe', 'locales/zh-CN.pak', 'resources/tracker/lib/db.js']) {
-      assert.equal(isSafeManifestPath(p), true, `${p} 被误判为不安全`);
+      assert.equal(isSafeManifestPath(p), true, `${p} was wrongly judged unsafe`);
     }
   });
 
-  test('越界的一律拒绝', () => {
-    // 清单是从网上下来的,而它唯一的用途是喂给一个删除循环
+  test('anything out of bounds is refused', () => {
+    // The manifest comes off the internet, and its only use is to feed a deletion loop
     for (const p of [
       '../outside.txt',
       'a/../../outside.txt',
@@ -369,26 +379,26 @@ describe('清单路径校验', () => {
       'a//b',
       'a\0b',
     ]) {
-      assert.equal(isSafeManifestPath(p), false, `${JSON.stringify(p)} 应该被拒绝`);
+      assert.equal(isSafeManifestPath(p), false, `${JSON.stringify(p)} should be refused`);
     }
   });
 
-  test('非字符串一律拒绝', () => {
+  test('anything that is not a string is refused', () => {
     for (const p of [null, undefined, 17, {}, []]) {
       assert.equal(isSafeManifestPath(p), false);
     }
   });
 
-  test('一条越界路径就整份拒收', () => {
-    // 逐条过滤是错的:一份带越界路径的清单本身就说明它不是我们发的,
-    // 剩下的部分同样不可信
+  test('one out-of-bounds path rejects the whole manifest', () => {
+    // Filtering entry by entry is wrong: a manifest carrying an out-of-bounds path is itself
+    // evidence that we did not publish it, and the rest is equally untrustworthy
     assert.throws(
       () => parseManifest(JSON.stringify({ version: '1.1.4', files: ['ok.txt', '../evil'] })),
       /越界路径/
     );
   });
 
-  test('形状不对的清单直接抛', () => {
+  test('a manifest of the wrong shape throws outright', () => {
     assert.throws(() => parseManifest('不是 json'), /合法的 JSON/);
     assert.throws(() => parseManifest('{}'), /没有文件列表/);
     assert.throws(() => parseManifest('{"files": []}'), /没有文件列表/);
@@ -396,9 +406,9 @@ describe('清单路径校验', () => {
   });
 });
 
-// ================================================================ helper 脚本
+// ================================================================ the helper script
 
-describe('helper 脚本 —— 三条约束', () => {
+describe('the helper script — three constraints', () => {
   const render = (over = {}) =>
     renderHelperScript({
       processId: 4242,
@@ -411,121 +421,125 @@ describe('helper 脚本 —— 三条约束', () => {
       ...over,
     });
 
-  test('约束 1:按清单删,不是按保留名单', () => {
+  test('constraint 1: delete by the manifest, never by a keep-list', () => {
     const s = render();
-    assert.match(s, /foreach \(\$rel in \$entries\)/, '没有遍历清单 —— 删除依据变了');
-    assert.match(s, /\.files/, '没有从清单里取文件列表');
-    // 「先清空文件夹再解压」正是要避免的写法。这些形状出现任何一个,
-    // 删的就不再是"上一版装了什么"
+    assert.match(s, /foreach \(\$rel in \$entries\)/, 'the manifest is not being walked — the deletion criterion has changed');
+    assert.match(s, /\.files/, 'the file list is not taken from the manifest');
+    // "empty the folder then unzip" is exactly the form being avoided. Any one of these shapes
+    // appearing means what is deleted is no longer "what the previous version installed"
     assert.doesNotMatch(
       s,
       /Remove-Item[^\n]*\$AppDir\s*(\)|$|\s-)/m,
-      '出现了对整个 AppDir 的删除 —— 那会删掉用户的数据库'
+      'a deletion of the whole AppDir appeared — that would delete the user database'
     );
-    assert.doesNotMatch(s, /\$AppDir\\\*/, '出现了 $AppDir\\* 通配删除');
-    assert.doesNotMatch(s, /-Exclude/i, '出现了 -Exclude —— 那就是保留名单,方向反了');
+    assert.doesNotMatch(s, /\$AppDir\\\*/, 'a $AppDir\\* wildcard deletion appeared');
+    assert.doesNotMatch(s, /-Exclude/i, '-Exclude appeared — that is a keep-list, the wrong direction');
   });
 
-  test('约束 1:只删文件,而且要先验证路径没越界', () => {
-    // **必须切到删除循环里再匹配。** 整份脚本上找 `-PathType Leaf` 是空跑的:
-    // 「清单在不在」那个判断上也带着同一个参数,于是把删除循环里的保护摘掉,
-    // 断言照样通过。变异验证抓到的,读代码读不出来 —— 和 tray.test.js 里
-    // 被注释满足的那条同一类错误,只是换了个伪装
+  test('constraint 1: delete files only, and verify the path is in bounds first', () => {
+    // **The slice has to be into the deletion loop before matching.** Searching the whole script
+    // for `-PathType Leaf` runs empty: the "is the manifest there" check carries the same
+    // parameter, so removing the protection inside the deletion loop still leaves the assertion
+    // passing. Mutation testing caught it; reading the code did not — the same class of error as
+    // the one satisfied by its own comment in tray.test.js, merely in a different disguise
     const s = render();
     const loop = s.slice(s.indexOf('foreach ($rel in $entries)'), s.indexOf('Log "按清单删除'));
-    assert.ok(loop.length > 0, '找不到删除循环 —— 这条检查失去了目标');
-    assert.match(loop, /-PathType Leaf/, '删除循环里没有 -PathType Leaf —— 目录也可能被删');
-    assert.match(loop, /StartsWith\(\$AppDirFull/, '删除循环里没有边界检查');
+    assert.ok(loop.length > 0, 'cannot find the deletion loop — this check has lost its target');
+    assert.match(loop, /-PathType Leaf/, 'the deletion loop has no -PathType Leaf — a directory could be deleted too');
+    assert.match(loop, /StartsWith\(\$AppDirFull/, 'the deletion loop has no bounds check');
   });
 
-  test('约束 1:目录只在空的时候才删', () => {
-    // resources/tracker/data/ 里有数据库,永远不空 —— 「只删空目录」
-    // 就是这里全部的安全边界
+  test('constraint 1: a directory is deleted only when it is empty', () => {
+    // resources/tracker/data/ holds the database and is never empty — "delete only empty
+    // directories" is the entire safety boundary here
     const s = render();
     const prune = s.slice(s.indexOf('-Recurse -Directory'));
     assert.match(
       prune.slice(0, 400),
       /if \(-not \(Get-ChildItem/,
-      '删目录之前没有判空 —— 非空目录会被连内容一起删掉'
+      'no emptiness check before deleting a directory — a non-empty one would be deleted with its contents'
     );
   });
 
-  test('约束 2:没有清单就退回覆盖,不猜', () => {
+  test('constraint 2: with no manifest, fall back to overwriting rather than guessing', () => {
     const s = render();
     const guard = s.indexOf('if (Test-Path -LiteralPath $Manifest -PathType Leaf)');
     const loop = s.indexOf('foreach ($rel in $entries)');
     const extract = s.indexOf('Expand-Archive');
-    assert.ok(guard > 0, '没有"清单在不在"的判断');
-    assert.ok(guard < loop && loop < extract, '删除循环必须被清单存在性判断包住');
+    assert.ok(guard > 0, 'there is no "is the manifest there" check');
+    assert.ok(guard < loop && loop < extract, 'the deletion loop has to be wrapped by the manifest-existence check');
 
-    // else 分支里绝不能有任何删除动作
+    // The else branch must contain no deletion at all
     const elseBranch = s.slice(s.indexOf('} else {', loop), extract);
-    assert.doesNotMatch(elseBranch, /Remove-Item/, '没有清单时仍在删东西 —— 那就是在猜');
+    assert.doesNotMatch(elseBranch, /Remove-Item/, 'things are still being deleted with no manifest — that is guessing');
   });
 
-  test('删除必须排在解压之前', () => {
-    // 这是"删多了无害"的全部理由:解压会把程序文件补回来。
-    // 反过来的话,新装的文件会被按旧清单删掉,升级完就是个残包
+  test('deletion has to come before extraction', () => {
+    // This is the whole reason "deleting too much is harmless": extraction puts the program files
+    // back. The other way round, newly installed files are deleted by the old manifest and the
+    // upgrade ends as a broken install
     const s = render();
     assert.ok(
       s.indexOf('foreach ($rel in $entries)') < s.indexOf('Expand-Archive'),
-      '解压排到了删除前面 —— 新文件会被旧清单删掉'
+      'extraction was moved ahead of deletion — new files would be deleted by the old manifest'
     );
   });
 
-  test('约束 3:动手之前必须等进程退出', () => {
+  test('constraint 3: wait for the process to exit before acting', () => {
     const s = render();
     const wait = s.indexOf('Wait-Process');
-    assert.ok(wait > 0, '没有等待主进程退出 —— Windows 会拒绝替换正在运行的 exe');
-    assert.ok(wait < s.indexOf('foreach ($rel in $entries)'), '等待必须排在删除之前');
-    assert.ok(wait < s.indexOf('Expand-Archive'), '等待必须排在解压之前');
-    assert.match(s, /\$ProcessId\s+= 4242/, 'PID 没有传进脚本');
-    assert.doesNotMatch(s, /\$Pid\s*=/i, '$Pid 是 PowerShell 的只读自动变量,不能赋值');
+    assert.ok(wait > 0, 'the main process is not waited for — Windows refuses to replace a running exe');
+    assert.ok(wait < s.indexOf('foreach ($rel in $entries)'), 'the wait has to come before the deletion');
+    assert.ok(wait < s.indexOf('Expand-Archive'), 'the wait has to come before the extraction');
+    assert.match(s, /\$ProcessId\s+= 4242/, 'the PID was not passed into the script');
+    assert.doesNotMatch(s, /\$Pid\s*=/i, '$Pid is a read-only PowerShell automatic variable and cannot be assigned');
   });
 
-  test('装完要写新清单;这次发布没带清单就把旧的清掉', () => {
+  test('after installing, write the new manifest; if this release carries none, clear the old one', () => {
     const withManifest = render();
-    assert.match(withManifest, /Copy-Item -LiteralPath \$NewManifest/, '没有写入新清单');
+    assert.match(withManifest, /Copy-Item -LiteralPath \$NewManifest/, 'the new manifest is not written');
 
     const without = render({ newManifestPath: '' });
-    assert.match(without, /\$NewManifest = ''/, '空清单路径没有正确落进脚本');
-    // 留着一份描述错版本的清单不会造成破坏(删在解压之前),但会把排查引向错误方向
-    assert.match(without, /Remove-Item -LiteralPath \$Manifest/, '没有清掉过期的旧清单');
+    assert.match(without, /\$NewManifest = ''/, 'an empty manifest path did not land correctly in the script');
+    // Keeping a manifest that describes the wrong version does no damage (deletion comes before
+    // extraction), but it points any investigation in the wrong direction
+    assert.match(without, /Remove-Item -LiteralPath \$Manifest/, 'the stale old manifest is not cleared');
   });
 
-  test('路径里的单引号被正确转义', () => {
-    // 转义漏了的话脚本会在一个没有控制台的 detached 进程里语法错误,
-    // 表现是"程序自己退了,再也没起来",没有任何提示
+  test('single quotes in a path are escaped correctly', () => {
+    // A missed escape makes the script a syntax error in a detached process with no console,
+    // presenting as "the program quit itself and never came back", with no message at all
     const s = render({ appDir: "D:\\it's here" });
     assert.match(s, /\$AppDir\s+= 'D:\\it''s here'/);
   });
 
-  test('失败了要说话,并尽量把老程序拉起来', () => {
+  test('a failure has to speak up, and try to bring the old program back', () => {
     const s = render();
-    assert.match(s, /MessageBox/, '失败时静默 —— 用户面对的是一个自己退掉又没起来的程序');
-    // 从外层 catch 的第一行日志切起。用 lastIndexOf('} catch {') 会切到
-    // 里面那个空 catch,断言就变成了对着两行代码做匹配
+    assert.match(s, /MessageBox/, 'silent on failure — the user faces a program that quit itself and did not come back');
+    // Slice from the first log line of the outer catch. Using lastIndexOf('} catch {') slices into
+    // the empty inner catch, and the assertion then matches against two lines of code
     const catchBlock = s.slice(s.indexOf('Log "失败'));
-    assert.match(catchBlock, /Start-Process -FilePath \$ExePath/, '失败后没有尝试重新拉起');
+    assert.match(catchBlock, /Start-Process -FilePath \$ExePath/, 'no attempt to relaunch after a failure');
   });
 
-  test('脚本以 BOM 存盘', () =>
+  test('the script is saved with a BOM', () =>
     withTempDir((dir) => {
-      // PowerShell 5.1 没有 BOM 时按 ANSI 代码页读 .ps1。中文路径和中文提示
-      // 会全变成问号,而路径变成问号就是找不到文件
+      // Without a BOM, PowerShell 5.1 reads a .ps1 in the ANSI code page. Chinese paths and
+      // Chinese messages all become question marks, and a path of question marks is a file that
+      // cannot be found
       const p = join(dir, 'apply.ps1');
       writeHelperScript(p, render());
       assert.deepEqual([...readFileSync(p).subarray(0, 3)], [0xef, 0xbb, 0xbf]);
     }));
 
   test(
-    '生成出来的是合法的 PowerShell',
-    { skip: process.platform !== 'win32' ? '只在 Windows 上验' : false },
+    'what is generated is valid PowerShell',
+    { skip: process.platform !== 'win32' ? 'verified on Windows only' : false },
     () =>
       withTempDir((dir) => {
-        // 这条是这个文件里唯一"真的跑了一下"的检查。模板字符串里同时有
-        // JS 的 \\ 和 ` 与 PowerShell 的 \ 和 `,转义弄错一处就是语法错误 ——
-        // 而那个错误发生在一个没有控制台的进程里,不会有任何人看到
+        // This is the one check in this file that actually runs something. The template literal
+        // carries JS's \\ and ` alongside PowerShell's \ and `, and one escape wrong is a syntax
+        // error — in a process with no console, where nobody would ever see it
         const p = join(dir, 'apply.ps1');
         writeHelperScript(p, render({ appDir: 'D:\\有中文的 路径' }));
         const probe = join(dir, 'probe.ps1');
@@ -541,146 +555,151 @@ describe('helper 脚本 —— 三条约束', () => {
           ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', probe],
           { encoding: 'utf8' }
         );
-        assert.equal(out.trim(), '', `生成的 PowerShell 解析失败:${out}`);
+        assert.equal(out.trim(), '', `the generated PowerShell failed to parse: ${out}`);
       })
   );
 });
 
-// ================================================================ 接线(源码断言)
+// ================================================================ wiring (source assertions)
 
-describe('main.js 的接线', () => {
+describe('the wiring in main.js', () => {
   const checkBlock = () => blockFrom(mainSrc, 'async function checkForUpdate');
 
-  test('检查失败必须静默', () => {
-    // 离线是常态。没网就弹错误框的话,这个功能会先把自己变成一个每天骚扰
-    // 用户一次的东西,然后被关掉
+  test('a failed check has to be silent', () => {
+    // Being offline is normal. Popping an error box with no network would first turn this feature
+    // into something that pesters the user once a day, and then get it switched off
     const body = checkBlock();
     const fetchCatch = body.slice(body.indexOf('await fetchRelease'), body.indexOf('tag_name'));
-    assert.match(fetchCatch, /catch/, '检查更新没有被 try 包住 —— 离线会抛到未捕获');
-    assert.doesNotMatch(fetchCatch, /showErrorBox|showMessageBox/, '检查失败弹了框');
+    assert.match(fetchCatch, /catch/, 'the update check is not wrapped in a try — being offline throws uncaught');
+    assert.doesNotMatch(fetchCatch, /showErrorBox|showMessageBox/, 'a failed check popped a box');
   });
 
-  test('校验通过之前不能退出', () => {
-    // 顺序反了就是:程序先退了,然后发现下载的是坏文件 —— 用户面对的是
-    // 一个凭空关掉的程序
+  test('it must not quit before verification passes', () => {
+    // The other order is: the program quits first and then discovers the download was a bad file —
+    // the user faces a program that closed for no reason
     const body = checkBlock();
     assert.ok(
       body.indexOf('downloadVerified') < body.indexOf('app.quit()'),
-      '先退出再校验 —— 校验失败时用户已经没有程序可用了'
+      'quitting before verifying — on a failed verification the user already has no program to run'
     );
-    assert.match(body, /downloadVerified/, '下载没有走校验路径');
+    assert.match(body, /downloadVerified/, 'the download does not go through the verified path');
   });
 
-  test('helper 收到的是我们自己的 PID', () => {
-    // 传错的话 Wait-Process 立刻返回,替换发生在 exe 还锁着的时候
-    assert.match(checkBlock(), /processId: process\.pid/, 'PID 不是当前进程的');
+  test('the helper receives our own PID', () => {
+    // Pass the wrong one and Wait-Process returns immediately, so the replacement happens while
+    // the exe is still locked
+    assert.match(checkBlock(), /processId: process\.pid/, 'the PID is not the current process');
   });
 
-  test('跳过的版本真的写盘', () => {
+  test('a skipped version really is written to disk', () => {
     const body = checkBlock();
     const dismissed = body.slice(body.indexOf('if (!choice.update)'));
     assert.match(
       dismissed.slice(0, 300),
       /if \(choice\.skip\) writeUpdateState/,
-      '勾了"不再提示这个版本"却没有落盘 —— 下次开机照弹'
+      'the do-not-prompt-for-this-version box was ticked without being persisted — it prompts again on the next launch'
     );
   });
 
-  test('不是只在启动时查一次', () => {
-    // 收进托盘之后"启动"变成很稀少的事件。只查一次的话,一个连着开几天的
-    // 用户永远收不到更新提示,而且完全不报错
+  test('it does not check only once at startup', () => {
+    // Once it lives in the tray, "startup" becomes a rare event. Checking only once means a user
+    // who leaves it running for days never gets an update prompt, with no error at all
     const body = blockFrom(mainSrc, 'function scheduleUpdateCheck');
-    // 只看回调体,别让函数声明那一行满足断言
+    // Look only at the callback body, so the function declaration line cannot satisfy the assertion
     const callback = body.slice(body.indexOf('setTimeout'));
     assert.match(
       callback,
       /scheduleUpdateCheck\([^)]*UPDATE_CHECK_INTERVAL_MS/,
-      '定时器没有自己续上下一次 —— 查一次就再也不查了'
+      'the timer does not schedule the next one — it checks once and never again'
     );
-    assert.match(mainSrc, /UPDATE_CHECK_INTERVAL_MS = 24 \* 60 \* 60 \* 1000/, '检查周期不是一天');
+    assert.match(mainSrc, /UPDATE_CHECK_INTERVAL_MS = 24 \* 60 \* 60 \* 1000/, 'the check interval is not one day');
   });
 
-  test('定时器在退出时清掉', () => {
+  test('the timer is cleared on quit', () => {
     assert.match(
       blockFrom(mainSrc, "app.on('before-quit'"),
       /clearTimeout\(updateTimer\)/,
-      'before-quit 没有清掉更新定时器'
+      'before-quit does not clear the update timer'
     );
   });
 
-  test('dev 模式不查', () => {
-    // npm start 下根本没有可替换的 zip 目录
-    assert.match(checkBlock(), /!app\.isPackaged/, 'dev 模式也会去检查更新');
+  test('dev mode does not check', () => {
+    // Under npm start there is no zip directory to replace at all
+    assert.match(checkBlock(), /!app\.isPackaged/, 'dev mode checks for updates too');
   });
 
-  test('更新提示绝不能用原生对话框', () => {
+  test('the update prompt must never be a native dialog', () => {
     /**
-     * **这条断言原本是反的,而且正因为它是反的,它保护着一个真 bug。**
+     * **This assertion is inverted, and precisely because it is inverted it guards a real bug.**
      *
-     * 第一版是 `dialog.showMessageBox`。真实排练里它闪一下就消失,promise 立刻
-     * 带着 `response: 420` 返回 —— 那个值不在按钮范围里。把选项拆到只剩
-     * `{ message }`、换成同步版、挂父窗口、不挂父窗口,十种组合全是 420;
-     * 而同一台机器上纯 Win32 的 MessageBox 立得好好的。
+     * The first version used `dialog.showMessageBox`. In a real rehearsal it flashed and vanished,
+     * with the promise returning `response: 420` at once — a value outside the button range.
+     * Cutting the options down to `{ message }`, switching to the synchronous version, attaching a
+     * parent window, not attaching one: ten combinations, all 420; while a plain Win32 MessageBox
+     * on the same machine stood there perfectly.
      *
-     * 这是这个仓库第二次撞上同一类事(第一次是渲染进程的 `window.confirm`,
-     * 「生成攻略」在打包版里整个是死的)。当时的结论「原生对话框归主进程所有」
-     * 太窄了 —— 主进程的一样不能用。解法和当时一样:用页面。
+     * This is the second time this repository hit the same class of thing (the first was the
+     * renderer's `window.confirm`, which made guide generation entirely dead in the packaged
+     * build). The conclusion at the time — "native dialogs belong to the main process" — was too
+     * narrow: the main process's are equally unusable. The fix is the same as it was then: use a page.
      */
     const body = checkBlock();
     assert.doesNotMatch(
       body,
       /dialog\.showMessageBox/,
-      '更新提示又用回原生对话框了 —— 实测它会自己消失,而且不报错,功能静默失效'
+      'the update prompt went back to a native dialog — measured, it vanishes on its own, raises no error, and the feature silently stops working'
     );
-    assert.match(body, /await askUpdate\(/, '没有走网页版提示');
+    assert.match(body, /await askUpdate\(/, 'it does not go through the web-page prompt');
 
     const showAt = body.indexOf('showWindow()');
     const askAt = body.indexOf('askUpdate(');
-    assert.ok(showAt > 0 && showAt < askAt, '问之前要先把窗口叫到前面来');
+    assert.ok(showAt > 0 && showAt < askAt, 'bring the window to the front before asking');
   });
 
-  test('提示窗口靠 page-title-updated 回传,关掉窗口算「以后再说」', () => {
-    // needle 必须带上参数列表:`function askUpdate({ version, sizeMb })` 的第一个
-    // `{` 是**解构参数**,blockFrom 会从那里开始配平,截出来的只有参数本身
+  test('the prompt window reports back via page-title-updated, and closing the window counts as 「以后再说」', () => {
+    // The needle has to carry the parameter list: the first `{` of
+    // `function askUpdate({ version, sizeMb })` is the **destructured parameter**, and blockFrom
+    // would balance from there, slicing out nothing but the parameters
     const body = blockFrom(mainSrc, 'function askUpdate({ version, sizeMb })');
-    assert.match(body, /page-title-updated/, '没有监听标题回传 —— 用户点了也没人接');
-    assert.match(body, /parsePromptChoice/, '没有解析回传的标题');
-    // 问了问题却因为用户关了窗口就永远卡住,比不问更糟
+    assert.match(body, /page-title-updated/, 'the title report is not listened for — the user clicks and nobody receives it');
+    assert.match(body, /parsePromptChoice/, 'the reported title is not parsed');
+    // Asking a question and then hanging forever because the user closed the window is worse than
+    // not asking
     assert.match(
       body,
       /win\.on\('closed'[\s\S]{0,120}?update: false/,
-      '关掉窗口没有当作「以后再说」—— 那条路径会让 promise 永远不 resolve'
+      'closing the window is not treated as "later" — that path leaves the promise never resolving'
     );
-    // 页面不需要任何特权,就别给
-    assert.match(body, /nodeIntegration: false/, '提示窗口开了 nodeIntegration');
-    assert.match(body, /contextIsolation: true/, '提示窗口关了 contextIsolation');
+    // The page needs no privileges at all, so it gets none
+    assert.match(body, /nodeIntegration: false/, 'the prompt window enabled nodeIntegration');
+    assert.match(body, /contextIsolation: true/, 'the prompt window disabled contextIsolation');
   });
 
-  test('提示页面是自给自足的,而且三个出口都在', () => {
+  test('the prompt page is self-contained, and all three exits are there', () => {
     const html = renderUpdatePromptHtml({ version: '1.1.4', sizeMb: 133 });
     assert.match(html, /有新版本 1\.1\.4/);
     assert.match(html, /133 MB/);
     assert.match(html, /立即更新/);
     assert.match(html, /以后再说/);
     assert.match(html, /不再提示这个版本/);
-    assert.match(html, /document\.title\s*=/, '页面没有把选择写回标题 —— 主进程收不到');
-    // data: URL 里加载不了外部资源,而且这个窗口本来就该离线可用
-    assert.doesNotMatch(html, /https?:\/\//, '页面引用了外部资源');
-    assert.doesNotMatch(html, /<img|<link/i, '页面引用了外部资源');
+    assert.match(html, /document\.title\s*=/, 'the page does not write the choice back into the title — the main process receives nothing');
+    // A data: URL cannot load external resources, and this window should work offline anyway
+    assert.doesNotMatch(html, /https?:\/\//, 'the page references an external resource');
+    assert.doesNotMatch(html, /<img|<link/i, 'the page references an external resource');
   });
 
-  test('版本号是转义后才进页面的', () => {
-    // 版本号来自 GitHub 的 tag_name —— 是网上来的数据,不是我们的常量
+  test('the version number is escaped before it reaches the page', () => {
+    // The version comes from GitHub's tag_name — data off the internet, not a constant of ours
     const html = renderUpdatePromptHtml({ version: '<img src=x onerror=alert(1)>', sizeMb: 1 });
-    assert.doesNotMatch(html, /<img src=x/, 'tag_name 被原样插进了 HTML');
-    assert.match(html, /&#60;img/, '没有转义');
+    assert.doesNotMatch(html, /<img src=x/, 'tag_name was inserted into the HTML verbatim');
+    assert.match(html, /&#60;img/, 'it was not escaped');
   });
 
-  test('标题回传只认得出自己那一种', () => {
+  test('the title report recognises only its own form', () => {
     assert.deepEqual(parsePromptChoice('choice:update:0'), { update: true, skip: false });
     assert.deepEqual(parsePromptChoice('choice:update:1'), { update: true, skip: true });
     assert.deepEqual(parsePromptChoice('choice:later:1'), { update: false, skip: true });
-    // 页面自己的 <title> 会先触发一次 page-title-updated,不能被误读成选择
+    // The page's own <title> fires page-title-updated first and must not be misread as a choice
     assert.equal(parsePromptChoice('Steam 成就追踪器'), null);
     assert.equal(parsePromptChoice('choice:update'), null);
     assert.equal(parsePromptChoice('choice:maybe:1'), null);
@@ -688,82 +707,87 @@ describe('main.js 的接线', () => {
     assert.equal(parsePromptChoice(null), null);
   });
 
-  test('窗口还没建好时不弹,而且要短间隔重来', () => {
-    // 服务器启动慢的时候(waitForServer 最多 15 秒)窗口会晚于第一次检查出现。
-    // 直接跳到 24 小时后等于白白丢掉这一天唯一的机会,且没有任何征兆
+  test('no prompt before the window exists, and retry after a short interval', () => {
+    // When the server starts slowly (waitForServer allows up to 15 seconds) the window appears
+    // after the first check. Jumping straight to 24 hours later throws away the day's only chance,
+    // with no sign of it
     const body = checkBlock();
     const guardAt = body.indexOf('if (!mainWindow)');
-    assert.ok(guardAt > 0, '没有判断窗口在不在');
-    // **要断到分支返回什么,不能只断言那个 if 还在。** 变异验证证明后者是空跑的:
-    // 把分支体改成 return true,那行 if 原封不动,断言照样通过 —— 而调度器会
-    // 把这一轮当成"查过了",直接等到明天
+    assert.ok(guardAt > 0, 'there is no check for whether the window exists');
+    // **Assert on what the branch returns, not merely that the if is still there.** Mutation
+    // testing proved the latter runs empty: change the branch body to return true and that if line
+    // is untouched while the assertion still passes — and the scheduler treats the round as
+    // "checked" and waits until tomorrow
     const branch = body.slice(guardAt, body.indexOf('}', guardAt));
     assert.match(
       branch,
       /return false;/,
-      '窗口没建好时没有返回 false —— 调度器会当作查过了,整整一天不再检查'
+      'it does not return false when the window is not ready — the scheduler counts it as checked and stops checking for a whole day'
     );
 
     const sched = blockFrom(mainSrc, 'function scheduleUpdateCheck');
     assert.match(
       sched,
       /checked \? UPDATE_CHECK_INTERVAL_MS : UPDATE_CHECK_RETRY_MS/,
-      '没查成也照样等一天 —— 启动慢的机器会整天收不到更新提示'
+      'it waits a day even after an unsuccessful check — a slow machine gets no update prompt all day'
     );
   });
 
-  test('helper 绝不能再用 detached 启动', () => {
+  test('the helper must never be started with detached again', () => {
     /**
-     * 拿一次真实事故换来的。第一版是 `spawn(..., { detached: true })`,日志写着
-     * 「helper 已启动」,实际上它随 app.quit() 一起被杀了,程序退了再也没回来。
+     * Bought with one real incident. The first version was `spawn(..., { detached: true })`, the
+     * log said the helper had started, and it was in fact killed along with app.quit(), so the
+     * program quit and never came back.
      *
-     * 真实会话里四种方式各起一个假 helper 再立刻 app.quit(),实测:
-     * detached ✗ / 普通 spawn ✗ / `cmd /c start` ✓ / WMI ✓ ——
-     * 这是**作业对象**的特征,而 Windows 的 DETACHED_PROCESS 逃不出 job。
+     * In a real session, four ways of starting a fake helper were each followed immediately by
+     * app.quit(). Measured: detached ✗ / plain spawn ✗ / `cmd /c start` ✓ / WMI ✓ —
+     * that is the signature of a **job object**, and Windows's DETACHED_PROCESS cannot escape one.
      */
     const launch = blockFrom(mainSrc, 'async function launchHelper({ scriptPath, renderedScript, aliveMarkerPath })');
     assert.doesNotMatch(
       launch,
       /detached:\s*true/,
-      'helper 又用 detached 启动了 —— 它会跟着 app.quit() 一起死,而且不报错'
+      'the helper is started with detached again — it dies with app.quit() and reports nothing'
     );
-    assert.match(launch, /primaryLaunch\(/, '没走能逃出作业对象的启动方式');
-    assert.match(launch, /fallbackLaunch\(/, '没有备用启动方式');
-    // spawn 的启动失败是异步 error 事件,不是抛异常
-    assert.match(launch, /child\.on\('error'/, '没监听 spawn 的 error —— 启动失败会表现成"启动成功"');
+    assert.match(launch, /primaryLaunch\(/, 'it does not use a launch method that escapes the job object');
+    assert.match(launch, /fallbackLaunch\(/, 'there is no fallback launch method');
+    // A spawn launch failure is an async error event, not a thrown exception
+    assert.match(launch, /child\.on\('error'/, 'spawn error is not listened for — a failed launch presents as a successful one');
   });
 
-  test('确认 helper 活着才准退出,等不到就不退', () => {
-    // 「启动了」和「活着」是两回事。等不到就退,用户得到的是一个自己关掉、
-    // 再也不回来的程序 —— 这正是真实排练里发生的事
+  test('quit only after the helper is confirmed alive, and do not quit if it never reports in', () => {
+    // "Started" and "alive" are two different things. Quitting without waiting gives the user a
+    // program that closed itself and never returns — which is exactly what happened in the real
+    // rehearsal
     const body = checkBlock();
     const launchAt = body.indexOf('await launchHelper(');
     const quitAt = body.indexOf('app.quit()');
-    assert.ok(launchAt > 0 && launchAt < quitAt, '没等确认就退出了');
+    assert.ok(launchAt > 0 && launchAt < quitAt, 'it quit without waiting for confirmation');
     const guard = body.slice(launchAt, quitAt);
-    assert.match(guard, /if \(!launched\)/, '没有"起不来就别退"的分支');
-    assert.match(guard, /showErrorBox/, '起不来却不吭声');
-    assert.match(guard, /return true;/, '起不来还继续往下走到 app.quit()');
+    assert.match(guard, /if \(!launched\)/, 'there is no "do not quit if it cannot start" branch');
+    assert.match(guard, /showErrorBox/, 'it cannot start and says nothing');
+    assert.match(guard, /return true;/, 'it cannot start and still carries on to app.quit()');
   });
 
-  test('两条启动路子都逃得出作业对象', () => {
+  test('both launch paths escape the job object', () => {
     const primary = primaryLaunch({ scriptPath: 'C:\\t\\apply.ps1', psPath: 'C:\\ps.exe' });
-    assert.equal(primary.file, 'cmd', '主路不是 cmd start —— 普通 spawn 逃不出作业对象');
+    assert.equal(primary.file, 'cmd', 'the primary path is not cmd start — a plain spawn cannot escape the job object');
     assert.deepEqual(primary.args.slice(0, 4), ['/c', 'start', '""', '/min']);
-    // 空标题参数必须给:不给的话 start 会把后面第一个带引号的路径当成窗口标题
-    assert.equal(primary.args[2], '""', 'start 少了空标题参数,带空格的路径会被当成标题');
-    assert.ok(primary.args.includes('-File'), '主路应当走脚本文件(命令行短,不会撞 cmd 的 8191 上限)');
+    // The empty title argument has to be given: without it, start takes the first quoted path that
+    // follows as the window title
+    assert.equal(primary.args[2], '""', 'start is missing the empty title argument, so a path with spaces is taken as the title');
+    assert.ok(primary.args.includes('-File'), 'the primary path should use a script file (a short command line, well under the cmd 8191 limit)');
 
     const fallback = fallbackLaunch({ script: 'Write-Output 1', psPath: 'C:\\ps.exe' });
     assert.equal(fallback.file, 'C:\\ps.exe');
     const joined = fallback.args.join(' ');
-    assert.match(joined, /Win32_Process/, '备用路不是 WMI 建进程');
-    assert.match(joined, /-EncodedCommand/, '备用路应当用 EncodedCommand —— 执行策略管不着它');
+    assert.match(joined, /Win32_Process/, 'the fallback path does not create the process through WMI');
+    assert.match(joined, /-EncodedCommand/, 'the fallback path should use EncodedCommand — the execution policy does not reach it');
   });
 
-  test('helper 头一件事就是报到', () => {
-    // 报到必须排在等进程退出之前:app 就是在等这个文件,晚一步等于让 app
-    // 白等 15 秒然后判定失败
+  test('the first thing the helper does is report in', () => {
+    // Reporting in has to come before waiting for the process to exit: the app is waiting on that
+    // file, and one step later means the app waits 15 seconds for nothing and then declares failure
     const s = renderHelperScript({
       processId: 1,
       appDir: 'D:\\App',
@@ -774,87 +798,90 @@ describe('main.js 的接线', () => {
       aliveMarkerPath: 'C:\\t\\helper-alive.txt',
     });
     const aliveAt = s.indexOf('Set-Content -LiteralPath $AliveMarker');
-    assert.ok(aliveAt > 0, 'helper 不写报到文件 —— app 会永远等不到,然后判定更新失败');
-    assert.ok(aliveAt < s.indexOf('Wait-Process'), '报到必须排在等待主进程之前');
-    assert.ok(aliveAt < s.indexOf('Expand-Archive'), '报到必须排在动手之前');
+    assert.ok(aliveAt > 0, 'the helper does not write the alive marker — the app waits forever and then declares the update failed');
+    assert.ok(aliveAt < s.indexOf('Wait-Process'), 'reporting in has to come before waiting for the main process');
+    assert.ok(aliveAt < s.indexOf('Expand-Archive'), 'reporting in has to come before doing anything');
   });
 
-  test('dev 模式连定时器都不起', () => {
+  test('dev mode does not even start the timer', () => {
     assert.match(
       blockFrom(mainSrc, 'app.whenReady()'),
       /app\.isPackaged && autoUpdateEnabled\(\)/,
-      'dev 模式也起了更新定时器'
+      'dev mode started the update timer too'
     );
   });
 
-  test('能整个关掉', () => {
-    // 设计文档三个死细节之一
-    assert.match(mainSrc, /function autoUpdateEnabled/, '没有关掉自动更新的开关');
+  test('it can be turned off entirely', () => {
+    // One of the three fatal details in the design document
+    assert.match(mainSrc, /function autoUpdateEnabled/, 'there is no switch to turn auto-update off');
     assert.match(
       blockFrom(mainSrc, 'app.whenReady()'),
       /autoUpdateEnabled\(\)/,
-      '开关没有接到实际的调度上'
+      'the switch is not wired to the actual scheduling'
     );
   });
 });
 
-describe('打包与发布', () => {
-  test('updater.js 必须进 build.files', () => {
-    // 漏掉只有**打包版**坏掉:npm start 一切正常,发出去的包一启动就是
-    // 模块找不到。和 icon.ico 那条同一类
+describe('packaging and release', () => {
+  test('updater.js has to be in build.files', () => {
+    // Missing it breaks only the **packaged** build: npm start is fine throughout while the
+    // released package fails at launch with a module not found. The same class as the icon.ico one
     const pkg = JSON.parse(
       readFileSync(new URL('../launcher/package.json', import.meta.url), 'utf8')
     );
-    assert.ok(pkg.build.files.includes('updater.js'), 'build.files 里没有 updater.js');
+    assert.ok(pkg.build.files.includes('updater.js'), 'build.files does not contain updater.js');
     assert.ok(pkg.build.files.includes('main.js'));
   });
 
-  test('postbuild 先生成清单,再复制 local.config.json', () => {
-    // 顺序反了,那份本机配置就会进清单,下次更新时被当作程序文件删掉 ——
-    // 用户的数据目录会静默地跳回默认位置,看起来像"数据全没了"
+  test('postbuild generates the manifest first, then copies local.config.json', () => {
+    // In the other order that machine-local config lands in the manifest and is deleted as a
+    // program file by the next update — the user's data directory silently reverts to the default
+    // location, which looks like "all the data is gone"
     const manifestAt = postbuildSrc.indexOf('buildManifest(');
     const copyAt = postbuildSrc.indexOf('copyFileSync(localCfg');
-    assert.ok(manifestAt > 0, 'postbuild 没有生成清单');
-    assert.ok(copyAt > 0, 'postbuild 不再复制 local.config.json 了?');
-    assert.ok(manifestAt < copyAt, '清单生成排到了复制 local.config.json 之后');
+    assert.ok(manifestAt > 0, 'postbuild does not generate the manifest');
+    assert.ok(copyAt > 0, 'postbuild no longer copies local.config.json?');
+    assert.ok(manifestAt < copyAt, 'manifest generation was moved after the local.config.json copy');
   });
 
-  test('清单里混进本机专属文件要认得出来', () => {
+  test('a machine-local file sneaking into the manifest has to be recognised', () => {
     /**
-     * 这条本来是纯源码断言(「postbuild 里有没有那段 if」),而变异验证证明它是
-     * 空跑的:把守卫改成恒假,那段文本还在,断言照样通过。源码断言只能证明
-     * 某段字符还在,证明不了它还起作用。
+     * This used to be a pure source assertion ("is that if still in postbuild"), and mutation
+     * testing proved it ran empty: turn the guard into a constant false and that text is still
+     * there, with the assertion still passing. A source assertion can only prove some characters
+     * are still there; it cannot prove they still do anything.
      *
-     * 所以判断本身被搬进了 updater.js —— 现在这里测的是行为,守卫失效就红。
+     * So the judgement itself moved into updater.js — what is tested here now is behaviour, and a
+     * broken guard goes red.
      */
-    assert.deepEqual(machineLocalEntries(['App.exe', 'lib/db.js']), [], '干净的清单被误报了');
+    assert.deepEqual(machineLocalEntries(['App.exe', 'lib/db.js']), [], 'a clean manifest was falsely reported');
     assert.deepEqual(machineLocalEntries(['App.exe', 'local.config.json']), ['local.config.json']);
-    // 大小写和分隔符都不该成为漏网的理由
+    // Neither case nor separator should be a reason to slip through
     assert.deepEqual(machineLocalEntries(['Local.Config.JSON']), ['Local.Config.JSON']);
     assert.deepEqual(machineLocalEntries(['a/b/local.config.json']), ['a/b/local.config.json']);
     assert.deepEqual(machineLocalEntries(['a\\b\\local.config.json']), ['a\\b\\local.config.json']);
-    // 只匹配整个文件名,不能靠后缀撞上别的文件
+    // Match the whole filename only; a suffix must not collide with another file
     assert.deepEqual(machineLocalEntries(['my-local.config.json.bak']), []);
   });
 
-  test('postbuild 真的用它挡住了,并且失败要让 build 红', () => {
-    assert.match(postbuildSrc, /machineLocalEntries\(manifest\.files\)/, 'postbuild 没有检查清单');
+  test('postbuild really uses it to block, and a failure has to make the build red', () => {
+    assert.match(postbuildSrc, /machineLocalEntries\(manifest\.files\)/, 'postbuild does not check the manifest');
     const guard = postbuildSrc.slice(postbuildSrc.indexOf('machineLocalEntries(manifest.files)'));
     assert.match(
       guard.slice(0, 900),
       /process\.exit\(1\)/,
-      '发现了却没让 build 失败 —— 那等于没发现'
+      'it was found without failing the build — which amounts to not finding it'
     );
     const guardAt = postbuildSrc.indexOf('machineLocalEntries(manifest.files)');
     const writeAt = postbuildSrc.indexOf('writeFileSync(manifestPath');
-    assert.ok(guardAt < writeAt, '检查必须排在写出清单之前,否则坏清单已经落盘了');
+    assert.ok(guardAt < writeAt, 'the check has to come before the manifest is written, or the bad manifest is already on disk');
   });
 
-  test('清单文件名带版本号,和 zip 一致', () => {
+  test('the manifest filename carries the version, matching the zip', () => {
     assert.match(
       postbuildSrc,
       /\$\{PRODUCT\}-\$\{version\}-manifest\.json/,
-      '清单文件名不带版本 —— 发布页上会分不清是哪一版的'
+      'the manifest filename carries no version — the release page cannot tell which build it belongs to'
     );
   });
 });

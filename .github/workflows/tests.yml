@@ -1,11 +1,12 @@
-# 每个 PR 和每次进 main 都跑一遍全套测试。
+# Run the whole suite on every PR and on every push to main.
 #
-# **触发器是 `pull_request`,不是 `pull_request_target`,而这不是随手选的。**
-# 这个仓库是公开的,所以任何人都能从自己的 fork 提 PR。`pull_request_target`
-# 会用**基础分支**的 workflow 定义、带着一个**可写**的 token 运行,而如果它再
-# 去 checkout PR 那一侧的代码,就等于让陌生人的代码拿着你的写权限跑 —— 这是
-# 公开仓库被打穿最常见的一条路。`pull_request` 拿到的 token 对 fork PR 是只读的,
-# 也拿不到 secrets。这个 workflow 什么都不需要写,所以没有任何理由用另一个。
+# **The trigger is `pull_request`, not `pull_request_target`, and that was not an idle choice.**
+# This repository is public, so anyone can open a PR from their own fork. `pull_request_target`
+# runs the workflow definition from the **base branch** carrying a **writable** token, and if it
+# then checks out the code from the PR side, a stranger's code runs with your write permissions —
+# the most common way a public repository is broken into. The token `pull_request` receives is
+# read-only for a fork PR and cannot reach secrets. This workflow needs to write nothing, so there
+# is no reason to use the other one.
 name: tests
 
 on:
@@ -13,22 +14,24 @@ on:
     branches: [main]
   pull_request:
 
-# 显式收窄。不写的话默认权限取决于仓库设置,而那是个会在别处被改掉的东西
+# Narrowed explicitly. Left unwritten, the default permissions depend on the repository settings,
+# and those are something that gets changed elsewhere
 permissions:
   contents: read
 
-# 同一个分支连推两次,前一次没跑完就取消 —— 没必要为一个已经过时的 commit 排队
+# Two pushes to the same branch in a row cancel the first if it has not finished — there is no
+# point queueing for a commit that is already out of date
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   test:
-    # **windows-latest,不是 ubuntu。** 产品只在 Windows 上跑,而
-    # `selfupdate.test.js` 里那条「生成出来的是合法的 PowerShell」带着
-    # `skip: process.platform !== 'win32'`。换到 Linux 上它会被静静跳过 ——
-    # 而它是那个文件里唯一真的执行了生成物的检查,偏偏那段脚本运行在一个
-    # 没有控制台的进程里,语法错了没有任何人会看到。
+    # **windows-latest, not ubuntu.** The product runs only on Windows, and the
+    # "what is generated is valid PowerShell" case in `selfupdate.test.js` carries
+    # `skip: process.platform !== 'win32'`. On Linux it is silently skipped — and it is the one
+    # check in that file that actually executes what was generated, while that script runs in a
+    # process with no console, where a syntax error is seen by nobody.
     runs-on: windows-latest
 
     steps:
@@ -36,13 +39,13 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          # `node:sqlite` 要 Node 24+,和 package.json 的 engines 一致
+          # `node:sqlite` needs Node 24+, matching engines in package.json
           node-version: '24'
 
-      # **这里没有 `npm install`,而那个缺席本身就是一条断言。**
-      # 运行时零依赖是这个仓库的硬约束(见 CLAUDE.md「Stack constraints」),
-      # 哪天有人给运行时加了真依赖,这一步的缺席会让测试当场失败,
-      # 而不是悄悄地把约束丢掉。launcher/ 的 devDependencies 只在打包时用,
-      # 测试碰不到它们。
-      - name: 全套测试
+      # **There is no `npm install` here, and that absence is itself an assertion.**
+      # Zero runtime dependencies is a hard constraint of this repository (see "Stack constraints"
+      # in CLAUDE.md), so the day someone adds a real runtime dependency, the absence of this step
+      # makes the tests fail on the spot rather than quietly dropping the constraint.
+      # The devDependencies of launcher/ are used only for packaging and the tests never touch them.
+      - name: full test suite
         run: node --test --test-reporter=dot
