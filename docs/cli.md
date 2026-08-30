@@ -74,7 +74,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `sync --fast` | Sampled refresh — the same work the Dashboard does | Steam |
 | `sync --library` | Only check for new games, and fill in any missing English names | Steam |
 | `sync --achievements` | Only refresh achievement counts | Steam |
-| `sync --schema` | Only sync achievement detail | Steam |
+| `sync --schema` | Only sync achievement detail, and backfill any missing English descriptions | Steam |
 | `serve [--port 8777]` | Opens the Dashboard, syncing first if the data is stale | Steam + Notion |
 | `status` | Completion stats and AGCR | — |
 | `log [n]` | The last n sync-log entries | — |

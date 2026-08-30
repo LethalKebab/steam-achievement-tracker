@@ -11,7 +11,7 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 | Table | Holds |
 |---|---|
 | `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
-| `achievements` | per-achievement detail — CN + EN names, description, hidden flag, icon URL |
+| `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) |
 | `sync_log` | every checkbox change, skip and failure, for after-the-fact auditing |
 | `meta` | last sync timestamp and other odds and ends |
@@ -64,6 +64,24 @@ Six decisions worth knowing before you write queries:
   ```
 
   A failed lookup is deliberately **not** cached. Rate limiting and not-yet-published store pages both produce "no cover" and both stop being true later; recording that as a fact would retire the game's artwork permanently.
+
+### `achievements` columns
+
+`appid` + `api_name` (composite primary key) / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon`
+
+- **Both languages come from one sync, not two.** `fetchGameSchema` calls `GetSchemaForGame` twice, once per language, because the name has always been stored in both. The English description arrives in the response fetched for the English *name*, so storing it costs no extra request.
+
+- **A hidden achievement stores `''` for both descriptions.** The description is the spoiler; blanking one language and not the other would publish it in the other. `hidden = 1` with both empty is the normal, correct state for those rows — not a failed fetch.
+
+- **`description_en = ''` on a row whose `description` is set means that game's detail predates the column.** That is the whole backfill signal: `selectSchemaTargets` re-fetches any game with Chinese descriptions and not one English one, **including games at 100%**, which the other two fetch reasons deliberately skip. It is one pass per game and then never again. To force one game through it:
+
+  ```sql
+  UPDATE achievements SET description_en = '' WHERE appid = '...';
+  ```
+
+  The test is per game rather than per row on purpose: an individual achievement can come back without an English description, and asking per row would put its game in the queue on every sync forever.
+
+- **`game_name` is a denormalised copy of `games.name`,** used only as a fallback when the `games` row is gone. It is not a second name to keep bilingual — resolve a display name from `games.name_en || games.name` instead.
 
 ## What Steam can't tell us
 
