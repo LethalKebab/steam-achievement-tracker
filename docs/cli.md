@@ -72,7 +72,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `init` | Steam API key and SteamID64; `--notion` and `--ai` add those | Steam |
 | `sync` | Full refresh: library, achievement counts, achievement detail | Steam |
 | `sync --fast` | Sampled refresh — the same work the Dashboard does | Steam |
-| `sync --library` | Only check for new games | Steam |
+| `sync --library` | Only check for new games, and fill in any missing English names | Steam |
 | `sync --achievements` | Only refresh achievement counts | Steam |
 | `sync --schema` | Only sync achievement detail | Steam |
 | `serve [--port 8777]` | Opens the Dashboard, syncing first if the data is stale | Steam + Notion |
