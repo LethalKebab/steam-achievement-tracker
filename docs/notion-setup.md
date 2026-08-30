@@ -4,7 +4,7 @@ Once connected, the program writes generated guides into your Notion and ticks t
 
 Four steps, about 10 minutes, all of it in the browser and the program's own UI. **No command line required.**
 
-> This is the operator's walkthrough. For the rules behind checkbox sync and status convergence see [guides.md](guides.md); for what each setting means see [configuration.md](configuration.md).
+> This is the operator's walkthrough. For the rules behind checkbox sync and status convergence, see [guides.md](guides.md). For what each setting means, see [configuration.md](configuration.md).
 >
 > **UI labels are quoted verbatim in Chinese**, because that is what the buttons actually say.
 
@@ -25,10 +25,15 @@ Step ② is called out separately because the overwhelming majority of "it won't
 Open the [developer page](https://app.notion.com/developers/connections) → **New connection**.
 
 - **Name** — anything, e.g. `Steam 攻略`
-- **Type** — choose **Internal**
-- **Associated workspace** — the workspace your guides live in
+- **Authentication method** — stick with `Access token`
+
+<img width="720" height="380" alt="New connection page" src="https://github.com/user-attachments/assets/b2ee037a-0274-4d36-a5c1-4d80efdcbd88" />
+
+<img width="400" height="320" alt="Authentication method options" src="https://github.com/user-attachments/assets/799391c5-e751-44ba-8636-ad41fc831a64" />
 
 Once created, go to the **Configuration** tab. It holds an **Access token** starting with `ntn_` or `secret_`. Click **Show** → **Copy** and keep it somewhere for step ③.
+
+<img width="720" height="380" alt="Access token field" src="https://github.com/user-attachments/assets/0136e04f-6e6e-49dd-864e-dd61d086efc9" />
 
 > **The older UI uses different words for these**: `New connection` was `New integration`, `Access token` was `Internal Integration Secret` (shown directly on the page after creation, not in a Configuration tab), and the developer page was at `notion.so/my-integrations`. They are the same things.
 >
@@ -40,7 +45,9 @@ Once created, go to the **Configuration** tab. It holds an **Access token** star
 
 ## ② Share the page with it
 
-**Skip this and nothing later will connect.** A newly created connection can see **nothing** by default — even inside your own workspace. You have to tell Notion explicitly that this connection may touch this page.
+Create a new page in the left sidebar. Name it whatever you like, e.g. "Steam games", then click **Empty page**.
+
+<img width="200" height="255" alt="Creating a new empty page" src="https://github.com/user-attachments/assets/a887028f-4b3b-46fa-a0ae-f791d47fb74a" />
 
 Open the page you intend to keep guides under, then:
 
@@ -56,6 +63,8 @@ Some Notion versions require clicking "+ Add connections" first.
 **How to tell it worked**: your connection's name now appears in that page's `•••` menu.
 
 **Authorising a parent page authorises every page beneath it** — so pick a high enough page and do it once, rather than clicking through page by page.
+
+<img width="720" height="380" alt="Adding the connection to a page" src="https://github.com/user-attachments/assets/cc58e3ca-1bdc-4452-b2ca-ed41a599b72f" />
 
 ---
 
@@ -79,8 +88,8 @@ flowchart TD
 Open the database **as a full page** in Notion (not a small table embedded in another page), then look at the address bar:
 
 ```
-https://notion.so/我的攻略库-3bd1fee6252b816da1ccf9c50b8e91c2?v=8a2f...
-                            └─────── these 32 characters ────────┘  └─ drop everything from ? on
+https://app.notion.com/p/Steam-Game-3cc90c1c4bd680089a1dff2a79a88148?pvs=12
+                                    └───── these 32 characters ─────┘ └─ drop everything after '?'
 ```
 
 Take the pure hexadecimal run before the `?` (only `0-9` and `a-f`). **Drop the title and the hyphens.**
@@ -93,11 +102,19 @@ Three common mistakes:
 | The part after `?v=` | That is a **view** ID, not a database ID |
 | The page ID | Easy to copy the outer page's ID when the database is embedded in a page |
 
-Getting it wrong is not a problem: on save the program tells you separately whether this is "not a database" or "not shared with the connection" — the fixes are completely different, so it never merges them into one vague sentence.
+Getting it wrong is not a problem: on save, the program tells you separately whether this is "not a database" or "not shared with the connection" — the fixes are completely different, so it never merges them into one vague sentence.
 
 ---
 
 ## ④ 保存并验证
+
+<img width="720" height="560" alt="Save and verify — success" src="https://github.com/user-attachments/assets/5bb13ef1-7b77-4a41-aad7-6a75bd7df3fe" />
+
+<img width="720" height="560" alt="Save and verify — result detail" src="https://github.com/user-attachments/assets/51e8d3a0-8016-47cf-bda1-b3c6bf691ccd" />
+
+On success it should say something like:
+
+> 建好了:「Steam 攻略」,状态选项 Not started / In progress / Staged / Done。ID 已填好并存盘。
 
 Press **「保存并验证」**. The program asks everything it needs to ask right then, rather than failing later when you first generate a guide:
 
@@ -109,9 +126,9 @@ Press **「保存并验证」**. The program asks everything it needs to ask rig
 | Whether the status options are complete | If not, a **「帮我补上」** button appears — one click fills them in |
 | Whether it can actually write | Creates a page and immediately archives it; a read-only connection is reported on the spot |
 
-If everything passes, it returns to the Dashboard automatically. If anything fails the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
+If everything passes, it returns to the Dashboard automatically. If anything fails, the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
 
-> The last row is worth calling out: a read-only inspection cannot detect "this connection only has read permission", and that particular fault stays green all the way to a 403 on your first guide generation. So it genuinely creates a page and archives it again.
+> The last row is worth calling out: a read-only inspection cannot detect "this connection only has read permission," and that particular fault stays green all the way to a 403 on your first guide generation. So it genuinely creates a page and archives it again.
 
 ### About the status options
 
