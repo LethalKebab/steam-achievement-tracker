@@ -372,6 +372,7 @@ Every one of these was paid for.
 | `server-guard.test.js` | who can reach the port, and whether one request can take the process down. Asserts the API method **was not executed**, not merely that the status was 403 |
 | `steam-delay.test.js` | the two rate-limit knobs staying two — the failure surfaces only as an IP block |
 | `gamename.test.js` | a game having two names — that the English one is taken from the response already being received rather than bought with 300 store calls, that the pass filling the rest extinguishes itself, and that **both** search tests still route through `nameMatches`. Two copies of that comparison is what reported a library as empty while the row sat in the table |
+| `achievement-desc.test.js` | the English description arriving in a response already being received, and the one pass that backfills it **terminating** — the predicate is per game rather than per row precisely because the per-row spelling re-fetches forever while looking identical |
 | `pathsafe.test.js` | the containment predicate and that all four callers still route through it |
 | `tray.test.js` | the app staying quittable and the sync still firing (source assertions — `launcher/main.js` needs Electron to import) |
 | `selfupdate.test.js` | the one component that can't be fixed by shipping a fix. Also parses the generated PowerShell with `[Parser]::ParseFile` |
