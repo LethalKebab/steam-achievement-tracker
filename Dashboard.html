@@ -1783,7 +1783,13 @@
     #gen-bar.collapsed #genToggle .ic { transform: rotate(180deg); }
     #gen-bar .gen-close {
       position: absolute;
-      top: var(--s1);
+      /* Centred on the first line of #gen-msg, not on the container's own top edge — those are
+         not the same thing. The container's padding-top is var(--s3) (12px); #gen-msg's line box
+         is 12px font × 1.6 line-height = 19.2px, so that line's own centre sits at 12 + 19.2/2 =
+         21.6px from the top. This button is 31px tall (see the padding comment below), so its top
+         has to be 21.6 − 31/2 = 6.1px for the two centres to land on the same line — not var(--s1)
+         (4px), which is 2px shy and reads as "floating slightly above the text" */
+      top: 6px;
       right: var(--s1);
       background: none;
       border: none;
@@ -2419,11 +2425,17 @@
       <circle cx="12" cy="12" r="9"/>
       <path d="M12 7v5.3l3.3 2"/>
     </symbol>
-    <!-- The cancel button, and the "cancelled" line in a finished job's report — same badge shape as
-         i-check/i-clock (a circle plus a glyph) so the three read as one family of status marks -->
+    <!-- The cancel button, and the "cancelled" line in a finished job's report.
+         **Deliberately not a circle-plus-glyph badge like i-check/i-clock** — a first version
+         drawn that way (a 9-radius circle around a tiny inner square) read as just another round
+         dot at 15px, indistinguishable at a glance from those two unrelated status icons and from
+         a plain bullet. A stop icon has exactly one universal convention — the plain solid square
+         from every media player and IDE "stop" button — and deviating from it to fit this file's
+         badge family made it *less* recognisable, not more consistent. Rendered filled
+         (`icon('stop', true)`), never as an outline: a hollow square reads as an empty checkbox or
+         a placeholder, not "stop" -->
     <symbol id="i-stop" viewBox="0 0 24 24">
-      <circle cx="12" cy="12" r="9"/>
-      <rect x="9" y="9" width="6" height="6" rx="1"/>
+      <rect x="6" y="6" width="12" height="12" rx="2"/>
     </symbol>
     <symbol id="i-search" viewBox="0 0 24 24">
       <circle cx="10.8" cy="10.8" r="6.8"/>
@@ -2621,7 +2633,7 @@
     (**live only**): a finished job has nothing left to cancel.
   -->
   <div id="gen-bar" role="status">
-    <button type="button" class="gen-close" id="genCancel" title="取消生成" data-t-title="gen.cancelOk" aria-label="取消生成" data-t-aria-label="gen.cancelOk"><svg class="ic"><use href="#i-stop"/></svg></button>
+    <button type="button" class="gen-close" id="genCancel" title="取消生成" data-t-title="gen.cancelOk" aria-label="取消生成" data-t-aria-label="gen.cancelOk"><svg class="ic filled"><use href="#i-stop"/></svg></button>
     <button type="button" class="gen-close" id="genToggle" title="收起(任务仍在进行)" data-t-title="gen.collapseTitle" aria-label="收起" data-t-aria-label="gen.collapse"><svg class="ic"><use href="#i-chevron"/></svg></button>
     <button type="button" class="gen-close" id="genClose" title="关闭" data-t-title="ui.close" aria-label="关闭" data-t-aria-label="ui.close"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
@@ -3299,7 +3311,7 @@
     const GEN_WARN = icon('warn');
     const GEN_OK = icon('check');
     const GEN_QUEUE = icon('clock');
-    const GEN_CANCEL = icon('stop');
+    const GEN_CANCEL = icon('stop', true);
     const GEN_SEARCH = icon('search');
     const GEN_BOOK = icon('book');
 
