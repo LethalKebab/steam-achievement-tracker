@@ -315,22 +315,50 @@
      and "pick exactly one of these" is precisely what a radio group is. The input
      is moved out of sight rather than `display:none`, which would take it out of
      the tab order along with it. */
-  .lang { display: flex; gap: var(--s2); margin: 0 0 var(--s5); }
+  /* **One segmented control, on the heading row, not two buttons on a row of their own.**
+     As two bordered buttons it cost a full band of vertical space above the step nav for a setting
+     most people touch once — and being the first thing under the heading, it read as the first
+     thing to fill in. Opposite the heading it costs no vertical space at all: the row is as tall as
+     the h1 either way.
+
+     **The shell is `.view-toggle` from Dashboard.html** (inset track, borderless halves, the
+     selected one lifting on --surface-3 + --sh-1). That page already has a segmented control, and
+     frontend.md's rule for this project is that an element matching nothing next to it gets
+     removed — so a second segmented style would be the thing that rule exists to stop. Radios
+     rather than buttons because "exactly one of these" is what a radiogroup is; only the skin is
+     shared.
+
+     **The one value that could not be copied is the track's fill.** There it is --surface sitting
+     on the page floor, so the track reads as a raised object; here the control is inside a --surface
+     card, and --surface on --surface measured a contrast ratio of exactly 1.00 — the track vanished
+     into the card and only its border survived, flattening the whole group. --bg puts the well
+     *below* the card instead, which is the same relationship the Dashboard has, expressed against a
+     different backdrop. Copying a colour value across contexts is what broke it; copying the
+     relationship is what fixes it. */
+  .head-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+  .lang {
+    display: inline-flex;
+    flex: none;
+    gap: 2px;
+    padding: 2px;
+    background: var(--bg);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+  }
   .lang-opt { position: relative; display: inline-flex; margin: 0; }
   .lang-opt input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; border: none; opacity: 0; }
   .lang-opt span {
     display: block;
-    padding: 7px var(--s3);
-    border: 1px solid var(--line-2);
-    border-radius: var(--r-md);
-    background: var(--surface-2);
-    color: var(--text-2);
+    padding: 4px var(--s3);
+    border-radius: var(--r-sm);
+    color: var(--text-3);
     font-size: var(--fs-sm);
+    white-space: nowrap;
     cursor: pointer;
-    transition: border-color var(--dur-1), background var(--dur-1), color var(--dur-1);
+    transition: color var(--dur-1), background var(--dur-1);
   }
-  .lang-opt span:hover { border-color: var(--accent); color: var(--text); }
-  .lang-opt input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--text-hi); }
+  .lang-opt span:hover { color: var(--text); }
+  .lang-opt input:checked + span { color: var(--text-hi); background: var(--surface-3); box-shadow: var(--sh-1); }
   /* The global :focus-visible rule cannot reach a control that is out of sight, so the ring is
      drawn on the label standing in for it — without this the group is keyboard-operable but
      invisible while being operated */
@@ -695,17 +723,22 @@
          above. Two meanings sharing one control is exactly the lesson from the
          filter-chip round -->
     <button type="button" class="back" id="gate-back" data-t="back.gate" hidden>← 重新选择</button>
-    <h1 id="page-title" data-t="head.setup">初始设置</h1>
-    <div class="subtitle" id="page-subtitle" data-t="sub.setup">只填一次,密钥只存在这台电脑上</div>
-    <!-- Each option is written in its own language, so neither needs the other to
-         be readable — the one label on this page that works before the setting
-         it changes has taken effect. `aria-label` carries both for the same
-         reason. **Not `config.language`**: that one decides what is fetched from
-         Steam and changing it would need a full re-sync, see lib/lang.js -->
-    <div class="lang" role="radiogroup" aria-label="界面语言 / Interface language">
-      <label class="lang-opt"><input type="radio" name="uiLang" value="zh"><span>中文</span></label>
-      <label class="lang-opt"><input type="radio" name="uiLang" value="en"><span>English</span></label>
+    <!-- The heading and the language control share one row. The control is placed here rather
+         than below the subtitle because it is a page-level setting, not a step: on its own row it
+         read as the first thing to fill in -->
+    <div class="head-row">
+      <h1 id="page-title" data-t="head.setup">初始设置</h1>
+      <!-- Each option is written in its own language, so neither needs the other to
+           be readable — the one label on this page that works before the setting
+           it changes has taken effect. `aria-label` carries both for the same
+           reason. **Not `config.language`**: that one decides what is fetched from
+           Steam and changing it would need a full re-sync, see lib/lang.js -->
+      <div class="lang" role="radiogroup" aria-label="界面语言 / Interface language">
+        <label class="lang-opt"><input type="radio" name="uiLang" value="zh"><span>中文</span></label>
+        <label class="lang-opt"><input type="radio" name="uiLang" value="en"><span>English</span></label>
+      </div>
     </div>
+    <div class="subtitle" id="page-subtitle" data-t="sub.setup">只填一次,密钥只存在这台电脑上</div>
     <!-- The first-run fork. **The question is not 「你是不是新用户」** — that
          would require guessing what this program considers 「新」. The question is
          whether there is anything to bring across, and that is something the
@@ -793,7 +826,7 @@
            "let me open the instructions and follow along" was missing. It points
            at the rendered copy on GitHub rather than transcribing it again: the
            consequence of a second transcription is the comment above -->
-      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener" data-t="step3.docs">详细步骤 ↗</a></p>
+      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener" data-t="step3.docs">配置图解 ↗</a></p>
       <label for="notion-token">Access token<span class="configured" id="token-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
       <!-- Newly created secrets now begin with ntn_. The old secret_ ones still
            work, so this only changes the shape the placeholder suggests; the
@@ -835,8 +868,6 @@
           <input type="checkbox" id="bk-config" checked>
           <span data-t="step4.include">包含 Steam / Notion / AI 密钥</span>
         </label>
-        <!-- This sentence stays because it says **plaintext secrets are leaving this machine**, not because it explains how a feature works -->
-        <div class="hint" id="bk-warn" data-t="step4.warn">密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。</div>
         <div class="msg" id="bk-msg" role="status"></div>
         <code class="bk-path" id="bk-path" hidden></code>
         <div class="bk-row" id="bk-done" hidden>
@@ -1048,7 +1079,6 @@
       'head.setup':           ['初始设置', 'First-time setup'],
       'head.settings':        ['设置', 'Settings'],
       'sub.setup':            ['只填一次,密钥只存在这台电脑上', 'Filled in once. The keys stay on this computer.'],
-      'sub.settings':         ['点上面的步骤跳到要改的那一节;没动的项目留空即可', 'Use the steps above to jump to a section. Leave anything you are not changing blank.'],
       'sub.restore':          ['恢复后直接进入面板,不用重新设置', 'Restoring goes straight to the dashboard. Nothing needs setting up again.'],
 
       'gate.new':             ['全新设置', 'Fresh setup'],
@@ -1086,7 +1116,9 @@
       'step3.li1.d':          [' 里复制 ', ' copy the '],
       'step3.li2.a':          ['在 Notion 打开要放攻略的页面 → ', 'In Notion open the page the guides go on → '],
       'step3.li2.b':          [' → 选中它', ' → select it'],
-      'step3.docs':           ['详细步骤 ↗', 'Step by step ↗'],
+      // Names the destination rather than its form. 「详细步骤」/「Step by step」 said how the page
+      // is laid out, which is the one thing a reader does not need to decide whether to open it
+      'step3.docs':           ['配置图解 ↗', 'Setup guide ↗'],
       'step3.db':             ['攻略数据库 ID', 'Guide database ID'],
       'step3.db.ph':          ['32 位十六进制', '32 hex characters'],
       'step3.make':           ['＋ 新建一个攻略数据库', '＋ Create a guide database'],
@@ -1097,8 +1129,12 @@
 
       'step4.title':          ['第 4 步 · 备份与恢复', 'Step 4 · Backup and restore'],
       'step4.now':            ['立即备份', 'Back up now'],
+      // **The three vendors are named rather than collapsed into one word.** 「Steam 凭据」 is an
+      // established term in this program and would be read as the API key alone; here one label has
+      // to cover three different secrets, and without naming them nobody knows what the box covers.
+      // The plaintext disclosure lives on the terminal side (`backup.hasSecrets` in
+      // lib/tracker-messages.js), which is where the same backup is offered with room to say it
       'step4.include':        ['包含 Steam / Notion / AI 密钥', 'Include the Steam / Notion / AI keys'],
-      'step4.warn':           ['密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。', 'The keys go into the zip in plain text. Nothing needs re-entering on another computer, but anyone holding this file can spend your AI credit.'],
       'step4.reveal':         ['打开文件夹', 'Open folder'],
 
       'restore.title':        ['从备份恢复', 'Restore from a backup'],
@@ -1386,8 +1422,10 @@
       if (isEditMode) {
         armBack();
         // **The key, not the text.** Written as textContent it would be right until the language
-        // changed, at which point applyStrings would repaint it with the first-run copy
-        setPageCopy('head.settings', 'sub.settings', 'title.settings');
+        // changed, at which point applyStrings would repaint it with the first-run copy.
+        // **No subtitle in settings mode**: the step nav sits directly below and is self-evident,
+        // so a sentence explaining how to use it narrates what the controls already show
+        setPageCopy('head.settings', '', 'title.settings');
         // Not queried during first-run setup: the library is empty then, so the
         // archive directories necessarily are too, and the startRestore() path is
         // busy restoring from a zip and does not need an extra empty list
@@ -1815,11 +1853,6 @@
     $('bk-reveal').addEventListener('click', async () => {
       const r = await call('revealBackup', [lastBackupPath]);
       if (r.error) setMsg('bk-msg', r.error, 'error');
-    });
-
-    // Unchecked, no secrets go into the zip and that warning no longer applies — leaving it up makes people think they still do
-    $('bk-config').addEventListener('change', () => {
-      $('bk-warn').hidden = !$('bk-config').checked;
     });
 
     // ---- Restore -----------------------------------------------------------

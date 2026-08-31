@@ -82,7 +82,7 @@ The packaging one is worth pinning especially: it breaks **only** the packaged b
 
 `Steam 成就追踪器` in one `<h1>`, three roles by three means:
 
-- 「Steam」 is the platform — 0.74em, **weight 500**, wide tracking, `--text-3`
+- 「Steam」 is the platform — 0.86em, **weight 500**, wide tracking, `--text-3`
 - 「成就」 is the keyword — accent colour
 - the rest is plain
 
@@ -94,7 +94,11 @@ The body is **weight 800** at 27px.
 
 **None of this was possible before the self-hosted font** — the old stack rendered 600/650/700 as one weight in Chinese, so the only way to push 「Steam」 back was to dim it, and dimming is what drove `--text-3` into its contrast failure. Weight and colour now do one job each. **If 「Steam」 ever needs to recede further, use a lighter weight, never a darker colour.**
 
-`.wm-latin`'s hand-tuned `0.74em` survived the font swap — Latin-cap-to-CJK-ink ratio measured 0.593 after, against ~0.58 before, so **do not "recalibrate" it without measuring first**.
+**`.wm-latin` is `0.86em`, and the number is not the size it looks.** Latin capitals reach cap-height while Han glyphs nearly fill the em box — measured at 0.593 on this font — so 0.86em renders STEAM at about **0.51 of the Chinese ink height**. That compounding is the whole reason the value looks arbitrary: it is chosen for the product, not for the declaration. Below roughly 0.8em the product falls under 0.45 and STEAM stops reading as subordinate and starts reading as a mistake.
+
+**In English the compounding does not apply.** The whole wordmark is Latin there, so it is a plain 0.86-against-1 comparison and the weight gap (500 against 800) carries most of the hierarchy. Any future change has to be looked at in both languages — a value tuned against Han ink alone will be wrong in the one where nothing compounds.
+
+**The word gap is a real character, not a margin.** 成就追踪器 is one uninterrupted phrase and its two spans sit flush; in English the same markup produced 「AchievementTracker」. It is fixed with a `.wm-gap` span holding a non-breaking space, shown only under `:root[lang="en"]`. A margin would have looked right and left the *text* still running the two words together — which is what a screen reader announces and what copying the heading puts on the clipboard.
 
 ### Three attempts at a *drawn* wordmark were reverted
 
@@ -474,6 +478,24 @@ Four rules the tests pin, each of which fails silently:
 - **Interpolated text has to be repainted explicitly.** `applyStrings` cannot help it — there is no key on the element, because the value was spliced in when it was painted. Those painters register in `REPAINT`. Leaving one out is invisible in Chinese: the guide-archive line went on reading 「0 份 · 0 B」 in an otherwise entirely English page.
 
 Switching language repaints in place and **does not reload** — a reload would cost whichever step you were on.
+
+**The control is a segmented pill on the heading row, not two buttons on a row of their own.** As
+two bordered buttons it took a full band of vertical space above the step nav for a setting most
+people touch once, and being the first thing under the heading it read as the first thing to fill
+in. Opposite the heading it costs no vertical space at all: the row's height is the `h1`'s.
+
+It is still two radios in a `radiogroup` — the same native selected state, focus ring and arrow-key
+behaviour — and the hit area is unchanged at 32px. What changed is the shell: the border moved to
+the track and the halves are borderless, so the pair reads as one control with one of two positions
+rather than as two buttons competing for a press.
+
+Each option stays written in its own language (中文 / English) rather than being abbreviated. It is
+the one label on the page that has to be readable *before* the setting it changes has taken effect.
+
+**Settings mode has no subtitle.** The step nav sits directly beneath the heading and is
+self-evident; a sentence telling you to click it narrated what the controls already showed. The
+first-run subtitle stays, because it states a fact that is nowhere else on screen — the keys never
+leave this machine.
 
 ### The first screen is a fork, and it is the one thing the program has to ask
 

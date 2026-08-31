@@ -293,6 +293,23 @@ for (const PAGE of ['Setup.html', 'Dashboard.html']) describe('the ' + PAGE + ' 
   const STRINGS = pageStrings(PAGE);
   const html = read(PAGE);
   const script = strip(html.slice(html.indexOf('<script>', html.indexOf('</style>'))));
+  /**
+   * The script **with the STRINGS table cut out of it**.
+   *
+   * Without that cut the "defined but never used" check below is vacuous: every key appears as a
+   * quoted literal in the very table that defines it, so the catch-all sweep matches all of them
+   * and `keys - used` is empty whatever else is true. Measured — a key wired to nothing passed.
+   */
+  const scriptNoTable = (() => {
+    const at = script.indexOf('const STRINGS = {');
+    if (at < 0) return script;
+    let depth = 0, i = script.indexOf('{', at);
+    for (; i < script.length; i++) {
+      if (script[i] === '{') depth++;
+      else if (script[i] === '}' && --depth === 0) break;
+    }
+    return script.slice(0, at) + script.slice(i + 1);
+  })();
   const keys = Object.keys(STRINGS);
 
   test('every entry carries both languages', () => {
@@ -333,7 +350,7 @@ for (const PAGE of ['Setup.html', 'Dashboard.html']) describe('the ' + PAGE + ' 
     // dataset assignment. Rather than enumerate every shape, count a key as used if the script
     // mentions it as a quoted string at all: the question here is whether an entry is dead
     // weight, and a key that appears nowhere in the file certainly is
-    for (const m of script.matchAll(/'([a-z][\w.]*)'/g)) used.add(m[1]);
+    for (const m of scriptNoTable.matchAll(/'([a-z][\w.]*)'/g)) used.add(m[1]);
     for (const m of script.matchAll(/setPageCopy\('([^']+)', '([^']*)', '([^']+)'\)/g)) {
       used.add(m[1]); if (m[2]) used.add(m[2]); used.add(m[3]);
     }
