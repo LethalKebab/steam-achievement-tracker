@@ -3497,7 +3497,7 @@
       BELL_GROUPS.forEach(function(pair) {
         const rows = items.filter(function(i){ return i.kind === pair[0]; });
         if (!rows.length) return;
-        html += '<div class="bell-group">' + pair[1] + '</div>';
+        html += '<div class="bell-group">' + escapeHtml(t(pair[1])) + '</div>';
         html += rows.map(function(i) {
           return '<div class="bell-item">'
             + '<img src="' + thumbUrl(i.game.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
@@ -4488,7 +4488,8 @@
 
     const arcKb = function(n){ return n >= 1024 ? (n / 1024).toFixed(1) + ' KB' : n + ' B'; };
     const arcWhen = function(iso) {
-      return new Date(iso).toLocaleString('zh-CN',
+      // The locale follows the interface language, not the machine
+      return new Date(iso).toLocaleString(LANG === 'en' ? 'en-GB' : 'zh-CN',
         { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
     function setArcMsg(text, cls) {
