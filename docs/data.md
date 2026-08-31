@@ -12,7 +12,7 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 |---|---|
 | `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
 | `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL |
-| `guides` | appid → guide location, plus `kind` (`notion` or `local`) |
+| `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
 | `sync_log` | every checkbox change, skip and failure, for after-the-fact auditing |
 | `meta` | last sync timestamp and other odds and ends |
 
@@ -82,6 +82,14 @@ Six decisions worth knowing before you write queries:
   The test is per game rather than per row on purpose: an individual achievement can come back without an English description, and asking per row would put its game in the queue on every sync forever.
 
 - **`game_name` is a denormalised copy of `games.name`,** used only as a fallback when the `games` row is gone. It is not a second name to keep bilingual — resolve a display name from `games.name_en || games.name` instead.
+
+### `guides.lang`
+
+Which language a guide is written in — `'zh'` or `'en'`, defaulting to `'zh'`. It is written after a guide is successfully generated or rewritten, and never by guide *discovery*, which registers pages it found and knows nothing about their contents.
+
+**It is a display fact and has no correctness role.** Two surfaces read it: the marker in the achievement panel's header, and the wording of the rewrite dialog's title. Matching does not — both the reverse lookup and the `paraphrased-description` check accept either language's description — so a row carrying the wrong value costs a marker, never a tick. That is deliberate, because the rows that predate the column carry an assumed value rather than a recorded one: every guide in the library at the time was Chinese.
+
+Anything other than `'en'` is stored as `'zh'`. A third value would make the marker unreachable rather than wrong, which is the harder failure to notice.
 
 ## What Steam can't tell us
 
