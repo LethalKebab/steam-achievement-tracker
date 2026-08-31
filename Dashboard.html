@@ -1730,8 +1730,9 @@
       max-height: 60vh;
       overflow-y: auto;
       /* Room reserved on the right for the corner buttons — two side by side while live
-         (cancel + collapse), one while finished (close), so this has to fit the wider pair */
-      padding: var(--s3) 60px var(--s3) var(--s4);
+         (cancel + collapse), one while finished (close), so this has to fit the wider pair.
+         76px, not 60: the buttons themselves grew (see .gen-close's padding below) */
+      padding: var(--s3) 76px var(--s3) var(--s4);
       border: 1px solid rgba(140, 198, 63, 0.5);
       border-left: 3px solid var(--ok);
       border-radius: var(--r-md);
@@ -1786,7 +1787,10 @@
       right: var(--s1);
       background: none;
       border: none;
-      padding: var(--s1);
+      /* var(--s1) (4px) used to leave this at 15px icon + 8px padding = 23×23 CSS px — one pixel
+         under WCAG 2.2 AA's 24×24 minimum pointer target (Success Criterion 2.5.8). var(--s2)
+         clears it with real margin: 15 + 16 = 31×31 */
+      padding: var(--s2);
       cursor: pointer;
       color: var(--text-3);
       font-size: var(--fs-lg);
@@ -1795,9 +1799,14 @@
       display: inline-flex;
     }
     #gen-bar .gen-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+    /* Disabling with no visual change reads as "did my click even register" for the ~3s until
+       the next poll updates the message — the one case that hits this is genCancel mid-click */
+    #gen-bar .gen-close:disabled { opacity: 0.4; cursor: default; }
+    #gen-bar .gen-close:disabled:hover { color: var(--text-3); background: none; }
     /* genCancel sits immediately left of the toggle/close corner rather than stacked on it —
-       while live the two are shown together, so they need two positions, not one */
-    #gen-bar #genCancel { right: calc(var(--s1) + 26px); }
+       while live the two are shown together, so they need two positions, not one.
+       34px = the sibling's own 31px width plus a 3px gap, both measured from the 31×31 size above */
+    #gen-bar #genCancel { right: calc(var(--s1) + 34px); }
     #gen-bar #genCancel:hover { color: var(--danger); background: rgba(255, 255, 255, 0.08); }
     /* On a narrow screen the two corners crowd each other, so it spans a row and yields to the sync status bar below */
     @media (max-width: 720px) {
@@ -2991,6 +3000,7 @@
       'gen.cancelOk':         ['取消生成', 'Cancel generation'],
       'gen.cancelTitle':      ['取消《{game}》的生成?', 'Cancel generating {game}?'],
       'gen.cancelBody':       ['已经查到、写好的部分会留在草稿里,不会丢。', 'Anything already researched and written stays in the draft — nothing is lost.'],
+      'gen.cancelling':       ['正在取消《{game}》…', 'Cancelling {game}…'],
 
       // ---- The two-click buttons on a generation result ------------------------
       'res.actionFailed':     ['{label}失败:{reason}', '{label} failed: {reason}'],
@@ -5708,6 +5718,12 @@
       // makes a second click while waiting an easy accident, and a button that visibly did
       // something is less alarming than one that silently accepted a second click
       genCancelBtn.disabled = true;
+      // **Said out loud immediately, not left to the next 3-second poll.** The disabled icon
+      // alone is not "feedback" in any sense a confirm-then-wait interaction needs — the request
+      // to cancel still has to reach the server, tear down the in-flight call, and unwind the
+      // job's promise before a real result exists, and none of that is instant. Overwritten by
+      // the next poll either way, so a stale "cancelling…" can never be stranded on screen
+      showGen('⏳ ' + escapeHtml(t('gen.cancelling', { game: name })), false, true);
       rpc
         .withSuccessHandler(function (r) {
           // **The actual outcome never arrives here.** A successful cancel only tears down the
