@@ -1345,7 +1345,7 @@ describe('the 「生成」 button on the Dashboard', () => {
     assert.match(strip('**x** 最便宜', '../x.md'), /最便宜/,
       'the bold line in markdown was stripped, so the whole loop below ran on nothing');
     const JUDGEMENT = /cheapest|priciest|most expensive|best quality|最便宜|最贵|质量最好|有免费额度/i;
-    const surfaces = ['../README.md', '../docs/guides.md', '../docs/configuration.md',
+    const surfaces = ['../README.md', '../README.zh.md', '../docs/guides.md', '../docs/configuration.md',
       '../docs/cli.md',
       '../tracker.js', '../lib/config.js', '../lib/ai.js', '../Setup.html', '../Dashboard.html'];
     for (const rel of surfaces) {

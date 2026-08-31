@@ -703,7 +703,7 @@ function createTray() {
 
 /**
  * Only one instance is allowed. **This is not fastidiousness, it is a hard constraint imposed by the
- * hardcoded 8777** (see 「已知取舍」 in the README): a second instance would spawn its own `serve`,
+ * hardcoded 8777** (see `docs/configuration.md`): a second instance would spawn its own `serve`,
  * that one necessarily hits EADDRINUSE and dies instantly, and `serverProcess.on('exit')` cannot tell
  * "the port is held by another copy of ourselves" from "the service really crashed" — so
  * double-clicking the exe a second time produces a 「后台服务意外退出(代码 1)」 error box. Neither
