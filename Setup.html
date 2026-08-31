@@ -321,19 +321,27 @@
      thing to fill in. Opposite the heading it costs no vertical space at all: the row is as tall as
      the h1 either way.
 
-     **The shell is `.view-toggle` from Dashboard.html, value for value** (track holds the border,
-     halves are borderless, the selected one lifts on --surface-3 + --sh-1). That page already has a
-     segmented control, and frontend.md's rule for this project is that an element matching nothing
-     next to it gets removed — so a second segmented style, differing only in radius and fill, is
-     the thing that rule exists to stop. Radios rather than buttons because "exactly one of these"
-     is what a radiogroup is; only the skin is shared. */
+     **The shell is `.view-toggle` from Dashboard.html** (inset track, borderless halves, the
+     selected one lifting on --surface-3 + --sh-1). That page already has a segmented control, and
+     frontend.md's rule for this project is that an element matching nothing next to it gets
+     removed — so a second segmented style would be the thing that rule exists to stop. Radios
+     rather than buttons because "exactly one of these" is what a radiogroup is; only the skin is
+     shared.
+
+     **The one value that could not be copied is the track's fill.** There it is --surface sitting
+     on the page floor, so the track reads as a raised object; here the control is inside a --surface
+     card, and --surface on --surface measured a contrast ratio of exactly 1.00 — the track vanished
+     into the card and only its border survived, flattening the whole group. --bg puts the well
+     *below* the card instead, which is the same relationship the Dashboard has, expressed against a
+     different backdrop. Copying a colour value across contexts is what broke it; copying the
+     relationship is what fixes it. */
   .head-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
   .lang {
     display: inline-flex;
     flex: none;
     gap: 2px;
     padding: 2px;
-    background: var(--surface);
+    background: var(--bg);
     border: 1px solid var(--line-2);
     border-radius: var(--r-md);
   }
@@ -858,7 +866,7 @@
              covers -->
         <label class="check" style="margin-top: var(--s3)">
           <input type="checkbox" id="bk-config" checked>
-          <span data-t="step4.include">包含 Steam / Notion / AI 密钥(明文)</span>
+          <span data-t="step4.include">包含 Steam / Notion / AI 密钥</span>
         </label>
         <div class="msg" id="bk-msg" role="status"></div>
         <code class="bk-path" id="bk-path" hidden></code>
@@ -1121,11 +1129,12 @@
 
       'step4.title':          ['第 4 步 · 备份与恢复', 'Step 4 · Backup and restore'],
       'step4.now':            ['立即备份', 'Back up now'],
-      // **「明文」 is on the label, not in a sentence below it.** The paragraph that used to explain
-      // the consequence was prose; that the secrets travel unencrypted is a property of the
-      // checkbox and belongs to it. Dropping the word entirely would leave a control that hands
-      // three vendors' keys to whoever holds the file while saying only 「包含密钥」
-      'step4.include':        ['包含 Steam / Notion / AI 密钥(明文)', 'Include the Steam / Notion / AI keys (in plain text)'],
+      // **The three vendors are named rather than collapsed into one word.** 「Steam 凭据」 is an
+      // established term in this program and would be read as the API key alone; here one label has
+      // to cover three different secrets, and without naming them nobody knows what the box covers.
+      // The plaintext disclosure lives on the terminal side (`backup.hasSecrets` in
+      // lib/tracker-messages.js), which is where the same backup is offered with room to say it
+      'step4.include':        ['包含 Steam / Notion / AI 密钥', 'Include the Steam / Notion / AI keys'],
       'step4.reveal':         ['打开文件夹', 'Open folder'],
 
       'restore.title':        ['从备份恢复', 'Restore from a backup'],
