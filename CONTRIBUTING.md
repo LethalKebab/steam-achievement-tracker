@@ -83,6 +83,8 @@ CI runs the same suite on every pull request and every push to `main`, on `windo
 
 Building the Windows app is not part of an ordinary change. `dist/` is gitignored, and a rebuild is not a release — no version bump, no tag, no upload. The build steps and the release checklist are in [launcher/README.md](launcher/README.md).
 
+A build you make yourself reads **this checkout's** `config.json` and `data/`, the same ones `node tracker.js serve` uses: `postbuild.js` leaves a `local.config.json` beside the exe pointing back here. That is not a convenience — the rename step deletes the previous build's directory, which is where a packaged build would otherwise be keeping your database. It also switches auto-update off, so a build from your branch cannot offer to replace itself with the published release and leave you testing code that no longer contains your change. A zip handed to somebody else carries neither setting; it is sealed before that file is written.
+
 ## Reporting a bug
 
 Issues are welcome. **Do not paste `config.json` or a backup zip into one** — both carry your Steam API key, Notion token and AI keys in plain text, and this repository is public. The output of `node tracker.js status` is safe to share.

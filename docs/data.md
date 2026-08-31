@@ -6,6 +6,16 @@ Everything is in `data/steam.db`, a single SQLite file (gitignored). `openDb()` 
 sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DESC LIMIT 10"
 ```
 
+**What that path is relative to depends on how the program was started**, and `config.json` and `guides/` follow it:
+
+| Started as | Rooted at |
+|---|---|
+| `node tracker.js …`, or `npm start` in `launcher/` | the checkout |
+| a build you made yourself (`npm run build`) | the checkout as well — `postbuild.js` leaves a pointer next to the exe |
+| the release zip | `resources\tracker\` inside the extracted folder |
+
+Only the third is a surprise, and it is why the whole extracted folder is the thing to move or back up. `TRACKER_DATA_DIR` overrides all three; `dataDir` in `launcher/local.config.json` is what sets it for a packaged build.
+
 ## Tables
 
 | Table | Holds |
