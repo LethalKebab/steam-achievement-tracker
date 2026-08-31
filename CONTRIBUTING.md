@@ -16,6 +16,29 @@ node tracker.js serve    # Dashboard on http://127.0.0.1:8777
 
 Full setup, including the optional Notion and AI halves, and the complete command reference: [docs/cli.md](docs/cli.md).
 
+### Working on the pages without a Steam key
+
+`init` verifies the key against Steam, and `/` redirects to `/setup` while `steamApiKey` and `steamId` are unset — so `Dashboard.html` cannot be opened at all until something fills them. What the redirect tests is only that both are **non-empty**, so for interface work they need not be real:
+
+```bash
+mkdir -p /tmp/sat-dev
+cat > /tmp/sat-dev/config.json <<'JSON'
+{
+  "steamApiKey": "dummy",
+  "steamId": "76561190000000000",
+  "syncStaleHours": 0,
+  "syncGuidesOnServe": false,
+  "checkboxSyncOnServe": false,
+  "guideStatusOnServe": false
+}
+JSON
+TRACKER_DATA_DIR=/tmp/sat-dev PORT=8779 node tracker.js serve
+```
+
+`TRACKER_DATA_DIR` moves `config.json`, the database and `guides/` together, so this cannot reach a real install; `PORT` keeps it clear of a packaged build already holding 8777. The four switches turn off `serve`'s startup jobs, which would otherwise go to Steam and Notion with credentials that are not real.
+
+The Dashboard comes up empty. That is enough for layout, copy, theming and interaction work, and not enough for anything that needs real rows — for that you need a key and a `sync`.
+
 There is no build step and no deploy. Edit a file, re-run the command. `serve` does **not** hot-reload `lib/` — restart it after changing anything there. `Dashboard.html` and `lib/rpc.js` are read per request, so a browser refresh is enough for those.
 
 ## Where things are written down
@@ -76,7 +99,9 @@ CI runs the same suite on every pull request and every push to `main`, on `windo
 `main` is protected by a ruleset: pull requests are required, the `test` check must pass, and force-pushes and deletion are blocked. A direct push to `main` is rejected regardless of permissions.
 
 - Work on a branch, open a pull request against `main`.
-- Commit messages take a conventional prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`). The subject may be Chinese or English, whichever suits the change.
+- **A first pull request from a fork does not start CI by itself.** GitHub holds workflow runs from first-time contributors until a maintainer approves them, so the checks sit unstarted — nothing is wrong with your branch and re-pushing does not help. Once you have one merged pull request here, later ones start on their own.
+- Commit messages take a conventional prefix (`feat`, `fix`, `docs`, `refactor`, `test`, `chore`) and are **English**, subject and body alike. So are pull request titles and bodies. The reader of a commit message is whoever is bisecting, not the app's user — the user-facing half is bilingual and unaffected.
+- **`git log` is mixed, and the log is not the rule.** Commits from before this was settled are Chinese and stay that way; history here is not rewritten.
 - Say in the body what changed and why the alternative was not taken. Commit bodies here are long on purpose; they are where a decision is recoverable from six months later.
 
 ## Packaging
