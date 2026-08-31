@@ -1595,6 +1595,31 @@ describe('sharded writing', () => {
       assert.equal((text.match(/- \[ \]/g) ?? []).length, 5, 'not one of the 5 achievements may be lost');
     });
 
+    test('**the classification pass is counted in what the run cost**', async () => {
+      // `usage` is what the user is told the run spent. The classification pass is a real request
+      // on a session of its own, and a session that never joins the total is money spent and never
+      // shown — the figure reported is simply lower than the bill, with nothing marking it as
+      // partial. It reads as correct precisely because every other request is in there.
+      const { db, config } = envFor(3);
+      const provider = fakeProvider(
+        [
+          body([['主线', BIG.slice(0, 2)], ['社交', [BIG[2]]]]),
+          body([['社交', [BIG[3]]], ['主线', [BIG[4]]]]),
+        ],
+        { sections: ['主线', '社交'] }
+      );
+      const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
+      assert.equal(provider.regroupAsks, 1, 'the premise of this case is that the classification pass really ran');
+      assert.equal(
+        res.usage.requests, provider.asked.length + provider.regroupAsks,
+        'the classification session is missing from the total — those tokens were spent and are not reported'
+      );
+      // The classification reply reports 1 input token where a shard reply reports 10, so the
+      // total distinguishes "the pass was counted" from "the shards happen to add up"
+      assert.equal(res.usage.inputTokens, provider.asked.length * 10 + 1,
+        'the total is exactly the two shards, so the classification pass contributed nothing to it');
+    });
+
     test('both interfaces have to report "unifying the sections" and "could not unify"', () => {
       // **Both consumers are if/else-if chains, and an unrecognised phase lands silently.**
       // Not adding a branch has two symptoms, neither of them an error: the progress bar does not
