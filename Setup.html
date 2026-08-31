@@ -315,11 +315,11 @@
      and "pick exactly one of these" is precisely what a radio group is. The input
      is moved out of sight rather than `display:none`, which would take it out of
      the tab order along with it. */
-  /* **One segmented control, on the heading row, not two buttons on a row of their own.**
-     As two bordered buttons it cost a full band of vertical space above the step nav for a setting
-     most people touch once — and being the first thing under the heading, it read as the first
-     thing to fill in. Opposite the heading it costs no vertical space at all: the row is as tall as
-     the h1 either way.
+  /* **One segmented control, on the heading row.**
+     Two bordered buttons on a row of their own cost a full band of vertical space above the step
+     nav for a setting most people touch once, and sitting first under the heading they read as the
+     first thing to fill in. Opposite the heading the control costs no vertical space at all: the
+     row is as tall as the h1 either way.
 
      **The shell is `.view-toggle` from Dashboard.html** (inset track, borderless halves, the
      selected one lifting on --surface-3 + --sh-1). That page already has a segmented control, and
@@ -328,13 +328,12 @@
      rather than buttons because "exactly one of these" is what a radiogroup is; only the skin is
      shared.
 
-     **The one value that could not be copied is the track's fill.** There it is --surface sitting
-     on the page floor, so the track reads as a raised object; here the control is inside a --surface
-     card, and --surface on --surface measured a contrast ratio of exactly 1.00 — the track vanished
-     into the card and only its border survived, flattening the whole group. --bg puts the well
-     *below* the card instead, which is the same relationship the Dashboard has, expressed against a
-     different backdrop. Copying a colour value across contexts is what broke it; copying the
-     relationship is what fixes it. */
+     **The track's fill is the one value that cannot be copied across.** On the Dashboard it is
+     --surface sitting on the page floor, so the track reads as a raised object. Here the control is
+     inside a --surface card, and --surface on --surface is a contrast ratio of exactly 1.00: the
+     track disappears into the card, only its border survives, and the group reads flat. --bg puts
+     the well *below* the card instead — the same relationship, expressed against a different
+     backdrop. **Copy the relationship, not the colour value.** */
   .head-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
   .lang {
     display: inline-flex;
@@ -1116,8 +1115,9 @@
       'step3.li1.d':          [' 里复制 ', ' copy the '],
       'step3.li2.a':          ['在 Notion 打开要放攻略的页面 → ', 'In Notion open the page the guides go on → '],
       'step3.li2.b':          [' → 选中它', ' → select it'],
-      // Names the destination rather than its form. 「详细步骤」/「Step by step」 said how the page
-      // is laid out, which is the one thing a reader does not need to decide whether to open it
+      // **Names the destination, not its form.** A label describing how the target page is laid
+      // out — 「step by step」 — is the one thing a reader does not need in order to decide whether
+      // to open it
       'step3.docs':           ['配置图解 ↗', 'Setup guide ↗'],
       'step3.db':             ['攻略数据库 ID', 'Guide database ID'],
       'step3.db.ph':          ['32 位十六进制', '32 hex characters'],
