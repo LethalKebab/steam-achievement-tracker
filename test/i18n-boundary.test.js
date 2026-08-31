@@ -213,15 +213,75 @@ for (const [TABLE_NAME, TABLE, FN, OWN_FILES] of [
     ['cli-messages.js', 'tracker-messages.js']],
 ])
 describe('the messages in ' + TABLE_NAME, () => {
+  /**
+   * A handful of entries have **no Chinese to carry**: they are punctuation and slots, and the
+   * difference between their halves is typography rather than words. Written out by name so that a
+   * *new* entry losing its Chinese is still reported, which is what this check is for.
+   *
+   * The entry still has to differ between the two halves — otherwise this list becomes the place a
+   * genuinely untranslated entry goes to hide.
+   */
+  const NO_PROSE = {
+    'gp.header': 'a game line: 《》 and · against ( ) and ·, with everything else interpolated',
+  };
+
   test('every entry has both languages, and the Chinese half really is Chinese', () => {
-    const bad = Object.entries(TABLE).filter(([, v]) => {
+    const bad = Object.entries(TABLE).filter(([k, v]) => {
       if (!Array.isArray(v) || v.length !== 2) return true;
       const [zh, en] = v;
+      if (!zh || !en) return true;
       // A translation pass that took the runtime surface with it shows up here and nowhere else:
       // both halves present, both readable, and the Chinese one no longer Chinese
-      return !zh || !en || !CJK.test(zh);
+      return !CJK.test(zh) && !(k in NO_PROSE);
     }).map(([k]) => k);
     assert.deepEqual(bad, [], 'these entries are not a [zh, en] pair with a Chinese first half');
+  });
+
+  test('the entries exempted from that are really wordless, and really do differ', () => {
+    for (const [k, why] of Object.entries(NO_PROSE)) {
+      if (!(k in TABLE)) continue;              // the exemption lists both tables' names
+      const [zh, en] = TABLE[k];
+      assert.ok(!CJK.test(zh), `${k} now carries Chinese, so it does not need the exemption: ${why}`);
+      assert.notEqual(zh, en, `${k}'s two halves are identical — the exemption is hiding an untranslated entry`);
+    }
+  });
+
+
+  test('no entry has two identical halves', () => {
+    /**
+     * The failure this catches is a **half-finished translation pass**: an entry copied into both
+     * slots so the shape is right and the content is not. Every other check here passes on it —
+     * both halves present, the Chinese one Chinese, the slots identical by construction — and at
+     * runtime the interface simply keeps answering in the wrong language for that one line.
+     *
+     * No exemptions today, and a new one needs an argument: two languages agreeing on a whole
+     * message, punctuation included, is rare enough to be worth writing down.
+     */
+    const same = Object.entries(TABLE).filter(([, [zh, en]]) => zh === en).map(([k]) => k);
+    assert.deepEqual(same, [], 'these entries say exactly the same thing in both languages');
+  });
+
+  test('a message asked for with no values has no slots to fill', () => {
+    /**
+     * `clog('key')` with no second argument leaves every `{slot}` in the message **rendered
+     * literally**, so a dotted placeholder reaches the terminal where a path or a count belongs.
+     * Nothing throws, and it is invisible until somebody hits that branch.
+     *
+     * Only the no-argument form is checkable statically — with an object passed there is no way
+     * from here to know which keys it holds — and that is the form the bug takes.
+     */
+    const bare = new Set();
+    const scan = [...readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))]
+      .map((f) => join('lib', f)).concat(['tracker.js']);
+    for (const f of scan) {
+      for (const m of stripComments(read(f)).matchAll(new RegExp(FN + "\\('([^']+)'\\s*\\)", 'g'))) {
+        bare.add(m[1]);
+      }
+    }
+    const unfilled = [...bare]
+      .filter((k) => TABLE[k] && /\{[a-zA-Z]+\}/.test(TABLE[k][0]))
+      .map((k) => `${k} (${(TABLE[k][0].match(/\{[a-zA-Z]+\}/g) ?? []).join(', ')})`);
+    assert.deepEqual(unfilled, [], 'these are asked for with no values, and their slots would print literally');
   });
 
   test('a slot in one language is a slot in the other', () => {
