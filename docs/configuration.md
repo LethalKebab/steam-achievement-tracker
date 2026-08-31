@@ -67,7 +67,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 
 **`ai.provider` and `ai.providers`** — `providers` holds one block per vendor and `provider` names which one is live. Switching between them is a one-word edit, and each vendor keeps its own `apiKey` and `model` across the switch.
 
-You do not have to edit the file by hand: the settings page (设置 → 第 2 步) writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· 已配置` in the dropdown, and the key field's 「已配置,留空就不改」 badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
+You do not have to edit the file by hand: step 2 of the **Settings** (「设置」) page writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· configured` (「· 已配置」) in the dropdown, and the key field's **Configured — blank keeps it** (「已配置,留空就不改」) badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
 
 Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — and the reason is the same for all three: **more than one provider reads them, and the right value differs per vendor.** A model name is vendor-specific (`claude-*` / `gemini-*` / `deepseek-*`), so one shared `model` field has to be wiped every time you switch, which silently discards a version you pinned. `baseUrl` is read by both the Anthropic and DeepSeek paths, and one vendor's endpoint address is meaningless to the other. Everything else stays at the `ai.*` level: the budgets (`maxTokens`, `chunkSize`, `effort`, …) are correct at the same value for every vendor, and the single-vendor knobs (`geminiTools`, `webFetch`, `searchTool`, `anthropicExtras`, …) are only ever read by the one provider they belong to, so a leftover value is ignored rather than misapplied.
 
@@ -87,7 +87,7 @@ Everything written for a person follows it. Messages that can reach the Dashboar
 
 The split between those tables is by audience: only the terminal ones may name a command line, because the packaged app's user has no terminal to run one in.
 
-**A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing 「重写」 is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
+**A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing **Rewrite** (「重写」) is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
 
