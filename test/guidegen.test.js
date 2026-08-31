@@ -580,6 +580,61 @@ describe('generateGuide', () => {
     assert.equal(r.draftPath, null);
   });
 
+  describe('cancellation — the Dashboard Cancel button', () => {
+    /**
+     * Models a shard's request that never resolves on its own, exactly the shape of a real
+     * in-flight `provider.send()`: it only settles when the signal it was handed fires, and it
+     * rejects with the same `cancelled: true` shape the real providers produce (see ai.test.js
+     * for where *that* is verified against a real fetch).
+     */
+    function hangingProvider() {
+      return {
+        model: 'claude-opus-5',
+        webTools: () => [],
+        send({ signal }) {
+          return new Promise((_resolve, reject) => {
+            const onAbort = () => {
+              const err = new Error('已取消');
+              err.cancelled = true;
+              reject(err);
+            };
+            if (signal?.aborted) return onAbort();
+            signal?.addEventListener('abort', onAbort);
+          });
+        },
+      };
+    }
+
+    test('aborting mid-round rejects the whole run rather than degrading into a draft-only result', async () => {
+      const { db, config } = freshEnv();
+      const ac = new AbortController();
+      const gen = generateGuide(db, { config, provider: hangingProvider(), steam: fakeSteam(), appid: '1', signal: ac.signal });
+      ac.abort();
+      await assert.rejects(gen, (err) => {
+        assert.equal(err.cancelled, true, 'the caller (server.js) tells this apart from a real failure by this flag');
+        return true;
+      });
+    });
+
+    test('an already-aborted signal is honoured before the first request goes out', async () => {
+      const { db, config } = freshEnv();
+      const ac = new AbortController();
+      ac.abort();
+      await assert.rejects(
+        generateGuide(db, { config, provider: hangingProvider(), steam: fakeSteam(), appid: '1', signal: ac.signal }),
+        (err) => { assert.equal(err.cancelled, true); return true; }
+      );
+    });
+
+    test('no signal at all behaves exactly as before — the parameter is opt-in', async () => {
+      // Not a cancellation test so much as a guard against the opposite mistake: a default that
+      // somehow makes every ordinary run pass a live signal it never checked
+      const { db, config } = freshEnv();
+      const r = await generateGuide(db, { config, provider: fakeProvider([GOOD]), steam: fakeSteam(['A']), appid: '1' });
+      assert.equal(r.ok, true);
+    });
+  });
+
   test('the first round missed an achievement and the second fills it in after feedback → pass', async () => {
     const { db, config } = freshEnv();
     const provider = fakeProvider([MISSING_B, GOOD]);

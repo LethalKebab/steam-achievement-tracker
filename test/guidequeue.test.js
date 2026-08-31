@@ -468,3 +468,202 @@ describe('the finished screen has to be able to get the backup id', () => {
       'without that check the new-generation screen shows a button that is bound to fail');
   });
 });
+
+/**
+ * Cancelling — issue #79. Two shapes, and `cancelGuideGen` in server.js picks between them by
+ * asking `snapshot()`, not by trying one then the other: **the running job and a queued one are
+ * different objects with different recovery paths** (an AbortController to fire vs. an array
+ * entry to remove), and conflating them risks the same mistake `isPending`/`claim` already made
+ * once — a check that is true for the wrong reason.
+ */
+describe('cancelRunning / cancelQueued — the state module half', () => {
+  test('cancelRunning is false when nothing is running: nothing to abort, nothing pretends otherwise', () => {
+    const s = createGuideGenState();
+    assert.equal(s.cancelRunning(), false);
+  });
+
+  test('cancelRunning aborts the controller that was set, and only that one', () => {
+    const s = createGuideGenState();
+    const ac = new AbortController();
+    s.setController(ac);
+    assert.equal(s.cancelRunning(), true);
+    assert.equal(ac.signal.aborted, true);
+  });
+
+  test('the controller is one slot, not a stack — setController(null) really clears it', () => {
+    // This is what runGuideGen's .finally does after every job, win or lose. Leaving the old
+    // controller behind would let a *later* job's Cancel button reach back and abort a request
+    // that already finished
+    const s = createGuideGenState();
+    const first = new AbortController();
+    s.setController(first);
+    s.setController(null);
+    assert.equal(s.cancelRunning(), false, 'a cleared controller must not still be abortable');
+    assert.equal(first.signal.aborted, false);
+  });
+
+  test('cancelQueued removes exactly the named appid, in place — the rest keep their order', () => {
+    const s = createGuideGenState();
+    s.enqueue({ appid: '1', game: 'A' });
+    s.enqueue({ appid: '2', game: 'B' });
+    s.enqueue({ appid: '3', game: 'C' });
+    assert.equal(s.cancelQueued('2'), true);
+    assert.deepEqual(s.snapshot().queue.map((q) => q.appid), ['1', '3']);
+  });
+
+  test('cancelQueued on an appid not in the queue returns false and touches nothing', () => {
+    const s = createGuideGenState();
+    s.enqueue({ appid: '1', game: 'A' });
+    assert.equal(s.cancelQueued('999'), false);
+    assert.equal(s.queueLength(), 1);
+  });
+
+  test('cancelQueued still un-greys the row: it synthesises a finished record', () => {
+    // Without this, the row that started it stays greyed out forever — setGuideBusy(appid,
+    // false) on the Dashboard only ever fires off an entry appearing in `finished`, and a job
+    // that never reaches begin() would otherwise produce none
+    const s = createGuideGenState();
+    s.enqueue({ appid: '5', game: '空之轨迹' });
+    assert.equal(s.cancelQueued('5'), true);
+    const done = s.snapshot().finished;
+    assert.equal(done.length, 1);
+    assert.equal(done[0].appid, '5');
+    assert.equal(done[0].game, '空之轨迹');
+    assert.equal(done[0].error, null, 'a cancellation is not an error — the run did exactly what was asked');
+    assert.deepEqual(done[0].result, { ok: false, cancelled: true });
+  });
+
+  test('cancelling one queued job leaves the others queued and cancellable', () => {
+    const s = createGuideGenState();
+    s.enqueue({ appid: '1', game: 'A' });
+    s.enqueue({ appid: '2', game: 'B' });
+    s.cancelQueued('1');
+    assert.equal(s.isPending('1'), false, 'appid 1 is free again — it can be queued afresh');
+    assert.equal(s.isPending('2'), true, 'appid 2 is still queued and must still block a repeat click');
+  });
+});
+
+/**
+ * End to end: a real server, a real running job, cancelled through the real HTTP endpoint.
+ *
+ * The unit tests above prove the state module; this proves the **whole path** a click actually
+ * takes — `/api/cancelGuideGen` → `cancelGuideGen` → `guideGenState.cancelRunning()` → the
+ * controller's `abort()` → the fake provider's in-flight `send()` rejecting → `runGuideGen`'s
+ * `.catch` recognising `err.cancelled` → a `finished` entry the next `/api/guideGenStatus` poll
+ * picks up. Any one of those links silently missing (the commonest way: `signal` dropped
+ * somewhere on its way from `runGuideGen` down into `provider.send`) leaves the button doing
+ * nothing forever, indistinguishable from a slow network unless someone actually waits for it.
+ */
+describe('end to end: cancelling a real running job', () => {
+  /**
+   * Replaces globalThis.fetch wholesale (see the comment in boot() for why), so it also has to
+   * carry the test's own calls to the local server through untouched. **The signal is what tells
+   * the two apart**: `#once` always passes one, whether idle-timeout or Cancel-driven, and this
+   * test's own `call()` helper below never does — so "no signal" reliably means "not the request
+   * under test" rather than a guess about URLs or ports.
+   */
+  function hangingFetch(realFetch) {
+    return (url, init) => {
+      if (!init?.signal) return realFetch(url, init);
+      return new Promise((_resolve, reject) => {
+        const onAbort = () => {
+          const err = new Error('The operation was aborted.');
+          err.name = 'AbortError';
+          reject(err);
+        };
+        if (init.signal.aborted) return onAbort();
+        init.signal.addEventListener('abort', onAbort);
+      });
+    };
+  }
+
+  const boot = async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sat-cancel-'));
+    const db = openDb(join(dir, 'steam.db'));
+    insertGame(db, { appid: '730', name: '测试游戏', status: '' });
+    replaceAchievements(db, '730', [
+      { apiName: 'A1', gameName: '测试游戏', nameCn: '成就一', description: 'x' },
+    ]);
+    // **The real AnthropicProvider, with the real network call intercepted.** createProvider is
+    // called inside server.js with no injectable fetchImpl, so the only way to reach a genuinely
+    // running job — one whose in-flight request this test can then cancel — is to replace
+    // globalThis.fetch, which is AnthropicProvider's own default when none is given.
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = hangingFetch(originalFetch);
+    const server = await serve({
+      db,
+      steam: {
+        fetchPlayerAchievements: async () => ({ achievements: [{ apiname: 'A1', achieved: 0 }] }),
+        fetchGlobalAchievementPercentages: async () => null,
+      },
+      config: {
+        port: 0,
+        guidesDir: join(dir, 'guides'),
+        steamApiKey: 'k',
+        steamId: '1',
+        ai: { provider: 'anthropic', apiKey: 'k', model: 'claude-opus-5' },
+      },
+      log: () => {},
+    });
+    const port = server.address().port;
+    // **Unwrapped to the method's own return value.** The endpoint wraps every call as
+    // `{ok, result}` (`ok` reflects only whether the body carries an `{error}` field, not HTTP
+    // status) — the earlier "two simultaneous clicks" test above reaches into `.result` itself
+    // for the same reason
+    const call = (method, args) =>
+      fetch(`http://127.0.0.1:${port}/api/${method}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ args }),
+      }).then((r) => r.json()).then((j) => j.result);
+    return {
+      call,
+      cleanup: () => {
+        globalThis.fetch = originalFetch;
+        server.close();
+        db.close();
+        rmSync(dir, { recursive: true, force: true });
+      },
+    };
+  };
+
+  /** Polls guideGenStatus until running flips false, the same signal the Dashboard's fetchGen waits on */
+  const untilFinished = async (call, tries = 50) => {
+    for (let i = 0; i < tries; i++) {
+      const s = await call('guideGenStatus', []);
+      if (!s.running) return s;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error('the job never stopped running — cancel did not reach the in-flight request');
+  };
+
+  test('cancelling a running job reports cancelled:true, and the finished record says so', async () => {
+    const { call, cleanup } = await boot();
+    try {
+      const started = await call('startGuideGen', ['730', false, null, null]);
+      assert.equal(started.started, true, `setup failed before the real test began: ${JSON.stringify(started)}`);
+
+      const cancelled = await call('cancelGuideGen', ['730']);
+      assert.equal(cancelled.cancelled, true, JSON.stringify(cancelled));
+
+      const status = await untilFinished(call);
+      const entry = status.finished.find((f) => f.appid === '730');
+      assert.ok(entry, 'the cancelled job never produced a finished record — the row would stay greyed out forever');
+      assert.equal(entry.error, null, 'a cancellation is not an error');
+      assert.deepEqual(entry.result, { ok: false, cancelled: true });
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('cancelling an appid that is neither running nor queued reports cancelled:false', async () => {
+    const { call, cleanup } = await boot();
+    try {
+      const r = await call('cancelGuideGen', ['999999']);
+      assert.equal(r.cancelled, false);
+      assert.ok(r.error, 'a false result with no explanation reads as "did it even try"');
+    } finally {
+      cleanup();
+    }
+  });
+});

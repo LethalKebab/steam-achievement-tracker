@@ -508,3 +508,38 @@ describe('listModels', () => {
     );
   });
 });
+
+describe('cancellation — the Dashboard Cancel button, mirroring ai.test.js exactly', () => {
+  /** Never resolves on its own; only reacts to whichever AbortController owns init.signal */
+  function hangingFetch() {
+    return (url, init) => new Promise((_resolve, reject) => {
+      const onAbort = () => {
+        const err = new Error('The operation was aborted.');
+        err.name = 'AbortError';
+        reject(err);
+      };
+      if (init.signal.aborted) return onAbort();
+      init.signal.addEventListener('abort', onAbort);
+    });
+  }
+
+  test('an external signal aborts the request and is reported cancelled, not a timeout', async () => {
+    const ac = new AbortController();
+    const p = new GeminiProvider(AI, { fetchImpl: hangingFetch() });
+    const sent = p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], signal: ac.signal });
+    ac.abort();
+    await assert.rejects(sent, (err) => {
+      assert.equal(err.cancelled, true);
+      assert.equal(err.retryable, false);
+      return true;
+    });
+  });
+
+  test('the idle timeout with no external signal is not mistaken for a cancellation', async () => {
+    const p = new GeminiProvider({ ...AI, requestTimeoutMs: 5 }, { fetchImpl: hangingFetch() });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (err) => {
+      assert.equal(err.cancelled, false);
+      return true;
+    });
+  });
+});
