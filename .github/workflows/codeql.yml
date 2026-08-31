@@ -44,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@v4
         with:
           # One value covers both — and it reaches the inline scripts in Dashboard.html and
           # Setup.html, which is where most of this project's JavaScript actually lives
@@ -52,6 +52,6 @@ jobs:
 
       # No build step: JavaScript is analysed from source, and this repository has nothing to
       # compile. `autobuild` would only try to guess at launcher/ and fail loudly for no gain
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@v4
         with:
           category: '/language:javascript-typescript'
