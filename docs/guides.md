@@ -339,7 +339,7 @@ Two consequences of restoring worth knowing:
 
 - Restoring a `.md` for a game whose guide now lives in Notion **re-registers it as local**.
   The Notion page is not touched, but it stops being the registered guide, and the panel
-  says so. Use 「搬去 Notion」 to send it back.
+  says so. Use the row's **Notion** button to send it back.
 - Restoring a Notion backup deletes the page's current blocks before writing the old ones.
   That order is deliberate: writing first would leave old and new side by side, and running
   it again would triple them, while deleting first means a failure is fixed by simply
@@ -357,7 +357,7 @@ Clicking a game row expands the achievements you haven't unlocked yet. Each card
 
 The card already prints the name and the official description from Steam, so the guide text has its opening echo of those two stripped — what's left is your notes. Only exact echoes go, and only from the top: a description you paraphrased is your own wording and stays, which is what keeps a *hidden* achievement's condition on screen (Steam gives no description for those, so that line in your guide is the only place it appears). An entry that copied the official text and added nothing shows no guide block at all, rather than repeating what's already above it.
 
-Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement`): a verbatim quote of a description that is unique in the game, or a name that maps to exactly one achievement. **It refuses to guess.** An achievement it can't attribute shows 「攻略里还没写这条」 and keeps the search link. Do not loosen the matching to fill those blanks — the same function decides which boxes get ticked in your notes, so loosening it here loosens it there.
+Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement`): a verbatim quote of a description that is unique in the game, or a name that maps to exactly one achievement. **It refuses to guess.** An achievement it can't attribute shows **Not written up yet** (「攻略里还没写这条」) and keeps the search link. Do not loosen the matching to fill those blanks — the same function decides which boxes get ticked in your notes, so loosening it here loosens it there.
 
 That refusal is what makes the header worth reading:
 
@@ -374,7 +374,7 @@ Details:
 - One Notion read per game, on the first expand, cached for the rest of the page's life.
 - **Failure is soft.** An expired token leaves the achievement list exactly as it was and says why in the header — it does not take the panel down.
 - Local markdown guides show the text but no jump link: a line number is not an anchor.
-- A game with no registered guide is unchanged — search link only. Nothing claims 「攻略里还没写」 when there is no guide to have written it in.
+- A game with no registered guide is unchanged — search link only. Nothing claims **Not written up yet** (「攻略里还没写这条」) when there is no guide to have written it in.
 
 ## Running the sync
 
@@ -391,7 +391,7 @@ A game is eligible if it has a registered guide, has an achievement system, and 
 
 ## Automatic ticking
 
-Opening the Dashboard, and the 「立即同步」 button on it, both run a tick pass once the achievement sync finishes. It is deliberately narrower than the manual command:
+Opening the Dashboard, and the **Sync now** (「立即同步」) button on it, both run a tick pass once the achievement sync finishes. It is deliberately narrower than the manual command:
 
 - **Only games that changed in that run** — ones where your unlocked count went up, ones where the developer added achievements, and guide pages registered for the first time that run. Nothing changed means zero Notion calls, which is the usual case.
 - **No sub-step cascade.** Nested boxes under an achievement are only ticked by the manual command, where a dry-run is available first. See the cascade section below for why.
