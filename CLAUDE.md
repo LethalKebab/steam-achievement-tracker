@@ -39,7 +39,7 @@ node --check lib/foo.js                  # syntax check (silent on success)
 
 **What `dot` does not print is a summary line.** There is no `tests N / pass N / fail 0` tail, so **the green signal is the exit code plus the absence of an `X`**, not a sentence. Two consequences: do not pipe it through `tail` and then report "all tests pass" because nothing looked wrong (`| tail -4` on a red run shows dots and hides the failure block above them); and when you actually want a count, use the default reporter for that run.
 
-Commit messages are Chinese or English, whichever suits the change. This is settled — don't raise it.
+**Everything a developer reads is English** — comments, documentation, test names, **commit messages and pull request titles and bodies**. This is the same audience rule `test/i18n-boundary.test.js` states at the top, and it extends to the history: the reader of a commit message is whoever is bisecting, not the exe's user. The user-facing side is unaffected — that is bilingual, and `README.md` / `README.zh.md` are the two halves of it.
 
 There is no build, no push, no deploy. Editing a file and re-running the command is the whole loop. `serve` does not hot-reload — restart it after changing `lib/` (`Dashboard.html` and `lib/rpc.js` are re-read per request).
 
