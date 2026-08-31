@@ -27,7 +27,15 @@
  * first update naturally takes constraint 2's overwrite path with no special case needed.
  */
 import { createHash } from 'node:crypto';
-import { createReadStream, createWriteStream, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -173,8 +181,8 @@ export function parseManifest(text) {
 /**
  * Files that are specific to this machine and are never part of the program itself.
  *
- * There is only one today: `local.config.json` (the pointer that aims the packaged build at an
- * existing CLI data set). Letting it into the manifest means the next update deletes it as a program
+ * There is only one today: `local.config.json` (the pointer naming the build's data directory).
+ * Letting it into the manifest means the next update deletes it as a program
  * file — the user's data directory silently reverts to the default location, presenting as "all my
  * data is gone". postbuild generates the manifest before copying it in, so the ordering is the
  * mechanism and this check is the safety net — orderings get changed by people.
@@ -187,6 +195,55 @@ export function machineLocalEntries(files = []) {
     const base = String(f).split(/[/\\]/).pop()?.toLowerCase();
     return MACHINE_LOCAL_FILES.includes(base);
   });
+}
+
+/**
+ * The user's own files inside an app directory, at their default locations, relative to it.
+ *
+ * `lib/config.js` puts all of them under `DATA_ROOT`, which without a `local.config.json` is
+ * `resources/tracker/` — the same directory the program files were copied into. **A build cannot
+ * produce any of these paths**: `extraResources` in `launcher/package.json` is an allow-list of
+ * `tracker.js`, `package.json`, `*.html`, `lib/**` and `assets/**`, so a path named here is the
+ * user's or does not exist.
+ *
+ * **That is what makes a fixed list usable here and not for deletion.** Deciding what to *delete*
+ * from a list like this is the keep-list the updater refuses to have: one missing entry destroys
+ * data. Deciding what to *refuse to delete* fails the other way — one missing entry lets a build
+ * proceed that should have stopped, which is the situation that already exists without the check.
+ *
+ * It covers the defaults, not every configuration: `dbPath` and `guidesDir` are settable, and a
+ * database moved elsewhere is not found by this.
+ */
+export const USER_DATA_PATHS = [
+  'resources/tracker/config.json',
+  'resources/tracker/data',
+  'resources/tracker/guides',
+  'resources/tracker/backups',
+  'resources/tracker/exports',
+];
+
+/** Which of `USER_DATA_PATHS` are present under `appDir` (an empty array = none of the user's files are in there) */
+export function userDataEntries(appDir) {
+  return USER_DATA_PATHS.filter((rel) => existsSync(join(appDir, ...rel.split('/'))));
+}
+
+/**
+ * The `local.config.json` a build writes for itself when `launcher/` holds none.
+ *
+ * **`dataDir` is what keeps a local build's data out of dist/**, where the next build's directory
+ * swap would delete it. It also puts `config.json` and `data/` where CONTRIBUTING.md and .gitignore
+ * already say they are, so the CLI, `npm start` and the built exe read one dataset instead of three.
+ *
+ * **`autoUpdate: false` is about code, not data.** A build made from a working tree that offers to
+ * replace itself with the published release ends with somebody testing a change against code that no
+ * longer contains it.
+ *
+ * Forward slashes because that is what a JSON path is read as everywhere here, and it needs no
+ * escaping. It lives in this file rather than in postbuild so the decision can be tested; postbuild
+ * itself acts on the real repository and cannot be run by a test.
+ */
+export function generatedLocalConfig(repoRoot) {
+  return { dataDir: String(repoRoot).replace(/\\/g, '/'), autoUpdate: false };
 }
 
 /**
