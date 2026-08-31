@@ -322,15 +322,19 @@
        weight, so colour no longer moonlights as hierarchy and the two jobs are
        separated.
 
-       **Do not change the 0.74em size.** Han characters nearly fill the em box
-       while Latin capitals only reach cap-height, so at the same px the Latin looks
-       noticeably smaller; 0.74em was compared step by step at the time. It was
-       re-measured after switching to the self-hosted font: the ratio of Latin cap
-       height to Han ink height is 0.593, against roughly 0.58 before — under two
-       percentage points apart, so **it survived the font change and needs no
-       recalibration.** */
+       **The size is 0.86em, and the number is not a free choice — read this before
+       nudging it.** Han characters nearly fill the em box while Latin capitals only
+       reach cap-height, measured on the self-hosted font at a ratio of 0.593. So the
+       size set here is not what STEAM looks like: at 0.86em its caps stand about
+       0.51 of the Han ink height, i.e. it still reads as roughly half the size of
+       the Chinese, which is the recession the design wants. Below ~0.8em that
+       compounding drops it under 0.45 and it stops looking subordinate and starts
+       looking like a mistake.
+       **In English the compounding does not apply** — the whole wordmark is Latin
+       there, so this is a plain 0.86-against-1 comparison, and the weight gap
+       (500 against 800) is carrying most of the hierarchy rather than the size. */
     .wm-latin {
-      font-size: 0.74em;
+      font-size: 0.86em;
       font-weight: 500;
       letter-spacing: 0.15em;
       text-transform: uppercase;
@@ -340,6 +344,17 @@
     }
     /* 「成就」 is this tool's keyword, so it gets the accent. All white is too flat, and colouring the whole phrase is too noisy */
     .wm-key { color: var(--accent); }
+    /* **The word gap belongs to the script, and it is a real character.** The two spans sit flush
+       against each other because 成就追踪器 is one uninterrupted phrase; the same markup in English
+       ran 「Achievement」 and 「Tracker」 together.
+       It is a space in the DOM rather than a margin, because a margin leaves the *text* still
+       reading 「AchievementTracker」 — which is what a screen reader announces and what copying the
+       heading puts on the clipboard. Shown only under lang="en", the attribute `applyStrings`
+       already sets on <html>; hidden it contributes nothing to the accessible name, which is
+       correct for Chinese. A literal space in the string table is the wrong home for it: invisible
+       in a diff and the first thing a trim would eat. */
+    .wm-gap { display: none; }
+    :root[lang="en"] .wm-gap { display: inline; }
     /* position: relative is no longer needed — it was only ever the anchor for that absolutely positioned underline */
     .wm-text { display: inline-block; white-space: nowrap; }
 
@@ -2394,7 +2409,7 @@
       <!-- 「Steam」 is the platform, 「成就」 is the keyword and 「追踪器」 is the noun;
            three roles, three treatments: weight, accent colour, plain. **There is no
            underline**; the reasoning is in the .wordmark block in the stylesheet -->
-      <h1 class="wordmark"><span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key" data-t="wm.key">成就</span><span data-t="wm.rest">追踪器</span></span></h1>
+      <h1 class="wordmark"><span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key" data-t="wm.key">成就</span><span class="wm-gap">&#160;</span><span data-t="wm.rest">追踪器</span></span></h1>
       <!-- The exact values and their definitions go in title attributes (readable on hover) rather than taking screen space -->
       <div class="readout">
         <!-- **Always the library total, and it does not follow the filters.** The
