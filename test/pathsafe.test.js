@@ -147,17 +147,30 @@ describe('every caller routes through the same predicate', () => {
    * own tests still pass. So this checks the source directly.
    */
   test('no file still writes its own `startsWith(root)` containment check', async () => {
-    const { readFileSync } = await import('node:fs');
-    const files = ['lib/markdown.js', 'lib/backup.js', 'lib/guidearchive.js', 'lib/server.js'];
+    const { readFileSync, readdirSync } = await import('node:fs');
+    // **Every file in lib/, not a list.** A hand-maintained list has the same failure mode as the
+    // duplicated predicate it guards: the file that most needs checking is the one nobody
+    // remembered to add. `api.js` was exactly that — it hand-rolled the check, and this test named
+    // four other files and passed.
+    const files = readdirSync(new URL('../lib/', import.meta.url))
+      .filter((f) => f.endsWith('.js') && f !== 'pathsafe.js');
+    assert.ok(files.length > 10, `only ${files.length} files found — the scan has lost its target rather than passed`);
     for (const f of files) {
-      const src = readFileSync(new URL('../' + f, import.meta.url), 'utf8')
+      const src = readFileSync(new URL('../lib/' + f, import.meta.url), 'utf8')
         .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
         .replace(/^\s*\/\/.*$/gm, '')       // line comments — mentioning this form in a comment is allowed
         .replace(/^\s*\*.*$/gm, '');        // JSDoc continuation lines
-      assert.doesNotMatch(
-        src, /startsWith\(\s*(?:root|base|resolve\()/,
-        `${f} still holds a hand-written containment check, so the predicate is back to two copies`
-      );
+      for (const shape of [
+        // Named for what it is compared against …
+        /startsWith\(\s*(?:root|base|dir|resolve\()/,
+        // … or recognisable by the separator that has to be appended for it to be correct at all
+        /startsWith\([^)]*\+\s*sep\s*\)/,
+      ]) {
+        assert.doesNotMatch(
+          src, shape,
+          `lib/${f} still holds a hand-written containment check, so the predicate is back to two copies`
+        );
+      }
     }
   });
 });

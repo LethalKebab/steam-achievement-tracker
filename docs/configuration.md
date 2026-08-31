@@ -73,6 +73,8 @@ Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — a
 
 The older flat `ai.apiKey` / `ai.model` still work and need no edit. They are treated as belonging to whatever `ai.provider` says in the file — so on load they are adopted into that vendor's block, and they are **never** offered to a different vendor. That refusal is the point: handing DeepSeek's key to `api.anthropic.com` produces a 401 whose message says to check `ANTHROPIC_API_KEY`, sending you after a variable that was set correctly all along. An empty key instead reports which vendor is unconfigured.
 
+Saving from the **Settings** page writes that adoption into the file: the flat fields are cleared and each vendor's block holds what they carried. Nothing is lost in the move, and a file already using `providers` is unaffected.
+
 Environment variables win over both, and they are looked up **by the vendor being asked for** rather than by the one written in the file.
 
 **`language`** — passed to Steam as the `l=` parameter, so it changes the names that are **fetched and stored**. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.

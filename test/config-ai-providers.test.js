@@ -36,7 +36,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -308,5 +308,104 @@ describe('loadConfig', () => {
     assert.equal(ai.providers.anthropic.model, 'claude-opus-5', 'the model has to survive along with it');
     assert.equal(ai.providers.gemini.apiKey, 'GEM');
     assert.equal(ai.apiKey, 'DS', 'the current provider\'s key has to resolve');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Saving from the settings page has to make the legacy adoption real
+// ---------------------------------------------------------------------------
+
+const { createServer } = await import('node:http');
+const { createApi } = await import('../lib/api.js');
+const { openDb } = await import('../lib/db.js');
+
+/**
+ * A stand-in for the vendor, so that saving can be exercised without a network.
+ * `saveAiConfig` verifies with a real request by design — an invalid key, a withdrawn model and a
+ * tier allowance of 0 are none of them visible from the string — so the request has to go
+ * somewhere, and `ai.baseUrl` is where the provider points.
+ */
+async function fakeVendor() {
+  const events = [
+    { type: 'message_start', message: { id: 'msg_1', model: 'claude-opus-5', usage: { input_tokens: 5, output_tokens: 1 } } },
+    { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+    { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '好' } },
+    { type: 'content_block_stop', index: 0 },
+    { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } },
+  ];
+  const body = events.map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`).join('');
+  const server = createServer((req, res) => {
+    req.resume();
+    req.on('end', () => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(body);
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  return { url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() };
+}
+
+describe('saveAiConfig persists the legacy adoption, not only the new vendor', () => {
+  /**
+   * `adoptLegacyAiFields` moves a pre-`providers{}` file's flat `ai.apiKey` / `ai.model` /
+   * `ai.baseUrl` into the slot of the provider that file names, and clears the flat ones. That
+   * rewrite is done on every load and has only ever existed in memory.
+   *
+   * So saving without it leaves the flat key on disk while `provider` moves on, and it then
+   * belongs to nobody: the previous vendor's adopted slot was never written, so its key is
+   * unreachable, and the next load clears the flat field it was still sitting in. What the user
+   * sees is a key they have to type again although it was never wrong — and nothing reports it.
+   */
+  const saveWith = async (legacyAi, vendorUrl) => {
+    writeConfig({ ...legacyAi, baseUrl: vendorUrl });
+    const config = loadConfig();
+    const api = createApi({
+      db: openDb(join(DIR, 'save-ai.db')),
+      steam: {}, config,
+      syncState: { snapshot: () => ({}) },
+      startBackgroundSync: null, guideGenState: null, startGuideGen: null,
+      planGuidePreflight: null, maybeAutoSync: null,
+    });
+    const r = await api.saveAiConfig('anthropic', 'sk-ant-new', 'claude-opus-5');
+    const onDisk = JSON.parse(readFileSync(join(DIR, 'config.json'), 'utf8'));
+    return { r, onDisk };
+  };
+
+  test('**the previous vendor\'s adopted key reaches the file**', async () => {
+    const v = await fakeVendor();
+    try {
+      const { r, onDisk } = await saveWith(
+        { provider: 'deepseek', apiKey: 'sk-deepseek-legacy', model: 'deepseek-chat' }, v.url
+      );
+      assert.equal(r.error, undefined, `saving failed outright: ${r.error}`);
+      assert.equal(
+        onDisk.ai.providers?.deepseek?.apiKey, 'sk-deepseek-legacy',
+        'the adopted DeepSeek slot was never written, so that key is now unreachable and the next load clears it'
+      );
+      assert.equal(onDisk.ai.providers.anthropic.apiKey, 'sk-ant-new');
+    } finally { v.close(); }
+  });
+
+  test('the orphaned flat fields are cleared on disk, so nothing is left without an owner', async () => {
+    const v = await fakeVendor();
+    try {
+      const { onDisk } = await saveWith(
+        { provider: 'deepseek', apiKey: 'sk-deepseek-legacy', model: 'deepseek-chat' }, v.url
+      );
+      assert.equal(onDisk.ai.apiKey, '',
+        'a flat key left behind while provider moved on belongs to no vendor at all');
+      assert.equal(onDisk.ai.model, '');
+    } finally { v.close(); }
+  });
+
+  test('reloading the saved file gives both vendors back — the round trip is what this is for', async () => {
+    const v = await fakeVendor();
+    try {
+      await saveWith({ provider: 'deepseek', apiKey: 'sk-deepseek-legacy', model: 'deepseek-chat' }, v.url);
+      const reloaded = loadConfig();
+      assert.equal(resolveAiKey(reloaded.ai, 'deepseek', env()), 'sk-deepseek-legacy',
+        'switching vendor and back asks for a key that was never wrong');
+      assert.equal(resolveAiKey(reloaded.ai, 'anthropic', env()), 'sk-ant-new');
+    } finally { v.close(); }
   });
 });
