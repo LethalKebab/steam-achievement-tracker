@@ -180,6 +180,14 @@ gh release create v<version> \
   --notes-file <notes>
 ```
 
+**The notes are English, and every control they name needs both languages.** The interface has been bilingual since v1.2.4, so 「重写」 on its own tells an English-interface reader to press something that is not on their screen — write **Rewrite** (「重写」), the convention `docs/` uses.
+
+**Windows' own dialogs are the trap that looks identical and is not.** 「已保护你的电脑」 is what a *Chinese* Windows says; an English one reads "Windows protected your PC" → **More info → Run anyway**. Every release through v1.2.4 quoted only the Chinese, which was never right for a reader on an English system — that half predates the bilingual interface and has nothing to do with it. Lead with the English and put the Chinese after it.
+
+Real example data — an achievement name, a section heading, a line of generated prose — stays in whatever language it actually was. Translating it would misreport what the feature produced.
+
+**Nothing checks any of this.** Release notes are written by hand and live on GitHub rather than in the repo, so the walkthrough-doc guard in `test/i18n-boundary.test.js` cannot see them. This checklist is the only gate.
+
 **Upload the manifest every time.** Forgetting it is not loud: that release installs fine, and the damage shows up one release later as an update that leaves stale files behind. The updater treats a missing manifest as "fall back to overwrite" precisely so a slip here degrades instead of breaking, but the degradation is silent.
 
 ### Publish as a prerelease first, then flip — and flip *both* switches
