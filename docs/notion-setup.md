@@ -4,15 +4,15 @@ Once connected, the program writes generated guides into your Notion and ticks t
 
 Four steps, about 10 minutes, all of it in the browser and the program's own UI. **No command line required.**
 
-> This is the operator's walkthrough. For the rules behind checkbox sync and status convergence see [guides.md](guides.md); for what each setting means see [configuration.md](configuration.md).
+> This is the operator's walkthrough. For the rules behind checkbox sync and status convergence, see [guides.md](guides.md). For what each setting means, see [configuration.md](configuration.md).
 >
-> **UI labels are given English first, with the Chinese in parentheses**, because the interface runs in either language and a control has to be findable in both.
+> **UI labels are quoted verbatim in Chinese**, because that is what the buttons actually say.
 
 ```mermaid
 flowchart LR
     A["① Create a connection<br/>on the Notion site"] --> B["② Authorise the page<br/>the step most often missed"]
-    B --> C["③ Enter it in the app<br/>Settings (「设置」) → Notion"]
-    C --> D["④ Save and verify (「保存并验证」)<br/>tells you the result on the spot"]
+    B --> C["③ Enter it in the app<br/>设置 → Notion"]
+    C --> D["④ 保存并验证<br/>tells you the result on the spot"]
     style B stroke-width:3px
 ```
 
@@ -25,10 +25,15 @@ Step ② is called out separately because the overwhelming majority of "it won't
 Open the [developer page](https://app.notion.com/developers/connections) → **New connection**.
 
 - **Name** — anything, e.g. `Steam 攻略`
-- **Type** — choose **Internal**
-- **Associated workspace** — the workspace your guides live in
+- **Authentication method** — stick with `Access token`
+
+<img width="720" alt="New connection page" src="https://github.com/user-attachments/assets/b2ee037a-0274-4d36-a5c1-4d80efdcbd88" />
+
+<img width="400" alt="Authentication method options" src="https://github.com/user-attachments/assets/799391c5-e751-44ba-8636-ad41fc831a64" />
 
 Once created, go to the **Configuration** tab. It holds an **Access token** starting with `ntn_` or `secret_`. Click **Show** → **Copy** and keep it somewhere for step ③.
+
+<img width="720" alt="Access token field" src="https://github.com/user-attachments/assets/0136e04f-6e6e-49dd-864e-dd61d086efc9" />
 
 > **The older UI uses different words for these**: `New connection` was `New integration`, `Access token` was `Internal Integration Secret` (shown directly on the page after creation, not in a Configuration tab), and the developer page was at `notion.so/my-integrations`. They are the same things.
 >
@@ -40,16 +45,20 @@ Once created, go to the **Configuration** tab. It holds an **Access token** star
 
 ## ② Share the page with it
 
-**Skip this and nothing later will connect.** A newly created connection can see **nothing** by default — even inside your own workspace. You have to tell Notion explicitly that this connection may touch this page.
+Create a new page in the left sidebar. Name it whatever you like, e.g. "Steam games", then click **Empty page**.
+
+<img width="200" alt="Creating a new empty page" src="https://github.com/user-attachments/assets/a887028f-4b3b-46fa-a0ae-f791d47fb74a" />
 
 Open the page you intend to keep guides under, then:
 
 ```
 top-right of the page
    ••• (More)
-      └─ Add connections
+      └─ Connections
             └─ search for the name you used in step ① → select it
 ```
+
+<img width="720" alt="Adding the connection to a page" src="https://github.com/user-attachments/assets/cc58e3ca-1bdc-4452-b2ca-ed41a599b72f" />
 
 Some Notion versions require clicking "+ Add connections" first.
 
@@ -61,7 +70,7 @@ Some Notion versions require clicking "+ Add connections" first.
 
 ## ③ Back in the app: pick one of two routes
 
-Open the program → **⚙️ Settings** (「设置」, top right) → click through to the **Notion** step on the step bar.
+Open the program → **⚙️ 设置** (top right) → click through to the **Notion** step on the step bar.
 
 Paste the token from step ① into **Access token**. From there, two routes:
 
@@ -74,13 +83,23 @@ flowchart TD
 
 **The left route never touches a URL and cannot be filled in wrong** — take it if you have no existing database. The program creates the database along with all four status options and writes the ID straight into the config.
 
+<img width="720" alt="Click ＋ 新建一个攻略数据库 to start the left route" src="https://github.com/user-attachments/assets/5bb13ef1-7b77-4a41-aad7-6a75bd7df3fe" />
+
+<img width="720" alt="The create-database form: pick a parent page, name it, then click 建立" src="https://github.com/user-attachments/assets/51e8d3a0-8016-47cf-bda1-b3c6bf691ccd" />
+
+On success:
+
+> 创建成功:「Steam 攻略」,状态选项 Not started / In progress / Staged / Done。ID 已填好并保存。
+>
+> Created: Steam 攻略, status options Not started / In progress / Staged / Done. The ID is filled in and saved.
+
 ### If you take the right route: getting the database ID
 
 Open the database **as a full page** in Notion (not a small table embedded in another page), then look at the address bar:
 
 ```
-https://notion.so/我的攻略库-3bd1fee6252b816da1ccf9c50b8e91c2?v=8a2f...
-                            └─────── these 32 characters ────────┘  └─ drop everything from ? on
+https://app.notion.com/p/Steam-Guides-3cc90c1c4bd680089a1dff2a79a88148?v=8f3d21a4c9b6407a8e2f1c5d6a7b8c90&pvs=12
+                                      └──── these 32 characters ─────┘ └─ drop everything after '?'
 ```
 
 Take the pure hexadecimal run before the `?` (only `0-9` and `a-f`). **Drop the title and the hyphens.**
@@ -93,11 +112,11 @@ Three common mistakes:
 | The part after `?v=` | That is a **view** ID, not a database ID |
 | The page ID | Easy to copy the outer page's ID when the database is embedded in a page |
 
-Getting it wrong is not a problem: on save the program tells you separately whether this is "not a database" or "not shared with the connection" — the fixes are completely different, so it never merges them into one vague sentence.
+Getting it wrong is not a problem: on save, the program tells you separately whether this is "not a database" or "not shared with the connection" — the fixes are completely different, so it never merges them into one vague sentence.
 
 ---
 
-## ④ Save and verify (「保存并验证」)
+## ④ 保存并验证
 
 Press **Save and verify** (「保存并验证」). The program asks everything it needs to ask right then, rather than failing later when you first generate a guide:
 
@@ -109,7 +128,7 @@ Press **Save and verify** (「保存并验证」). The program asks everything i
 | Whether the status options are complete | If not, a **Fill it in for me** (「帮我补上」) button appears — one click fills them in |
 | Whether it can actually write | Creates a page and immediately archives it; a read-only connection is reported on the spot |
 
-If everything passes, it returns to the Dashboard automatically. If anything fails the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
+If everything passes, it returns to the Dashboard automatically. If anything fails, the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
 
 > The last row is worth calling out: a read-only inspection cannot detect "this connection only has read permission", and that particular fault stays green all the way to a 403 on your first guide generation. So it genuinely creates a page and archives it again.
 
@@ -125,7 +144,7 @@ Three of those — `Not started` / `In progress` / `Done` — are **Notion's own
 
 ## What happens once it's connected
 
-- Games with no guide get a **✨ Generate** (「生成」) button at the end of the row — provided you also configured AI (step ② in settings)
+- Games with no guide get a **✨ 生成** button at the end of the row — provided you also configured AI (step ② in settings)
 - When you unlock an achievement on Steam, the program ticks the matching checkbox in the Notion guide
 - Completing a game marks its guide page `Done`; if the developer adds achievements and it drops below 100%, it goes back to `Staged`
 - All of this runs automatically when you open the Dashboard and when you press **Sync now** (「立即同步」) — nothing to manage
