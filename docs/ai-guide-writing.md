@@ -26,6 +26,7 @@ Writing a guide used to require a Claude Code session: pull the Steam achievemen
 | Overwriting | Allowed, but requires a backup + diff preview + human confirmation | |
 | Rewrite granularity | Beyond whole-guide there is **`--only`, rewriting just the named entries** | A full rewrite has two costs unrelated to writing quality: **every hand-edited passage and every hand-ticked sub-step box is voided**, and the parts that were already right get re-rolled. The criterion is not saving money, it is **preserving what wasn't named** — and that has to be guaranteed by the program (splicing back by line number / block id), never by "telling the model not to touch the rest" |
 | Interruption | Completed parts are kept as a draft | The draft is written after every shard, see below |
+| Language | **A generated guide follows the interface language**, and changing an existing guide's language is done by switching the interface and pressing 「重写」 | One guide per game, so a separate "generate in English" action would be a second button spending the same money on the same guide. See the section below |
 
 ## What is guaranteed and what is not
 
@@ -224,7 +225,7 @@ Three guards, each pinned by a test:
 
 - **A fully-unlocked game skips nothing.** What you'd save there is the entire guide, leaving a list of names and official descriptions that the Steam page already has. Someone generating a guide for a 100% game wants precisely the content.
 - **An overwrite skips nothing.** The guide already holds prose that was paid for, and "they unlocked it since" is not a reason to delete that text — there is nowhere to get it back. Only a fresh guide writes brief entries.
-- **A one-line entry is still a checkbox.** SKILL.md rule 一 forbids merging a group of achieved entries into checkbox-less prose; brief entries keep each `- [ ]` line and simply omit the body. Without that line `checkbox-sync` can never tick it, and the linter reports `missing-checkbox` immediately.
+- **A one-line entry is still a checkbox.** SKILL.md rule-1 forbids merging a group of achieved entries into checkbox-less prose; brief entries keep each `- [ ]` line and simply omit the body. Without that line `checkbox-sync` can never tick it, and the linter reports `missing-checkbox` immediately.
 
 Asking a shard what to write has **exactly one exit** (`chunkMessage`). With the two call sites each passing it separately, the one that forgot the skip-list would not error and would not lose content — that shard's list would just quietly vanish, on the path that is hardest to reach (a whole shard has to fail first).
 
@@ -460,9 +461,42 @@ Both of these were hit while measuring quality:
 - **100% games have no schema in the library.** `syncAchievementSchema` deliberately skips completed games, and "completed, so you're best placed to judge whether the guide is right" is the same set of games — so an A/B script reading the `achievements` table directly exits immediately. The production path doesn't have this problem: `planGuide` calls `fetchGameSchema` on the spot.
 - **A bare single request has none of production's retry ladder**, so judging tiers with one takes measurements on a path more fragile than production.
 
+## The guide's language
+
+A generated guide is written in the interface language (`config.uiLanguage`). The language is resolved **once**, in `planGuide`, and travels on the plan alongside `target` — full generation, partial rewrite and `--dry-run`'s preview all have to send the same prompt, and a caller resolving it for itself is where the three first diverge. The preview exists precisely to show what will be sent.
+
+**There is one builder; the rule text is per-language.** A translation is a different string all the way down, so the two prompts cannot share sentences. What they share is the shape: `PROMPT_SECTIONS` in `lib/guidegen.js` pairs the `##` sections of the two languages in the order they appear, and `test/guidegen.test.js` requires each prompt to carry its own half, in that order, with no heading missing from the table on either side. A section added to one language and forgotten in the other is a failing test rather than an English guide quietly written to a shorter rule set.
+
+### The four rules that genuinely differ
+
+| | |
+|---|---|
+| The output language | Stated outright rather than left to the surrounding language to imply |
+| Which achievement name is preferred | The official English one, with the list putting it first. Where a game ships only a Chinese name, that name is kept rather than translated — a translated name matches nothing, and rule 3 requires the bold name to equal one in the list |
+| The two rules about a game having no Chinese name | Gone. In an English guide they have no subject, and a rule with no subject still costs the model attention |
+| Citations | Follow whatever source was actually read, rather than naming Bilibili by default |
+
+**The research sources are deliberately not one of them.** They were Chinese-*first*, never Chinese-only: `lib/guidegen.js` already tells the model to search Steam community guides, TrueAchievements and Fandom alongside 游民星空 / 3DM / NGA / B站. For a Chinese-developed game the best guide really is on NGA or Bilibili, and a model that can read it can write English from it. Dropping those sites would make English guides worst exactly where guides are hardest to find.
+
+### Changing an existing guide's language
+
+There is no separate action. One appid has one guide, so a second button beside 「重写」 doing the same work with a different output is two ways to spend the same money on the one thing a game is allowed. Switching the interface and pressing 「重写」 is the whole mechanism — which is why the rewrite dialog's **title** names the language when it differs from the guide being replaced. That dialog has no body, by four rounds of deliberate cutting, so the title is the only place the language can be said.
+
+### `guides.lang` is a display fact
+
+The column feeds exactly two surfaces: the marker in the achievement panel's header, and the wording of that rewrite title. **Nothing about matching reads it.** Stage 1 of `resolveTodoToAchievement` and the `paraphrased-description` lint rule both accept *either* language's description, which was chosen so that a wrong value here costs a marker and never a tick — and it has to be, because the rows that predate the column carry an assumed value rather than a recorded one.
+
+It is written after a **successful** landing only. A failed rewrite leaves the old guide in place, and stamping the new language on at that point would have the panel describe a guide in a language it is not written in.
+
+The marker appears in the achievement panel and nowhere else: that panel is the one place the guide's own text is on screen, so it is the one place the mismatch is about to matter. On the row button it would be a badge on most rows carrying the same word, which stops being information the second time it is seen.
+
+### The density guard is parameterised, not exempted
+
+`test/i18n-boundary.test.js` requires the Chinese prompt to be more than 40% Chinese **and** the English one to be almost free of it. Exempting the English variant instead would leave the one real hole open — a pass that translates both and reports itself fine — because the Chinese prompt would then be English with nothing looking at it. Two assertions pointing in opposite directions cannot both be satisfied by one sweeping translation.
+
 ## Explicitly not doing
 
-- **Screenshots** (SKILL.md rule 二) — the model cannot produce reliable in-game screenshots.
+- **Screenshots** (SKILL.md rule-2) — the model cannot produce reliable in-game screenshots.
 - **Cost estimation** — waiting on measured data for search billing.
 - **Mandatory source citations** — decided against.
 - **Resuming across a process boundary** (Ctrl+C, a crash) — would require persisting the shard boundaries along with the prose, and the session context cannot be reused. With per-shard draft writes, one failure loses at most one shard, so the remaining value is small.

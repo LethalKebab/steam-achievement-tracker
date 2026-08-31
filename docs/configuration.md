@@ -83,9 +83,11 @@ Environment variables win over both, and they are looked up **by the vendor bein
 
 `uiLanguage` needs no network at all: both languages are already on disk (`games.name` / `name_en`, `achievements.name_cn` / `name_en` and `description` / `description_en`), so it only chooses between them. Where one is missing it falls back to the other silently, with no marker — a game with no English title shows the name that was stored.
 
-Error messages follow it too. The ones `lib/` composes live in `lib/messages.js` and are picked at composition time, so they arrive in whichever language the interface is set to — `serve` sets it at startup, the toggle sets it again, and the CLI sets it from the same key so one error never reads in two languages depending on which entry point hit it.
+Everything written for a person follows it. Messages that can reach the Dashboard live in `lib/messages.js`; what only ever reaches a terminal — `serve`'s own log, and every line the CLI prints — lives in `lib/cli-messages.js` and `lib/tracker-messages.js`. All three are picked at composition time, so a message arrives in whichever language the interface is set to. `serve` sets it at startup, the toggle sets it again, and the CLI sets it once at dispatch before any command runs, so one error never reads in two languages depending on which entry point hit it.
 
-Guides are not affected. Ones already generated stay exactly as they are.
+The split between those tables is by audience: only the terminal ones may name a command line, because the packaged app's user has no terminal to run one in.
+
+**A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing 「重写」 is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
 

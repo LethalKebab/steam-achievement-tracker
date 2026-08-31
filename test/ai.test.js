@@ -341,7 +341,7 @@ test('the web tools are the _20260209 version, and code_execution is never decla
   assert.deepEqual(tools.map((t) => t.type), ['web_search_20260209', 'web_fetch_20260209']);
   assert.ok(!tools.some((t) => String(t.type).startsWith('code_execution')),
     'this version of the tools already runs code internally for dynamic filtering, so adding one more is two execution environments');
-  assert.deepEqual(tools[1].citations, { enabled: false }, 'SKILL.md rule 七: a guide does not carry sources');
+  assert.deepEqual(tools[1].citations, { enabled: false }, 'SKILL.md rule-7: a guide does not carry sources');
 });
 
 test('allowedDomains is not sent when empty (an empty array reads as "nothing may be searched")', () => {

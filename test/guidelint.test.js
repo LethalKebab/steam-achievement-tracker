@@ -171,6 +171,21 @@ describe('the verbatim description', () => {
     assert.equal(r.ok, true, 'a warn should not fail the whole guide');
   });
 
+  test('quoting the English description is not a paraphrase either', () => {
+    // The rule catches paraphrasing, and a guide that copied the other language's description
+    // verbatim has paraphrased nothing. Demanding one language would report every entry of every
+    // guide written in the other — a rule that fires on everything is one nobody reads
+    const d = { ...def('A', '偷儿', '偷窃十次', 'Pickpocket'), description_en: 'Steal ten times' };
+    const r = lintGuide({ defs: [d], todos: [todo(1, '**Pickpocket**<br>Steal ten times<br>early on')] });
+    assert.equal(codesOf(r).includes('paraphrased-description'), false);
+  });
+
+  test('a real paraphrase is still caught, in both languages', () => {
+    const d = { ...def('A', '偷儿', '偷窃十次', 'Pickpocket'), description_en: 'Steal ten times' };
+    const r = lintGuide({ defs: [d], todos: [todo(1, '**Pickpocket**<br>nick a few things')] });
+    assert.deepEqual(codesOf(r), ['paraphrased-description']);
+  });
+
   test('a whitespace difference is not a paraphrase (the same test as resolveTodoToAchievement)', () => {
     const r = lintGuide({
       defs: [def('A', 'X', '偷窃 十次')],

@@ -246,7 +246,7 @@ test('hashes with no space after them are not a heading (the #1 case)', () => {
 // ---------------------------------------------------------------------------
 
 /**
- * **SKILL.md rule 五 requires long content to be collapsed with `<details><summary>`**, so a
+ * **SKILL.md rule-5 requires long content to be collapsed with `<details><summary>`**, so a
  * model writing one is following the rules and what fails to recognise it is the converter. The
  * consequence of not recognising it is the same as understanding only `##` back then: it falls
  * into the ordinary-paragraph branch and the page is left with a literal

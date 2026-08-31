@@ -4,6 +4,8 @@ The Windows app in [the README](../README.md) covers everyday use. This page is 
 
 The commands are the same either way. The packaged app bundles its own Node runtime and its own copy of the project, so you can run any command below from the app's folder without installing anything — `resources/tracker/` next to the exe.
 
+Everything these commands print follows `uiLanguage` in `config.json` — the same setting as the Dashboard's, `"zh"` or `"en"`. See [configuration.md](configuration.md#uilanguage).
+
 ## Requirements
 
 **Node.js 24 or newer** — check with `node --version`. The project uses Node built-ins only (`node:sqlite`, global `fetch`, `node:http`, `node:test`), so there is nothing to `npm install`.

@@ -270,6 +270,16 @@ Each card carries the matching checkbox's own text from the guide (name + verbat
 
 A game with no registered guide is untouched (search link only) — and so is one whose achievement schema hasn't synced, because `resolveTodoToAchievement` needs `api_name`/`name_cn`/`name_en`/`description` and `getMissingAchievements`'s live-schema fallback can't produce that shape; claiming 「攻略里还没写」 there would be a guess.
 
+### A guide in the other language is marked in this header, and nowhere else
+
+When `guides.lang` disagrees with the interface language, the header gains one more segment: 「· 英文攻略」 / 「· Chinese guide」. It is symmetric, and it names the **guide's** language rather than the interface's.
+
+**This panel is the only place it appears.** It is the one place the guide's own text is on screen, so it is the one place the mismatch is about to matter. On the row button it would be a badge on most rows carrying the same word, which stops being information the second time it is seen.
+
+Both keys spell out both languages in both halves, which is not redundancy: a table holding only 「英文攻略」/`Chinese guide` would be correct *because of the condition guarding it* rather than because of what it says, and moving the render would silently make it lie.
+
+The dialog behind ♻ 重写 names the language in its **title** when the guide being replaced is in the other one — 「用中文重写《…》的攻略?」 / `Rewrite the guide for … in English?`. That dialog has no body (§10), so the title is the only place it can be said, and it needs saying: switching the interface and pressing 重写 is the whole mechanism for changing a guide's language.
+
 ### The guide text is stripped of its echo of the name and description (`stripGuideEcho`)
 
 By the writing convention a checkbox opens with the achievement's name and its **verbatim** official description — both of which the card already prints above, from Steam. Left alone, every card said everything twice and pushed the actual tips out of the window.

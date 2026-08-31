@@ -47,6 +47,9 @@ const TERMINAL_ONLY = {
   // from lib/messages.js **for this rule**: messages.js can reach the Dashboard, so it stays
   // strictly command-line-free, and anything bound for a terminal lives here instead
   'cli-messages.js': 'the terminal-only half of the message tables, by construction',
+  // Split from cli-messages.js by size rather than audience — everything in it reaches a terminal
+  // and nothing else, which is the whole reason it may name a command line
+  'tracker-messages.js': "the CLI's own copy, terminal-only by construction",
 };
 
 /**
@@ -71,13 +74,28 @@ function userFacingStrings(src) {
   return out;
 }
 
-/** The body of the CLI_HINTS object literal */
+/**
+ * The body of the CLI_HINTS object literal — **which codes have advice**, not what the advice says.
+ *
+ * The prose moved into `lib/tracker-messages.js` when the CLI became switchable, so `tracker.js`
+ * now holds only the mapping from an error code to a message key. The two halves are checked
+ * separately below: this one that every code is covered, `adviceText()` that the covering entries
+ * still say the things worth saying.
+ */
 function hintsBlock() {
   const start = tracker.indexOf('const CLI_HINTS = {');
   assert.notEqual(start, -1, 'CLI_HINTS not found — the extraction is broken, not the advice missing');
   const end = tracker.indexOf('\n};', start);
   assert.notEqual(end, -1, 'CLI_HINTS does not terminate properly');
   return tracker.slice(start, end);
+}
+
+/** Every hint's text, both languages, as one string to search */
+function adviceText() {
+  const src = readFileSync(join(ROOT, 'lib', 'tracker-messages.js'), 'utf8');
+  const start = src.indexOf("'hint.providerModelMismatch'");
+  assert.notEqual(start, -1, 'the advice entries were renamed — this extraction is broken, not the advice missing');
+  return src.slice(start);
 }
 
 describe('CLI_HINTS covers every error code in lib/ that carries a detail', () => {
@@ -112,23 +130,40 @@ describe('CLI_HINTS covers every error code in lib/ that carries a detail', () =
   });
 
   test('not one of the sentences formerly pinned inside the message bodies is missing', () => {
+    const advice = adviceText();
     // Provider/model mismatch: two fixes plus the source most easily overlooked
-    assert.match(block, /--provider \$\{d\.belongsTo\}/, 'it has to give a directly usable fix');
-    assert.match(block, /--model/, 'the fix for the other direction has to be given too');
-    assert.match(block, /环境变量会盖掉 config\.json/, 'this is the kind of source most easily overlooked');
+    assert.match(advice, /--provider \{belongsTo\}/, 'it has to give a directly usable fix');
+    assert.match(advice, /--model/, 'the fix for the other direction has to be given too');
+    assert.match(advice, /环境变量会盖掉 config\.json/, 'this is the kind of source most easily overlooked');
+    assert.match(advice, /environment variables override config\.json/, 'and the English half has to say it too');
     // Too many achievements: which knob, and what it is now
-    assert.match(block, /ai\.maxAchievements/);
+    assert.match(advice, /ai\.maxAchievements/);
     // Still unwritable at the floor: **it advises against**, and this one is far easier to get backwards than the two above
-    assert.match(block, /别急着调大 ai\.maxTokens/);
-    // Gemini: all three model-name codes point at the same piece of advice
-    assert.match(tracker, /const GEMINI_MODEL_HINT/);
-    assert.match(tracker, /ai-check --models/, '"how to find out which models are available" must not be lost');
-    assert.match(tracker, /列出来 ≠ 能用/, 'a retired model still appears in the list, which was learned the hard way');
-    assert.match(block, /AI_MODEL=gemini-2\.5-flash/, 'it has to name a concrete model that can be tried');
-    assert.match(block, /别名/, 'an alias may resolve to a new model outside the free tier');
-    assert.match(block, /geminiTools/);
+    assert.match(advice, /别急着调大 ai\.maxTokens/);
+    assert.match(advice, /Do not reach for a larger ai\.maxTokens/);
+    // Gemini: all three model-name codes point at one entry rather than three copies of it
+    assert.equal((tracker.match(/'hint\.geminiModel'/g) ?? []).length, 3,
+      'the three Gemini model-name codes have to share one entry');
+    assert.match(advice, /ai-check --models/, '"how to find out which models are available" must not be lost');
+    assert.match(advice, /列出来 ≠ 能用/, 'a retired model still appears in the list, which was learned the hard way');
+    assert.match(advice, /listed does not mean/, 'and the English half has to carry the same warning');
+    assert.match(advice, /AI_MODEL=gemini-2\.5-flash/, 'it has to name a concrete model that can be tried');
+    assert.match(advice, /别名/, 'an alias may resolve to a new model outside the free tier');
+    assert.match(advice, /geminiTools/);
     // DeepSeek's 401: an env var overrides the config file, and clearing it can only be done in a terminal
-    assert.match(block, /Remove-Item Env:\$\{d\.envVar\}/);
+    assert.match(advice, /Remove-Item Env:\{envVar\}/);
+  });
+
+  test('a command line stays a command line in both halves', () => {
+    // The one thing a translation must not do here: a flag, a file name or a config field is
+    // retyped by the reader, so it is the same string in both languages or the English half is
+    // advice that cannot be followed
+    const src = readFileSync(join(ROOT, 'lib', 'tracker-messages.js'), 'utf8');
+    for (const literal of ['--provider', '--model', '--overwrite', '--only', 'ai.maxTokens',
+      'ai.maxAchievements', 'ai.geminiTools', 'Remove-Item Env:', 'node tracker.js ai-check --models']) {
+      const n = (src.split(literal).length - 1);
+      assert.ok(n >= 2, `${literal} appears ${n} time(s) — one of the two languages dropped it`);
+    }
   });
 
   test('these sentences appear only in the terminal, and lib/ must not hold another copy', () => {
