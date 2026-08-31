@@ -303,6 +303,39 @@
   .back.armed,
   .back.armed:hover:not(:disabled) { color: var(--danger); }
 
+  /* ---- Interface language --------------------------------------------
+     **It sits above everything it governs.** This is the one control on the page
+     that decides how every other line on it reads, so it belongs with the title
+     rather than inside a step — and it is present during first-run setup too,
+     not only in settings mode: somebody who cannot read the wizard needs this
+     before the wizard, not after finishing it.
+
+     Real radios rather than two buttons. Arrow-key navigation between the
+     options, the checked state and the focus ring are all then the browser's job,
+     and "pick exactly one of these" is precisely what a radio group is. The input
+     is moved out of sight rather than `display:none`, which would take it out of
+     the tab order along with it. */
+  .lang { display: flex; gap: var(--s2); margin: 0 0 var(--s5); }
+  .lang-opt { position: relative; display: inline-flex; margin: 0; }
+  .lang-opt input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; border: none; opacity: 0; }
+  .lang-opt span {
+    display: block;
+    padding: 7px var(--s3);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+    background: var(--surface-2);
+    color: var(--text-2);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition: border-color var(--dur-1), background var(--dur-1), color var(--dur-1);
+  }
+  .lang-opt span:hover { border-color: var(--accent); color: var(--text); }
+  .lang-opt input:checked + span { border-color: var(--accent); background: var(--accent-soft); color: var(--text-hi); }
+  /* The global :focus-visible rule cannot reach a control that is out of sight, so the ring is
+     drawn on the label standing in for it — without this the group is keyboard-operable but
+     invisible while being operated */
+  .lang-opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   /* ---- The first-screen fork ----------------------------------------
      The program cannot tell 「第一次用」 from 「老用户换了台电脑」 — in both cases
      there is no config and no data. This is **the one thing that can only be
@@ -655,15 +688,24 @@
          gate, and there should be no exit before the credentials are filled in.
          `type="button"` must not be dropped — it is inside a <form>, where the
          default type is submit -->
-    <button type="button" class="back" id="back-btn" hidden>← 返回面板</button>
+    <button type="button" class="back" id="back-btn" data-t="back.dashboard" hidden>← 返回面板</button>
     <!-- The way back from the fork. **Not the same thing** as `#back-btn`: that
          one goes to the Dashboard and is armed only in settings mode, while this
          one appears only during first-run setup and goes back to the two choices
          above. Two meanings sharing one control is exactly the lesson from the
          filter-chip round -->
-    <button type="button" class="back" id="gate-back" hidden>← 重新选择</button>
-    <h1 id="page-title">初始设置</h1>
-    <div class="subtitle" id="page-subtitle">只填一次,密钥只存在这台电脑上</div>
+    <button type="button" class="back" id="gate-back" data-t="back.gate" hidden>← 重新选择</button>
+    <h1 id="page-title" data-t="head.setup">初始设置</h1>
+    <div class="subtitle" id="page-subtitle" data-t="sub.setup">只填一次,密钥只存在这台电脑上</div>
+    <!-- Each option is written in its own language, so neither needs the other to
+         be readable — the one label on this page that works before the setting
+         it changes has taken effect. `aria-label` carries both for the same
+         reason. **Not `config.language`**: that one decides what is fetched from
+         Steam and changing it would need a full re-sync, see lib/lang.js -->
+    <div class="lang" role="radiogroup" aria-label="界面语言 / Interface language">
+      <label class="lang-opt"><input type="radio" name="uiLang" value="zh"><span>中文</span></label>
+      <label class="lang-opt"><input type="radio" name="uiLang" value="en"><span>English</span></label>
+    </div>
     <!-- The first-run fork. **The question is not 「你是不是新用户」** — that
          would require guessing what this program considers 「新」. The question is
          whether there is anything to bring across, and that is something the
@@ -672,10 +714,10 @@
          the config exists and the fork was passed long ago -->
     <div class="gate" id="gate" hidden>
       <button type="button" class="gate-choice primary" id="gate-new">
-        <b>全新设置</b><span>第一次用</span>
+        <b data-t="gate.new">全新设置</b><span data-t="gate.new.sub">第一次用</span>
       </button>
       <button type="button" class="gate-choice" id="gate-restore">
-        <b>从备份恢复</b><span>手上有以前的备份文件</span>
+        <b data-t="gate.restore">从备份恢复</b><span data-t="gate.restore.sub">手上有以前的备份文件</span>
       </button>
     </div>
 
@@ -686,14 +728,14 @@
       <!-- Step 4 appears only on the settings page (during first-run setup there
            is nothing to back up). The fork on the first screen sends people
            straight into the lower half of this section, bypassing the step bar -->
-      <li data-goto="4" id="nav-backup" hidden>备份</li>
+      <li data-goto="4" id="nav-backup" data-t="nav.backup" hidden>备份</li>
     </ol>
 
     <section class="step" data-step="1">
-      <h2 class="step-title">第 1 步 · Steam<span class="tag req">必填</span></h2>
+      <h2 class="step-title"><span data-t="step1.title">第 1 步 · Steam</span><span class="tag req" data-t="tag.req">必填</span></h2>
       <div class="hint">
         ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
-        ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>(把你的个人资料链接粘进去查)
+        ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a><span data-t="step1.id.hint">(把你的个人资料链接粘进去查)</span>
       </div>
       <!-- The absence of a required attribute is **deliberate**: only one section
            is shown at a time, and the browser refuses to validate a required
@@ -701,34 +743,34 @@
            reports "not focusable". The required check is handled by the manual
            check in the submit handler below, which jumps back to this step and
            explains why -->
-      <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空就不改</span></label>
+      <label for="key">① Steam Web API Key<span class="configured" id="key-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
       <input id="key" name="key" type="text" autocomplete="off">
       <label for="id">② SteamID64</label>
-      <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字">
+      <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字" data-t-placeholder="step1.id.ph">
     </section>
 
     <section class="step" data-step="2" hidden>
-      <h2 class="step-title">第 2 步 · AI 攻略生成<span class="tag opt">可选</span><span class="configured" id="ai-set" hidden>已配置</span></h2>
-      <div class="hint">给没有攻略的游戏联网查资料、写一份。<strong>内容准不准没法自动检查,生成完自己读一遍。</strong></div>
-      <label for="ai-provider">供应商</label>
+      <h2 class="step-title"><span data-t="step2.title">第 2 步 · AI 攻略生成</span><span class="tag opt" data-t="tag.opt">可选</span><span class="configured" id="ai-set" data-t="tag.set" hidden>已配置</span></h2>
+      <div class="hint"><span data-t="step2.hint">给没有攻略的游戏联网查资料、写一份。</span><strong data-t="step2.hint.warn">内容准不准没法自动检查,生成完自己读一遍。</strong></div>
+      <label for="ai-provider" data-t="step2.provider">供应商</label>
       <select id="ai-provider" name="ai-provider">
-        <option value="">不启用</option>
+        <option value="" data-t="step2.off">不启用</option>
         <option value="deepseek">DeepSeek</option>
         <option value="anthropic">Anthropic (Claude)</option>
         <option value="gemini">Google Gemini</option>
       </select>
-      <label for="ai-key">API Key<span class="configured" id="ai-key-set" hidden>已配置,留空就不改</span></label>
+      <label for="ai-key">API Key<span class="configured" id="ai-key-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
       <!-- The placeholder is filled in per provider by paintAiProvider (they all
            look different). No value is hardcoded here — a hardcoded one is wrong
            for two of the three, and in the instant before JS starts it is better
            to be empty than to be wrong -->
       <input id="ai-key" name="ai-key" type="password" autocomplete="off">
-      <label for="ai-model">模型(可选)</label>
-      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用默认模型">
+      <label for="ai-model" data-t="step2.model">模型(可选)</label>
+      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用默认模型" data-t-placeholder="step2.model.ph">
     </section>
 
     <section class="step" data-step="3" hidden>
-      <h2 class="step-title">第 3 步 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
+      <h2 class="step-title"><span data-t="step3.title">第 3 步 · Notion 攻略同步</span><span class="tag opt" data-t="tag.opt">可选</span><span class="configured" id="notion-set" data-t="tag.set" hidden>已配置</span></h2>
       <!-- **Every <code> holds the literal wording from Notion's UI**, not what
            the thing is called — somebody following along is scanning the screen
            for those exact characters, and a conceptual name (「Internal
@@ -743,30 +785,30 @@
            The old names live in docs/notion-setup.md — the people who go and read
            a walkthrough are the ones who need them -->
       <ol>
-        <li>在 <a href="https://app.notion.com/developers/connections" target="_blank" rel="noopener">Notion 开发者页面</a> 点 <code>New connection</code>,再从 <code>Configuration</code> 里复制 <code>Access token</code></li>
-        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>Add connections</code> → 选中它</li>
+        <li><span data-t="step3.li1.a">在 </span><a href="https://app.notion.com/developers/connections" target="_blank" rel="noopener" data-t="step3.li1.link">Notion 开发者页面</a><span data-t="step3.li1.b"> 点 </span><code>New connection</code><span data-t="step3.li1.c">,再从 </span><code>Configuration</code><span data-t="step3.li1.d"> 里复制 </span><code>Access token</code></li>
+        <li><span data-t="step3.li2.a">在 Notion 打开要放攻略的页面 → </span><code>•••</code> → <code>Add connections</code><span data-t="step3.li2.b"> → 选中它</span></li>
       </ol>
       <!-- The walkthrough page has always existed (docs/notion-setup.md), it just
            had no entry point in the UI — this line is what the user's request to
            "let me open the instructions and follow along" was missing. It points
            at the rendered copy on GitHub rather than transcribing it again: the
            consequence of a second transcription is the comment above -->
-      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener">详细步骤 ↗</a></p>
-      <label for="notion-token">Access token<span class="configured" id="token-set" hidden>已配置,留空就不改</span></label>
+      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener" data-t="step3.docs">详细步骤 ↗</a></p>
+      <label for="notion-token">Access token<span class="configured" id="token-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
       <!-- Newly created secrets now begin with ntn_. The old secret_ ones still
            work, so this only changes the shape the placeholder suggests; the
            validation side does not recognise prefixes (recognising them would
            reject a good token the next time Notion renames things) -->
       <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="ntn_...">
-      <label for="notion-db">攻略数据库 ID</label>
-      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
-      <button type="button" class="btn-outline" id="notion-make">＋ 新建一个攻略数据库</button>
+      <label for="notion-db" data-t="step3.db">攻略数据库 ID</label>
+      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制" data-t-placeholder="step3.db.ph">
+      <button type="button" class="btn-outline" id="notion-make" data-t="step3.make">＋ 新建一个攻略数据库</button>
       <div id="notion-create" hidden>
-        <label for="notion-parent">建在哪一页下面</label>
+        <label for="notion-parent" data-t="step3.parent">建在哪一页下面</label>
         <select id="notion-parent"></select>
-        <label for="notion-title">数据库名字</label>
-        <input id="notion-title" type="text" value="Steam 攻略">
-        <button type="button" class="btn-sub btn-wide" id="notion-make-go">创建</button>
+        <label for="notion-title" data-t="step3.dbname">数据库名字</label>
+        <input id="notion-title" type="text" value="Steam 攻略" data-t-value="step3.dbname.value">
+        <button type="button" class="btn-sub btn-wide" id="notion-make-go" data-t="step3.create">创建</button>
       </div>
       <div class="msg" id="notion-msg" role="status"></div>
     </section>
@@ -776,14 +818,14 @@
          the first screen's fork — the library is empty then, and 「立即备份」
          would be meaningless -->
     <section class="step" data-step="4" hidden>
-      <h2 class="step-title" id="backup-title">第 4 步 · 备份与恢复<span class="tag opt">可选</span></h2>
+      <h2 class="step-title"><span id="backup-title" data-t="step4.title">第 4 步 · 备份与恢复</span><span class="tag opt" data-t="tag.opt">可选</span></h2>
 
       <!-- The three lines after a backup **are in order**: first what was
            produced (how many games, how large), then where it is, and only then
            the button that goes there. With the result line placed below the
            button at first, it was separated from the very path it describes -->
       <div id="backup-make">
-        <button type="button" class="btn-outline" id="bk-go">立即备份</button>
+        <button type="button" class="btn-outline" id="bk-go" data-t="step4.now">立即备份</button>
         <!-- The label names all three secrets outright. **「凭据」 alone is not
              enough** — in this program 「Steam 凭据」 is an established term (the
              API Key plus the SteamID), and here one word has to stand for three
@@ -791,26 +833,26 @@
              covers -->
         <label class="check" style="margin-top: var(--s3)">
           <input type="checkbox" id="bk-config" checked>
-          包含 Steam / Notion / AI 密钥
+          <span data-t="step4.include">包含 Steam / Notion / AI 密钥</span>
         </label>
         <!-- This sentence stays because it says **plaintext secrets are leaving this machine**, not because it explains how a feature works -->
-        <div class="hint" id="bk-warn">密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。</div>
+        <div class="hint" id="bk-warn" data-t="step4.warn">密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。</div>
         <div class="msg" id="bk-msg" role="status"></div>
         <code class="bk-path" id="bk-path" hidden></code>
         <div class="bk-row" id="bk-done" hidden>
-          <button type="button" class="btn-sub" id="bk-reveal">打开文件夹</button>
+          <button type="button" class="btn-sub" id="bk-reveal" data-t="step4.reveal">打开文件夹</button>
         </div>
       </div>
 
       <div id="backup-restore">
-        <h2 class="step-title" id="restore-title">从备份恢复</h2>
+        <h2 class="step-title" id="restore-title" data-t="restore.title">从备份恢复</h2>
         <div class="drop" id="drop" role="button" tabindex="0">
-          <b>把备份 .zip 拖到这里</b>
-          或点击选择文件
+          <b data-t="restore.drop">把备份 .zip 拖到这里</b>
+          <span data-t="restore.click">或点击选择文件</span>
         </div>
         <input type="file" id="bk-file" accept=".zip" hidden>
         <div class="bk-info" id="bk-info" hidden></div>
-        <button type="button" class="btn-sub btn-wide" id="bk-restore" hidden>恢复</button>
+        <button type="button" class="btn-sub btn-wide" id="bk-restore" data-t="restore.go" hidden>恢复</button>
         <div class="msg" id="restore-msg" role="status"></div>
       </div>
 
@@ -833,10 +875,10 @@
            game has been deleted from the library and can no longer be reached
            from a row -->
       <details id="guide-archive" hidden>
-        <summary class="arc-head">攻略备份<span class="arc-count" id="arc-count"></span></summary>
+        <summary class="arc-head"><span data-t="arc.head">攻略备份</span><span class="arc-count" id="arc-count"></span></summary>
         <div class="hint" id="arc-sum"></div>
         <ul class="arc-list" id="arc-list"></ul>
-        <div class="arc-foot"><button type="button" class="btn-sub" id="arc-wipe">全部删除</button></div>
+        <div class="arc-foot"><button type="button" class="btn-sub" id="arc-wipe" data-t="arc.wipe">全部删除</button></div>
         <div class="msg" id="arc-msg" role="status"></div>
       </details>
     </section>
@@ -847,9 +889,9 @@
          twice. The remaining division: step 1 is required and uses 「下一步」,
          optional steps use 「跳过」, and the last step submits -->
     <div class="step-actions" id="step-actions" hidden>
-      <button type="button" class="btn-sub" id="step-skip">跳过</button>
-      <button type="button" id="step-next">下一步</button>
-      <button type="submit" id="submit-btn">保存并验证</button>
+      <button type="button" class="btn-sub" id="step-skip" data-t="act.skip">跳过</button>
+      <button type="button" id="step-next" data-t="act.next">下一步</button>
+      <button type="submit" id="submit-btn" data-t="act.submit">保存并验证</button>
     </div>
     <div class="msg" id="msg" role="status"></div>
   </form>
@@ -888,7 +930,7 @@
       const head = document.createElement('div');
       head.textContent =
         (done && done.length ? done.join(';') + '。' : '') +
-        (worst === 'error' ? '配置已保存,但这个库还有问题:' : '配置已保存,还剩一处:');
+        (worst === 'error' ? t('msg.saved.problems') : t('msg.saved.oneleft'));
       msg.appendChild(head);
 
       const list = document.createElement('ul');
@@ -930,13 +972,13 @@
         // recolouring and a board view — so that label would not be telling the truth.
         const reformat = problems.some((p) => p.code === 'outdated-format');
         // The question is in the text above; the button carries only the verb
-        const label = reformat ? '套用' : '帮我补上';
+        const label = reformat ? t('msg.apply') : t('msg.fill');
         const fix = document.createElement('button');
         fix.type = 'button';
         fix.textContent = label;
         fix.onclick = async () => {
           fix.disabled = true;
-          fix.textContent = reformat ? '套用…' : '补…';
+          fix.textContent = reformat ? t('msg.apply.busy') : t('msg.fill.busy');
           const r = await call('repairNotionGuideDb', []);
           if (r.error) {
             fix.disabled = false;
@@ -957,8 +999,8 @@
             // surface that lists them is the CLI, and it still does.
             msg.className = 'msg ok';
             msg.textContent = (r.added || []).length
-              ? '补上 ' + r.added.join(' / ') + '。'
-              : '已套用新模版。';
+              ? t('msg.fill.done', { list: r.added.join(' / ') })
+              : t('msg.applied');
             setTimeout(() => { window.location.href = '/'; }, 1500);
           }
         };
@@ -969,12 +1011,300 @@
       // This page already defines the full-width secondary variant, so use that — two solid
       // primary buttons side by side is the same as having no hierarchy at all
       skip.className = 'btn-sub btn-wide';
-      skip.textContent = '先这样,进入面板';
+      skip.textContent = t('msg.carryon');
       skip.onclick = () => { window.location.href = '/'; };
       bar.appendChild(skip);
       msg.appendChild(bar);
     }
     const $ = (id) => document.getElementById(id);
+
+    /**
+     * The string table, and the two ways a string reaches the screen
+     * ------------------------------------------------
+     * `[zh, en]` in that order, everywhere. **Chinese is the source and English is a translation of
+     * it** — where the two disagree the Chinese is right, because that is the one written against
+     * the interface rather than against another language.
+     *
+     * **A whole sentence is one entry.** Several of these used to be assembled from three or four
+     * pieces around an interpolated value, which works only for as long as one language is
+     * involved: word order moves, and a sentence spliced from fragments comes out in the order the
+     * *other* language needed. Slots are `{name}` and are filled by `t`.
+     *
+     * Two routes onto the screen, and they are not interchangeable:
+     * - **Static markup** carries `data-t` (or `data-t-placeholder` / `data-t-value` /
+     *   `data-t-aria-label`) and is repainted by `applyStrings`. Nothing is interpolated there.
+     * - **Anything composed at runtime** calls `t(key, values)`.
+     *
+     * A line of markup that mixes our own words with an `<a>` or a `<code>` keeps its elements and
+     * gives **each text run its own key** rather than storing markup in the table. That pins the
+     * word order to the Chinese one, so the English for those runs is written to fit the same
+     * slots — the price of never putting a table string through `innerHTML`.
+     */
+    const STRINGS = {
+      'title.setup':          ['初始设置 · Steam 成就追踪器', 'First-time setup · Steam Achievement Tracker'],
+      'title.settings':       ['设置 · Steam 成就追踪器', 'Settings · Steam Achievement Tracker'],
+      'back.dashboard':       ['← 返回面板', '← Back to dashboard'],
+      'back.gate':            ['← 重新选择', '← Choose again'],
+      'head.setup':           ['初始设置', 'First-time setup'],
+      'head.settings':        ['设置', 'Settings'],
+      'sub.setup':            ['只填一次,密钥只存在这台电脑上', 'Filled in once. The keys stay on this computer.'],
+      'sub.settings':         ['点上面的步骤跳到要改的那一节;没动的项目留空即可', 'Use the steps above to jump to a section. Leave anything you are not changing blank.'],
+      'sub.restore':          ['恢复后直接进入面板,不用重新设置', 'Restoring goes straight to the dashboard. Nothing needs setting up again.'],
+
+      'gate.new':             ['全新设置', 'Fresh setup'],
+      'gate.new.sub':         ['第一次用', 'First time using it'],
+      'gate.restore':         ['从备份恢复', 'Restore from a backup'],
+      'gate.restore.sub':     ['手上有以前的备份文件', 'I have a backup file'],
+
+      'nav.backup':           ['备份', 'Backup'],
+      'tag.req':              ['必填', 'Required'],
+      'tag.opt':              ['可选', 'Optional'],
+      'tag.set':              ['已配置', 'Configured'],
+      'tag.set.keep':         ['已配置,留空就不改', 'Configured — blank keeps it'],
+      'tag.set.suffix':       ['{label} · 已配置', '{label} · configured'],
+
+      'step1.title':          ['第 1 步 · Steam', 'Step 1 · Steam'],
+      // The English carries a leading space; the Chinese does not, because a fullwidth 「(」 already
+      // sets its own. Written without it the line reads `steamid.io(paste your…`
+      'step1.id.hint':        ['(把你的个人资料链接粘进去查)', ' (paste your profile link to look it up)'],
+      'step1.id.ph':          ['17 位数字', '17 digits'],
+      'step1.missing':        ['Steam Web API Key 和 SteamID64 都要填,这一步跳不过去。', 'Both the Steam Web API Key and the SteamID64 are needed. This step cannot be skipped.'],
+
+      'step2.title':          ['第 2 步 · AI 攻略生成', 'Step 2 · AI guide generation'],
+      'step2.hint':           ['给没有攻略的游戏联网查资料、写一份。', 'Researches and writes a guide for a game that has none.'],
+      'step2.hint.warn':      ['内容准不准没法自动检查,生成完自己读一遍。', 'Nothing can check whether it is right — read it once it is written.'],
+      'step2.provider':       ['供应商', 'Provider'],
+      'step2.off':            ['不启用', 'Off'],
+      'step2.model':          ['模型(可选)', 'Model (optional)'],
+      'step2.model.ph':       ['留空 = 用默认模型', 'Blank = the default model'],
+
+      'step3.title':          ['第 3 步 · Notion 攻略同步', 'Step 3 · Notion guide sync'],
+      'step3.li1.a':          ['在 ', 'On the '],
+      'step3.li1.link':       ['Notion 开发者页面', 'Notion developers page'],
+      'step3.li1.b':          [' 点 ', ' click '],
+      'step3.li1.c':          [',再从 ', ', then from '],
+      'step3.li1.d':          [' 里复制 ', ' copy the '],
+      'step3.li2.a':          ['在 Notion 打开要放攻略的页面 → ', 'In Notion open the page the guides go on → '],
+      'step3.li2.b':          [' → 选中它', ' → select it'],
+      'step3.docs':           ['详细步骤 ↗', 'Step by step ↗'],
+      'step3.db':             ['攻略数据库 ID', 'Guide database ID'],
+      'step3.db.ph':          ['32 位十六进制', '32 hex characters'],
+      'step3.make':           ['＋ 新建一个攻略数据库', '＋ Create a guide database'],
+      'step3.parent':         ['建在哪一页下面', 'Create it under'],
+      'step3.dbname':         ['数据库名字', 'Database name'],
+      'step3.dbname.value':   ['Steam 攻略', 'Steam guides'],
+      'step3.create':         ['创建', 'Create'],
+
+      'step4.title':          ['第 4 步 · 备份与恢复', 'Step 4 · Backup and restore'],
+      'step4.now':            ['立即备份', 'Back up now'],
+      'step4.include':        ['包含 Steam / Notion / AI 密钥', 'Include the Steam / Notion / AI keys'],
+      'step4.warn':           ['密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。', 'The keys go into the zip in plain text. Nothing needs re-entering on another computer, but anyone holding this file can spend your AI credit.'],
+      'step4.reveal':         ['打开文件夹', 'Open folder'],
+
+      'restore.title':        ['从备份恢复', 'Restore from a backup'],
+      'restore.drop':         ['把备份 .zip 拖到这里', 'Drop a backup .zip here'],
+      'restore.click':        ['或点击选择文件', 'or click to choose a file'],
+      'restore.go':           ['恢复', 'Restore'],
+
+      'arc.head':             ['攻略备份', 'Guide backups'],
+      'arc.wipe':             ['全部删除', 'Delete all'],
+      'arc.view':             ['查看', 'View'],
+      'arc.collapse':         ['收起', 'Collapse'],
+      'arc.delete':           ['删除', 'Delete'],
+      'arc.delete.armed':     ['永久删除', 'Delete for good'],
+      'arc.empty':            ['(内容为空)', '(empty)'],
+      'arc.count':            ['{n} 份 · {size}', '{n} · {size}'],
+      'arc.wipe.armed':       ['永久删除 {n} 份 · {size}', 'Delete {n} for good · {size}'],
+      'arc.wiped':            ['删了 {n} 份,腾出 {size}', 'Deleted {n}, freed {size}'],
+      'arc.wiped.failed':     [';{n} 份删除失败', '; {n} could not be deleted'],
+      'arc.orphans':          ['最上面 {n} 份的游戏已从库里删除,面板上没有对应行 —— 想覆盖回去,先把游戏加回来。', 'The games for the top {n} have been removed from the library, so no row on the dashboard matches them. Add the game back first to restore one.'],
+      'arc.unknown.time':     ['时间未知', 'time unknown'],
+      // A **suffix**: the bold date is put first and this follows it. As a `{when}` template the
+      // English would need the date in the middle, and the bold would end up on the wrong words
+      'bk.of.suffix':         [' 的备份', ' backup'],
+      'arc.deleted.one':      ['删了 {name},腾出 {size}', 'Deleted {name}, freed {size}'],
+
+      'act.skip':             ['跳过', 'Skip'],
+      'act.next':             ['下一步', 'Next'],
+      'act.submit':           ['保存并验证', 'Save and verify'],
+      'act.finish':           ['完成设置', 'Finish setup'],
+      'act.discard':          ['放弃未保存的修改?', 'Discard unsaved changes?'],
+
+      'msg.unreachable':      ['连不上后台服务,刷新一下页面', 'Cannot reach the local service. Refresh the page.'],
+      'msg.failed':           ['请求失败', 'The request failed'],
+      'msg.verifying':        ['正在验证…', 'Verifying…'],
+      'msg.steam.ok':         ['Steam 凭据可用({n} 款游戏)', 'Steam credentials work ({n} games)'],
+      'msg.ai.ok':            ['AI 可用({provider} / {model}{note})', 'AI works ({provider} / {model}{note})'],
+      'msg.ai.nosearch':      [',注意:该供应商不支持联网搜索', ' — note: this provider cannot search the web'],
+      'msg.notion.token.ok':  ['Notion token 可用', 'The Notion token works'],
+      'msg.notion.db.ok':     ['Notion 可用(数据库里 {n} 个页面)', 'Notion works ({n} pages in the database)'],
+      // **Whole sentences.** These were assembled from a prefix, a joined list and a full stop,
+      // which only ever worked because one language was involved — the separator and the stop
+      // are both different in English, and the order can move
+      'msg.done.some':        ['已完成:{list}。', 'Done: {list}.'],
+      'msg.sep':              [';', '; '],
+      'msg.ok.opening':       ['✅ {list},正在打开面板…', '✅ {list} — opening the dashboard…'],
+      'msg.saved.problems':   ['配置已保存,但这个库还有问题:', 'Saved, but this database still has problems:'],
+      'msg.saved.oneleft':    ['配置已保存,还剩一处:', 'Saved. One thing left:'],
+      'msg.apply':            ['套用', 'Apply'],
+      'msg.apply.busy':       ['套用…', 'Applying…'],
+      'msg.fill':             ['帮我补上', 'Fill it in for me'],
+      'msg.fill.busy':        ['补…', 'Filling…'],
+      'msg.fill.done':        ['补上 {list}。', 'Added {list}.'],
+      'msg.applied':          ['已套用新模版。', 'The new template is in place.'],
+      'msg.carryon':          ['先这样,进入面板', 'Leave it, open the dashboard'],
+
+      'notion.looking':       ['正在查询这个 connection 能访问的页面…', 'Looking for pages this connection can reach…'],
+      'notion.nopages':       ['token 有效,但这个 connection 一个页面都看不到 —— 上面第 2 步还没做:', 'The token works, but this connection can see no pages — step 2 above has not been done:'],
+      'notion.nopages.how':   ['在 Notion 里打开要放攻略的页面 → ••• → Add connections → 加上它,然后再点一次。', 'In Notion open the page the guides go on → ••• → Add connections → add it, then click again.'],
+      'notion.found':         ['找到 {n} 个可用页面{more},选一个再点创建。', 'Found {n} usable pages{more}. Pick one and click Create.'],
+      'notion.more':          ['(还有更多没列完)', ' (more not listed)'],
+      'notion.creating':      ['正在创建…', 'Creating…'],
+      'notion.created':       ['创建成功:「{name}」,状态选项 {options}。ID 已填好并保存。', 'Created: {name}, status options {options}. The ID is filled in and saved.'],
+
+      'bk.packing':           ['正在打包…', 'Packing…'],
+      'bk.made':              ['{games} 款游戏 · {size}', '{games} games · {size}'],
+      'bk.upload.failed':     ['上传失败', 'Upload failed'],
+      'bk.reading':           ['正在读取…', 'Reading…'],
+      'bk.counts':            ['{games} 款游戏 · {achievements} 个成就 · {files} 个攻略文件', '{games} games · {achievements} achievements · {files} guide files'],
+      'bk.withkeys':          ['包含密钥,恢复后不用重新设置', 'Includes the keys — nothing to set up again'],
+      'bk.nokeys':            ['不含密钥,恢复后要重填 Steam API Key', 'No keys — the Steam API Key has to be entered again'],
+      'bk.replaces':          ['本机现有的 {n} 款游戏将被替换', 'The {n} games on this computer will be replaced'],
+      'bk.restoring':         ['正在恢复…', 'Restoring…'],
+    };
+
+    /**
+     * The language the page is drawn in. Set from getSettings before the first paint, and again
+     * whenever the toggle changes it — a table is what makes a live re-render possible, so a
+     * language change needs no reload and does not lose which step you were on.
+     */
+    let LANG = 'zh';
+    /** The key for <title>. Empty on a page that never renames itself; applyStrings leaves the tag alone then */
+    let docTitleKey = '';
+
+    /**
+     * One string, with `{slot}` filled from `values`.
+     *
+     * **An unknown key returns the key.** A blank label reads as a layout bug and sends the reader
+     * into the CSS; the key on screen names the entry that is missing. A missing translation falls
+     * back to the Chinese for the same reason the rest of the app does — the other language beats
+     * nothing at all.
+     */
+    function t(key, values) {
+      const pair = STRINGS[key];
+      if (!pair) return key;
+      let s = pair[LANG === 'en' ? 1 : 0] || pair[0];
+      if (values) for (const k in values) s = s.split('{' + k + '}').join(values[k]);
+      return s;
+    }
+
+    /** Attribute keys: `data-t-placeholder` reaches `dataset.tPlaceholder`, and so on */
+    const T_ATTRS = [['tPlaceholder', 'placeholder'], ['tValue', 'value'], ['tAriaLabel', 'aria-label'], ['tTitle', 'title']];
+
+    /**
+     * Repaint every string in the markup. Cheap enough to run again on each language change — this
+     * page is one screen, and the alternative is reloading it, which costs whichever step you were
+     * on.
+     */
+    function applyStrings() {
+      document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+      T_ATTRS.forEach(([prop, attr]) => {
+        document.querySelectorAll('[data-t-' + attr + ']').forEach((el) => {
+          const key = el.dataset[prop];
+          if (!key) return;
+          if (attr === 'value') el.value = t(key); else el.setAttribute(attr, t(key));
+        });
+      });
+      if (docTitleKey) document.title = t(docTitleKey);
+      // The document's own language, so a screen reader announces it correctly and the browser
+      // picks the right line-breaking rules
+      document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
+    }
+
+    /**
+     * Repainting an **interpolated** string is not applyStrings' job: there is no key on the element
+     * to read back, because the value was spliced in at the moment it was painted. Those painters
+     * register here and are re-run when the language changes.
+     *
+     * Leaving one out is invisible in Chinese and only shows after a switch — the guide-archive line
+     * went on reading 「0 份 · 0 B」 in an otherwise entirely English page, which is the failure this
+     * exists to prevent. A painter that throws must not stop the rest of the page changing language.
+     */
+    const REPAINT = [];
+    function repaintInterpolated() {
+      REPAINT.forEach((fn) => { try { fn(); } catch { /* one stale line beats a half-switched page */ } });
+    }
+
+    /**
+     * The page's own heading, subtitle and document title, set **as keys rather than as text**.
+     *
+     * This page renames itself four times — the first-run fork, the wizard, restore-from-backup and
+     * settings — and each of those used to assign the finished string. That is correct until the
+     * language changes, at which point applyStrings repaints the heading from whichever key the
+     * markup shipped with, and the page silently goes back to calling itself 「初始设置」.
+     *
+     * An empty `subKey` means the subtitle is deliberately blank, which is the fork's state: the two
+     * choices there explain themselves and the wizard's subtitle is not true of both.
+     */
+    function setPageCopy(titleKey, subKey, docKey) {
+      $('page-title').dataset.t = titleKey;
+      const sub = $('page-subtitle');
+      if (subKey) sub.dataset.t = subKey; else delete sub.dataset.t;
+      sub.textContent = subKey ? t(subKey) : '';
+      docTitleKey = docKey;
+      $('page-title').textContent = t(titleKey);
+      document.title = t(docKey);
+    }
+
+    const langInputs = () => document.querySelectorAll('.lang-opt input');
+
+    /** Reflect the stored setting. Nothing is checked in the markup, so a failed read shows neither option selected rather than the wrong one */
+    function paintLanguage(lang) {
+      langInputs().forEach((r) => { r.checked = r.value === lang; });
+    }
+
+    /**
+     * **Takes effect on the spot, and does not navigate.** It joins the several controls on this
+     * page that act immediately rather than waiting for 「保存并验证」 — there is nothing to
+     * validate here and no request to make of anyone, only a choice between two things already on
+     * disk.
+     *
+     * It deliberately does not reload either. Every string on this page comes from the table, so
+     * `applyStrings` repaints the whole of it in place — a reload would cost whichever step you
+     * were on and buy nothing.
+     *
+     * A refusal puts the selection back. The control **is** the state, so leaving it showing a
+     * language that was not saved would be the interface lying about what it did; the message says
+     * what happened, and the selection says what is true.
+     */
+    function initLanguage() {
+      langInputs().forEach((radio) => {
+        radio.addEventListener('change', async () => {
+          const chosen = radio.value;
+          let res;
+          try {
+            res = await call('saveUiLanguage', [chosen]);
+          } catch {
+            res = { error: t('msg.unreachable') };
+          }
+          if (res && res.error) {
+            msg.className = 'msg error';
+            msg.textContent = res.error;
+            const previous = await call('getSettings', []).catch(() => ({}));
+            paintLanguage(previous.uiLanguage);
+            return;
+          }
+          // Repaint rather than reload. The table is what makes this possible, and it is the
+          // reason the control does not navigate: a reload would send somebody on step 3 back to
+          // step 1 to change one setting
+          LANG = chosen;
+          applyStrings();
+          repaintInterpolated();
+          if (msg.classList.contains('error')) { msg.className = 'msg'; msg.textContent = ''; }
+        });
+      });
+    }
+    initLanguage();
 
     const call = async (method, args) => {
       const res = await fetch('/api/' + method, {
@@ -983,7 +1313,7 @@
         body: JSON.stringify({ args }),
       });
       const body = await res.json();
-      return body.ok ? body.result : { error: body.error || '请求失败' };
+      return body.ok ? body.result : { error: body.error || t('msg.failed') };
     };
 
     // This page has two identities: first-run setup (no credentials yet, a gate
@@ -1021,6 +1351,12 @@
       if (s.error) { initSteps(); return; }
       isEditMode = s.hasSteamKey && Boolean(s.steamId);
 
+      // **Before anything else touches the page.** The steps, the mode switches and the armed
+      // button labels all read through t(), so the language has to be settled first or each of
+      // them bakes in the wrong one and only fixes itself the next time it is redrawn
+      LANG = s.uiLanguage === 'en' ? 'en' : 'zh';
+      applyStrings();
+      paintLanguage(s.uiLanguage);
       $('id').value = s.steamId || '';
       $('notion-db').value = s.notionDbId || '';
       loadedNotionDb = s.notionDbId || '';
@@ -1049,9 +1385,9 @@
       }
       if (isEditMode) {
         armBack();
-        $('page-title').textContent = '设置';
-        $('page-subtitle').textContent = '点上面的步骤跳到要改的那一节;没动的项目留空即可';
-        document.title = '设置 · Steam 成就追踪器';
+        // **The key, not the text.** Written as textContent it would be right until the language
+        // changed, at which point applyStrings would repaint it with the first-run copy
+        setPageCopy('head.settings', 'sub.settings', 'title.settings');
         // Not queried during first-run setup: the library is empty then, so the
         // archive directories necessarily are too, and the startRestore() path is
         // busy restoring from a zip and does not need an extra empty list
@@ -1094,7 +1430,7 @@
       // only intercept when dirty, so the condition wraps around it.
       // The condition is not pushed into arm(): the other three call sites are
       // deletions, and those have to intercept at all times
-      arm(back, label, '放弃未保存的修改?', () => { location.href = '/'; });
+      arm(back, label, t('act.discard'), () => { location.href = '/'; });
       const confirmClick = back.onclick;
       back.onclick = (e) => {
         if (isDirty()) return confirmClick(e);
@@ -1133,6 +1469,7 @@
       deepseek: 'sk-...',
     };
 
+    REPAINT.push(() => paintAiProvider());
     function paintAiProvider() {
       const sel = $('ai-provider');
       for (const opt of sel.options) {
@@ -1140,7 +1477,7 @@
         // The original copy is stored in dataset: changing textContent directly would stack the marker on a second repaint
         if (opt.dataset.label === undefined) opt.dataset.label = opt.textContent;
         const label = opt.dataset.label;
-        opt.textContent = aiProviders[opt.value]?.hasKey ? `${label} · 已配置` : label;
+        opt.textContent = aiProviders[opt.value]?.hasKey ? t('tag.set.suffix', { label }) : label;
       }
 
       const cur = aiProviders[sel.value];
@@ -1201,7 +1538,8 @@
     const stepHasInput = (n) => (STEP_INPUTS[n] ?? []).some((id) => $(id).value.trim() !== '');
 
     function refreshSkipLabel() {
-      $('step-skip').textContent = stepHasInput(currentStep) ? '下一步' : '跳过';
+      $('step-skip').dataset.t = stepHasInput(currentStep) ? 'act.next' : 'act.skip';
+      $('step-skip').textContent = t($('step-skip').dataset.t);
     }
 
     /** Step 1's manual validation. See the comment in the HTML: why the required attribute is not used */
@@ -1209,7 +1547,7 @@
       const ok = ($('key').value.trim() || isEditMode) && $('id').value.trim();
       if (!ok) {
         msg.className = 'msg error';
-        msg.textContent = 'Steam Web API Key 和 SteamID64 都要填,这一步跳不过去。';
+        msg.textContent = t('step1.missing');
       }
       return Boolean(ok);
     }
@@ -1301,7 +1639,8 @@
         $('step-next').hidden = true;
         btn.hidden = false;
       } else {
-        btn.textContent = '完成设置';
+        btn.dataset.t = 'act.finish';
+      btn.textContent = t('act.finish');
       }
       showStep(1);
     }
@@ -1338,18 +1677,17 @@
       $('backup-make').hidden = false;
       $('backup-title').hidden = false;
       $('restore-title').hidden = false;
-      $('page-title').textContent = '初始设置';
       // The subtitle ("只需要填一次…") was written for the wizard and does not hold
       // for 「从备份恢复」, while the two choices on the fork need no explanation at
       // all. It is put back once 「全新设置」 is chosen
-      $('page-subtitle').textContent = '';
+      setPageCopy('head.setup', '', 'title.setup');
       $('gate').hidden = false;
     }
 
     function startWizard() {
       $('gate').hidden = true;
       $('gate-back').hidden = false;
-      $('page-subtitle').textContent = '只填一次,密钥只存在这台电脑上';
+      setPageCopy('head.setup', 'sub.setup', 'title.setup');
       showWizard();
     }
 
@@ -1365,8 +1703,7 @@
       $('backup-make').hidden = true;
       $('backup-title').hidden = true;
       $('restore-title').hidden = true;
-      $('page-title').textContent = '从备份恢复';
-      $('page-subtitle').textContent = '恢复后直接进入面板,不用重新设置';
+      setPageCopy('gate.restore', 'sub.restore', 'title.setup');
       document.querySelector('.step[data-step="4"]').hidden = false;
     }
 
@@ -1388,14 +1725,13 @@
     $('notion-make').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setNotionMsg('正在查询这个 connection 能访问的页面…');
+      setNotionMsg(t('notion.looking'));
       const r = await call('listNotionParents', [$('notion-token').value.trim()]);
       b.disabled = false;
       if (r.error) return setNotionMsg(r.error, 'error');
       if (!r.pages.length) {
         return setNotionMsg(
-          'token 有效,但这个 connection 一个页面都看不到 —— 上面第 2 步还没做:'
-            + '在 Notion 里打开要放攻略的页面 → ••• → Add connections → 加上它,然后再点一次。',
+          t('notion.nopages') + t('notion.nopages.how'),
           'error'
         );
       }
@@ -1409,14 +1745,13 @@
         sel.appendChild(o);
       }
       $('notion-create').hidden = false;
-      setNotionMsg('找到 ' + r.pages.length + ' 个可用页面'
-        + (r.truncated ? '(还有更多没列完)' : '') + ',选一个再点创建。');
+      setNotionMsg(t('notion.found', { n: r.pages.length, more: r.truncated ? t('notion.more') : '' }));
     });
 
     $('notion-make-go').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setNotionMsg('正在创建…');
+      setNotionMsg(t('notion.creating'));
       const r = await call('createNotionGuideDb', [
         $('notion-token').value.trim(), $('notion-parent').value, $('notion-title').value.trim(),
       ]);
@@ -1433,8 +1768,7 @@
       // change made at the same moment (a half-edited SteamID, say)
       markSaved('notion-db');
       $('notion-create').hidden = true;
-      setNotionMsg('创建成功:「' + r.title + '」,状态选项 ' + r.options.join(' / ')
-        + '。ID 已填好并保存。', 'ok');
+      setNotionMsg(t('notion.created', { name: r.title, options: r.options.join(' / ') }), 'ok');
     });
 
     // ---- Backup ------------------------------------------------------------
@@ -1455,7 +1789,7 @@
     $('bk-go').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setMsg('bk-msg', '正在打包…');
+      setMsg('bk-msg', t('bk.packing'));
       try {
         const r = await call('makeBackup', [{ includeConfig: $('bk-config').checked }]);
         if (r.error) throw new Error(r.error);
@@ -1470,7 +1804,7 @@
         const size = r.sizeBytes >= 1048576
           ? (r.sizeBytes / 1048576).toFixed(1) + ' MB'
           : Math.max(1, Math.round(r.sizeBytes / 1024)) + ' KB';
-        setMsg('bk-msg', `${r.manifest.counts.games} 款游戏 · ${size}`, 'ok');
+        setMsg('bk-msg', t('bk.made', { games: r.manifest.counts.games, size }), 'ok');
       } catch (err) {
         setMsg('bk-msg', err.message, 'error');
       } finally {
@@ -1501,7 +1835,7 @@
     async function upload(file, query) {
       const res = await fetch('/restore' + query, { method: 'POST', body: file });
       const body = await res.json();
-      return body.ok ? body.result : { error: body.error || '上传失败' };
+      return body.ok ? body.result : { error: body.error || t('bk.upload.failed') };
     }
 
     /** Look before writing: restoring clears the existing data, so people have to see what is inside before acting */
@@ -1509,12 +1843,16 @@
       pendingFile = null;
       $('bk-info').hidden = true;
       $('bk-restore').hidden = true;
-      setMsg('restore-msg', '正在读取…');
+      setMsg('restore-msg', t('bk.reading'));
       try {
         const r = await upload(file, '?dry=1');
         if (r.error) throw new Error(r.error);
         const c = r.manifest?.counts ?? {};
-        const when = r.manifest ? new Date(r.manifest.createdAt).toLocaleString('zh-CN') : '时间未知';
+        // The date format follows the interface, not the machine: a page reading in English with a
+        // zh-CN timestamp in it is the one line that looks like a bug rather than a choice
+        const when = r.manifest
+          ? new Date(r.manifest.createdAt).toLocaleString(LANG === 'en' ? 'en-GB' : 'zh-CN')
+          : t('arc.unknown.time');
         // **These numbers come from the manifest.json inside the very zip being
         // inspected** — that is, the not-yet-trusted file itself. The entire point
         // of this screen is "look at what is inside before overwriting the data",
@@ -1531,17 +1869,17 @@
         };
         const br = () => box.appendChild(document.createElement('br'));
         put(when, true);
-        put(' 的备份');
+        put(t('bk.of.suffix'));
         br();
-        put(`${num(c.games)} 款游戏 · ${num(c.achievements)} 个成就 · ${num(r.guideFiles)} 个攻略文件`);
+        put(t('bk.counts', { games: num(c.games), achievements: num(c.achievements), files: num(r.guideFiles) }));
         br();
-        put(r.hasConfig ? '包含密钥,恢复后不用重新设置' : '不含密钥,恢复后要重填 Steam API Key');
+        put(r.hasConfig ? t('bk.withkeys') : t('bk.nokeys'));
         // Only say things will be cleared when the library already holds
         // something. During first-run setup it is 0, and saying it then just reads
         // as scaremongering
         if (r.currentGames > 0) {
           br();
-          put(`本机现有的 ${num(r.currentGames)} 款游戏将被替换`, true);
+          put(t('bk.replaces', { n: num(r.currentGames) }), true);
         }
         box.hidden = false;
         $('bk-restore').hidden = false;
@@ -1587,7 +1925,7 @@
       if (!pendingFile) return;
       const b = e.currentTarget;
       b.disabled = true;
-      setMsg('restore-msg', '正在恢复…');
+      setMsg('restore-msg', t('bk.restoring'));
       try {
         const r = await upload(pendingFile, '');
         if (r.error) throw new Error(r.error);
@@ -1686,28 +2024,28 @@
       const view = document.createElement('button');
       view.type = 'button';
       view.className = 'btn-sub';
-      view.textContent = '查看';
+      view.textContent = t('arc.view');
       view.onclick = async () => {
         const open = li.querySelector('.arc-body');
-        if (open) { open.remove(); view.textContent = '查看'; return; }
+        if (open) { open.remove(); view.textContent = t('arc.view'); return; }
         view.disabled = true;
         const r = await call('readGuideArchive', [e.id]);
         view.disabled = false;
         const body = document.createElement('pre');
         body.className = 'arc-body';
-        body.textContent = r.error ? r.error : r.text || '(内容为空)';
+        body.textContent = r.error ? r.error : r.text || t('arc.empty');
         li.appendChild(body);
-        view.textContent = '收起';
+        view.textContent = t('arc.collapse');
       };
 
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'btn-sub';
-      del.textContent = '删除';
-      arm(del, '删除', '永久删除', async () => {
+      del.textContent = t('arc.delete');
+      arm(del, t('arc.delete'), t('arc.delete.armed'), async () => {
         const r = await call('deleteGuideArchive', [e.id]);
         if (r.error) return setArcMsg(r.error, 'error');
-        setArcMsg(`删了 ${e.game || e.file},腾出 ${kb(r.bytes)}`, 'ok');
+        setArcMsg(t('arc.deleted.one', { name: e.game || e.file, size: kb(r.bytes) }), 'ok');
         loadArchives();
       });
 
@@ -1754,6 +2092,9 @@
      * regardless of size: they are the **only** things this section can reach, as
      * every other row has an owner on the Dashboard.
      */
+    // Only when the section is on screen: during first-run setup the library is empty, and
+    // loadArchives is deliberately not called there
+    REPAINT.push(() => { if (!$('guide-archive').hidden) loadArchives(); });
     async function loadArchives() {
       let list;
       try {
@@ -1776,7 +2117,7 @@
       $('guide-archive').hidden = list.length === 0;
       const bytes = list.reduce((n, e) => n + e.bytes, 0);
       // The half-sentence visible while collapsed: how many, and how large
-      $('arc-count').textContent = `${list.length} 份 · ${kb(bytes)}`;
+      $('arc-count').textContent = t('arc.count', { n: list.length, size: kb(bytes) });
       // **This slot holds only the orphan sentence, no explanation of the
       // mechanism.** 「备份会进 zip」 and 「去哪儿覆盖回去」 are the docs' job, not the
       // screen's — the list itself already states what there is and how large it
@@ -1787,7 +2128,7 @@
       // loud along with the way out (add the game back). With no orphans this line
       // is empty and collapsed by `:empty`, leaving no gap with margins
       $('arc-sum').textContent = orphans.length
-        ? `最上面 ${orphans.length} 份的游戏已从库里删除,面板上没有对应行 —— 想覆盖回去,先把游戏加回来。`
+        ? t('arc.orphans', { n: orphans.length })
         : '';
 
       // 「全部删除」 deletes **the batch that was just painted**, so the ids are
@@ -1803,14 +2144,14 @@
       // 份" when those 12 are no longer the batch on screen
       const ids = sorted.map((e) => e.id);
       const wipe = $('arc-wipe');
-      wipe.textContent = '全部删除';
+      wipe.textContent = t('arc.wipe');
       wipe.classList.remove('armed');
-      arm(wipe, '全部删除', `永久删除 ${list.length} 份 · ${kb(bytes)}`, async () => {
+      arm(wipe, t('arc.wipe'), t('arc.wipe.armed', { n: list.length, size: kb(bytes) }), async () => {
         const r = await call('deleteGuideArchives', [ids]);
         if (r.error) return setArcMsg(r.error, 'error');
         const bad = r.failed?.length ?? 0;
         setArcMsg(
-          `删了 ${r.deleted} 份,腾出 ${kb(r.bytes)}` + (bad ? `;${bad} 份删除失败` : ''),
+          t('arc.wiped', { n: r.deleted, size: kb(r.bytes) }) + (bad ? t('arc.wiped.failed', { n: bad }) : ''),
           bad ? 'error' : 'ok');
         loadArchives();
       });
@@ -1839,7 +2180,7 @@
 
       btn.disabled = true;
       msg.className = 'msg';
-      msg.textContent = '正在验证…';
+      msg.textContent = t('msg.verifying');
 
       const done = [];
       try {
@@ -1848,7 +2189,7 @@
         if (key || !isEditMode) {
           const r = await call('completeSetup', [key, id]);
           if (r.error) throw new Error(r.error);
-          done.push(`Steam 凭据可用(${r.gameCount} 款游戏)`);
+          done.push(t('msg.steam.ok', { n: r.gameCount }));
         }
 
         // Notion is an independent step: its failure must not make an
@@ -1868,9 +2209,10 @@
         if (aiChanged && aiProvider) {
           const r = await call('saveAiConfig', [aiProvider, aiKey, aiModel]);
           if (r.error) throw new Error('AI:' + r.error);
-          done.push(
-            `AI 可用(${r.provider} / ${r.model}${r.canSearch ? '' : ',注意:该供应商不支持联网搜索'})`
-          );
+          done.push(t('msg.ai.ok', {
+            provider: r.provider, model: r.model,
+            note: r.canSearch ? '' : t('msg.ai.nosearch'),
+          }));
         }
 
         const notionChanged = Boolean(notionToken) || notionDb !== loadedNotionDb;
@@ -1879,8 +2221,8 @@
           if (r.error) throw new Error(r.error);
           done.push(
             r.pageCount === null || r.pageCount === undefined
-              ? 'Notion token 可用'
-              : `Notion 可用(数据库里 ${r.pageCount} 个页面)`
+              ? t('msg.notion.token.ok')
+              : t('msg.notion.db.ok', { n: r.pageCount })
           );
           // When the health check has something to say, **stay on this page**. The
           // config has been saved (the ID itself is correct), but navigating away
@@ -1894,7 +2236,7 @@
         }
 
         msg.className = 'msg ok';
-        msg.textContent = '✅ ' + done.join(';') + ',正在打开面板…';
+        msg.textContent = t('msg.ok.opening', { list: done.join(t('msg.sep')) });
         // With Electron present, its getSetupStatus poll sees the configuration
         // complete and navigates the window back — completeSetup has already
         // updated config/steam in place, so no child-process restart is needed.
@@ -1905,7 +2247,7 @@
       } catch (err) {
         msg.className = 'msg error';
         // State the steps that already succeeded, or a failed Notion change makes people think the Steam step was wasted too
-        msg.textContent = (done.length ? '已完成:' + done.join(';') + '。' : '') + err.message;
+        msg.textContent = (done.length ? t('msg.done.some', { list: done.join(t('msg.sep')) }) : '') + err.message;
         btn.disabled = false;
       }
     });

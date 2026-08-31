@@ -68,6 +68,28 @@ const markupOnly = (html) =>
  */
 const markupNoComments = (html) => markupOnly(html).replace(/<!--[\s\S]*?-->/g, '');
 
+/**
+ * A page's string table, evaluated.
+ *
+ * Several assertions below used to pin a Chinese literal at its call site. The wording moved into
+ * the table when the pages became switchable, so they pin the entry instead — and where the promise
+ * is about **what the sentence says** rather than where it lives, they pin both halves. A rule kept
+ * only on the Chinese is a rule that stops applying the moment somebody reads the other language.
+ */
+function pageStrings(file) {
+  const js = inlineScripts(read(file)).join(SEP);
+  const at = js.indexOf('const STRINGS = {');
+  assert.ok(at > 0, `cannot find STRINGS in ${file}`);
+  const open = js.indexOf('{', at);
+  let depth = 0, i = open;
+  for (; i < js.length; i++) {
+    if (js[i] === '{') depth++;
+    else if (js[i] === '}' && --depth === 0) break;
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function('return ' + js.slice(open, i + 1))();
+}
+
 /** The markup of one step. Slice by data-step, never by byte count — a fixed window drifts quietly as the content grows */
 const stepBlock = (html, n) => {
   const m = markupNoComments(html).match(
@@ -950,10 +972,22 @@ describe('the wording in the confirmation dialog', () => {
   // `{ value: 'high', label: '高' }`, the regex matched that one, and changing the default to low
   // stayed green. Mutation testing caught it. This function has no dependencies, and pulling it out
   // and executing it is the only way to be sure
+  // The labels and hints moved into the page's string table, so the sandbox is handed a **real** `t`
+  // reading the **real** STRINGS. A stub returning the key would make every assertion below pass
+  // against identifiers rather than against the wording they exist to pin
+  const STRINGS = pageStrings('Dashboard.html');
+  const t = (key, values) => {
+    const pair = STRINGS[key];
+    if (!pair) return key;
+    let out = pair[0];
+    if (values) for (const k in values) out = out.split('{' + k + '}').join(values[k]);
+    return out;
+  };
+
   const effortChoice = (() => {
     const at = js.indexOf('function effortChoice');
     const end = js.indexOf('\n    }', at) + '\n    }'.length;
-    return new Function(js.slice(at, end) + '; return effortChoice;')();
+    return new Function('t', js.slice(at, end) + '; return effortChoice;')(t);
   })();
 
   test('the default is the deep mode, and there are only two tiers', () => {
@@ -966,6 +1000,8 @@ describe('the wording in the confirmation dialog', () => {
     assert.deepEqual(effortChoice().options.map((o) => o.value), ['low', 'high'],
       'the order is content too: left to right is cheap to deep, and reversing it makes people pick the wrong one by position');
     assert.equal(effortChoice().label, '写法');
+    // and the English half has to exist, or the cell loses its heading the moment it switches
+    assert.ok(STRINGS['gen.style'] && STRINGS['gen.style'][1], "'gen.style' has no English half");
   });
 
   test('each tier says plainly what picking it loses', () => {
@@ -981,6 +1017,10 @@ describe('the wording in the confirmation dialog', () => {
     const low = effortChoice().options.find((o) => o.value === 'low');
     assert.match(low.hint, /模板/,
       'the concrete cost of saving is "it becomes template sentences" — said softly it cannot help anyone decide');
+    // The same promise in the other language: dropping the word there costs exactly what softening
+    // the Chinese would
+    assert.match(STRINGS['gen.fastHint'][1], /template/i,
+      'the English hint has to name template sentences too, or English readers get the softened version');
   });
 
   test('the selected state has to be reported, and written in both places', () => {
@@ -1158,7 +1198,7 @@ describe('the wording in the confirmation dialog', () => {
      * command line is for someone who typed a flag and can afford detail; the interface has to be
      * short — one set of wording forced to serve both suits neither.
      */
-    const call = js.slice(js.indexOf("title: '重写《'"));
+    const call = js.slice(js.indexOf("title: t('rw.title'"));
     const args = call.slice(0, call.indexOf('\n      });')).replace(/\/\*[\s\S]*?\*\//g, '');
     assert.match(args, /picker: picker/, '(first confirm the slice really is the rewrite dialog)');
     assert.doesNotMatch(args, /body:/, 'the scope, the count and the instruction are all on controls; a body could only restate them');
@@ -1510,15 +1550,24 @@ describe('the two backup actions on the generation-succeeded screen', () => {
     assert.match(fn, /restoreGuideArchive\(/);
   });
 
+  const STRINGS = pageStrings('Dashboard.html');
+
   test('that consequence sentence branches by backend, and Notion has to say 「整页重写」', () => {
     // On the Notion side the whole page's blocks are **deleted first and written back**, which is
     // not the same as overwriting a local file, and saying it the same way leaves the user not
     // knowing what they are approving before they press
     const i = src.indexOf('const restoreBackup');
     const seg = src.slice(i, src.indexOf('const dropBackup'));
-    assert.match(seg, /整页重写/, 'the Notion branch');
-    assert.match(seg, /覆盖本地文件/, 'the local branch');
+    // The two sentences moved into the string table; what has to stay here is that the branch is
+    // still taken and still reaches those two entries. The wording itself is pinned just below,
+    // in both languages — a Notion restore deleting a whole page must not read like a file write
+    assert.match(seg, /arc\.restoreNotion/, 'the Notion branch');
+    assert.match(seg, /arc\.restoreLocal/, 'the local branch');
     assert.match(seg, /r\.target === 'notion'/, 'chosen by backend rather than one hardcoded sentence');
+    assert.match(STRINGS['arc.restoreNotion'][0], /整页重写/);
+    assert.match(STRINGS['arc.restoreNotion'][1], /whole page/i, 'the English has to say the whole page too');
+    assert.match(STRINGS['arc.restoreLocal'][0], /覆盖本地文件/);
+    assert.match(STRINGS['arc.restoreLocal'][1], /overwrite/i);
   });
 
   test('after a restore, remove 「删除备份」 — what it points at is no longer the copy meant to be deleted', () => {
@@ -1541,7 +1590,9 @@ describe('the two backup actions on the generation-succeeded screen', () => {
     );
     assert.ok(fn.length > 0 && fn.length < 2500, 'what was sliced should be that handler');
     assert.match(fn, /if \(!armed\)/, 'the first click only arms and does not delete');
-    assert.match(fn, /'永久删除'/, 'the second click label states the consequence, not 「确定」');
+    assert.match(fn, /t\('res\.deleteArmed'\)/, 'the armed label comes from the table');
+    assert.match(STRINGS['res.deleteArmed'][0], /永久删除/, 'the second click states the consequence, not 「确定」');
+    assert.match(STRINGS['res.deleteArmed'][1], /for good|permanently/i, 'and says it as plainly in English');
     assert.match(fn, /deleteGuideArchive\(/);
   });
 
@@ -1559,7 +1610,7 @@ describe('the two backup actions on the generation-succeeded screen', () => {
       src.indexOf("querySelectorAll('[data-drop-backup]')"),
       src.indexOf("querySelectorAll('[data-reveal]')")
     );
-    assert.match(fn, /'备份已删'/, 'once deleted it has no object left');
+    assert.match(fn, /t\('res\.backupDeleted'\)/, 'once deleted it has no object left');
   });
 });
 
@@ -1650,9 +1701,20 @@ describe('the bulk delete of guide backups', () => {
     const i = js.indexOf('arm(wipe,');
     assert.ok(i > 0, 'cannot find arm(wipe, ...)');
     const call = js.slice(i, js.indexOf('\n', i));
-    assert.match(call, /永久删除/);
-    assert.match(call, /\$\{list\.length\} 份/, 'it has to say how many are being deleted');
-    assert.match(call, /\$\{kb\(bytes\)\}/, 'it has to say how much is freed');
+    // The wording moved into the page's string table when the page became switchable. The rule is
+    // the same and is now checked in two halves: this line still has to pass **both** numbers, and
+    // the entry itself still has to spend them on stating the consequence
+    assert.match(call, /t\('arc\.wipe\.armed'/, 'the armed label has to come from the table');
+    assert.match(call, /n: list\.length/, 'it has to say how many are being deleted');
+    assert.match(call, /size: kb\(bytes\)/, 'it has to say how much is freed');
+    const armed = js.match(/'arc\.wipe\.armed':\s*\[([^\]]*)\]/);
+    assert.ok(armed, "cannot find the 'arc.wipe.armed' entry in STRINGS");
+    assert.match(armed[1], /永久删除/);
+    assert.match(armed[1], /for good|permanently/i, 'the English has to be as plain about it as the Chinese');
+    for (const slot of ['{n}', '{size}']) {
+      assert.ok(armed[1].split(slot).length - 1 >= 2,
+        `both languages have to spend ${slot} — one of them dropping it is how a confirmation stops stating the consequence`);
+    }
     assert.doesNotMatch(call, /确定/, 'the second click states the consequence, not 「确定」');
   });
 
@@ -1690,7 +1752,7 @@ describe('the bulk delete of guide backups', () => {
     const i = js.indexOf("const wipe = $('arc-wipe')");
     assert.ok(i > 0, 'cannot find the definition of wipe');
     const block = js.slice(i, js.indexOf('arm(wipe,', i));
-    assert.match(block, /wipe\.textContent = '全部删除'/, 'without a reset it stays on 永久删除 N 份');
+    assert.match(block, /wipe\.textContent = t\('arc\.wipe'\)/, 'without a reset it stays on 永久删除 N 份');
     assert.match(block, /wipe\.classList\.remove\('armed'\)/);
   });
 
@@ -1924,8 +1986,15 @@ describe('the exit from the setup page', () => {
     const i = code.indexOf('arm(back,');
     assert.ok(i > 0, 'cannot find arm(back, ...)');
     const line = code.slice(i, code.indexOf('\n', i));
-    assert.match(line, /放弃未保存的修改/, 'it has to say plainly what is being lost');
-    assert.doesNotMatch(line, /确定/, 'the same rule as the archive buttons');
+    // The copy moved into the string table when the page became switchable, so the rule is now
+    // enforced on the entry rather than on this line — but the line still has to be **reading**
+    // that entry, or the table is decoration and the wording lives wherever it used to
+    assert.match(line, /t\('act\.discard'\)/, 'the armed label has to come from the table');
+    const entry = code.match(/'act\.discard':\s*\[([^\]]*)\]/);
+    assert.ok(entry, "cannot find the 'act.discard' entry in STRINGS");
+    assert.match(entry[1], /放弃未保存的修改/, 'it has to say plainly what is being lost');
+    assert.match(entry[1], /Discard unsaved/i, 'and say it in English too, not merely differently');
+    assert.doesNotMatch(entry[1], /确定/, 'the same rule as the archive buttons');
   });
 
   test('with nothing changed it goes straight through — stopping every time trains the confirmation into something dismissed reflexively', () => {

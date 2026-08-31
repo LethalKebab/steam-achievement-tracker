@@ -35,6 +35,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { buildSystemPrompt } from '../lib/guidegen.js';
+import { MESSAGES } from '../lib/messages.js';
+import { CLI_MESSAGES } from '../lib/cli-messages.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
@@ -69,40 +71,219 @@ function constBlock(src, name) {
   assert.fail(`the initialiser of ${name} does not close`);
 }
 
-describe('every message thrown from lib/ is Chinese', () => {
+/**
+ * Everything `lib/` says to a user now comes out of `lib/messages.js`, and the rule below is what
+ * keeps it that way.
+ *
+ * **The rule this replaces was "every string handed to `new Error` in lib/ is Chinese".** It was
+ * the strict one, and it worked while every message was a literal. It cannot survive them moving
+ * into a table: a message composed through `msg('key')` is invisible to it, so as files converted
+ * that rule would have covered less and less while still reporting green — the exact failure mode
+ * this whole file exists to catch, wearing the costume of the check meant to catch it.
+ *
+ * So the rule became "no user-facing literal survives in lib/ at all", and the language question
+ * moved to the table, where both halves of every entry can be checked. `EXEMPT` is what keeps the
+ * two from drifting apart: a file listed here still holds its own strings, with the reason written
+ * out, the way `TERMINAL_ONLY` does in cli-hints.test.js. Anything not listed must be empty.
+ */
+describe('nothing lib/ says to a user is a loose literal any more', () => {
   /**
-   * The strict one, and the only surface clean enough to be strict about: **all 85 of these are
-   * Chinese today, with no exemptions**.
+   * The one real exemption, and the reason it is real.
    *
-   * These strings are not diagnostics. `lib/` throws them and the Dashboard prints them verbatim
-   * into its floating bar, which is why CLAUDE.md forbids them from carrying command lines — the
-   * packaged app's user has no terminal. The same reasoning fixes their language: whoever reads
-   * them is reading the rest of that interface in Chinese.
-   *
-   * If a genuinely internal error ever needs to be English, add it to an exemption map here with
-   * the reason written out, the way `TERMINAL_ONLY` does in cli-hints.test.js — do not loosen the
-   * rule, because "deliberately exempt" and "translated by accident" have to stay distinguishable.
+   * `lib/rpc.js` is **served to the browser** as `/_rpc.js` — it runs inside the page, not in Node,
+   * so it cannot import `lib/messages.js` at all. Its single message is the same sentence as
+   * `Setup.html`'s `msg.failed`, and it converts when the Dashboard's own table is built.
    */
+  const EXEMPT = { 'rpc.js': ['请求失败'] };
+
   const libFiles = readdirSync(join(ROOT, 'lib')).filter((f) => f.endsWith('.js'));
 
-  /** Every string literal handed straight to `new Error(...)`, comments stripped first */
-  const thrownLiterals = (src) =>
-    [...stripComments(src).matchAll(/new Error\(\s*(['"`])((?:[^\\]|\\.)*?)\1/g)].map((m) => m[2]);
+  /**
+   * Every string literal **anywhere inside** a `new Error(...)`, plus the `{error: ...}` returns.
+   *
+   * Not "the literal immediately after the paren": `new Error(body?.error || '请求失败')` puts one
+   * behind a fallback, and an extractor anchored to the opening paren walks straight past it. That
+   * is not hypothetical — it is the one exemption in this file, and the narrower version reported
+   * the whole rule green while also declaring the exemption stale, which is how it was noticed.
+   * So the argument list is sliced by paren balancing and then scanned whole.
+   */
+  const errorExpressions = (src) => {
+    const out = [];
+    let i = 0;
+    while ((i = src.indexOf('new Error(', i)) !== -1) {
+      let depth = 0, j = i + 'new Error('.length - 1, inStr = null;
+      for (; j < src.length; j++) {
+        const c = src[j];
+        if (inStr) {
+          if (c === '\\') { j++; continue; }
+          if (c === inStr) inStr = null;
+          continue;
+        }
+        if (c === "'" || c === '"' || c === '`') { inStr = c; continue; }
+        if (c === '(') depth++;
+        else if (c === ')' && --depth === 0) break;
+      }
+      out.push(src.slice(i, j + 1));
+      i = j + 1;
+    }
+    return out;
+  };
 
-  test('not one of them is English', () => {
-    const english = [];
-    let total = 0;
+  const literals = (src) => {
+    const clean = stripComments(src);
+    const found = [];
+    for (const expr of errorExpressions(clean)) {
+      for (const m of expr.matchAll(/(['"`])((?:[^\\]|\\.)*?)\1/g)) found.push(m[2]);
+    }
+    for (const m of clean.matchAll(/error:\s*(['`])((?:[^\\]|\\.)*?)\1/g)) found.push(m[2]);
+    return found;
+  };
+
+  test('every user-facing string in lib/ is either in the table or a written-out exemption', () => {
+    const loose = [];
     for (const f of libFiles) {
-      for (const s of thrownLiterals(read(join('lib', f)))) {
-        total++;
-        if (!CJK.test(s)) english.push(`lib/${f}: ${JSON.stringify(s.slice(0, 60))}`);
+      const allowed = EXEMPT[f] ?? [];
+      for (const s of literals(read(join('lib', f)))) {
+        if (!CJK.test(s)) continue;
+        if (allowed.includes(s)) continue;
+        loose.push(`lib/${f}: ${JSON.stringify(s.slice(0, 60))}`);
       }
     }
-    // Guard the extraction itself: an empty result would otherwise read as "all of them pass"
-    assert.ok(total > 60, `only ${total} thrown messages were found in lib/ — the extraction is broken, not the rule satisfied`);
-    assert.deepEqual(english, [],
-      'these messages are thrown from lib/ in English, and they render verbatim in the Dashboard floating bar:\n  '
-      + english.join('\n  '));
+    assert.deepEqual(loose, [],
+      'these are user-facing strings still written into lib/ rather than composed from '
+      + 'lib/messages.js, so they stay in one language while everything around them switches: '
+      + loose.join(' | '));
+  });
+
+  test('an exemption that is no longer used has to be deleted, not left standing', () => {
+    // A stale entry here is how an exemption list turns into a place things are quietly parked.
+    const stale = [];
+    for (const [f, strings] of Object.entries(EXEMPT)) {
+      const present = literals(read(join('lib', f)));
+      for (const s of strings) if (!present.includes(s)) stale.push(`lib/${f}: ${JSON.stringify(s)}`);
+    }
+    assert.deepEqual(stale, [], 'these exemptions no longer match anything in the file: ' + stale.join(' | '));
+  });
+
+  /**
+   * **The rule above reaches `new Error` and `{error: …}` and nothing else.** `lib/api.js` also hands
+   * the Dashboard user-facing text in ordinary data fields — the last-synced line, a game with no
+   * name, the placeholder for a hidden achievement — and one of those was still Chinese in an
+   * otherwise entirely English page until a browser showed it. Nothing in the suite could have.
+   *
+   * So this file is checked whole: every Chinese literal in it is either composed through `msg` or
+   * named here with its reason.
+   */
+  test('lib/api.js hands out no Chinese it did not compose', () => {
+    const KEEP = {
+      // Sent **to the model**, not to the user: a one-character reply is the cheapest probe that
+      // proves a key works, and asking in another language changes what is being tested
+      '回复一个字:好': 'the AI verification prompt',
+      // The default title of a database created **in the user's Notion**. It is content, not
+      // interface, and the settings page sends its own title through anyway
+      'Steam 攻略': 'the default Notion database title',
+    };
+    // **Line-based on purpose.** Two attempts to pull the string literals out of the source both
+    // produced false positives — a scan that pairs quotes straddles a regex literal containing
+    // Chinese, and one that pairs backticks straddles two unrelated template literals, reporting
+    // everything in between. Asking "does this line carry Chinese, and does it compose it" needs no
+    // parsing at all and cannot straddle anything.
+    const loose = stripComments(read(join('lib', 'api.js')))
+      .split('\n')
+      .filter((l) => CJK.test(l))
+      .filter((l) => !l.includes('msg('))
+      .filter((l) => !Object.keys(KEEP).some((k) => l.includes(k)))
+      .map((l) => l.trim().slice(0, 70));
+    assert.deepEqual(loose, [],
+      'these reach the Dashboard as text without going through lib/messages.js, so they stay Chinese '
+      + 'while everything around them switches: ' + loose.join(' | '));
+  });
+
+  test('the exempt strings are still Chinese', () => {
+    // They are outside the table, so the table's own check cannot reach them — but they are read by
+    // the same person, and the original rule still applies to whatever has not moved yet
+    for (const [f, strings] of Object.entries(EXEMPT)) {
+      for (const s of strings) {
+        assert.ok(CJK.test(s), `lib/${f} carries an exempt message that is no longer Chinese: ${JSON.stringify(s)}`);
+      }
+    }
+  });
+});
+
+/**
+ * The other half of the same rule: the table those messages moved into.
+ *
+ * The check above says nothing is left loose in `lib/`. On its own that is satisfied by an empty
+ * table, so this one says the table is actually right — both languages present, the Chinese half
+ * still Chinese, the slots agreeing, no key asked for that does not exist and none defined that
+ * nothing shows. Together they add up to "every message a user can see is available in both
+ * languages"; either alone can be satisfied by something broken.
+ */
+// Two tables, two composers: `msg` reads MESSAGES, `clog` reads CLI_MESSAGES. The checks are the
+// same for both, so the call name is a parameter — scanning for the wrong one reports every key
+// in the other table as an undefined translation
+for (const [TABLE_NAME, TABLE, FN] of [
+  ['lib/messages.js', MESSAGES, 'msg'],
+  ['lib/cli-messages.js', CLI_MESSAGES, 'clog'],
+])
+describe('the messages in ' + TABLE_NAME, () => {
+  test('every entry has both languages, and the Chinese half really is Chinese', () => {
+    const bad = Object.entries(TABLE).filter(([, v]) => {
+      if (!Array.isArray(v) || v.length !== 2) return true;
+      const [zh, en] = v;
+      // A translation pass that took the runtime surface with it shows up here and nowhere else:
+      // both halves present, both readable, and the Chinese one no longer Chinese
+      return !zh || !en || !CJK.test(zh);
+    }).map(([k]) => k);
+    assert.deepEqual(bad, [], 'these entries are not a [zh, en] pair with a Chinese first half');
+  });
+
+  test('a slot in one language is a slot in the other', () => {
+    const slots = (x) => (x.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
+    const mismatched = Object.entries(TABLE)
+      .filter(([, [zh, en]]) => slots(zh) !== slots(en))
+      .map(([k]) => k);
+    // A dropped slot does not throw — it renders the sentence without the value it existed to carry
+    assert.deepEqual(mismatched, [], 'the two languages of these entries interpolate different things');
+  });
+
+  test('every key asked for exists, and every key defined is asked for', () => {
+    const asked = new Set();
+    for (const f of readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))) {
+      for (const m of stripComments(read(join('lib', f))).matchAll(new RegExp(FN + "\\('([^']+)'", 'g'))) asked.add(m[1]);
+    }
+    for (const m of stripComments(read('tracker.js')).matchAll(new RegExp(FN + "\\('([^']+)'", 'g'))) asked.add(m[1]);
+    /**
+     * **The two directions need different sets, and mixing them is what broke this once.**
+     *
+     * "Asked for but not defined" has to stay narrow — only a real `msg('key')` call — or every
+     * quoted string in `lib/` becomes a supposed key and the check reports `'end_turn'` and
+     * `'max_tokens'` as missing translations.
+     *
+     * "Defined but never used" has to be wide, because a key is often reached indirectly:
+     * `msg(cond ? 'a' : 'b')` puts it nowhere near the call. The question there is only whether an
+     * entry is dead weight, and one that appears nowhere in the source certainly is.
+     */
+    const mentioned = new Set(asked);
+    for (const f of [...readdirSync(join(ROOT, 'lib')).filter((x) => x.endsWith('.js'))]) {
+      for (const m of stripComments(read(join('lib', f))).matchAll(/'([a-z][\w.]*)'/g)) mentioned.add(m[1]);
+    }
+    const defined = new Set(Object.keys(TABLE));
+    // msg() returns the key for a miss, so a typo reaches the user as a dotted identifier in the
+    // floating bar rather than as an error anybody sees first
+    assert.deepEqual([...asked].filter((k) => !defined.has(k)), [], 'these keys are used but not defined');
+    assert.deepEqual([...defined].filter((k) => !mentioned.has(k)), [], 'these entries are translated but never used');
+  });
+
+  test('the language is actually set at both entry points', () => {
+    // The table defaults to Chinese, so forgetting this is silent: the interface switches to
+    // English and every message from lib/ keeps answering in Chinese
+    assert.match(stripComments(read(join('lib', 'server.js'))), /setMessageLanguage\(config\.uiLanguage\)/,
+      'serve has to set it before anything can fail');
+    assert.match(stripComments(read('tracker.js')), /setMessageLanguage\(config\.uiLanguage\)/,
+      'the CLI shares these messages with the Dashboard and has to agree with it');
+    assert.match(stripComments(read(join('lib', 'api.js'))), /setMessageLanguage\(lang\)/,
+      'saveUiLanguage has to move the messages too, or the toggle changes the page and not the errors');
   });
 });
 

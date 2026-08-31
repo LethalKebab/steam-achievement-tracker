@@ -43,6 +43,10 @@ const TERMINAL_ONLY = {
   'config.js': 'missing credentials are a startup-time error, and the page path redirects to the setup page',
   // log() prints to the server process's console (into the stderr pipe in the packaged build), not to the page
   'server.js': 'log() writes to the server console, not to the floater',
+  // The table server.js and the CLI compose their terminal lines from. It is a separate file
+  // from lib/messages.js **for this rule**: messages.js can reach the Dashboard, so it stays
+  // strictly command-line-free, and anything bound for a terminal lives here instead
+  'cli-messages.js': 'the terminal-only half of the message tables, by construction',
 };
 
 /**

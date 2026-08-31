@@ -246,9 +246,11 @@ Esc only intercepts when the field has text, so an empty filter still lets the d
 
 ### A game has two names, and 搜索游戏名… matches either
 
-`games.name` is the localised title — the sync hunts for a Chinese one — so an English term matches none of the third of a library stored that way. The miss is not a blank table: `libHit === false` is the switch that sends the query on to the store, the store matches the English term perfectly well, and a game already owned comes back under 「Steam 上的结果」, where clicking it is refused as a duplicate.
+A game row carries two: `name`, whichever one the interface is currently showing, and `nameAlt`, the stored name it is not showing. Matching only `name` misses about a third of a library either way round — in Chinese an English term finds nothing, and in English a Chinese one finds nothing. The miss is not a blank table: `libHit === false` is the switch that sends the query on to the store, the store matches perfectly well, and a game already owned comes back under 「Steam 上的结果」, where clicking it is refused as a duplicate.
 
-`name_en` is carried beside it for exactly this ([data.md](data.md)), and **both search tests go through `nameMatches`**: `hidingFilter` decides what the table draws, `libHit` decides whether to go to Steam at all. Judged separately they drift, and the drift presents as a row plainly in the table while the code reports the library as empty. The row still displays `name` only. `gamename.test.js` pins the shared route and the matching itself, mutation-tested.
+**`nameAlt` is "the other one", not "the English one",** and that distinction is load-bearing. A field named by language carries the English name in both modes, so the day the interface could be switched to English every Chinese title stopped being findable — the same bug arriving from the opposite side. `lib/lang.js`'s `gameNamePair` decides both values together, and `addGame` returns them through it too, because its result is pushed straight into the table without a reload.
+
+**Both search tests go through `nameMatches`**: `hidingFilter` decides what the table draws, `libHit` decides whether to go to Steam at all. Judged separately they drift, and the drift presents as a row plainly in the table while the code reports the library as empty. `gamename.test.js` and `uilanguage.test.js` pin the shared route and the matching itself, mutation-tested.
 
 ---
 
@@ -429,11 +431,39 @@ Every armed rule in both pages is therefore written as a pair (`.x.armed, .x.arm
 
 ---
 
+## 12b. Both pages read their text from a table
+
+`Setup.html` and `Dashboard.html` each hold a `STRINGS` table of `[zh, en]` pairs and the same ~56-line mechanism (`t`, `applyStrings`, `REPAINT`). **Zero dependencies allows no shared script**, so the mechanism is stored twice — the same arrangement as the `:root` design tokens, and `uilanguage.test.js` compares the two copies the same way. A divergence is silent: a fix to slot substitution lands on one page and not the other.
+
+Pairs rather than two locale files, deliberately. A key missing from a second file falls back and looks fine; a pair makes a half-translation a structural fact the tests can see — both halves present, the Chinese half genuinely Chinese, the `{slots}` matching, no key used-but-undefined or defined-but-unused, and no Chinese left loose outside the table.
+
+The two pages differ in one way. `Setup.html` repaints in place on a language change, so it needs a `REPAINT` registry for text that was interpolated when it was painted — leaving one out is invisible in Chinese and shows up as a single stale line in an otherwise English page, which is how the guide-archive counter was found still reading 「0 份 · 0 B」. The Dashboard needs no such registry: `render()` rebuilds the whole table from `allGames`, and there is no toggle on the page — it lives on `/setup`, and coming back is a full navigation.
+
+**Dates follow the interface, not the machine.** `lastUpdated` is formatted server-side against `uiLanguage`; a page reading in English with a `zh-CN` timestamp on it is the one line that looks like a bug rather than a choice.
+
+---
+
 ## 13. The setup page (`Setup.html`)
 
 It is the first-run gate **and** the settings page. Served instead of `Dashboard.html` when `config.json` has no Steam credentials; reachable any time from the Dashboard's 设置 button. `getSettings` drives the two modes.
 
 **Secret fields blank = keep current**, never = clear.
+
+### Every string on this page comes from a table
+
+`Setup.html` is the first surface converted for `uiLanguage`, so nothing on it is a literal any more. Two routes, and they are not interchangeable:
+
+- **Static markup** carries `data-t` (or `data-t-placeholder` / `data-t-value` / `data-t-aria-label`) and is repainted by `applyStrings`. The Chinese stays inline as the pre-JS default, so the page reads correctly before the script runs.
+- **Anything composed at runtime** calls `t(key, values)`, with `{slot}` for the interpolated parts.
+
+Four rules the tests pin, each of which fails silently:
+
+- **A whole sentence is one entry.** Several messages used to be spliced from a prefix, a joined list and a full stop. That works while one language is involved and breaks the moment word order moves — so `'已完成:' + list + '。'` became `msg.done.some`, and the list separator is its own entry because `;` and `; ` are not the same character.
+- **A line that mixes our words with an `<a>` or a `<code>` keeps its elements** and gives each text run its own key, rather than storing markup in the table. That pins the word order to the Chinese one, so the English for those runs is written to fit the same slots. It is the price of never putting a table string through `innerHTML` — the restore preview is on this page, and it renders a not-yet-trusted file.
+- **The page's own heading is set as a key, not as text.** It renames itself four times (fork, wizard, restore, settings); assigned as text, the next `applyStrings` repaints it from whichever key the markup shipped with and the page silently goes back to calling itself 初始设置.
+- **Interpolated text has to be repainted explicitly.** `applyStrings` cannot help it — there is no key on the element, because the value was spliced in when it was painted. Those painters register in `REPAINT`. Leaving one out is invisible in Chinese: the guide-archive line went on reading 「0 份 · 0 B」 in an otherwise entirely English page.
+
+Switching language repaints in place and **does not reload** — a reload would cost whichever step you were on.
 
 ### The first screen is a fork, and it is the one thing the program has to ask
 

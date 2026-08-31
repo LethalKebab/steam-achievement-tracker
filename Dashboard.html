@@ -2394,21 +2394,21 @@
       <!-- 「Steam」 is the platform, 「成就」 is the keyword and 「追踪器」 is the noun;
            three roles, three treatments: weight, accent colour, plain. **There is no
            underline**; the reasoning is in the .wordmark block in the stylesheet -->
-      <h1 class="wordmark"><span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key">成就</span>追踪器</span></h1>
+      <h1 class="wordmark"><span class="wm-text"><span class="wm-latin">Steam</span><span class="wm-key" data-t="wm.key">成就</span><span data-t="wm.rest">追踪器</span></span></h1>
       <!-- The exact values and their definitions go in title attributes (readable on hover) rather than taking screen space -->
       <div class="readout">
         <!-- **Always the library total, and it does not follow the filters.** The
              filtered count belongs to the table and sits above it (#rowCount); the two
              numbers mean different things, and putting them together makes them read as
              the same one -->
-        <span class="reading" title="库里的游戏总数">
-          <span class="value" id="cardTotal">–</span><span class="label">游戏</span>
+        <span class="reading" title="库里的游戏总数" data-t-title="card.totalTitle">
+          <span class="value" id="cardTotal">–</span><span class="label" data-t="card.total">游戏</span>
         </span>
-        <span class="reading" title="AGCR:所有游戏完成率的平均值">
-          <span class="value" id="cardAvg">–</span><span class="label">平均完成率</span>
+        <span class="reading" title="AGCR:所有游戏完成率的平均值" data-t-title="card.avgTitle">
+          <span class="value" id="cardAvg">–</span><span class="label" data-t="card.avg">平均完成率</span>
         </span>
-        <span class="reading" title="已经打满全部成就的游戏">
-          <span class="value" id="cardPerfect">–</span><span class="label">完美</span>
+        <span class="reading" title="已经打满全部成就的游戏" data-t-title="card.perfectTitle">
+          <span class="value" id="cardPerfect">–</span><span class="label" data-t="card.perfect">完美</span>
         </span>
       </div>
     </div>
@@ -2419,22 +2419,22 @@
          clicked" becomes a pattern recognisable at a glance -->
     <div class="subtitle-row">
       <div class="topbar-status">
-        <div class="subtitle" id="lastUpdated">加载中…</div>
+        <div class="subtitle" id="lastUpdated" data-t="ui.loading">加载中…</div>
         <span class="sync-msg" id="syncMsg"></span>
       </div>
       <div class="topbar-actions">
         <button class="icon-btn" id="syncNowBtn"
-                title="立即从 Steam 拉取最新数据。刷新页面只重读本地数据,不会联网。"
-                aria-label="立即同步"><span class="icon-glyph"><svg class="ic"><use href="#i-sync"/></svg></span></button>
+                title="立即从 Steam 拉取最新数据。刷新页面只重读本地数据,不会联网。" data-t-title="sync.buttonTitle"
+                aria-label="立即同步" data-t-aria-label="ui.syncNow"><span class="icon-glyph"><svg class="ic"><use href="#i-sync"/></svg></span></button>
         <!-- The packaged build has no address bar, and without an entry point here the settings page becomes unreachable after first-run setup -->
         <a class="icon-btn" href="/setup"
-           title="修改 Steam 凭据、配置 AI 攻略生成和 Notion 攻略同步、备份与恢复"
-           aria-label="设置"><span class="icon-glyph"><svg class="ic"><use href="#i-settings"/></svg></span></a>
+           title="修改 Steam 凭据、配置 AI 攻略生成和 Notion 攻略同步、备份与恢复" data-t-title="ui.settingsTitle"
+           aria-label="设置" data-t-aria-label="ui.settings"><span class="icon-glyph"><svg class="ic"><use href="#i-settings"/></svg></span></a>
         <span class="bell-wrap">
           <button class="icon-btn" id="bellBtn" type="button"
-                  title="提醒" aria-label="提醒" aria-expanded="false"><span class="icon-glyph"><svg class="ic"><use href="#i-bell"/></svg></span></button>
+                  title="提醒" data-t-title="ui.bell" aria-label="提醒" data-t-aria-label="ui.bell" aria-expanded="false"><span class="icon-glyph"><svg class="ic"><use href="#i-bell"/></svg></span></button>
           <span class="bell-dot" id="bellDot" hidden></span>
-          <div class="bell-panel" id="bellPanel" hidden role="dialog" aria-label="提醒"></div>
+          <div class="bell-panel" id="bellPanel" hidden role="dialog" aria-label="提醒" data-t-aria-label="ui.bell"></div>
         </span>
       </div>
     </div>
@@ -2472,14 +2472,14 @@
            one more line of heading would exactly cancel the height this merge saved
            (see --topbar-h) -->
       <div class="search-field">
-        <input type="text" id="searchBox" placeholder="搜索游戏名…"
-               aria-label="搜索游戏。库里没有的会去 Steam 上找,可以直接添加"
+        <input type="text" id="searchBox" placeholder="搜索游戏名…" data-t-placeholder="ui.searchPlaceholder"
+               aria-label="搜索游戏。库里没有的会去 Steam 上找,可以直接添加" data-t-aria-label="ui.searchAria"
                autocomplete="off">
         <!-- The cross is only present when the field has text (the rule is the
              :placeholder-shown one in the CSS).
              No title: a cross living inside a search box needs no sentence of
              explanation, and the aria-label already covers the screen-reader side -->
-        <button type="button" class="field-clear" aria-label="清除搜索"><svg class="ic"><use href="#i-close"/></svg></button>
+        <button type="button" class="field-clear" aria-label="清除搜索" data-t-aria-label="ui.clearSearch"><svg class="ic"><use href="#i-close"/></svg></button>
       </div>
     </div>
 
@@ -2499,7 +2499,7 @@
       <!-- A two-word source label. The results appear below the search box while the
            table above is simultaneously empty, and without labelling it they read as
            "these are what I have" -->
-      <div class="steam-label" id="steamLabel" hidden>Steam 商店</div>
+      <div class="steam-label" id="steamLabel" hidden data-t="ui.steamStore">Steam 商店</div>
       <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
       <!-- **Words only when words are genuinely needed**: neither side has it, the
            service is unreachable, and the clickable 「已添加 X」 after adding. Being busy
@@ -2516,14 +2516,14 @@
          also puts cause and effect together: change a filter and the number on the right
          changes on the spot. -->
     <div class="table-bar">
-      <div class="view-toggle" role="group" aria-label="视图">
+      <div class="view-toggle" role="group" aria-label="视图" data-t-aria-label="ui.view">
         <!-- 「网格 / 列表」 is the settled wording for this switch in a Chinese interface
              and needs no learning.
              The first two versions both fell over the same thing: 「图库」 is a literal
              translation of Gallery, and 「封面」 uses a noun as a view name, reading like
              labelling a picture rather than naming a way of looking. -->
-        <button type="button" class="on" aria-pressed="true" data-view="table">列表</button>
-        <button type="button" aria-pressed="false" data-view="gallery">网格</button>
+        <button type="button" class="on" aria-pressed="true" data-view="table" data-t="ui.viewTable">列表</button>
+        <button type="button" aria-pressed="false" data-view="gallery" data-t="ui.viewGrid">网格</button>
       </div>
       <!-- Five tri-state chips (neutral/only/exclude; the cycle and the palette are in
            .chip in the CSS).
@@ -2542,23 +2542,23 @@
            chip's own state, and a name carrying a direction as well reads as
            「只看隐藏已完成」. -->
       <div class="filter-chips" id="filterChips">
-      <button type="button" class="chip" data-filter="fav" data-state="off"><span class="chip-dot"></span><span class="chip-label">喜爱</span></button>
-      <button type="button" class="chip" data-filter="family" data-state="off"><span class="chip-dot"></span><span class="chip-label">家庭</span></button>
+      <button type="button" class="chip" data-filter="fav" data-state="off"><span class="chip-dot"></span><span class="chip-label" data-t="filter.fav">喜爱</span></button>
+      <button type="button" class="chip" data-filter="family" data-state="off"><span class="chip-dot"></span><span class="chip-label" data-t="filter.family">家庭</span></button>
       <!-- Excluded at startup. It replaced the old 「进行中」 tab — this page's question is
            「还有什么值得打」, and a completed game contributes nothing to it. With three
            states a trophy wall comes free: two clicks turns it into 「只看」 -->
-      <button type="button" class="chip" data-filter="complete" data-state="not"><span class="chip-dot"></span><span class="chip-label">已完成</span></button>
+      <button type="button" class="chip" data-filter="complete" data-state="not"><span class="chip-dot"></span><span class="chip-label" data-t="filter.complete">已完成</span></button>
       <!-- **"Unvetted" does not appear in the interface** — that is a word from Steam's
            API rather than the user's; the database column is still called Unvetted (it
            reaches CSV and is a compatibility surface). The explanation goes in a title and
            takes no screen space -->
-      <button type="button" class="chip" data-filter="unvetted" data-state="not" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label">受限</span></button>
+      <button type="button" class="chip" data-filter="unvetted" data-state="not" data-t-title="chip.unvettedTitle" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label" data-t="filter.unvetted">受限</span></button>
       <!-- Excluded at startup, for the same reason as 「已完成」: this page answers 「还有
            什么值得打」, and a game with no achievement system contributes nothing to it —
            it does not even have one target to aim at.
            To see the whole library (to find a game and change a mark, say), one click
            returns it to neutral -->
-      <button type="button" class="chip" data-filter="noach" data-state="not"><span class="chip-dot"></span><span class="chip-label">无成就</span></button>
+      <button type="button" class="chip" data-filter="noach" data-state="not"><span class="chip-dot"></span><span class="chip-label" data-t="filter.noach">无成就</span></button>
       </div>
       <div class="row-count" id="rowCount"></div>
     </div>
@@ -2572,29 +2572,29 @@
     thing, with CSS deciding which shows.
   -->
   <div id="gen-bar" role="status">
-    <button type="button" class="gen-close" id="genToggle" title="收起(任务仍在进行)" aria-label="收起"><svg class="ic"><use href="#i-chevron"/></svg></button>
-    <button type="button" class="gen-close" id="genClose" title="关闭" aria-label="关闭"><svg class="ic"><use href="#i-close"/></svg></button>
+    <button type="button" class="gen-close" id="genToggle" title="收起(任务仍在进行)" data-t-title="gen.collapseTitle" aria-label="收起" data-t-aria-label="gen.collapse"><svg class="ic"><use href="#i-chevron"/></svg></button>
+    <button type="button" class="gen-close" id="genClose" title="关闭" data-t-title="ui.close" aria-label="关闭" data-t-aria-label="ui.close"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
   </div>
 
   <div class="row-menu" id="rowEditMenu" hidden></div>
 
-  <button type="button" id="toTop" title="回到顶部" aria-label="回到顶部"><svg class="ic"><use href="#i-chevron-up"/></svg></button>
+  <button type="button" id="toTop" title="回到顶部" data-t-title="ui.toTop" aria-label="回到顶部" data-t-aria-label="ui.toTop"><svg class="ic"><use href="#i-chevron-up"/></svg></button>
 
   <div class="modal-overlay" id="addConfirmModal">
     <div class="modal-box">
-      <div style="font-size:13px; color:var(--text-3); margin-bottom:8px;">将这款游戏添加到列表？</div>
+      <div style="font-size:13px; color:var(--text-3); margin-bottom:8px;" data-t="addc.title">将这款游戏添加到列表？</div>
       <div class="game-name" id="confirmGameName"></div>
       <!-- Ticked by default: the vast majority of manual additions are family-shared or
            gifted games — anything bought outright is already in GetOwnedGames and needs no
            manual adding -->
       <label class="modal-check">
         <input type="checkbox" id="confirmFamily" checked>
-        家庭组游戏
+        <span data-t="addc.family">家庭组游戏</span>
       </label>
       <div class="modal-btns">
-        <button class="add-game-btn" id="confirmAddBtn">确认</button>
-        <button class="add-game-btn btn-secondary" id="cancelAddBtn">取消</button>
+        <button class="add-game-btn" id="confirmAddBtn" data-t="dlg.ok">确认</button>
+        <button class="add-game-btn btn-secondary" id="cancelAddBtn" data-t="ui.cancel">取消</button>
       </div>
     </div>
   </div>
@@ -2638,15 +2638,15 @@
              **They change only "what is displayed" and do not touch the selection by one
              character** — this is the shape this cell reached after two rounds of changes,
              and the reasoning is in the long comment in the js -->
-        <div id="askPickQuick" role="group" aria-label="筛选"></div>
+        <div id="askPickQuick" role="group" aria-label="筛选" data-t-aria-label="pick.filter"></div>
         <!-- The same shape as the search box: the cross inside the field rather than
              outside — the 「清空」 next to it clears the selection, and two clearing actions
              that look identical read as the same thing -->
         <div class="search-field">
-          <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就">
-          <button type="button" class="field-clear" aria-label="清除搜索"><svg class="ic"><use href="#i-close"/></svg></button>
+          <input type="search" id="askPickFilter" class="ask-input" autocomplete="off" placeholder="搜索成就" data-t-placeholder="pick.searchPlaceholder">
+          <button type="button" class="field-clear" aria-label="清除搜索" data-t-aria-label="ui.clearSearch"><svg class="ic"><use href="#i-close"/></svg></button>
         </div>
-        <div id="askPickList" role="group" aria-label="挑要重写的成就"></div>
+        <div id="askPickList" role="group" aria-label="挑要重写的成就" data-t-aria-label="pick.listAria"></div>
         <!-- The count and the two actions sit together: what they act on is precisely the
              number beside them, and in one place that needs no explanation.
              **「全选」 takes the batch currently displayed**, which makes it a pair with the
@@ -2655,8 +2655,8 @@
         <div class="ask-pick-foot">
           <span id="askPickCount" class="ask-pick-count" aria-live="polite"></span>
           <div class="ask-pick-acts">
-            <button type="button" id="askPickAll" class="ask-pick-clear">全选</button>
-            <button type="button" id="askPickClear" class="ask-pick-clear">清空</button>
+            <button type="button" id="askPickAll" class="ask-pick-clear" data-t="pick.all">全选</button>
+            <button type="button" id="askPickClear" class="ask-pick-clear" data-t="pick.clear">清空</button>
           </div>
         </div>
       </div>
@@ -2665,8 +2665,8 @@
         <input type="text" id="askInput" class="ask-input" autocomplete="off">
       </div>
       <div class="modal-btns">
-        <button class="add-game-btn" id="askOkBtn">确认</button>
-        <button class="add-game-btn btn-secondary" id="askCancelBtn">取消</button>
+        <button class="add-game-btn" id="askOkBtn" data-t="dlg.ok">确认</button>
+        <button class="add-game-btn btn-secondary" id="askCancelBtn" data-t="ui.cancel">取消</button>
       </div>
     </div>
   </div>
@@ -2683,7 +2683,7 @@
       <div class="arc-scroll"><ul class="arc-list" id="arcList"></ul></div>
       <div class="arc-msg" id="arcMsg" role="status"></div>
       <div class="modal-btns">
-        <button class="add-game-btn btn-secondary" id="arcCloseBtn">关闭</button>
+        <button class="add-game-btn btn-secondary" id="arcCloseBtn" data-t="ui.close">关闭</button>
       </div>
     </div>
   </div>
@@ -2691,14 +2691,14 @@
   <table id="gameTable">
     <thead>
       <tr>
-        <th data-key="name">游戏</th>
-        <th data-key="achieved">完成数</th>
-        <th data-key="total">成就总数</th>
-        <th data-key="rate">完成率</th>
+        <th data-key="name" data-t="th.name">游戏</th>
+        <th data-key="achieved" data-t="th.achieved">完成数</th>
+        <th data-key="total" data-t="th.total">成就总数</th>
+        <th data-key="rate" data-t="th.rate">完成率</th>
       </tr>
     </thead>
     <tbody id="gameTableBody">
-      <tr><td colspan="4" class="loading">正在读取数据…</td></tr>
+      <tr><td colspan="4" class="loading" data-t="table.loading">正在读取数据…</td></tr>
     </tbody>
   </table>
   <div id="gallery" class="gallery" hidden></div>
@@ -2708,6 +2708,319 @@
   <script src="/_rpc.js"></script>
 
   <script>
+    /**
+     * The string table, and the two ways a string reaches the screen
+     * ------------------------------------------------
+     * `[zh, en]` in that order, everywhere. **Chinese is the source and English is a translation of
+     * it** — where the two disagree the Chinese is right.
+     *
+     * **A whole sentence is one entry.** This page assembled most of its messages from two to five
+     * concatenated pieces around interpolated values, which works only while one language is
+     * involved: word order moves, and a sentence spliced from fragments comes out in the order the
+     * *other* language needed. Slots are `{name}`, filled by `t`.
+     *
+     * Two routes onto the screen:
+     * - **Static markup** carries `data-t` (or `data-t-placeholder` / `data-t-aria-label`) and is
+     *   repainted by `applyStrings`.
+     * - **Anything composed at runtime** calls `t(key, values)`. Most of this page is that: rows,
+     *   badges and dialogs are built as HTML strings, so their text arrives through `t` and is put
+     *   through `escapeHtml` wherever it is interpolated into markup, exactly as before.
+     *
+     * Unlike `Setup.html` this page needs no `REPAINT` registry for its own body — `render()`
+     * rebuilds the whole table from `allGames` on every call, so a language change is a repaint of
+     * the static chrome plus one `render()`.
+     */
+    const STRINGS = {
+      // ---- The page itself, the topbar and the readings -----------------------
+      'title.page':           ['Steam 成就追踪器', 'Steam Achievement Tracker'],
+      // The wordmark is one phrase split across two spans so the middle word can carry the accent
+      // colour. The split has to move with the language, or the accent lands on nothing
+      'wm.key':               ['成就', 'Achievement'],
+      'wm.rest':              ['追踪器', 'Tracker'],
+      'card.total':           ['游戏', 'Games'],
+      'card.totalTitle':      ['库里的游戏总数', 'How many games are in the library'],
+      'card.avg':             ['平均完成率', 'Average completion'],
+      'card.avgTitle':        ['AGCR:所有游戏完成率的平均值', 'AGCR: the mean completion rate across every game'],
+      'card.perfect':         ['完美', 'Perfect'],
+      'card.perfectTitle':    ['已经打满全部成就的游戏', 'Games with every achievement unlocked'],
+      'ui.loading':           ['加载中…', 'Loading…'],
+      'ui.syncNow':           ['立即同步', 'Sync now'],
+      'ui.settings':          ['设置', 'Settings'],
+      'ui.settingsTitle':     ['修改 Steam 凭据、配置 AI 攻略生成和 Notion 攻略同步、备份与恢复', 'Change the Steam credentials, set up AI guide generation and Notion sync, back up and restore'],
+      'ui.bell':              ['提醒', 'Notifications'],
+      'ui.searchPlaceholder': ['搜索游戏名…', 'Search game names…'],
+      'ui.searchAria':        ['搜索游戏。库里没有的会去 Steam 上找,可以直接添加', 'Search games. Anything not in the library is looked up on Steam and can be added from here'],
+      'ui.clearSearch':       ['清除搜索', 'Clear the search'],
+      'ui.steamStore':        ['Steam 商店', 'Steam store'],
+      'ui.view':              ['视图', 'View'],
+      'ui.viewTable':         ['列表', 'List'],
+      'ui.viewGrid':          ['网格', 'Grid'],
+      'ui.close':             ['关闭', 'Close'],
+      'ui.cancel':            ['取消', 'Cancel'],
+      'ui.toTop':             ['回到顶部', 'Back to top'],
+      'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but excluded from the average completion rate above — the same as Steam’s own method.'],
+      'gen.collapse':         ['收起', 'Collapse'],
+      'gen.collapseTitle':    ['收起(任务仍在进行)', 'Collapse — the task keeps running'],
+      'addc.title':           ['将这款游戏添加到列表？', 'Add this game to the list?'],
+      'addc.family':          ['家庭组游戏', 'Family-shared game'],
+      'pick.filter':          ['筛选', 'Filter'],
+      'pick.searchPlaceholder': ['搜索成就', 'Search achievements'],
+      'pick.listAria':        ['挑要重写的成就', 'Achievements to rewrite'],
+      'pick.all':             ['全选', 'Select all'],
+      'pick.clear':           ['清空', 'Clear'],
+      'th.name':              ['游戏', 'Game'],
+      'th.achieved':          ['完成数', 'Unlocked'],
+      'th.total':             ['成就总数', 'Total'],
+      'th.rate':              ['完成率', 'Rate'],
+      'table.loading':        ['正在读取数据…', 'Loading…'],
+
+      // ---- Filter chips and the search box ------------------------------------
+      'filter.fav':           ['喜爱', 'Favourite'],
+      'filter.family':        ['家庭', 'Family'],
+      'filter.complete':      ['已完成', 'Complete'],
+      'filter.unvetted':      ['受限', 'Limited'],
+      'filter.noach':         ['无成就', 'No achievements'],
+      'chip.off':             ['不筛选', 'Off'],
+      'chip.only':            ['只看', 'Only'],
+      'chip.not':             ['排除', 'Exclude'],
+      'ui.searchBox':         ['搜索框', 'the search box'],
+
+      // ---- The bell -----------------------------------------------------------
+      'bell.perfect':         ['打满之后又出了新成就', 'Completed, then new achievements appeared'],
+      'bell.added':           ['以前没有成就,现在有了', 'Had no achievements before, has them now'],
+      'bell.empty':           ['最近 {days} 天没有新动静', 'Nothing new in the last {days} days'],
+      'bell.today':           ['今天', 'today'],
+      'bell.daysAgo':         ['{n} 天前', '{n} days ago'],
+
+      // ---- The table ----------------------------------------------------------
+      'table.empty':          ['没有符合条件的游戏', 'No games match'],
+      'table.noAchSystem':    ['无成就系统', 'No achievement system'],
+      'table.syncing':        ['同步中', 'syncing'],
+      'table.noNumbers':      ['还没填数字', 'no numbers entered yet'],
+      'table.syncingRow':     ['数据同步中…', 'Syncing…'],
+      'table.openGuide':      ['(点开攻略)', ' (opens the guide)'],
+      'table.count':          ['显示 {shown} / 共 {total}', 'Showing {shown} of {total}'],
+      'table.unvettedTitle':  ['Steam 归为「个人资料功能受限」,不计入平均完成率', 'Steam classes this as “Profile Features Limited”; it is excluded from the average completion rate'],
+      'table.lockOn':         ['已锁定:不参与自动同步,数据需手动填写。点击解锁', 'Locked: excluded from automatic syncing, the numbers are yours to fill in. Click to unlock'],
+      'table.lockOff':        ['锁定这一行:停止自动同步', 'Lock this row: stop syncing it automatically'],
+      'table.locked':         ['已锁定', 'locked'],
+      'table.unlocked':       ['未锁定', 'unlocked'],
+      'table.familyOff':      ['取消家庭共享标记', 'Remove the family-share mark'],
+      'table.familyOn':       ['标记为家庭共享(非自购,纯信息用途)', 'Mark as family-shared — not self-purchased, for information only'],
+      'table.newAch':         ['{n}天前新增成就', 'new achievements {n}d ago'],
+      'table.playedToday':    ['今天在玩', 'playing today'],
+      'table.playedAgo':      ['{n}天前玩过', 'played {n}d ago'],
+      'table.guide':          ['攻略', 'Guide'],
+      'table.generate':       ['生成', 'Generate'],
+      'table.priority':       ['重点关注', 'Priority'],
+      'table.favourite':      ['喜爱', 'Favourite'],
+      'table.rewrite':        ['重写', 'Rewrite'],
+      'table.rewriteTitle':   ['让 AI 重新写一份,覆盖现在这份(会先备份原文)', 'Have the AI write it again, replacing the current one — the original is backed up first'],
+      'table.moveTitle':      ['把这份本地攻略搬到 Notion', 'Move this local guide to Notion'],
+      'table.backups':        ['备份 {n}', 'Backups {n}'],
+      'table.backupsTitle':   ['覆盖前的原文、搬去 Notion 时留下的原件、没过校验的草稿', 'Originals kept before an overwrite, the file left behind when a guide moved to Notion, and drafts that did not pass the checks'],
+      'table.more':           ['更多操作', 'More'],
+
+      // ---- The achievement panel ----------------------------------------------
+      'ach.loading':          ['正在查询缺失成就…', 'Looking up what is missing…'],
+      'ach.allDone':          ['所有成就都已解锁', 'Every achievement is unlocked'],
+      'ach.remaining':        ['还差 {n} / {total} 个成就', '{n} of {total} achievements to go'],
+      'ach.written':          [' · 攻略里已写 {written} / {n} 条', ' · {written} of {n} written up'],
+      'ach.searchGuide':      ['搜攻略', 'Search'],
+      'ach.notWritten':       ['攻略里还没写这条', 'Not written up yet'],
+      'ach.openInGuide':      ['在攻略中打开', 'Open in the guide'],
+
+      // ---- Deleting a row -----------------------------------------------------
+      'del.title':            ['删除《{game}》?', 'Delete {game}?'],
+      'del.body':             ['从本地删掉这一行,无法撤销。', 'Removes this row locally. It cannot be undone.'],
+      'del.ok':               ['删除', 'Delete'],
+      'del.failed':           ['删除失败', 'Could not delete'],
+      'del.gotIt':            ['知道了', 'Got it'],
+
+      // ---- Guide archives -----------------------------------------------------
+      'arc.notionWhole':      [' · Notion 整页', ' · whole Notion page'],
+      'arc.view':             ['查看', 'View'],
+      'arc.collapse':         ['收起', 'Collapse'],
+      'arc.empty':            ['(内容为空)', '(empty)'],
+      'arc.restore':          ['覆盖', 'Restore'],
+      'arc.restoreNotion':    ['整页重写', 'Rewrite the whole page'],
+      'arc.restoreLocal':     ['覆盖本地文件', 'Overwrite the local file'],
+      'arc.restoring':        ['正在覆盖…', 'Restoring…'],
+      'arc.restoreFailed':    ['覆盖失败', 'Could not restore'],
+      'arc.wroteNotion':      ['整页写回 {n} 条', 'Wrote {n} entries back to the page'],
+      'arc.wroteFile':        ['写回 {file}', 'Wrote back to {file}'],
+      'arc.unregistered':     [';Notion 那一页不再是登记的攻略', '; that Notion page is no longer the registered guide'],
+      'arc.backedUp':         [';原来那份已存进这个列表', '; the previous version is now in this list'],
+      'arc.delete':           ['删除', 'Delete'],
+      'arc.deleteArmed':      ['永久删除', 'Delete for good'],
+      'arc.deleteFailed':     ['删除失败', 'Could not delete'],
+      'arc.deletedOne':       ['删了一份,腾出 {size}', 'Deleted one, freed {size}'],
+      'arc.summary':          ['{n} 份 · {size} · 覆盖前会先备份当前版本', '{n} · {size} · the current version is backed up before any overwrite'],
+      'arc.none':             ['这个游戏没有备份了', 'No backups left for this game'],
+
+      // ---- The row menu -------------------------------------------------------
+      'menu.edit':            ['编辑', 'Edit'],
+      'menu.editTitle':       ['会同时锁定这一行(停止自动同步)', 'Also locks this row, stopping automatic syncing'],
+      'menu.delete':          ['删除', 'Delete'],
+
+      // ---- Adding a game ------------------------------------------------------
+      'add.addedHidden':      ['已添加: {game} (被「{filter}」挡住了,点这里查看)', 'Added: {game} — hidden by “{filter}”, click to see it'],
+      'add.added':            ['已添加: {game} —— 点这里查看', 'Added: {game} — click to see it'],
+      'add.jumpTo':           ['跳到这一行', 'Jump to this row'],
+      'add.adding':           ['添加中…', 'Adding…'],
+      'add.failed':           ['添加失败: {reason}', 'Could not add: {reason}'],
+      'add.storeResults':     ['Steam 商店 · {n} 个', 'Steam store · {n}'],
+      'add.notFound':         ['没有找到「{query}」', 'Nothing found for “{query}”'],
+      'add.unreachable':      ['连不上后台服务,刷新一下页面', 'Cannot reach the local service. Refresh the page.'],
+      'add.searchFailed':     ['搜索 Steam 失败:{reason}', 'Searching Steam failed: {reason}'],
+
+      // ---- Dialogs and the achievement picker ---------------------------------
+      'dlg.ok':               ['确认', 'Confirm'],
+      'pick.unsectioned':     ['未分节', 'No section'],
+      'pick.selectAll':       ['全选「{section}」这一节', 'Select all of “{section}”'],
+      'pick.deselectAll':     ['取消选中「{section}」这一节', 'Deselect all of “{section}”'],
+      'pick.unlocked':        ['已解锁', 'unlocked'],
+      'pick.noneRewritable':  ['这份攻略里没有能局部重写的条目', 'Nothing in this guide can be rewritten in part'],
+      'pick.noneMatchBoth':   ['没有同时满足筛选和搜索词的成就', 'No achievement matches both the filters and the search'],
+      'pick.noneMatchSearch': ['没有匹配的成就', 'No achievement matches'],
+      'pick.noneMatchAll':    ['没有同时满足这几个筛选的成就', 'No achievement matches all of these filters'],
+      'pick.noneMatchOne':    ['没有符合这个筛选的成就', 'No achievement matches this filter'],
+      'pick.chosen':          ['已选 {n} 条', '{n} selected'],
+
+      // ---- Loading and syncing ------------------------------------------------
+      'sync.lastUpdated':     ['上次同步: {when}', 'Last synced: {when}'],
+      'sync.loadFailed':      ['读取数据失败: {reason}', 'Could not read the data: {reason}'],
+      'sync.starting':        ['正在启动…', 'Starting…'],
+      'sync.startFailed':     ['启动同步失败: {reason}', 'Could not start the sync: {reason}'],
+      'sync.running':         ['正在同步…', 'Syncing…'],
+      'sync.buttonTitle':     ['立即从 Steam 拉取最新数据。刷新页面只重读本地数据,不会联网。', 'Pull the latest from Steam now. Refreshing the page only re-reads local data and does not go online.'],
+
+      // ---- Generating, rewriting and moving a guide ----------------------------
+      'gen.checking':         ['⏳ 检查《{game}》…', '⏳ Checking {game}…'],
+      'gen.preflightFailed':  ['预检失败', 'The pre-flight check failed'],
+      'gen.previewFailed':    ['预览失败', 'The preview failed'],
+      'gen.moveFailed':       ['搬运失败', 'The move failed'],
+      'scope.rare':           ['稀有', 'Rare'],
+      'scope.rareTitle':      ['全球解锁率低于 {pct}% 的成就', 'Achievements under {pct}% global unlock rate'],
+      'scope.locked':         ['未解锁', 'Locked'],
+      'scope.lockedTitle':    ['还没打下来的那些', 'The ones still to get'],
+      'scope.range':          ['范围', 'Scope'],
+      'scope.whole':          ['整篇', 'Whole guide'],
+      'scope.pick':           ['自选', 'Pick some'],
+      'scope.pickTitle':      ['自己挑要重写哪几条', 'Choose which ones to rewrite'],
+      'rw.requirements':      ['重写要求', 'What to change'],
+      'rw.placeholder':       ['留空 = 重新查着写。也可以:写详细点、标出易错过', 'Blank = research and write it again. Or say: more detail, flag the easy-to-miss ones'],
+      'rw.title':             ['重写《{game}》的攻略?', 'Rewrite the guide for {game}?'],
+      'rw.ok':                ['重写', 'Rewrite'],
+      'rw.running':           ['⏳ 重写《{game}》…', '⏳ Rewriting {game}…'],
+      'gen.style':            ['写法', 'How to write it'],
+      'gen.fast':             ['极速模式', 'Fast'],
+      'gen.fastHint':         ['便宜得多也快得多。最难的几条照样写得好,中间那批大多只剩一句模板。', 'Much cheaper and much faster. The hardest few still come out well; most of the middle ones end up a single template line.'],
+      'gen.deep':             ['深度模式', 'Thorough'],
+      'gen.deepHint':         ['默认。每条成就都会真的去查一遍,更慢也更贵。', 'The default. Every achievement is really researched — slower and dearer.'],
+      'mv.checkboxes':        ['{n} 个 checkbox 原样搬过去(含勾选状态)。', '{n} checkboxes move across as they are, ticks included.'],
+      'mv.localKept':         ['本地文件挪进 guides/.migrated/,不会删。', 'The local file moves into guides/.migrated/ — nothing is deleted.'],
+      'mv.unconverted':       ['{n} 行特殊排版会转为普通段落,文字不会丢失。', '{n} specially formatted lines become ordinary paragraphs. No text is lost.'],
+      'mv.title':             ['把《{game}》的攻略搬到 Notion?', 'Move the guide for {game} to Notion?'],
+      'mv.ok':                ['搬过去', 'Move it'],
+      'mv.running':           ['⏳ 搬运《{game}》…', '⏳ Moving {game}…'],
+      'mv.done':              ['《{game}》 {n} 个 checkbox 已搬到 Notion', '{game}: {n} checkboxes moved to Notion'],
+      'mv.openPage':          ['打开 Notion 页面', 'Open the Notion page'],
+      'mv.archived':          ['本地文件已移入 guides/.migrated/', 'The local file has moved into guides/.migrated/'],
+      'gen.title':            ['为《{game}》生成攻略?', 'Generate a guide for {game}?'],
+      'gen.ok':               ['生成', 'Generate'],
+      'gen.queued':           ['《{game}》已排队(前面还有 {n} 个)', '{game} is queued — {n} ahead of it'],
+      'gen.running':          ['⏳ 生成《{game}》…', '⏳ Generating {game}…'],
+
+      // ---- The two-click buttons on a generation result ------------------------
+      'res.actionFailed':     ['{label}失败:{reason}', '{label} failed: {reason}'],
+      'res.rolledBackKept':   ['已用回旧版,新的那份存成了备份', 'Rolled back; the new version is kept as a backup'],
+      'res.rolledBack':       ['已用回旧版', 'Rolled back'],
+      'res.restoreFailed':    ['恢复失败:{reason}', 'Could not restore: {reason}'],
+      'res.deleteArmed':      ['永久删除', 'Delete for good'],
+      'res.backupDeleted':    ['备份已删', 'Backup deleted'],
+      'res.deleteFailed':     ['删除失败:{reason}', 'Could not delete: {reason}'],
+      'res.openFailed':       ['打开失败:{reason}', 'Could not open: {reason}'],
+
+      // ---- What a finished generation reports ----------------------------------
+      'res.genFailed':        ['《{game}》生成失败:{reason}', 'Generating {game} failed: {reason}'],
+      'res.chunkFailed':      ['第 {chunk}/{of} 段({count} 个成就)未生成:{reason}', 'Part {chunk} of {of} ({count} achievements) was not generated: {reason}'],
+      'res.draftKept':        ['《{game}》校验没过,已存草稿,没写进攻略。', '{game} did not pass the checks. The draft is saved; nothing was written to the guide.'],
+      'res.noSearch':         ['没联网,内容是模型凭已有知识写的。', 'No web access — the content is what the model already knew.'],
+      'res.neverSearched':    ['一次都没搜,内容等同于凭记忆写的。', 'It never searched, so the content is effectively from memory.'],
+      'res.openGuide':        ['打开攻略', 'Open the guide'],
+      'res.openFolder':       ['打开文件夹', 'Open folder'],
+      'res.restoreBackup':    ['恢复备份', 'Restore the backup'],
+      'res.dropBackup':       ['删除备份', 'Delete the backup'],
+      'res.searches':         ['{n} 次搜索', '{n} searches'],
+      'res.noSearches':       ['没有联网搜索', 'no web searches'],
+      'res.unsyncable':       ['{n} 个成就同名、Steam 上描述是空的,自动勾选认不出它们,需手动勾选:', '{n} achievements share a name and have no description on Steam, so automatic ticking cannot tell them apart. Tick these by hand:'],
+      'res.andMore':          [' 等 {n} 个', ' and {n} more'],
+      'res.preExisting':      ['攻略里还有 {n} 条原有的校验问题,本次未处理', 'The guide still has {n} pre-existing check failures, untouched this time'],
+      'res.rewrote':          ['《{game}》已改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
+      'res.generated':        ['《{game}》已生成 · {covered}/{total} 个成就 · ', '{game} generated · {covered} of {total} achievements · '],
+      'res.readItYourself':   ['内容需要你自己过一遍。', 'Read it through yourself.'],
+      'res.queueLeft':        [' · 还有 {n} 个排队', ' · {n} still queued'],
+      'res.round':            [' 第 {round}/{rounds} 轮', ' round {round} of {rounds}'],
+    };
+
+    let LANG = 'zh';
+    /** The key for <title>. Empty on a page that never renames itself; applyStrings leaves the tag alone then */
+    let docTitleKey = '';
+
+    /**
+     * One string, with `{slot}` filled from `values`.
+     *
+     * **An unknown key returns the key.** A blank label reads as a layout bug and sends the reader
+     * into the CSS; the key on screen names the entry that is missing. A missing translation falls
+     * back to the Chinese for the same reason the rest of the app does — the other language beats
+     * nothing at all.
+     */
+    function t(key, values) {
+      const pair = STRINGS[key];
+      if (!pair) return key;
+      let s = pair[LANG === 'en' ? 1 : 0] || pair[0];
+      if (values) for (const k in values) s = s.split('{' + k + '}').join(values[k]);
+      return s;
+    }
+
+    /** Attribute keys: `data-t-placeholder` reaches `dataset.tPlaceholder`, and so on */
+    const T_ATTRS = [['tPlaceholder', 'placeholder'], ['tValue', 'value'], ['tAriaLabel', 'aria-label'], ['tTitle', 'title']];
+
+    /**
+     * Repaint every string in the markup. Cheap enough to run again on each language change — this
+     * page is one screen, and the alternative is reloading it, which costs whichever step you were
+     * on.
+     */
+    function applyStrings() {
+      document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+      T_ATTRS.forEach(([prop, attr]) => {
+        document.querySelectorAll('[data-t-' + attr + ']').forEach((el) => {
+          const key = el.dataset[prop];
+          if (!key) return;
+          if (attr === 'value') el.value = t(key); else el.setAttribute(attr, t(key));
+        });
+      });
+      if (docTitleKey) document.title = t(docTitleKey);
+      // The document's own language, so a screen reader announces it correctly and the browser
+      // picks the right line-breaking rules
+      document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
+    }
+
+    /**
+     * Repainting an **interpolated** string is not applyStrings' job: there is no key on the element
+     * to read back, because the value was spliced in at the moment it was painted. Those painters
+     * register here and are re-run when the language changes.
+     *
+     * Leaving one out is invisible in Chinese and only shows after a switch — the guide-archive line
+     * went on reading 「0 份 · 0 B」 in an otherwise entirely English page, which is the failure this
+     * exists to prevent. A painter that throws must not stop the rest of the page changing language.
+     */
+    const REPAINT = [];
+    function repaintInterpolated() {
+      REPAINT.forEach((fn) => { try { fn(); } catch { /* one stale line beats a half-switched page */ } });
+    }
+
     // How recently counts as "recently played". The badge and the pin share this one
     // window and cannot each declare their own, or a state appears where a row is pinned
     // to the top with no badge explaining why
@@ -2753,11 +3066,11 @@
      * The events are delegated, so the id array does not exist.
      */
     const FILTERS = [
-      { key: 'fav',      label: '喜爱',   has: (g) => Boolean(g.favorite) },
-      { key: 'family',   label: '家庭',   has: (g) => Boolean(g.family) },
-      { key: 'complete', label: '已完成', has: (g) => g.rate === 1 },
-      { key: 'unvetted', label: '受限',   has: (g) => Boolean(g.unvetted) },
-      { key: 'noach',    label: '无成就', has: (g) => g.total === 'N/A' },
+      { key: 'fav',      labelKey: 'filter.fav',      has: (g) => Boolean(g.favorite) },
+      { key: 'family',   labelKey: 'filter.family',   has: (g) => Boolean(g.family) },
+      { key: 'complete', labelKey: 'filter.complete', has: (g) => g.rate === 1 },
+      { key: 'unvetted', labelKey: 'filter.unvetted', has: (g) => Boolean(g.unvetted) },
+      { key: 'noach',    labelKey: 'filter.noach',    has: (g) => g.total === 'N/A' },
     ];
 
     /** The next position one click moves to. **neutral → only → exclude → neutral; do not casually change the direction** (see .chip in the CSS) */
@@ -2769,7 +3082,7 @@
      *  visible at a glance.
      *  It is also the first half of the sentence 「被「只看喜爱」挡住了」, so there can only be
      *  this one copy */
-    const STATE_NAME = { off: '不筛选', only: '只看', not: '排除' };
+    const STATE_NAME = { off: 'chip.off', only: 'chip.only', not: 'chip.not' };
 
     /** Sets a chip to the given state. **The state lives only on data-state**, which is what
      *  every CSS colour rule selects on; the aria-label changes with it, or a screen reader
@@ -2777,7 +3090,7 @@
     function setChipState(chip, state) {
       chip.dataset.state = state;
       chip.setAttribute('aria-label',
-        chip.querySelector('.chip-label').textContent + ':' + STATE_NAME[state]);
+        chip.querySelector('.chip-label').textContent + ':' + t(STATE_NAME[state]));
     }
 
     /** The filter controls' current state. Read once per render pass — asking the DOM row by
@@ -2799,9 +3112,10 @@
     /**
      * Does this game answer to this search term? Matches **either** of its two names.
      *
-     * `name` is deliberately the localised title — the sync hunts for a Chinese one — so an
-     * English term is `indexOf === -1` against it for a third of the library. `nameEn` is the same
-     * game's English store title, carried for exactly this test and empty when Steam has none.
+     * `name` is whichever name the interface is currently showing, and `nameAlt` is the stored one
+     * it is not showing — empty when there is no distinct second one. Matching only `name` misses a
+     * third of the library either way round: in Chinese an English term finds nothing, and in
+     * English a Chinese one finds nothing.
      *
      * **Both callers have to come through here.** One decides what the table draws, the other
      * whether to go to Steam at all; judged separately they drift, and the drift shows up as a row
@@ -2812,7 +3126,7 @@
       const q = String(needle || '').toLowerCase();
       if (!q) return true;
       return g.name.toLowerCase().indexOf(q) !== -1
-        || (g.nameEn || '').toLowerCase().indexOf(q) !== -1;
+        || (g.nameAlt || '').toLowerCase().indexOf(q) !== -1;
     }
 
     /**
@@ -2842,7 +3156,7 @@
       // **adding a game you already own all over again**
       if (f.search) {
         const box = document.getElementById('searchBox');
-        return nameMatches(g, f.search) ? null : { el: box, label: '搜索框' };
+        return nameMatches(g, f.search) ? null : { el: box, label: t('ui.searchBox') };
       }
       // **Several chips intersect rather than union.** 「只看喜爱」 and 「只看家庭」 together =
       // favourited family games, which may well leave nothing — and that is correct: the five
@@ -2859,7 +3173,7 @@
         if (state === 'only' ? !flt.has(g) : flt.has(g)) {
           return {
             el: document.querySelector('#filterChips [data-filter="' + flt.key + '"]'),
-            label: STATE_NAME[state] + flt.label,
+            label: t(STATE_NAME[state]) + t(flt.labelKey),
           };
         }
       }
@@ -3059,8 +3373,8 @@
     const BELL_DAYS = 30;
     const BELL_SEEN_KEY = 'satBellSeen';
     const BELL_GROUPS = [
-      ['perfect', '打满之后又出了新成就'],
-      ['added', '以前没有成就,现在有了'],
+      ['perfect', 'bell.perfect'],
+      ['added', 'bell.added'],
     ];
 
     function bellItems() {
@@ -3092,7 +3406,7 @@
 
       const panel = document.getElementById('bellPanel');
       if (!items.length) {
-        panel.innerHTML = '<div class="bell-empty">最近 ' + BELL_DAYS + ' 天没有新动静</div>';
+        panel.innerHTML = '<div class="bell-empty">' + escapeHtml(t('bell.empty', { days: BELL_DAYS })) + '</div>';
         return;
       }
       let html = '';
@@ -3104,7 +3418,7 @@
           return '<div class="bell-item">'
             + '<img src="' + thumbUrl(i.game.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
             + '<span class="bell-name">' + escapeHtml(i.game.name) + '</span>'
-            + '<span class="bell-when">' + (i.days === 0 ? '今天' : i.days + ' 天前') + '</span>'
+            + '<span class="bell-when">' + escapeHtml(i.days === 0 ? t('bell.today') : t('bell.daysAgo', { n: i.days })) + '</span>'
             + '</div>';
         }).join('');
       });
@@ -3308,18 +3622,18 @@
     function renderGallery(rows) {
       const el = document.getElementById('gallery');
       if (!rows.length) {
-        el.innerHTML = '<div class="empty">没有符合条件的游戏</div>';
+        el.innerHTML = '<div class="empty">' + escapeHtml(t('table.empty')) + '</div>';
         return;
       }
       el.innerHTML = rows.map(function(g) {
         const rate = typeof g.rate === 'number' ? g.rate : 0;
-        const rateText = (g.total === 'N/A') ? '无成就系统'
-          : (g.total === null ? '同步中' : g.achieved + '/' + g.total + ' · ' + fmtPct(rate));
+        const rateText = (g.total === 'N/A') ? t('table.noAchSystem')
+          : (g.total === null ? t('table.syncing') : g.achieved + '/' + g.total + ' · ' + fmtPct(rate));
         return '<div class="g-card' + (g.guideUrl ? ' has-guide' : '') + '"'
           // The same identity attribute as a table row: "jump to this game" takes one path in both views
           + ' data-appid="' + g.appid + '"'
           + (g.guideUrl ? ' data-guide="' + g.guideUrl + '"' : '')
-          + ' title="' + escapeHtml(g.name) + (g.guideUrl ? '(点开攻略)' : '') + '">'
+          + ' title="' + escapeHtml(g.name + (g.guideUrl ? t('table.openGuide') : '')) + '">'
           // The portrait cover first, falling back to the landscape header; only when the
           // landscape one is unavailable too does it ask the server for the real address.
           // **Every leg has to replace or clear onerror first** (see portraitFailed /
@@ -3356,7 +3670,7 @@
       // (「这张表现在给我看多少」) and sits against the table
       document.getElementById('cardTotal').textContent = String(allGames.length);
       document.getElementById('rowCount').textContent =
-        '显示 ' + rows.length + ' / 共 ' + allGames.length;
+        t('table.count', { shown: rows.length, total: allGames.length });
       // While searching, the filters have no effect (see hidingFilter). **Let the controls say
       // so themselves** — a greyed-out chip is 「现在不作数」, with no need for a sentence of
       // explanation after the count. The text version was tried and is redundant: it requires
@@ -3377,7 +3691,11 @@
         let av = a[sortKey], bv = b[sortKey];
         if (av === null || av === 'N/A') av = -1;
         if (bv === null || bv === 'N/A') bv = -1;
-        if (typeof av === 'string') return sortDir * av.localeCompare(bv);
+        // **Sorted in the interface's language, not the browser's.** A bare localeCompare()
+        // follows whatever locale the browser is set to, so the same library sorted differently
+        // on two machines showing the same page — and with names in two scripts mixed together
+        // that is the column where it shows
+        if (typeof av === 'string') return sortDir * av.localeCompare(bv, LANG === 'en' ? 'en' : 'zh-CN');
         return sortDir * ((av > bv) - (av < bv));
       });
 
@@ -3401,14 +3719,14 @@
 
       const body = document.getElementById('gameTableBody');
       if (rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="4" class="empty">没有符合条件的游戏</td></tr>';
+        body.innerHTML = '<tr><td colspan="4" class="empty">' + escapeHtml(t('table.empty')) + '</td></tr>';
         return;
       }
 
       let html = '';
       rows.forEach(function(g) {
         const unvettedBadge = g.unvetted
-          ? '<span class="badge" title="Steam 归为「个人资料功能受限」,不计入平均完成率">受限</span>'
+          ? '<span class="badge" title="' + escapeHtml(t('table.unvettedTitle')) + '">' + escapeHtml(t('filter.unvetted')) + '</span>'
           : '';
         // The word 「Manual」 is only still that name in the database (the status column); in
         // the interface it is a **lock** — what it actually does is 「停掉这一行的自动同步」,
@@ -3417,18 +3735,18 @@
         // changed
         const manualBadgeClass = 'badge-btn ' + (g.manual ? 'badge-btn-on' : 'badge-btn-off');
         const manualBadge = '<button class="' + manualBadgeClass + '" data-manual-appid="' + g.appid + '" title="'
-          + (g.manual ? '已锁定:不参与自动同步,数据需手动填写。点击解锁' : '锁定这一行:停止自动同步')
-          + '" aria-label="' + (g.manual ? '已锁定' : '未锁定') + '">'
+          + escapeHtml(g.manual ? t('table.lockOn') : t('table.lockOff'))
+          + '" aria-label="' + escapeHtml(g.manual ? t('table.locked') : t('table.unlocked')) + '">'
           + icon(g.manual ? 'lock' : 'unlock') + '</button>';
         const familyBadgeClass = 'badge-btn ' + (g.family ? 'badge-btn-family-on' : 'badge-btn-off');
         const familyBadge = '<button class="' + familyBadgeClass + '" data-family-appid="' + g.appid + '" title="'
-          + (g.family ? '取消家庭共享标记' : '标记为家庭共享(非自购,纯信息用途)') + '">家庭</button>';
+          + escapeHtml(g.family ? t('table.familyOff') : t('table.familyOn')) + '">' + escapeHtml(t('filter.family')) + '</button>';
         const newAchBadge = (g.newAchDaysAgo !== null && g.newAchDaysAgo <= 30)
-          ? '<span class="badge badge-new">' + icon('sparkle') + g.newAchDaysAgo + '天前新增成就</span>'
+          ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('table.newAch', { n: g.newAchDaysAgo })) + '</span>'
           : '';
         const playedBadge = isRecentlyPlayed(g)
           ? '<span class="badge badge-played">' + icon('gamepad')
-            + (g.playedDaysAgo === 0 ? '今天在玩' : g.playedDaysAgo + '天前玩过') + '</span>'
+            + escapeHtml(g.playedDaysAgo === 0 ? t('table.playedToday') : t('table.playedAgo', { n: g.playedDaysAgo })) + '</span>'
           : '';
         // **In-row icon buttons are .row-icon, not .icon-btn.** The latter is the topbar's
         // filled, outlined square; the two used to share one class name, and the in-row block
@@ -3440,11 +3758,11 @@
         const guideBtnClass = 'guide-btn ' + (g.guideUrl ? 'has-guide' : 'no-guide');
         const canGen = !g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0;
         const guideBtn = g.guideUrl
-          ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + icon('book') + '攻略</a>'
+          ? '<a class="' + guideBtnClass + '" href="' + g.guideUrl + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">' + icon('book') + escapeHtml(t('table.guide')) + '</a>'
           : canGen
             ? '<button class="' + guideBtnClass + ' can-gen" data-gen="' + g.appid + '" data-name="'
-              + escapeHtml(g.name) + '" onclick="event.stopPropagation();window.genGuide(this)">' + icon('sparkle') + '生成</button>'
-            : '<span class="' + guideBtnClass + '">' + icon('book') + '攻略</span>';
+              + escapeHtml(g.name) + '" onclick="event.stopPropagation();window.genGuide(this)">' + icon('sparkle') + escapeHtml(t('table.generate')) + '</button>'
+            : '<span class="' + guideBtnClass + '">' + icon('book') + escapeHtml(t('table.guide')) + '</span>';
         // A row really holds three groups: **marks** (star, heart), **identity** (cover, name,
         // status badges) and **actions** (guide, rewrite, more). They used to be a run of
         // evenly spaced siblings that the eye could not separate; and only the final 「更多」
@@ -3454,8 +3772,8 @@
         // right (the margin hangs on .row-actions)
         const gameCell = '<div class="game-cell">'
           + '<div class="row-marks">'
-          + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '" aria-label="重点关注">' + icon('star', g.priority) + '</button>'
-          + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '" aria-label="喜爱">' + heartSvg(g.favorite) + '</button>'
+          + '<button class="' + starClass + '" data-priority-appid="' + g.appid + '" aria-label="' + escapeHtml(t('table.priority')) + '">' + icon('star', g.priority) + '</button>'
+          + '<button class="' + heartClass + '" data-fav-appid="' + g.appid + '" aria-label="' + escapeHtml(t('table.favourite')) + '">' + heartSvg(g.favorite) + '</button>'
           + '</div>'
           + '<img class="game-thumb" src="' + coverSrc(g) + '" loading="lazy"'
           + ' onerror="window.coverFailed(this, \'' + g.appid + '\')">'
@@ -3481,28 +3799,28 @@
           // exactly what will be lost), so exposing it is safe
           + (g.guideUrl && aiReady && typeof g.total === 'number' && g.total > 0
               ? '<button class="guide-btn rewrite" ' + (guideBusy.has(String(g.appid)) ? 'disabled ' : '')
-                + 'title="让 AI 重新写一份,覆盖现在这份(会先备份原文)"'
+                + 'title="' + escapeHtml(t('table.rewriteTitle')) + '"'
                 + ' onclick="event.stopPropagation();window.rewriteGuide(\'' + g.appid + '\',this.dataset.name)"'
-                + ' data-name="' + escapeHtml(g.name) + '">' + icon('rewrite') + '重写</button>'
+                + ' data-name="' + escapeHtml(g.name) + '">' + icon('rewrite') + escapeHtml(t('table.rewrite')) + '</button>'
               : '')
           + (g.guideKind === 'local' && notionReady
               ? '<button class="guide-btn to-notion" ' + (guideBusy.has(String(g.appid)) ? 'disabled ' : '')
-                + 'title="把这份本地攻略搬到 Notion"'
+                + 'title="' + escapeHtml(t('table.moveTitle')) + '"'
                 + ' onclick="event.stopPropagation();window.migrateGuide(\'' + g.appid + '\',this.dataset.name)"'
                 + ' data-name="' + escapeHtml(g.name) + '">' + icon('upload') + 'Notion</button>'
               : '')
           + (archivesFor(g.appid).length
               ? '<button class="guide-btn backups" data-backups="' + g.appid + '"'
-                + ' title="覆盖前的原文、搬去 Notion 时留下的原件、没过校验的草稿"'
+                + ' title="' + escapeHtml(t('table.backupsTitle')) + '"'
                 + ' onclick="event.stopPropagation();window.openBackups(\'' + g.appid + '\',this.dataset.name)"'
                 + ' data-name="' + escapeHtml(g.name) + '">' + icon('clock')
-                + '备份 ' + archivesFor(g.appid).length + '</button>'
+                + escapeHtml(t('table.backups', { n: archivesFor(g.appid).length })) + '</button>'
               : '')
           // Editing numbers and deleting are **merged into one entry point**. They used to be
           // two buttons side by side on the row, and deleting is irreversible — next to a
           // button clicked daily, it gets clicked by mistake sooner or later. Both are now one
           // level down in the menu
-          + '<button class="delete-btn" data-edit-appid="' + g.appid + '" title="更多操作" aria-label="更多操作">' + icon('more') + '</button>'
+          + '<button class="delete-btn" data-edit-appid="' + g.appid + '" title="' + escapeHtml(t('table.more')) + '" aria-label="' + escapeHtml(t('table.more')) + '">' + icon('more') + '</button>'
           + '</div>'
           + '</div>';
 
@@ -3532,12 +3850,12 @@
         // nine times out of ten. data-appid is this row's identity, not a marker for "does it
         // have numbers"
         } else if (g.total === 'N/A') {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">无成就系统</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.noAchSystem')) + '</td></tr>';
         } else if (g.total === null && g.manual) {
           // A locked row is never synced automatically, so 「数据同步中」 would be a lie for it — it is waiting for you to fill it in
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">还没填数字</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.noNumbers')) + '</td></tr>';
         } else if (g.total === null) {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">数据同步中…</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.syncingRow')) + '</td></tr>';
         } else {
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '">'
             + '<td>' + gameCell + '</td>'
@@ -3745,20 +4063,20 @@
       const gameName = game ? game.name : '';
       let inner;
       if (!data || data.loading) {
-        inner = '<div class="missing-header">正在查询缺失成就…</div>';
+        inner = '<div class="missing-header">' + escapeHtml(t('ach.loading')) + '</div>';
       } else if (data.error) {
         inner = '<div class="missing-header">' + escapeHtml(data.error) + '</div>';
       } else if (data.missingCount === 0) {
-        inner = '<div class="missing-header">所有成就都已解锁</div>';
+        inner = '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
       } else {
         // Only with a registered guide that was genuinely read this time is there any "how many
         // are written" to speak of. A failed read says so honestly, so that 0 does not look
         // like "not one entry was written"
         const hasGuide = Boolean(data.guide) && !data.guide.error;
-        let head = '还差 ' + data.missingCount + ' / ' + data.total + ' 个成就';
+        let head = t('ach.remaining', { n: data.missingCount, total: data.total });
         if (hasGuide) {
           const written = data.missing.filter(function(a) { return a.guide; }).length;
-          head += ' · 攻略里已写 ' + written + ' / ' + data.missingCount + ' 条';
+          head += t('ach.written', { written: written, n: data.missingCount });
         } else if (data.guide && data.guide.error) {
           head += ' · ' + data.guide.error;
         }
@@ -3766,7 +4084,7 @@
           + '<div class="ach-grid">' + data.missing.map(function(a) {
             const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
             const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
-              + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' 搜攻略</a>';
+              + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' ' + escapeHtml(t('ach.searchGuide')) + '</a>';
             let tail;
             if (a.guide) {
               // After stripping the restatement of the official name and description there may
@@ -3784,7 +4102,7 @@
                   + substeps + '</div>'
                 : '';
             } else if (hasGuide) {
-              tail = '<div class="ach-gap">攻略里还没写这条</div>' + search;
+              tail = '<div class="ach-gap">' + escapeHtml(t('ach.notWritten')) + '</div>' + search;
             } else {
               tail = search;
             }
@@ -3793,7 +4111,7 @@
             // above also stops its position drifting with the guide's length
             const jump = (a.guide && a.guide.url)
               ? '<a class="ach-jump" href="' + escapeHtml(a.guide.url)
-                + '" target="_blank" rel="noopener" title="在攻略中打开">' + GEN_BOOK + '</a>'
+                + '" target="_blank" rel="noopener" title="' + escapeHtml(t('ach.openInGuide')) + '">' + GEN_BOOK + '</a>'
               : '';
             return '<div class="ach-item">'
               + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
@@ -3903,22 +4221,22 @@
       const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
       if (!game) return;
       const ok = await askConfirm({
-        title: '删除《' + game.name + '》?',
-        body: '从本地删掉这一行,无法撤销。',
-        okText: '删除',
+        title: t('del.title', { game: game.name }),
+        body: t('del.body'),
+        okText: t('del.ok'),
         danger: true,
       });
       if (!ok) return;
       rpc.withSuccessHandler(function(result) {
         if (result && result.error) {
-          askConfirm({ title: '删除失败', body: result.error, okText: '知道了', notifyOnly: true });
+          askConfirm({ title: t('del.failed'), body: result.error, okText: t('del.gotIt'), notifyOnly: true });
           return;
         }
         allGames = allGames.filter(function(g){ return String(g.appid) !== String(appid); });
         if (expandedAppid === String(appid)) expandedAppid = null;
         render();
       }).withFailureHandler(function(err) {
-        askConfirm({ title: '删除失败', body: String(err && err.message || err), okText: '知道了', notifyOnly: true });
+        askConfirm({ title: t('del.failed'), body: String(err && err.message || err), okText: t('del.gotIt'), notifyOnly: true });
       }).deleteGame(appid);
     }
 
@@ -4109,7 +4427,7 @@
       const meta = document.createElement('span');
       meta.className = 'arc-meta';
       meta.textContent = arcWhen(e.savedAt) + ' · ' + arcKb(e.bytes)
-        + (e.kind === 'notion' ? ' · Notion 整页' : '');
+        + (e.kind === 'notion' ? t('arc.notionWhole') : '');
       main.appendChild(name);
       main.appendChild(meta);
 
@@ -4119,11 +4437,11 @@
       // 「看」 is the one action that changes nothing, so it needs no second click
       const view = document.createElement('button');
       view.type = 'button';
-      view.textContent = '查看';
+      view.textContent = t('arc.view');
       view.onclick = async function (ev) {
         ev.stopPropagation();
         const open = li.querySelector('.arc-body');
-        if (open) { open.remove(); view.textContent = '查看'; return; }
+        if (open) { open.remove(); view.textContent = t('arc.view'); return; }
         view.disabled = true;
         const r = await new Promise(function (resolve) {
           rpc.withSuccessHandler(resolve).withFailureHandler(function(err){ resolve({ error: String(err) }); })
@@ -4132,28 +4450,28 @@
         view.disabled = false;
         const body = document.createElement('pre');
         body.className = 'arc-body';
-        body.textContent = r && r.error ? r.error : ((r && r.text) || '(内容为空)');
+        body.textContent = r && r.error ? r.error : ((r && r.text) || t('arc.empty'));
         li.appendChild(body);
-        view.textContent = '收起';
+        view.textContent = t('arc.collapse');
       };
 
       const restore = document.createElement('button');
       restore.type = 'button';
-      restore.textContent = '覆盖';
-      arcArm(restore, '覆盖', e.kind === 'notion' ? '整页重写' : '覆盖本地文件', async function () {
-        setArcMsg('正在覆盖…');
+      restore.textContent = t('arc.restore');
+      arcArm(restore, t('arc.restore'), e.kind === 'notion' ? t('arc.restoreNotion') : t('arc.restoreLocal'), async function () {
+        setArcMsg(t('arc.restoring'));
         const r = await new Promise(function (resolve) {
           rpc.withSuccessHandler(resolve).withFailureHandler(function(err){ resolve({ error: String(err) }); })
             .restoreGuideArchive(e.id);
         });
-        if (!r || r.error) return setArcMsg((r && r.error) || '覆盖失败', 'error');
+        if (!r || r.error) return setArcMsg((r && r.error) || t('arc.restoreFailed'), 'error');
         // **Where the displaced copy went has to be said.** Restoring is itself an overwrite,
         // and the backup just created is its way back — not saying so buries the same thing all
         // over again
         setArcMsg(
-          (r.kind === 'notion' ? '整页写回 ' + r.count + ' 条' : '写回 ' + r.file)
-            + (r.unregisteredNotion ? ';Notion 那一页不再是登记的攻略' : '')
-            + (r.backedUpTo ? ';原来那份已存进这个列表' : ''),
+          (r.kind === 'notion' ? t('arc.wroteNotion', { n: r.count }) : t('arc.wroteFile', { file: r.file }))
+            + (r.unregisteredNotion ? t('arc.unregistered') : '')
+            + (r.backedUpTo ? t('arc.backedUp') : ''),
           'ok'
         );
         await refreshArchives();
@@ -4162,14 +4480,14 @@
 
       const del = document.createElement('button');
       del.type = 'button';
-      del.textContent = '删除';
-      arcArm(del, '删除', '永久删除', async function () {
+      del.textContent = t('arc.delete');
+      arcArm(del, t('arc.delete'), t('arc.deleteArmed'), async function () {
         const r = await new Promise(function (resolve) {
           rpc.withSuccessHandler(resolve).withFailureHandler(function(err){ resolve({ error: String(err) }); })
             .deleteGuideArchive(e.id);
         });
-        if (!r || r.error) return setArcMsg((r && r.error) || '删除失败', 'error');
-        setArcMsg('删了一份,腾出 ' + arcKb(r.bytes), 'ok');
+        if (!r || r.error) return setArcMsg((r && r.error) || t('arc.deleteFailed'), 'error');
+        setArcMsg(t('arc.deletedOne', { size: arcKb(r.bytes) }), 'ok');
         await refreshArchives();
       });
 
@@ -4190,8 +4508,8 @@
       for (const e of list) ul.appendChild(arcRow(e));
       const bytes = list.reduce(function(n, e){ return n + e.bytes; }, 0);
       document.getElementById('arcSum').textContent = list.length
-        ? list.length + ' 份 · ' + arcKb(bytes) + ' · 覆盖前会先备份当前版本'
-        : '这个游戏没有备份了';
+        ? t('arc.summary', { n: list.length, size: arcKb(bytes) })
+        : t('arc.none');
     }
 
     // The 「备份 N」 button on the row calls into here — hung on window like rewriteGuide /
@@ -4244,11 +4562,11 @@
       // line is the object, not the frequency — and because only one object is left, no group
       // headings are needed here
       item({
-        label: '编辑',
-        title: game.manual ? '' : '会同时锁定这一行(停止自动同步)',
+        label: t('menu.edit'),
+        title: game.manual ? '' : t('menu.editTitle'),
         run: function(){ startManualEdit(appid); },
       });
-      item({ label: '删除', cls: 'danger', run: function(){ deleteGameFlow(appid); } });
+      item({ label: t('menu.delete'), cls: 'danger', run: function(){ deleteGameFlow(appid); } });
 
       rowMenu.hidden = false;
       const r = btn.getBoundingClientRect();
@@ -4344,9 +4662,9 @@
 
       const hidden = hidingFilter(game, currentFilters());
       btn.textContent = hidden
-        ? '已添加: ' + game.name + ' (被「' + hidden.label + '」挡住了,点这里查看)'
-        : '已添加: ' + game.name + ' —— 点这里查看';
-      btn.title = '跳到这一行';
+        ? t('add.addedHidden', { game: game.name, filter: hidden.label })
+        : t('add.added', { game: game.name });
+      btn.title = t('add.jumpTo');
       btn.addEventListener('click', function() {
         const blocking = hidingFilter(game, currentFilters());
         if (blocking) {
@@ -4374,7 +4692,7 @@
     }
 
     function addSelectedGame(appid, name, family) {
-      setAddMsg('添加中…');
+      setAddMsg(t('add.adding'));
 
       rpc.withSuccessHandler(function(result) {
         if (result && result.error) {
@@ -4385,7 +4703,7 @@
         render();
         showAddedMsg(result);
       }).withFailureHandler(function(err) {
-        setAddMsg('添加失败: ' + err.message, 'error');
+        setAddMsg(t('add.failed', { reason: err.message }), 'error');
       }).addGame(appid, name, family);
     }
 
@@ -4419,7 +4737,7 @@
         label.hidden = true;
         box.style.display = 'flex';
         box.innerHTML = '<button type="button" class="steam-more" id="steamMore">'
-          + 'Steam 商店 · ' + steamItems.length + ' 个</button>';
+          + escapeHtml(t('add.storeResults', { n: steamItems.length })) + '</button>';
         document.getElementById('steamMore').addEventListener('click', function() {
           steamExpanded = true;
           renderSearchResults(steamItems);
@@ -4494,7 +4812,7 @@
           // that needs words.
           // With something in the library, nothing is said: what the user was looking for was
           // already given by the table
-          if (!libHit) setAddMsg('没有找到「' + query + '」');
+          if (!libHit) setAddMsg(t('add.notFound', { query: query }));
           renderSearchResults([]);
           return;
         }
@@ -4512,7 +4830,7 @@
         // while what needs fixing is that local service (measured in practice: the service process
         // stopped while the page was open, and the notice said Steam was down)
         const local = /Failed to fetch|NetworkError|load failed/i.test(String(err.message));
-        setAddMsg(local ? '连不上后台服务,刷新一下页面' : '搜索 Steam 失败:' + err.message, 'error');
+        setAddMsg(local ? t('add.unreachable') : t('add.searchFailed', { reason: err.message }), 'error');
         renderSearchResults([]);
       }).searchSteamGames(query);
     }
@@ -4635,7 +4953,7 @@
         const bodyEl = document.getElementById('askBody');
         bodyEl.textContent = o.body || '';
         bodyEl.style.display = o.body ? '' : 'none';
-        okBtn.textContent = o.okText || '确认';
+        okBtn.textContent = o.okText || t('dlg.ok');
 
         // **The return value is still a boolean.** The choice is written back into the caller's own
         // `o.choices[i].value`, so askConfirm's contract is unchanged — it has six call sites, and
@@ -4866,7 +5184,7 @@
 
             const allOn = items.every(function (it) { return sel.has(it.apiName); });
             const someOn = !allOn && items.some(function (it) { return sel.has(it.apiName); });
-            const secName = g.heading || '未分节';
+            const secName = g.heading || t('pick.unsectioned');
 
             /**
              * The section's row is split into **two buttons, each doing one thing**:
@@ -4890,7 +5208,7 @@
             // The box has no visible text and **has to carry its own name** — otherwise a screen
             // reader announces an unlabelled button. Written as an action rather than a state: it
             // says what pressing it will do
-            box.setAttribute('aria-label', (allOn ? '取消选中「' : '全选「') + secName + '」这一节');
+            box.setAttribute('aria-label', t(allOn ? 'pick.deselectAll' : 'pick.selectAll', { section: secName }));
             box.setAttribute('aria-pressed', String(allOn));
             box.addEventListener('click', function () {
               items.forEach(function (it) {
@@ -4950,7 +5268,7 @@
                 n.textContent = on + '/' + items.length;
                 box.setAttribute('aria-pressed', String(on === items.length));
                 box.setAttribute('aria-label',
-                  (on === items.length ? '取消选中「' : '全选「') + secName + '」这一节');
+                  t(on === items.length ? 'pick.deselectAll' : 'pick.selectAll', { section: secName }));
                 box.className = 'ask-pick-box' + (on === items.length ? ' on' : on ? ' some' : '');
                 paintCount();
                 refreshOk();
@@ -4973,7 +5291,7 @@
               if (it.unlocked) {
                 const d = document.createElement('span');
                 d.className = 'done';
-                d.textContent = '已解锁';
+                d.textContent = t('pick.unlocked');
                 row.appendChild(d);
               }
               body.appendChild(row);
@@ -4996,11 +5314,11 @@
              */
             const hasQ = Boolean((pickFilter.value || '').trim());
             const nf = o.picker.active.size;
-            empty.textContent = !pickerItems().length ? '这份攻略里没有能局部重写的条目'
-              : hasQ && nf ? '没有同时满足筛选和搜索词的成就'
-                : hasQ ? '没有匹配的成就'
-                  : nf > 1 ? '没有同时满足这几个筛选的成就'
-                    : '没有符合这个筛选的成就';
+            empty.textContent = !pickerItems().length ? t('pick.noneRewritable')
+              : hasQ && nf ? t('pick.noneMatchBoth')
+                : hasQ ? t('pick.noneMatchSearch')
+                  : nf > 1 ? t('pick.noneMatchAll')
+                    : t('pick.noneMatchOne');
             pickList.appendChild(empty);
           }
           paintCount();
@@ -5022,7 +5340,7 @@
          */
         function paintCount() {
           const sel = o.picker.selected;
-          pickCount.textContent = '已选 ' + sel.size + ' 条';
+          pickCount.textContent = t('pick.chosen', { n: sel.size });
           pickClear.disabled = sel.size === 0;
           // 「全选」 has nothing to do when **the displayed batch is already entirely in the
           // selection** — an empty list falls into this branch too (every is true for an empty set).
@@ -5125,16 +5443,30 @@
 
     function loadDashboard() {
       rpc.withSuccessHandler(function(data) {
+        // **Before the first paint.** Everything below composes through t(), so the language has to
+        // be settled first or the readings, the table and the bell all bake in the wrong one and
+        // only correct themselves the next time each happens to be redrawn.
+        //
+        // There is no live toggle on this page — it lives on /setup, and coming back from there is
+        // a full navigation — so this is the only place the language is read
+        LANG = data.uiLanguage === 'en' ? 'en' : 'zh';
+        docTitleKey = 'title.page';
+        applyStrings();
         allGames = data.games;
         // cardTotal belongs solely to render() — only it knows the filter results
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
         document.getElementById('cardPerfect').textContent = data.perfectCount;
-        document.getElementById('lastUpdated').textContent = '上次同步: ' + data.lastUpdated;
+        // The element ships with data-t="ui.loading" so it reads correctly before this arrives.
+        // Once it holds a real timestamp that key is wrong, and applyStrings would repaint 「加载中…」
+        // over it on the next call — so the key is removed along with the placeholder text
+        const updated = document.getElementById('lastUpdated');
+        delete updated.dataset.t;
+        updated.textContent = t('sync.lastUpdated', { when: data.lastUpdated });
         renderBell();
         render();
       }).withFailureHandler(function(err) {
         document.getElementById('gameTableBody').innerHTML =
-          '<tr><td colspan="4" class="empty">读取数据失败: ' + err.message + '</td></tr>';
+          '<tr><td colspan="4" class="empty">' + escapeHtml(t('sync.loadFailed', { reason: err.message })) + '</td></tr>';
       }).getDashboardData();
     }
 
@@ -5161,7 +5493,7 @@
       syncStarting = true;
       syncBtn.disabled = true;
       syncMsg.className = 'sync-msg';
-      syncMsg.textContent = '正在启动…';
+      syncMsg.textContent = t('sync.starting');
 
       rpc.withSuccessHandler(function(res) {
         if (res && res.error) {
@@ -5176,7 +5508,7 @@
         syncStarting = false;
         syncBtn.disabled = false;
         syncMsg.className = 'sync-msg error';
-        syncMsg.textContent = '启动同步失败: ' + err.message;
+        syncMsg.textContent = t('sync.startFailed', { reason: err.message });
       }).startSync();
     });
 
@@ -5208,8 +5540,8 @@
       // something". Boolean() is likewise required, for the reason above
       syncBtn.classList.toggle('spinning', Boolean(s.running));
       syncBtn.title = s.running
-        ? '正在同步…'
-        : '立即从 Steam 拉取最新数据。刷新页面只重读本地数据,不会联网。';
+        ? t('sync.running')
+        : t('sync.buttonTitle');
 
       // Only progress notices like "正在启动…" are cleared. An error has to stay: the poll comes
       // every 3 seconds, and clearing unconditionally would wash away an error that has just
@@ -5335,7 +5667,7 @@
     window.rewriteGuide = async function (appid, name) {
       genCollapsed = false;
       setGuideBusy(appid, true);
-      showGen('⏳ 检查《' + name + '》…', false, true);
+      showGen(t('gen.checking', { game: name }), false, true);
 
       // **Both preflights are fetched together, and their failures are not the same thing.**
       //
@@ -5361,7 +5693,7 @@
       ]);
       if (!p || p.error) {
         setGuideBusy(appid, false);
-        return showGen(GEN_WARN + ' ' + ((p && p.error) || '预检失败'), true, false);
+        return showGen(GEN_WARN + ' ' + ((p && p.error) || t('gen.preflightFailed')), true, false);
       }
 
       /**
@@ -5412,13 +5744,13 @@
        */
       const filters = [
         {
-          key: 'rare', label: '稀有',
-          title: '全球解锁率低于 ' + rarePct + '% 的成就',
+          key: 'rare', label: t('scope.rare'),
+          title: t('scope.rareTitle', { pct: rarePct }),
           test: function (it) { return it.rarity !== null && it.rarity !== undefined && it.rarity < rarePct; },
         },
         {
-          key: 'locked', label: '未解锁',
-          title: '还没打下来的那些',
+          key: 'locked', label: t('scope.locked'),
+          title: t('scope.lockedTitle'),
           test: function (it) { return !it.unlocked; },
         },
       ];
@@ -5448,16 +5780,16 @@
        */
       const scopeChoice = {
         key: 'scope',
-        label: '范围',
+        label: t('scope.range'),
         value: 'all',
         options: [
-          { value: 'all', label: '整篇' },
+          { value: 'all', label: t('scope.whole') },
           {
             value: 'pick',
-            label: '自选',
+            label: t('scope.pick'),
             // With nothing locatable there is nothing to pick. Greyed out with an explanation beats opening an empty list
             disabled: pickable === 0,
-            title: pickable === 0 ? '这份攻略里没有能局部重写的条目' : '自己挑要重写哪几条',
+            title: pickable === 0 ? t('pick.noneRewritable') : t('scope.pickTitle'),
           },
         ],
       };
@@ -5479,17 +5811,17 @@
          * "What to put in it" is handled by the placeholder, which answers the real question: what
          * happens if it is left blank.
          */
-        label: '重写要求',
+        label: t('rw.requirements'),
         // What the placeholder really has to answer is **what happens if it is left blank**: that is
         // the question behind 「我该填什么」.
         // State the consequence of leaving it blank first, then give an example that can be copied
-        placeholder: '留空 = 重新查着写。也可以:写详细点、标出易错过',
+        placeholder: t('rw.placeholder'),
         value: '',
         when: function (s) { return s.scope !== 'all'; },
       };
 
       const ok = await askConfirm({
-        title: '重写《' + name + '》的攻略?',
+        title: t('rw.title', { game: name }),
         /**
          * **This dialog has no body.** Four rounds of cutting left not one sentence, because every
          * one of them restated something already on screen:
@@ -5512,7 +5844,7 @@
          * detail; the interface has to be short. Forcing one piece of copy on both suits neither —
          * the same reasoning as `previewGuideRewrite` returning numbers rather than sentences.
          */
-        okText: '重写',
+        okText: t('rw.ok'),
         danger: true,
         choices: [scopeChoice, rewriteChoice],
         input: noteInput,
@@ -5545,7 +5877,7 @@
             setGuideBusy(appid, false);
             return showGen(GEN_WARN + ' ' + r.error, true, false);
           }
-          showGen('⏳ 重写《' + name + '》…', false, true);
+          showGen(t('rw.running', { game: name }), false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
@@ -5601,10 +5933,10 @@
          * One sentence per tier, saying what choosing it gains and what it loses — both state one end
          * each, or it would read as pushing one of them.
          */
-        label: '写法',
+        label: t('gen.style'),
         options: [
-          { value: 'low', label: '极速模式', hint: '便宜得多也快得多。最难的几条照样写得好,中间那批大多只剩一句模板。' },
-          { value: 'high', label: '深度模式', hint: '默认。每条成就都会真的去查一遍,更慢也更贵。' },
+          { value: 'low', label: t('gen.fast'), hint: t('gen.fastHint') },
+          { value: 'high', label: t('gen.deep'), hint: t('gen.deepHint') },
         ],
         value: 'high',
       };
@@ -5613,45 +5945,45 @@
     window.migrateGuide = function (appid, name) {
       genCollapsed = false; // a migration the user pressed themselves, so the progress bar has to show
       setGuideBusy(appid, true);
-      showGen('⏳ 检查《' + name + '》…', false, true);
+      showGen(t('gen.checking', { game: name }), false, true);
       rpc
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             setGuideBusy(appid, false);
-            return showGen(GEN_WARN + ' ' + ((p && p.error) || '预览失败'), true, false);
+            return showGen(GEN_WARN + ' ' + ((p && p.error) || t('gen.previewFailed')), true, false);
           }
           // Verifying entry by entry, leaving the local file alone on a mismatch, and the page's icon
           // are all "how we make sure nothing goes wrong" rather than decisions for them. The only
           // two things they genuinely need to know are: what is being moved, and where the original
           // goes
           const lines = [
-            p.todos + ' 个 checkbox 原样搬过去(含勾选状态)。',
-            '本地文件挪进 guides/.migrated/,不会删。',
+            t('mv.checkboxes', { n: p.todos }),
+            t('mv.localKept'),
           ];
           if (p.unconverted && p.unconverted.length) {
-            lines.push(GEN_WARN + ' ' + p.unconverted.length + ' 行特殊排版会转为普通段落,文字不会丢失。');
+            lines.push(GEN_WARN + ' ' + t('mv.unconverted', { n: p.unconverted.length }));
           }
           const goMigrate = await askConfirm({
-            title: '把《' + p.game + '》的攻略搬到 Notion?',
+            title: t('mv.title', { game: p.game }),
             body: lines.join('\n'),
-            okText: '搬过去',
+            okText: t('mv.ok'),
           });
           if (!goMigrate) {
             setGuideBusy(appid, false);
             genBar.style.display = 'none';
             return;
           }
-          showGen('⏳ 搬运《' + p.game + '》…', false, true);
+          showGen(t('mv.running', { game: p.game }), false, true);
           rpc
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
                 setGuideBusy(appid, false);
-                return showGen(GEN_WARN + ' ' + ((r && r.error) || '搬运失败'), true, false);
+                return showGen(GEN_WARN + ' ' + ((r && r.error) || t('gen.moveFailed')), true, false);
               }
               showGen(
-                GEN_OK + ' 《' + r.game + '》 ' + r.count + ' 个 checkbox 已搬到 Notion' +
-                  '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">打开 Notion 页面</a>' +
-                  (r.archivedTo ? '<br><span class="warn">本地文件已移入 guides/.migrated/</span>' : ''),
+                GEN_OK + ' ' + escapeHtml(t('mv.done', { game: r.game, n: r.count })) +
+                  '<br><a href="' + escapeHtml(r.url) + '" target="_blank" rel="noopener">' + escapeHtml(t('mv.openPage')) + '</a>' +
+                  (r.archivedTo ? '<br><span class="warn">' + escapeHtml(t('mv.archived')) + '</span>' : ''),
                 false, false
               );
               // The success path used to release nothing — it relied on loadDashboard() repainting a
@@ -5692,7 +6024,7 @@
       // The dialogs that do lose something (rewrite, delete) are not covered by this rule; their
       // bodies are mandatory
       const choice = effortChoice();
-      const ok = await askConfirm({ title: '为《' + name + '》生成攻略?', okText: '生成', choices: [choice] });
+      const ok = await askConfirm({ title: t('gen.title', { game: name }), okText: t('gen.ok'), choices: [choice] });
       if (!ok) return;
       genCollapsed = false; // a generation the user pressed themselves, so the progress bar has to show
       btn.disabled = true;
@@ -5707,8 +6039,8 @@
           // several minutes, and once queued the progress bar shows **somebody else's** game name —
           // without saying so, the user concludes their click was lost
           showGen(r && r.queued
-            ? GEN_QUEUE + ' 《' + name + '》已排队(前面还有 ' + r.position + ' 个)'
-            : '⏳ 生成《' + name + '》…', false, true);
+            ? GEN_QUEUE + ' ' + escapeHtml(t('gen.queued', { game: name, n: r.position }))
+            : t('gen.running', { game: name }), false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
@@ -5765,13 +6097,13 @@
               b.disabled = false;
               armed = false;
               b.classList.remove('armed');
-              b.textContent = label + '失败:' + res.error;
+              b.textContent = t('res.actionFailed', { label: label, reason: res.error });
               return;
             }
             // **Where the displaced copy went has to be said.** Restoring is itself an overwrite, and
             // the copy just created is now its way back — not saying so buries the same thing all
             // over again
-            b.textContent = res && res.backedUpTo ? '已用回旧版,新的那份存成了备份' : '已用回旧版';
+            b.textContent = res && res.backedUpTo ? t('res.rolledBackKept') : t('res.rolledBack');
             b.classList.remove('armed');
             // The 「删除备份」 beside it now points at **the source of the content just written
             // back**, while what one most likely wants to delete is the new version that was just
@@ -5784,7 +6116,7 @@
             b.disabled = false;
             armed = false;
             b.classList.remove('armed');
-            b.textContent = '恢复失败:' + err.message;
+            b.textContent = t('res.restoreFailed', { reason: err.message });
           }).restoreGuideArchive(b.getAttribute('data-restore-backup'));
         });
       });
@@ -5796,7 +6128,7 @@
           e.stopPropagation();
           if (!armed) {
             armed = true;
-            b.textContent = '永久删除';
+            b.textContent = t('res.deleteArmed');
             b.classList.add('armed');
             return;
           }
@@ -5806,18 +6138,18 @@
               b.disabled = false;
               armed = false;
               b.classList.remove('armed');
-              b.textContent = label + '失败:' + res.error;
+              b.textContent = t('res.actionFailed', { label: label, reason: res.error });
               return;
             }
             // Once deleted the action has no object — leave a sentence of result rather than a button that can still be pressed
-            b.textContent = '备份已删';
+            b.textContent = t('res.backupDeleted');
             b.classList.remove('armed');
             refreshArchives(); // the 「备份 N」 at the end of the row has to lose one
           }).withFailureHandler(function(err) {
             b.disabled = false;
             armed = false;
             b.classList.remove('armed');
-            b.textContent = '删除失败:' + err.message;
+            b.textContent = t('res.deleteFailed', { reason: err.message });
           }).deleteGuideArchive(b.getAttribute('data-drop-backup'));
         });
       });
@@ -5833,7 +6165,7 @@
             if (res && res.error) b.textContent = res.error;
           }).withFailureHandler(function(err) {
             b.disabled = false;
-            b.textContent = '打开失败:' + err.message;
+            b.textContent = t('res.openFailed', { reason: err.message });
           }).revealGuideFile(appid);
         });
       });
@@ -5891,8 +6223,8 @@
     function renderFinished(f) {
       const game = escapeHtml(f.game || '');
       if (f.error) {
-        return '<span class="warn">' + GEN_WARN + ' 《' + game + '》生成失败:' +
-          escapeHtml(f.error) + '</span>' + warnLines(f.warnings);
+        return '<span class="warn">' + GEN_WARN + ' ' +
+          escapeHtml(t('res.genFailed', { game: f.game || '', reason: f.error })) + '</span>' + warnLines(f.warnings);
       }
       const r = f.result;
       if (!r) return '';
@@ -5903,12 +6235,12 @@
         // would conclude the model forgot to write them
         const failed = (r.chunkFailures || [])
           .map(function (c) {
-            return '<br><span class="warn">第 ' + c.chunk + '/' + c.of + ' 段(' + c.count +
-              ' 个成就)未生成:' + escapeHtml(String(c.reason).split('\n')[0]) + '</span>';
+            return '<br><span class="warn">' + escapeHtml(t('res.chunkFailed', {
+              chunk: c.chunk, of: c.of, count: c.count, reason: String(c.reason).split('\n')[0],
+            })) + '</span>';
           })
           .join('');
-        return '<span class="warn">' + GEN_WARN + ' 《' + game +
-          '》校验没过,已存草稿,没写进攻略。</span>' + failed +
+        return '<span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.draftKept', { game: f.game || '' })) + '</span>' + failed +
           (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : '') +
           warnLines(f.warnings);
       }
@@ -5917,9 +6249,9 @@
       // warning (that being the one that genuinely affects content quality)
       const searches = r.searchQueries ? r.searchQueries.length : 0;
       const noResearch = !r.researched
-        ? '<br><span class="warn">' + GEN_WARN + ' 没联网,内容是模型凭已有知识写的。</span>'
+        ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.noSearch')) + '</span>'
         : searches === 0
-          ? '<br><span class="warn">' + GEN_WARN + ' 一次都没搜,内容等同于凭记忆写的。</span>'
+          ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.neverSearched')) + '</span>'
           : '';
       // Where it was written has to be stated clearly — these are the user's own notes and they
       // should not have to hunt for them.
@@ -5934,9 +6266,9 @@
       // the moment right after generating that was not — which is exactly when one most wants to
       // click straight in and look
       const where = r.target === 'notion'
-        ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">打开攻略</a>'
-        : '<a href="/guide/' + encodeURIComponent(f.appid) + '" target="_blank" rel="noopener">打开攻略</a>'
-          + ' · <button type="button" class="gen-link" data-reveal="' + escapeHtml(f.appid) + '">打开文件夹</button>';
+        ? '<a href="' + escapeHtml(r.path || '') + '" target="_blank" rel="noopener">' + escapeHtml(t('res.openGuide')) + '</a>'
+        : '<a href="/guide/' + encodeURIComponent(f.appid) + '" target="_blank" rel="noopener">' + escapeHtml(t('res.openGuide')) + '</a>'
+          + ' · <button type="button" class="gen-link" data-reveal="' + escapeHtml(f.appid) + '">' + escapeHtml(t('res.openFolder')) + '</button>';
       // **「删除备份」 sits right beside 「打开攻略」**, because that is exactly the moment it is
       // wanted: open it, read it, confirm this version is fine, and the old one is of no further use
       // — anywhere else means 「等会儿再收拾」, and later mostly never comes.
@@ -5957,15 +6289,15 @@
       const restoreBackup = r.backup && r.backup.id
         ? ' · <button type="button" class="gen-link" data-restore-backup="'
           + escapeHtml(r.backup.id) + '" data-restore-label="'
-          + (r.target === 'notion' ? '整页重写' : '覆盖本地文件')
-          + '">恢复备份</button>'
+          + escapeHtml(r.target === 'notion' ? t('arc.restoreNotion') : t('arc.restoreLocal'))
+          + '">' + escapeHtml(t('res.restoreBackup')) + '</button>'
         : '';
       // Only an overwrite or a partial rewrite has a backup (a freshly generated whole guide has no
       // old one to save), and with `r.backup` empty this action does not appear at all — a button
       // that can never be pressed is worse than none
       const dropBackup = r.backup && r.backup.id
         ? ' · <button type="button" class="gen-link danger" data-drop-backup="'
-          + escapeHtml(r.backup.id) + '">删除备份</button>'
+          + escapeHtml(r.backup.id) + '">' + escapeHtml(t('res.dropBackup')) + '</button>'
         : '';
       // **The search count and the token count moved into a hover.** What remains on screen is three
       // things: which game, how many achievements were covered, and where to look. Tokens are still
@@ -5974,7 +6306,7 @@
       // 「内容自己过一遍」 stays — the machine only guarantees format and data, nothing can verify
       // whether the content is right, and this is the one sentence this feature has to say every time
       genBar.title = [
-        searches ? searches + ' 次搜索' : '没有联网搜索',
+        searches ? t('res.searches', { n: searches }) : t('res.noSearches'),
         Math.round((r.tokens || 0) / 100) / 10 + 'k token',
       ].join(' · ');
       // The ones with duplicate names whose Steam description is empty: the guide is written
@@ -5983,10 +6315,9 @@
       // only find out one day on noticing a few boxes that never move — and by then it looks more
       // like the sync being broken. Listing the names is what tells them which
       const unsyncable = (r.unsyncable || []).length
-        ? '<br><span class="warn">' + GEN_WARN + ' ' + r.unsyncable.length +
-          ' 个成就同名、Steam 上描述是空的,自动勾选认不出它们,需手动勾选:' +
+        ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.unsyncable', { n: r.unsyncable.length })) +
           escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
-          (r.unsyncable.length > 4 ? ' 等 ' + r.unsyncable.length + ' 个' : '') + '</span>'
+          (r.unsyncable.length > 4 ? escapeHtml(t('res.andMore', { n: r.unsyncable.length })) : '') + '</span>'
         : '';
       // A partial rewrite has **something else** to say: how many were changed, and that the rest
       // were untouched. Written as 「已生成 · 11/11 个成就」, an operation that changed only 5 looks
@@ -5995,14 +6326,13 @@
       // but without saying so the next validation would read them as damage from this change
       const pat = r.patched;
       const preExisting = pat && pat.preExisting
-        ? '<br><span class="warn">' + GEN_WARN + ' 攻略里还有 ' + pat.preExisting +
-          ' 条原有的校验问题,本次未处理</span>'
+        ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.preExisting', { n: pat.preExisting })) + '</span>'
         : '';
       const headline = pat
-        ? GEN_OK + ' 《' + game + '》已改 ' + pat.rewrote + ' 条 · 其余不变 · ' + where + restoreBackup + dropBackup
-        : GEN_OK + ' 《' + game + '》已生成 · ' + r.covered + '/' + r.total + ' 个成就 · ' + where + restoreBackup + dropBackup;
+        ? GEN_OK + ' ' + escapeHtml(t('res.rewrote', { game: f.game || '', n: pat.rewrote })) + where + restoreBackup + dropBackup
+        : GEN_OK + ' ' + escapeHtml(t('res.generated', { game: f.game || '', covered: r.covered, total: r.total })) + where + restoreBackup + dropBackup;
       return headline + noResearch + unsyncable + preExisting + warnLines(f.warnings) +
-        '<br><span class="warn">内容需要你自己过一遍。</span>';
+        '<br><span class="warn">' + escapeHtml(t('res.readItYourself')) + '</span>';
     }
 
     function fetchGen() {
@@ -6010,7 +6340,7 @@
         .withSuccessHandler(function (s) {
           if (!s) return;
           const waiting = (s.queue && s.queue.length)
-            ? ' · 还有 ' + s.queue.length + ' 个排队'
+            ? t('res.queueLeft', { n: s.queue.length })
             : '';
           // **A non-empty queue also counts as "still running".** This value decides whether the top
           // right offers 「收起」 or 「关闭」, and closing the progress bar mid-queue means the
@@ -6060,7 +6390,7 @@
             const warns = warnLines(s.warnings);
             // The round is shown only during an actual rewrite (round 2 onwards) — writing "round
             // 1/3" on a first pass reads as though something went wrong and it needs three attempts
-            const round = s.rounds && s.round > 1 ? ' 第 ' + s.round + '/' + s.rounds + ' 轮' : '';
+            const round = s.rounds && s.round > 1 ? t('res.round', { round: s.round, rounds: s.rounds }) : '';
             showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting + warns + doneTail, false, true);
             return;
           }
