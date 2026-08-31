@@ -667,3 +667,102 @@ describe('end to end: cancelling a real running job', () => {
     }
   });
 });
+
+describe('reserving the run slot: one at a time means *any* two, not the same one twice', () => {
+  /**
+   * `claim()` is per appid and deliberately lets a second appid through — that is what makes a
+   * queue possible at all. The one-at-a-time rule therefore needs a second, global gate, and it
+   * has to close in the same synchronous block that decides to run, for exactly the reason
+   * `claim()` does: `state.running` is not set until `begin()`, which is two awaits away
+   * (the preflight, then building the provider). Two different games racing through that window
+   * both read an idle state, both start, and both are paid for.
+   */
+  test('the first reservation succeeds and the second is refused', () => {
+    const s = createGuideGenState();
+    assert.equal(s.reserveRun(), true);
+    assert.equal(s.reserveRun(), false, 'two reservations at once is two generations at once, and two bills');
+  });
+
+  test('**a different appid is refused too** — this is the whole difference from claim()', () => {
+    const s = createGuideGenState();
+    assert.equal(s.claim('1'), true);
+    assert.equal(s.claim('2'), true, 'claim stays per appid, or there is no queue');
+    assert.equal(s.reserveRun(), true);
+    assert.equal(s.reserveRun(), false, 'both games hold their own claim and would both start');
+  });
+
+  test('one that is running holds the slot', () => {
+    const s = createGuideGenState();
+    s.begin('1', 'A', 3);
+    assert.equal(s.reserveRun(), false);
+  });
+
+  test('begin() takes the slot over from the reservation, so the next one still cannot have it', () => {
+    const s = createGuideGenState();
+    assert.equal(s.reserveRun(), true);
+    s.begin('1', 'A', 3);
+    assert.equal(s.reserveRun(), false, 'the handover left the slot free between reserve and begin');
+  });
+
+  test('after the running one ends the slot is free again', () => {
+    const s = createGuideGenState();
+    s.reserveRun();
+    s.begin('1', 'A', 3);
+    s.end(null, { ok: true });
+    assert.equal(s.reserveRun(), true, 'not freeing it on end wedges every later run, silently');
+  });
+
+  test('releaseRun gives it back when the reserving path never reached begin()', () => {
+    const s = createGuideGenState();
+    s.reserveRun();
+    s.releaseRun();
+    assert.equal(s.reserveRun(), true,
+      'a reservation held by a job that failed before begin() means nothing ever runs again');
+  });
+});
+
+describe('the wiring that decides to run rather than queue', () => {
+  /**
+   * **Source assertions**, for the same reason as `drainNext` above: both sites live inside
+   * `serve()`'s closure. They are what stops the fix being quietly reverted to the
+   * `snapshot().running` test it replaced, which reads correct and is wrong only under a race
+   * no unit test observes.
+   */
+  const src = () => readFileSync(new URL('../lib/server.js', import.meta.url), 'utf8');
+
+  test('startGuideGenClaimed reserves the slot instead of asking whether one is running', () => {
+    const s = src();
+    const start = s.indexOf('async function startGuideGenClaimed');
+    assert.ok(start > 0, 'cannot find startGuideGenClaimed — this check has lost its target rather than passed');
+    const end = s.indexOf('async function runGuideGen', start);
+    assert.ok(end > start, 'cannot find the tail of startGuideGenClaimed — rewrite this check rather than loosening it');
+    const body = s.slice(start, end);
+    assert.match(body, /guideGenState\.reserveRun\(\)/,
+      'the enqueue decision does not reserve — two different appids both pass it and both start');
+    assert.doesNotMatch(body, /snapshot\(\)\.running/,
+      'still deciding on snapshot().running: that is read after an await, so it answers about a moment that has passed');
+  });
+
+  test('drainNext reserves the slot before taking a job off the queue', () => {
+    const s = src();
+    const start = s.indexOf('const drainNext');
+    assert.ok(start > 0, 'cannot find drainNext — this check has lost its target rather than passed');
+    const body = s.slice(start, s.indexOf('};', start));
+    const reserveIdx = body.indexOf('reserveRun()');
+    const dequeueIdx = body.indexOf('dequeue()');
+    assert.ok(reserveIdx > 0, 'drainNext does not reserve — end() has already cleared running, so an incoming request starts alongside the one being drained');
+    assert.ok(reserveIdx < dequeueIdx,
+      'reserved after dequeuing: a job taken off the queue that then cannot start has nowhere to go back to, and losing it raises no error');
+    assert.match(body, /releaseRun\(\)/,
+      'nothing gives the slot back when the queue turns out to be empty, so the next request queues forever');
+  });
+
+  test('the one exit between reserving and begin() gives the slot back', () => {
+    const s = src();
+    const start = s.indexOf('provider = await createProvider(runConfig);');
+    assert.ok(start > 0, 'cannot find the createProvider call — this check has lost its target rather than passed');
+    const body = s.slice(start, s.indexOf('guideGenState.begin(', start));
+    assert.match(body, /releaseRun\(\)/,
+      'a provider that cannot be built leaves the slot held by a job that never ran — every later request queues behind a queue that never drains');
+  });
+});
