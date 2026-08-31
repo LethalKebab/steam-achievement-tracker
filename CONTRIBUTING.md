@@ -41,7 +41,7 @@ If your change touches a surface with a record above, update that record in the 
 Two of these fail **silently** — the language boundary and checkbox matching. Nothing errors, CI can be green, and the damage shows up in someone's Dashboard or in someone's own notes. The other two announce themselves.
 
 1. **Node 24+**, ES modules. `node:sqlite` is the reason.
-2. **The language boundary.** Anything a *user* reads at runtime is Chinese: Dashboard and Setup copy, messages thrown from `lib/`, CLI output, and the prompt sent to the model. Anything a *developer* reads is English: comments, documentation, test names. `test/i18n-boundary.test.js` guards this, because a well-meant translation pass over the wrong list is invisible — a translated `lib/` error renders verbatim in the Dashboard, and a translated prompt changes what the model is asked for.
+2. **The language boundary.** Anything a *user* reads at runtime comes from a `[zh, en]` message table and follows `uiLanguage` — Dashboard and Setup copy, messages thrown from `lib/`, CLI output, and the prompt sent to the model each keep both languages side by side, with Chinese as the source text. Anything a *developer* reads is English: comments, documentation, test names. Never leave a user-facing string as a loose literal in `lib/` or the pages. `test/i18n-boundary.test.js` and `test/uilanguage.test.js` guard this, because the failures are invisible — a literal renders in one language whatever the interface is set to, and a table entry missing its other half falls back silently.
 3. **Guide checkbox matching is not to be loosened.** It decides whether someone's own notes get ticked; a looser rule ticks the wrong achievement and nothing reports it. See the section of that name in `CLAUDE.md`.
 4. **Never commit `config.json`, `data/`, `backups/` or `guides/`.** This repository is public and those hold plaintext Steam, Notion and AI credentials, your database, and your personal notes. All four are gitignored — keep it that way.
 
@@ -67,7 +67,7 @@ node --check lib/foo.js             # syntax check, silent on success
 
 **`dot` prints no summary line.** The green signal is the exit code and the absence of an `X`, not a sentence. Two consequences: never pipe it through `tail` and conclude "all tests pass" because nothing looked wrong — a failure block sits *above* the dots and `tail` hides it; and when you actually want a count, use the default reporter for that run.
 
-35 test files, around 1,150 tests. Several exist because an existing rule was mutated until it failed, so a test here is often pinning a specific past mistake rather than a happy path. A behaviour change is expected to arrive with one.
+The suite is a few dozen files (`ls test/*.test.js` for the current count — a number written here would only drift). Many exist because an existing rule was mutated until it failed, so a test here is often pinning a specific past mistake rather than a happy path. A behaviour change is expected to arrive with one.
 
 CI runs the same suite on every pull request and every push to `main`, on `windows-latest` with Node 24, and there is no `npm install` step — see the section above for what that absence is doing and what it means if you add a dependency on purpose.
 

@@ -27,7 +27,7 @@ node tracker.js serve    # open the Dashboard: http://127.0.0.1:8777
 
 `init` writes your credentials to `config.json` and verifies them against Steam immediately, so a typo surfaces before the first sync rather than partway through it. `config.json` is gitignored and readable only by you.
 
-The Dashboard UI is in Chinese. The CLI output is Chinese too.
+The Dashboard and the CLI output default to Chinese; `uiLanguage` (above) switches both to English.
 
 ## Optional setup
 
@@ -123,7 +123,7 @@ Because ticking a Notion checkbox cannot be undone from here, run `checkbox-sync
 |---|---|---|
 | `ai-check [appid]` | Checks the provider and that its web search really works | AI provider |
 | `ai-check --dry` | Assembles the request without sending it; needs no key | — |
-| `ai-check --models` | Asks the API which models the key can use (Gemini) | AI provider |
+| `ai-check --models` | Asks the API which models the key can use (Gemini and `deepseek-openai`) | AI provider |
 | `guide-gen <appid>` | Researches and writes a guide, validates it, files it | AI + Steam (+ Notion) |
 | `guide-gen --dry-run` | Prints the prompt and the landing plan, sends no request | — |
 | `guide-gen --overwrite` | Rewrites the whole guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |
@@ -183,7 +183,7 @@ The staleness check runs once, when the **server starts**, against `syncStaleHou
 |---|---|
 | `config.json` | Credentials and settings. Gitignored, readable only by you |
 | `data/steam.db` | The database. A single SQLite file — `sqlite3` opens it directly |
-| `guides/` | Local markdown guides, plus `.drafts/` and `.backups/` |
+| `guides/` | Local markdown guides, plus `.drafts/`, `.backups/` and `.migrated/` |
 | `exports/` | CSV output from `export` |
 | `backups/` | Zips from `backup` |
 

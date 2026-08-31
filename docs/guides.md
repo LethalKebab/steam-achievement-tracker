@@ -101,7 +101,9 @@ node tracker.js guide-gen <appid> --effort low   # faster, less research
 ```
 
 `--effort` (`low` / `medium` / `high`, default `high`) sets how much research goes into
-this one guide; the Dashboard offers the same three in the confirmation before each run.
+this one guide; the Dashboard offers two of them (极速 = `low`, 深度 = `high`) in the
+confirmation before each run — `medium` measured indistinguishable from `high`, so it
+stays accepted in config and on the CLI but is not put on screen.
 Lower settings do not write worse solutions for the hard achievements — they stop
 researching the easy middle of the list, which then gets filled with lines that could have
 been written without looking anything up. See

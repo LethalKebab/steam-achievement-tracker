@@ -57,7 +57,7 @@ Three details are load-bearing, and each of them fails silently rather than loud
 
 ## Self-update
 
-The app checks GitHub Releases 10 seconds after launch and then once a day, offers the new version in a native dialog, and on acceptance downloads, verifies, quits, replaces itself and restarts. The full rationale — including why `electron-updater` is unusable here and why NSIS is not an option — is in [docs/self-update.md](../docs/self-update.md). **Read that before changing any of this.** What follows is what the code does.
+The app checks GitHub Releases 10 seconds after launch and then once a day, offers the new version in an in-app prompt (a web page — native dialogs do not survive here, see below), and on acceptance downloads, verifies, quits, replaces itself and restarts. The full rationale — including why `electron-updater` is unusable here and why NSIS is not an option — is in [docs/self-update.md](../docs/self-update.md). **Read that before changing any of this.** What follows is what the code does.
 
 ```
 每天一次 → GitHub API 比版本
