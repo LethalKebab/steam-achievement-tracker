@@ -99,6 +99,7 @@ More on what is stored and what Steam does not expose: [data.md](data.md).
 | Command | What it does | Network |
 |---|---|---|
 | `guides [--notion\|--local\|--all]` | Discovers guide pages and registers them | Notion |
+| `guides --force` | Registers a local `.md` over a same-appid Notion guide. One appid, one backend | Notion |
 | `checkbox-sync [appid]` | Ticks boxes for unlocked achievements | Steam + Notion |
 | `checkbox-sync --dry-run` | Previews which boxes would be ticked, writes nothing | Steam + Notion |
 | `checkbox-sync --no-cascade` | Does not cascade into nested sub-step checkboxes | Steam + Notion |
