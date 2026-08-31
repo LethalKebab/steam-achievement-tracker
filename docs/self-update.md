@@ -107,8 +107,6 @@ Three details are fixed:
 - It must be switchable off
 - **Remember the version the user skipped**, or it prompts on every launch and trains itself into being ignored within two days
 
-> **Note:** point one about `dialog` was later proved wrong — see "the rehearsals were worth more than the rehearsal" below. The prompt is a web page for that reason.
-
 ---
 
 ## 5. How to test it

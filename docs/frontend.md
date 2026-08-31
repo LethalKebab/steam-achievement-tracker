@@ -387,7 +387,7 @@ Empty selection **disables the confirm button** (and Enter respects that) rather
 
 It has no honest short Chinese name: 「写得薄」 is a translation of *thin content* and additionally *grades* the entry; 「没写打法」 calls "wrote one sentence" "wrote nothing". **A criterion that needs its threshold explained before it makes sense cannot be a button.**
 
-It stays on the CLI as `--only thin[:字数]`, where the threshold is adjustable and documented. **The two surfaces need not offer the same options.**
+It was not built on the CLI either — `--only` accepts `rare` / `locked` / `section:` / a name list, and `test/guidepatch.test.js` pins `thin` as absent. **A criterion that cannot be stated clearly enough for a button is not made a selector anywhere.**
 
 ### Two labels that read as casual, and the shape rule behind both
 
@@ -421,7 +421,7 @@ Generation runs for minutes — measured between 35 s and 11 min on real games, 
 
 Anything floating needs an opaque background or it renders on top of table text. `#gen-bar` sits at 9990 so the sync bar wins any collision, and a `max-width: 720px` media query stacks them instead.
 
-Its close button sets a `genDismissed` flag that `showGen` honours — without it the 3-second poll re-opens the bar seconds after you close it — and starting a new generation/migration clears the flag.
+While a job runs the bar can only be **collapsed** (`genCollapsed`), never closed — one line stays and one click brings the strip back, since losing sight of a paid multi-minute run is not allowed to happen. Only a **finished** bar offers 关闭. The old single `genDismissed` flag conflated the two (its button said 收起 while the behaviour was permanent discarding of a running job's progress) and was split; finishing a run auto-expands the bar once, because the result line carries where the guide landed. Starting a new generation/migration clears the collapse.
 
 ---
 

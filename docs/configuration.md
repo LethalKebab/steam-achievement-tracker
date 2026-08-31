@@ -47,7 +47,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
     "concurrency": 3,         // how many passes are written at once; 1 = one at a time
 
-    "maxSearches": 8,         // web_search calls per request
+    "maxSearches": 30,        // web_search calls per request
     "maxFetches": 10,         // web_fetch calls per request
     "maxFetchTokens": 50000,  // how much of one page to pull back
     "allowedDomains": [],     // non-empty = hard restrict search to these; empty = no limit
@@ -89,7 +89,7 @@ The split between those tables is by audience: only the terminal ones may name a
 
 **A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing **Rewrite** (「重写」) is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
 
-**`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
+**`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. (The packaged Windows app additionally re-runs the same check each time its window is shown, since its server process can live in the tray for days.) Set it to `0` if you'd rather only ever sync manually.
 
 Either way, the **立即同步** button next to the "上次同步" line on the Dashboard starts a sync on demand, ignoring `syncStaleHours` entirely. It's the same background sync, so the usual progress bar and automatic refresh apply, and the button greys out while one is running — including a sync you started from the CLI or another tab.
 
@@ -259,5 +259,5 @@ The server only ever listens on `127.0.0.1`, so the Dashboard is reachable from 
 
 There is no built-in scheduler. Two ways to get regular updates:
 
-- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), ticks the guide checkboxes for whatever that sync turned up (see `checkboxSyncOnServe`), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup.
-- **A real daily job** — on macOS, a launchd plist running `node tracker.js sync`. Note it only fires while the machine is awake; launchd will run a missed job on wake, but a machine that's off for a week syncs nothing.
+- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), ticks the guide checkboxes for whatever that sync turned up (see `checkboxSyncOnServe`), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup (the packaged app re-checks on window show).
+- **A real daily job** — a Windows Task Scheduler task running `node tracker.js sync` (`schtasks /create /sc daily …`). It only fires while the machine is awake; a machine that's off for a week syncs nothing.

@@ -84,7 +84,7 @@ Property name/type/options come from `fetchGuideStatusSchema`, never hardcoded: 
 ## Known structural cases
 
 - Pages with no `to_do` blocks at all (an external spreadsheet link, a pure walkthrough with no checklist) are skipped and logged — expected, not a bug.
-- Nested sub-checkboxes that are *conditions of* one achievement (not separate achievements) will be considered for matching; they just won't match anything, since matching requires exact equality with an achievement name.
+- Nested sub-checkboxes that are *conditions of* one achievement (not separate achievements) never match by name — exact equality with an achievement name still applies. The sub-step cascade (`collectSubStepTicks`) ticks them instead: once the parent achievement is established as unlocked, its nested to-dos are ticked too, each logged individually with the word 子步骤. On by default for manual runs (`--no-cascade` turns it off); the serve path runs with it off — see the serve section above.
 - Achievements living in nested Notion child pages are handled via a title-regex (`成就|achievement`) recursive search in `fetchAllToDoBlocks`. Unrelated child pages are deliberately not searched.
 - `child_database` and `link_to_page` blocks are skipped entirely — a Notion database with a "Done" checkbox *property* needs different logic (update page properties, not blocks) and isn't supported.
 - One appid uses exactly one backend. Markdown discovery won't clobber a registered Notion guide without `--force`.
