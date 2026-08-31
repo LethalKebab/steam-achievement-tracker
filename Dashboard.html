@@ -5813,7 +5813,7 @@
     window.rewriteGuide = async function (appid, name) {
       genCollapsed = false;
       setGuideBusy(appid, true);
-      showGen(t('gen.checking', { game: name }), false, true);
+      showGen(escapeHtml(t('gen.checking', { game: name })), false, true);
 
       // **Both preflights are fetched together, and their failures are not the same thing.**
       //
@@ -5839,7 +5839,7 @@
       ]);
       if (!p || p.error) {
         setGuideBusy(appid, false);
-        return showGen(GEN_WARN + ' ' + ((p && p.error) || t('gen.preflightFailed')), true, false);
+        return showGen(GEN_WARN + ' ' + escapeHtml((p && p.error) || t('gen.preflightFailed')), true, false);
       }
 
       /**
@@ -6021,14 +6021,14 @@
         .withSuccessHandler(function (r) {
           if (r && r.error) {
             setGuideBusy(appid, false);
-            return showGen(GEN_WARN + ' ' + r.error, true, false);
+            return showGen(GEN_WARN + ' ' + escapeHtml(r.error), true, false);
           }
-          showGen(t('rw.running', { game: name }), false, true);
+          showGen(escapeHtml(t('rw.running', { game: name })), false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
           setGuideBusy(appid, false);
-          showGen(GEN_WARN + ' ' + err, true, false);
+          showGen(GEN_WARN + ' ' + escapeHtml(err), true, false);
         })
         .startGuideGen(appid, true, rewriteChoice.value, scope);
     };
@@ -6091,12 +6091,12 @@
     window.migrateGuide = function (appid, name) {
       genCollapsed = false; // a migration the user pressed themselves, so the progress bar has to show
       setGuideBusy(appid, true);
-      showGen(t('gen.checking', { game: name }), false, true);
+      showGen(escapeHtml(t('gen.checking', { game: name })), false, true);
       rpc
         .withSuccessHandler(async function (p) {
           if (!p || p.error) {
             setGuideBusy(appid, false);
-            return showGen(GEN_WARN + ' ' + ((p && p.error) || t('gen.previewFailed')), true, false);
+            return showGen(GEN_WARN + ' ' + escapeHtml((p && p.error) || t('gen.previewFailed')), true, false);
           }
           // Verifying entry by entry, leaving the local file alone on a mismatch, and the page's icon
           // are all "how we make sure nothing goes wrong" rather than decisions for them. The only
@@ -6119,12 +6119,12 @@
             genBar.style.display = 'none';
             return;
           }
-          showGen(t('mv.running', { game: p.game }), false, true);
+          showGen(escapeHtml(t('mv.running', { game: p.game })), false, true);
           rpc
             .withSuccessHandler(function (r) {
               if (!r || r.error) {
                 setGuideBusy(appid, false);
-                return showGen(GEN_WARN + ' ' + ((r && r.error) || t('gen.moveFailed')), true, false);
+                return showGen(GEN_WARN + ' ' + escapeHtml((r && r.error) || t('gen.moveFailed')), true, false);
               }
               showGen(
                 GEN_OK + ' ' + escapeHtml(t('mv.done', { game: r.game, n: r.count })) +
@@ -6143,13 +6143,13 @@
             })
             .withFailureHandler(function (err) {
               setGuideBusy(appid, false);
-              showGen(GEN_WARN + ' ' + err, true, false);
+              showGen(GEN_WARN + ' ' + escapeHtml(err), true, false);
             })
             .migrateGuideToNotion(appid);
         })
         .withFailureHandler(function (err) {
           setGuideBusy(appid, false);
-          showGen(GEN_WARN + ' ' + err, true, false);
+          showGen(GEN_WARN + ' ' + escapeHtml(err), true, false);
         })
         .previewGuideToNotion(appid);
     };
@@ -6178,7 +6178,7 @@
         .withSuccessHandler(function (r) {
           if (r && r.error) {
             btn.disabled = false;
-            showGen(GEN_WARN + ' ' + r.error, true, false);
+            showGen(GEN_WARN + ' ' + escapeHtml(r.error), true, false);
             return;
           }
           // Queued and started have to read differently. **This one especially**: one generation takes
@@ -6186,12 +6186,12 @@
           // without saying so, the user concludes their click was lost
           showGen(r && r.queued
             ? GEN_QUEUE + ' ' + escapeHtml(t('gen.queued', { game: name, n: r.position }))
-            : t('gen.running', { game: name }), false, true);
+            : escapeHtml(t('gen.running', { game: name })), false, true);
           pollGen();
         })
         .withFailureHandler(function (err) {
           btn.disabled = false;
-          showGen(GEN_WARN + ' ' + err, true, false);
+          showGen(GEN_WARN + ' ' + escapeHtml(err), true, false);
         })
         .startGuideGen(appid, false, choice.value);
     };
@@ -6554,7 +6554,7 @@
             // The round is shown only during an actual rewrite (round 2 onwards) — writing "round
             // 1/3" on a first pass reads as though something went wrong and it needs three attempts
             const round = s.rounds && s.round > 1 ? t('res.round', { round: s.round, rounds: s.rounds }) : '';
-            showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting + warns + doneTail, false, true);
+            showGen('⏳ 《' + escapeHtml(s.game) + '》' + escapeHtml(round) + (s.note ? ' · ' + escapeHtml(s.note) : '') + escapeHtml(waiting) + warns + doneTail, false, true);
             return;
           }
           genRunningAppid = null;

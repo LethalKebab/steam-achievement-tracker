@@ -2111,3 +2111,145 @@ describe('dates follow the interface language, not the machine', () => {
     });
   }
 });
+
+describe('the progress bar is an innerHTML sink, so everything reaching it is escaped', () => {
+  /**
+   * `showGen` assigns its argument to `genMsg.innerHTML`, and what its callers hand it includes
+   * **game names and provider error text** — neither of which this program authors. A game name is
+   * whatever Steam returns, and for a title with no Chinese name it is scraped out of the store
+   * page. So markup in a name is script running on `127.0.0.1:8777`, **same origin**:
+   * `isLocalCaller` blocks other sites, not this page, so everything server-guard.test.js exists to
+   * stop — deleteGame, restore, a generation that spends money — is reachable from there.
+   *
+   * The family had drifted rather than been decided: `warnLines`, `renderFinished` and both
+   * grid-card sites escape, and fifteen `showGen` callers did not. Same shape as the bell panel
+   * printing its own i18n keys — one member of a correctly-handled set missed, reading exactly
+   * like working code.
+   *
+   * **`t()` does not escape.** It substitutes into the template and returns, so
+   * `t('gen.checking', {game: name})` carries the name through verbatim; wrapping the `t()` call
+   * is what makes it safe, not the fact that a template was used.
+   */
+  const HTML_BY_CONSTRUCTION = new Set([
+    // icon() — inline SVG
+    'GEN_WARN', 'GEN_OK', 'GEN_QUEUE',
+    // warnLines() / renderFinished() escape everything dynamic inside themselves
+    'warns', 'doneTail', 'genDoneHtml', 'join',
+  ]);
+
+  // Written this way rather than as a literal: the escape would have to survive every layer between
+  // here and the file on disk, and it does not always
+  const BACKSLASH = String.fromCharCode(92);
+  const QUOTES = ["'", '"', '`'];
+
+  /** The first argument of each `showGen(...)` call — up to the first comma at depth 0 */
+  function firstArgs(js) {
+    const out = [];
+    const marker = 'showGen(';
+    for (let i = js.indexOf(marker); i !== -1; i = js.indexOf(marker, i + 1)) {
+      // The declaration itself is not a call
+      if (js.slice(Math.max(0, i - 12), i).trimEnd().endsWith('function')) continue;
+      let p = i + marker.length;
+      const start = p;
+      let depth = 0;
+      let quote = null;
+      for (; p < js.length; p++) {
+        const c = js[p];
+        if (quote) {
+          if (c === BACKSLASH) p++;
+          else if (c === quote) quote = null;
+          continue;
+        }
+        if (QUOTES.includes(c)) { quote = c; continue; }
+        if ('([{'.includes(c)) depth++;
+        else if (')]}'.includes(c)) { if (depth === 0) break; depth--; }
+        else if (c === ',' && depth === 0) break;
+      }
+      out.push({ index: i, text: js.slice(start, p) });
+    }
+    return out;
+  }
+
+  /**
+   * Drop every string literal's contents. **Scanned rather than matched with a regex**: the regex
+   * for "a quoted string with escapes" is itself made of escapes, and one of them not surviving the
+   * trip to disk turns this check into something that silently matches nothing.
+   */
+  function stripStrings(s) {
+    let out = '';
+    let quote = null;
+    for (let p = 0; p < s.length; p++) {
+      const c = s[p];
+      if (quote) {
+        if (c === BACKSLASH) p++;
+        else if (c === quote) quote = null;
+        continue;
+      }
+      if (QUOTES.includes(c)) { quote = c; continue; }
+      out += c;
+    }
+    return out;
+  }
+
+  /**
+   * Remove each ternary's **test**, keeping both branches.
+   *
+   * A condition is read, never written: `(s.note ? ' · ' + escapeHtml(s.note) : '')` puts nothing
+   * of `s.note` on the page, and flagging it would be a false positive of the worst kind — the sort
+   * that gets the whole check deleted rather than the code fixed.
+   */
+  function stripTernaryTests(s) {
+    let out = s;
+    for (let q = out.indexOf('?'); q !== -1; q = out.indexOf('?')) {
+      let depth = 0;
+      let start = 0;
+      for (let p = q - 1; p >= 0; p--) {
+        const c = out[p];
+        if (c === ')') depth++;
+        else if (c === '(') { if (depth === 0) { start = p + 1; break; } depth--; }
+        else if (c === '+' && depth === 0) { start = p + 1; break; }
+      }
+      out = out.slice(0, start) + out.slice(q + 1);
+    }
+    return out;
+  }
+
+  /** Remove every `escapeHtml( … )` span, brackets and all — what it wrapped is by definition safe */
+  function stripEscaped(s) {
+    let out = s;
+    for (let idx = out.indexOf('escapeHtml('); idx !== -1; idx = out.indexOf('escapeHtml(')) {
+      let p = idx + 'escapeHtml('.length;
+      let depth = 0;
+      for (; p < out.length; p++) {
+        if (out[p] === '(') depth++;
+        else if (out[p] === ')') { if (depth === 0) break; depth--; }
+      }
+      out = out.slice(0, idx) + out.slice(p + 1);
+    }
+    return out;
+  }
+
+  test('every value handed to showGen is escaped, or is HTML this file built itself', () => {
+    const js = inlineScripts(read('Dashboard.html')).join(SEP);
+    const calls = firstArgs(js);
+    assert.ok(calls.length >= 15,
+      `only ${calls.length} showGen calls parsed — the scan has lost its target rather than passed`);
+
+    const offenders = [];
+    for (const call of calls) {
+      const bare = stripTernaryTests(stripEscaped(stripStrings(call.text)));
+      const idents = [...bare.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)]
+        .map((m) => m[0])
+        .filter((w) => !HTML_BY_CONSTRUCTION.has(w));
+      if (idents.length) {
+        const line = js.slice(0, call.index).split(SEP).length;
+        offenders.push(`showGen at inline-script line ${line}: ${idents.join(', ')}`);
+      }
+    }
+    assert.deepEqual(
+      offenders, [],
+      'these reach genMsg.innerHTML unescaped — a game name or provider error carrying markup runs as script, same-origin:' +
+        SEP + offenders.join(SEP)
+    );
+  });
+});
