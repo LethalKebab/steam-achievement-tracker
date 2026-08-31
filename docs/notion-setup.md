@@ -83,6 +83,16 @@ flowchart TD
 
 **The left route never touches a URL and cannot be filled in wrong** — take it if you have no existing database. The program creates the database along with all four status options and writes the ID straight into the config.
 
+<img width="720" alt="Click ＋ 新建一个攻略数据库 to start the left route" src="https://github.com/user-attachments/assets/5bb13ef1-7b77-4a41-aad7-6a75bd7df3fe" />
+
+<img width="720" alt="The create-database form: pick a parent page, name it, then click 建立" src="https://github.com/user-attachments/assets/51e8d3a0-8016-47cf-bda1-b3c6bf691ccd" />
+
+On success:
+
+> 创建成功:「Steam 攻略」,状态选项 Not started / In progress / Staged / Done。ID 已填好并保存。
+>
+> Created: Steam 攻略, status options Not started / In progress / Staged / Done. The ID is filled in and saved.
+
 ### If you take the right route: getting the database ID
 
 Open the database **as a full page** in Notion (not a small table embedded in another page), then look at the address bar:
@@ -107,14 +117,6 @@ Getting it wrong is not a problem: on save, the program tells you separately whe
 ---
 
 ## ④ 保存并验证
-
-<img width="720" alt="Save and verify — success" src="https://github.com/user-attachments/assets/5bb13ef1-7b77-4a41-aad7-6a75bd7df3fe" />
-
-<img width="720" alt="Save and verify — result detail" src="https://github.com/user-attachments/assets/51e8d3a0-8016-47cf-bda1-b3c6bf691ccd" />
-
-On success it should say something like:
-
-> 建好了:「Steam 攻略」,状态选项 Not started / In progress / Staged / Done。ID 已填好并存盘。
 
 Press **「保存并验证」**. The program asks everything it needs to ask right then, rather than failing later when you first generate a guide:
 
