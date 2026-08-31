@@ -1,0 +1,32 @@
+# Dependency updates.
+#
+# **Only launcher/ has dependencies at all.** The tracker itself is zero-dependency and
+# `tests.yml` asserts that by having no install step, so there is nothing at the root to watch —
+# and pointing an ecosystem at a lockfile-less directory produces a weekly "manifest not found"
+# rather than silence.
+#
+# What is actually at stake here: `launcher/` pins Electron, and the built zip **ships that Electron
+# to end users**. A Chromium advisory is therefore not a build-time concern that gets picked up at
+# the next convenient moment; it is already installed on other people's machines. Nothing in this
+# repository would otherwise say so — the tests cannot see it and neither can the build.
+#
+# Grouped into one PR per ecosystem: electron-builder pulls a long tail of transitive packages, and
+# a separate PR each would bury the one that matters.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /launcher
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      packaging:
+        patterns:
+          - '*'
+
+  # Pinned action SHAs go stale the same way, and a stale action is the supply-chain half of the
+  # same question
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
