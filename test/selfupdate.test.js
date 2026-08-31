@@ -35,13 +35,16 @@ import { join } from 'node:path';
 import {
   MANIFEST_NAME,
   STATE_NAME,
+  USER_DATA_PATHS,
   buildManifest,
   compareVersions,
   downloadVerified,
+  generatedLocalConfig,
   hashFile,
   fallbackLaunch,
   isSafeManifestPath,
   machineLocalEntries,
+  userDataEntries,
   primaryLaunch,
   parseManifest,
   parsePromptChoice,
@@ -883,5 +886,126 @@ describe('packaging and release', () => {
       /\$\{PRODUCT\}-\$\{version\}-manifest\.json/,
       'the manifest filename carries no version — the release page cannot tell which build it belongs to'
     );
+  });
+});
+
+/**
+ * A build eating its own data
+ * ------------------------------------------------
+ * The reported failure: clone, `npm run build`, run the exe, fill in the setup form, change
+ * something, build again — and the configuration and the database are gone. Step 1 of postbuild
+ * deletes the previous app directory to make room for the rename, and without a `local.config.json`
+ * that directory is exactly where `DATA_ROOT` had put `config.json` and `data/`.
+ *
+ * **It is invisible to anyone who has a `local.config.json`**, which is why it survived: their data
+ * is somewhere else entirely and the delete never reaches it.
+ *
+ * Two halves, and neither is sufficient alone: the data is kept out of dist/ in the first place, and
+ * the delete refuses to run over data that is in there anyway.
+ */
+describe('a local build must not eat its own data', () => {
+  const withAppDir = (fn) => {
+    const dir = mkdtempSync(join(tmpdir(), 'appdir-'));
+    try {
+      mkdirSync(join(dir, 'resources', 'tracker', 'lib'), { recursive: true });
+      writeFileSync(join(dir, 'resources', 'tracker', 'tracker.js'), '// program file\n');
+      writeFileSync(join(dir, 'resources', 'tracker', 'lib', 'db.js'), '// program file\n');
+      fn(dir);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  test('an app directory holding only program files reports nothing', () => {
+    // The false positive matters as much as the miss: firing on a clean build would fail every
+    // rebuild, and a guard that fires every time is one people delete
+    withAppDir((dir) => assert.deepEqual(userDataEntries(dir), []));
+  });
+
+  test('a config.json or a database in there is found', () => {
+    withAppDir((dir) => {
+      writeFileSync(join(dir, 'resources', 'tracker', 'config.json'), '{}\n');
+      assert.deepEqual(userDataEntries(dir), ['resources/tracker/config.json']);
+    });
+    withAppDir((dir) => {
+      // A directory, not a file — the database is `data/steam.db`, and checking for the file itself
+      // would miss a `dbPath` pointing anywhere else inside the same directory
+      mkdirSync(join(dir, 'resources', 'tracker', 'data'));
+      writeFileSync(join(dir, 'resources', 'tracker', 'data', 'steam.db'), 'x');
+      assert.deepEqual(userDataEntries(dir), ['resources/tracker/data']);
+    });
+    withAppDir((dir) => {
+      writeFileSync(join(dir, 'resources', 'tracker', 'config.json'), '{}\n');
+      mkdirSync(join(dir, 'resources', 'tracker', 'guides'));
+      assert.deepEqual(userDataEntries(dir), ['resources/tracker/config.json', 'resources/tracker/guides']);
+    });
+  });
+
+  test('no path on the list can be produced by a build', () => {
+    /**
+     * This is the reason a fixed list is allowed here at all. `extraResources` is an allow-list, so
+     * if none of these paths can come out of it, then anything found at one is the user's — and the
+     * guard cannot block a build over a file the build itself created.
+     *
+     * It is asserted rather than assumed because the allow-list is in another file and will be
+     * edited by somebody who has never read this comment.
+     */
+    const pkg = JSON.parse(readFileSync(new URL('../launcher/package.json', import.meta.url), 'utf8'));
+    const resource = pkg.build.extraResources.find((r) => r.to === 'tracker');
+    assert.ok(resource, 'the tracker resources entry is gone — this test no longer checks anything');
+    const shipped = resource.filter;
+    assert.deepEqual(
+      shipped.slice().sort(),
+      ['*.html', 'assets/**/*', 'lib/**/*', 'package.json', 'tracker.js'],
+      'the shipped file list changed; re-derive whether USER_DATA_PATHS can still collide with it'
+    );
+
+    for (const path of USER_DATA_PATHS) {
+      assert.ok(path.startsWith('resources/tracker/'), `${path} is not under the data root`);
+      const rel = path.slice('resources/tracker/'.length);
+      assert.ok(!shipped.includes(rel), `${path} is also a shipped file`);
+      assert.ok(!rel.endsWith('.html'), `${path} is covered by the *.html pattern`);
+      assert.ok(!rel.startsWith('lib/') && !rel.startsWith('assets/'), `${path} is covered by a ** pattern`);
+    }
+  });
+
+  test('postbuild checks before it deletes, and a hit makes the build red', () => {
+    // Checking after the delete would be a report about data that no longer exists
+    const checkAt = postbuildSrc.indexOf('userDataEntries(appDir)');
+    const deleteAt = postbuildSrc.indexOf('rmSync(appDir');
+    assert.ok(checkAt > 0, 'postbuild no longer looks for user data before the delete');
+    assert.ok(deleteAt > 0, 'postbuild no longer deletes the old app directory?');
+    assert.ok(checkAt < deleteAt, 'the check moved after the delete, which is the same as not having it');
+    assert.match(
+      postbuildSrc.slice(checkAt, deleteAt),
+      /process\.exit\(1\)/,
+      'the data was found without failing the build — which amounts to not finding it'
+    );
+  });
+
+  test('a build with no local.config.json of its own writes one pointing at the repository', () => {
+    // This is the half that stops data reaching dist/ at all. Forward slashes, because the value is
+    // read back out of JSON and a Windows path would otherwise need escaping
+    const cfg = generatedLocalConfig('D:\\GitHub\\steam-achievement-tracker');
+    assert.equal(cfg.dataDir, 'D:/GitHub/steam-achievement-tracker');
+    assert.equal(cfg.autoUpdate, false, 'a build from a working tree must not offer to replace itself with a release');
+    assert.equal(generatedLocalConfig('/home/x/repo').dataDir, '/home/x/repo');
+  });
+
+  test('postbuild generates that file only when launcher has none of its own', () => {
+    // A hand-written launcher/local.config.json is the machine owner's answer — including its
+    // silence about autoUpdate — and is copied verbatim
+    const branch = postbuildSrc.slice(postbuildSrc.indexOf('const localCfg = join(here'));
+    const copyAt = branch.indexOf('copyFileSync(localCfg');
+    const generateAt = branch.indexOf('generatedLocalConfig(repoRoot)');
+    assert.ok(copyAt > 0 && generateAt > 0, 'one of the two branches is gone');
+    assert.ok(copyAt < generateAt, 'the generated file would overwrite the machine\u2019s own copy');
+    assert.match(branch.slice(0, generateAt), /existsSync\(localCfg\)/, 'the branch no longer tests for the file');
+  });
+
+  test('the generated file is still recognised as machine-local', () => {
+    // It carries an absolute path, so letting it into a manifest means the next update deletes it
+    // and the data directory silently reverts — the same trap the copied one already guards against
+    assert.deepEqual(machineLocalEntries(['local.config.json']), ['local.config.json']);
   });
 });
