@@ -14,6 +14,7 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { openDb, insertGame, getGame } from '../lib/db.js';
 import { createApi } from '../lib/api.js';
@@ -147,5 +148,38 @@ describe('fetchGameIcon asks when the guess misses', () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+describe('a new column has to be declared in both places', () => {
+  /**
+   * `SCHEMA` is `CREATE TABLE IF NOT EXISTS`, so it does nothing at all to a table that already
+   * exists, and `ADDED_COLUMNS` is what carries a new column to installed databases. Both are
+   * needed, and db.js says so in its own comment.
+   *
+   * A column present only in `ADDED_COLUMNS` still works — `migrate` runs on a fresh database
+   * too — which is exactly why this drifts: nothing fails, and the next column added by copying
+   * the example inherits the omission. `cover_url` was that column.
+   */
+  test('every ADDED_COLUMNS entry also appears in the games CREATE TABLE', () => {
+    const src = readFileSync(new URL('../lib/db.js', import.meta.url), 'utf8');
+    const table = src.match(/CREATE TABLE IF NOT EXISTS games \(([\s\S]*?)\n\);/);
+    assert.ok(table, 'cannot find the games CREATE TABLE — this check has lost its target rather than passed');
+    const declared = new Set(
+      table[1].split('\n').map((l) => l.trim().split(/\s+/)[0]).filter((w) => /^[a-z_]+$/.test(w))
+    );
+    const block = src.match(/const ADDED_COLUMNS = \[([\s\S]*?)\n\];/);
+    assert.ok(block, 'cannot find ADDED_COLUMNS — this check has lost its target rather than passed');
+    const added = [...block[1].matchAll(/\[\s*'([a-z_]+)'/g)].map((m) => m[1]);
+    assert.ok(added.length >= 5, `only ${added.length} added columns parsed — the shape changed and this check is no longer reading it`);
+    const missing = added.filter((c) => !declared.has(c));
+    assert.deepEqual(missing, [],
+      `${missing.join(', ')} reach an installed database through the migration but are absent from the CREATE TABLE, contradicting the rule stated above ADDED_COLUMNS`);
+  });
+
+  test('cover_url is readable on a fresh database', () => {
+    const db = openDb(':memory:');
+    insertGame(db, { appid: '1', name: 'x' });
+    assert.equal('cover_url' in getGame(db, '1'), true);
   });
 });

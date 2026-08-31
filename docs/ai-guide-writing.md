@@ -286,14 +286,14 @@ Rule 五 only says "fold content once it reaches 10 lines"; it never said "but n
 
 `unnameableApiNames(defs)` handles it: when neither of an achievement's names is unique in this game, its `checked-mismatch` counts as **expected** and does not block. The exemption must be computed **per name** — a colliding Chinese name with a unique English one still ticks fine (most collisions are Steam single-language localization bugs), and over-exempting hides real defects.
 
-**The same shape has a second exit.** `ambiguous-no-description` requires same-named achievements to quote the description verbatim, but **if Steam's description is itself an empty string there is nothing to quote** — nobody can fix it. A guide with 197/197 coverage can be held at the door by 15 such findings, with all three rounds spent asking the model to copy a description that does not exist.
+**The same shape has a second exit.** `ambiguous-no-description` requires same-named achievements to quote the description verbatim — in **either** language, matching the reverse lookup and the `paraphrased-description` rule, so an English guide quoting the English description satisfies it. But **when Steam carries no description in either language there is nothing to quote** — nobody can fix it. A guide with 197/197 coverage can be held at the door by 15 such findings, with all three rounds spent asking the model to copy a description that does not exist.
 
 **The test is: is there any action, by anyone, that would clear this finding?** No ⇒ it belongs in `expected`, reported but not blocking. The fix is **splitting it into two codes**, not adding a boolean field:
 
 | code | Meaning | Blocks? | Fed back to the model? |
 |---|---|---|---|
-| `ambiguous-no-description` | A description exists, the guide didn't quote it | **Yes** | **Yes** (a rewrite genuinely fixes it) |
-| `ambiguous-empty-description` | Steam's description is empty | No (goes to `expected`) | No |
+| `ambiguous-no-description` | A description exists in one of the two languages, the guide quoted neither | **Yes** | **Yes** (a rewrite genuinely fixes it) |
+| `ambiguous-empty-description` | Steam has no description in either language | No (goes to `expected`) | No |
 
 Why a code rather than a boolean: in this project "is this failure recoverable" is dispatched on `code` everywhere (`MODEL_FIXABLE`, `splitFindings`, `CLI_HINTS`), and adding a boolean only this one rule sets means a second mechanism answering the same question — and **the second mechanism not being wired up** is precisely what the original fault was: no production code read that boolean, and the only thing referencing it was a test asserting it had been set.
 

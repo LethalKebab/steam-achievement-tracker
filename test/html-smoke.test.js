@@ -2075,3 +2075,39 @@ describe('the red of a two-click button cannot be covered by the hover colour', 
     });
   }
 });
+
+describe('copy that reaches the page has to have been through t()', () => {
+  /**
+   * A key rendered instead of its text is the one i18n failure that **looks like working code**:
+   * `t()` is applied nearly everywhere on the line, the string is a real key, and what the user
+   * gets is `bell.perfect` in the panel. Nothing anywhere reports it — no console error, no
+   * missing element, no failing selector.
+   */
+  test('the bell panel group headings are translated, not printed raw', () => {
+    const js = inlineScripts(read('Dashboard.html')).join(SEP);
+    const start = js.indexOf('function renderBell');
+    assert.ok(start > 0, 'cannot find renderBell — this check has lost its target rather than passed');
+    const body = js.slice(start, js.indexOf('function ', start + 10));
+    const group = body.match(/bell-group[^;]*;/);
+    assert.ok(group, 'cannot find where the group heading is emitted');
+    assert.match(group[0], /t\(/,
+      'the group heading is emitted without t() — the panel shows the key itself, and nothing reports it');
+    assert.match(group[0], /escapeHtml\(/, 'emitted into innerHTML without escaping');
+  });
+});
+
+describe('dates follow the interface language, not the machine', () => {
+  /**
+   * A page reading in English with a Chinese-formatted timestamp on it is the one line that looks
+   * like a bug rather than a choice. The locale is therefore never a literal: it is chosen from
+   * `LANG`, the same value every other string on the page goes through.
+   */
+  for (const page of PAGES) {
+    test(`${page} pins no locale literal`, () => {
+      const js = inlineScripts(read(page)).join(SEP);
+      const hits = [...js.matchAll(/toLocaleString\(\s*'([a-z]{2}-[A-Z]{2})'/g)].map((m) => m[1]);
+      assert.deepEqual(hits, [],
+        `a hardcoded locale (${hits.join(', ')}) formats the date the same way whatever the interface is set to`);
+    });
+  }
+});

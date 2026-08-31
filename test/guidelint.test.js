@@ -391,3 +391,58 @@ test('a checkbox inside a toggle is not an orphan, and both backends have to giv
   assert.equal(local.length, 1, 'the local side should report exactly one too — the two backends disagreeing is a bug');
   assert.match(local[0].message, /「回归自我」/);
 });
+
+describe('duplicate names: either language\'s description distinguishes them', () => {
+  /**
+   * `resolveTodoToAchievement` matches against **both** `description` and `description_en`, and so
+   * does the paraphrased-description rule. This one used to read `description` alone, which makes
+   * the two disagree in the direction that costs the most: an English guide quoting the English
+   * description resolves perfectly at sync time and was still reported as unfixable, and the
+   * remedy offered — copy the description — was already done.
+   */
+  const enDef = (apiName, nameEn, descriptionEn) => ({
+    api_name: apiName, name_cn: '', name_en: nameEn, description: '', description_en: descriptionEn,
+  });
+
+  test('an English-quoted description distinguishes a duplicate name', () => {
+    const r = lintGuide({
+      defs: [enDef('P1', 'Pilgrimage', 'Reach the summit'), enDef('P2', 'Pilgrimage', 'Reach the shore')],
+      todos: [todo(1, '**Pilgrimage** — Reach the summit'), todo(2, '**Pilgrimage** — Reach the shore')],
+    });
+    assert.deepEqual(
+      r.findings.filter((f) => f.code.startsWith('ambiguous-')), [],
+      'both boxes quote their own English description verbatim, which is exactly what makes them resolvable'
+    );
+  });
+
+  test('only one of the pair quotes it — the other is still reported', () => {
+    const r = lintGuide({
+      defs: [enDef('P1', 'Pilgrimage', 'Reach the summit'), enDef('P2', 'Pilgrimage', 'Reach the shore')],
+      todos: [todo(1, '**Pilgrimage** — Reach the summit'), todo(2, '**Pilgrimage**')],
+    });
+    assert.equal(r.findings.filter((f) => f.code === 'ambiguous-no-description').length, 1);
+  });
+
+  test('**an English-only description is fixable**, so it gets the fixable code', () => {
+    // The two codes route "can this be remedied". Answering "the description on Steam is empty"
+    // when an English one is sitting right there stops the model being asked to quote it, and the
+    // guide is held back by something that could have been fixed
+    const r = lintGuide({
+      defs: [enDef('P1', 'Pilgrimage', 'Reach the summit'), enDef('P2', 'Pilgrimage', 'Reach the shore')],
+      todos: [todo(1, '**Pilgrimage**'), todo(2, '**Pilgrimage**')],
+    });
+    assert.equal(r.findings.filter((f) => f.code === 'ambiguous-no-description').length, 2);
+    assert.equal(
+      r.findings.filter((f) => f.code === 'ambiguous-empty-description').length, 0,
+      'reported as unfixable while a description exists to quote — the guide is blocked by something nobody will try to fix'
+    );
+  });
+
+  test('genuinely empty in both languages is still the unfixable code', () => {
+    const r = lintGuide({
+      defs: [enDef('P1', 'Pilgrimage', ''), enDef('P2', 'Pilgrimage', '')],
+      todos: [todo(1, '**Pilgrimage**'), todo(2, '**Pilgrimage**')],
+    });
+    assert.equal(r.findings.filter((f) => f.code === 'ambiguous-empty-description').length, 2);
+  });
+});

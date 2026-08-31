@@ -543,3 +543,47 @@ describe('cancellation — the Dashboard Cancel button, mirroring ai.test.js exa
     });
   });
 });
+
+describe('a stream that fails partway must not leak the connection', () => {
+  /**
+   * When the body dies mid-stream the request is still open, and `maxRetries` opens another — so
+   * without an abort a socket leaks on every attempt. The abort is deliberately gated on having
+   * reached the stream: aborting a response that already returned completely (a 4xx whose body
+   * was consumed by `text()`) trips a libuv assertion at exit on Windows.
+   *
+   * That gate is a variable, and a variable that is declared and never set reads exactly like a
+   * working one — the abort simply never happens, and nothing anywhere reports it. This is the
+   * same pairing ai-anthropic.js and ai-deepseek.js have.
+   */
+  const dyingBody = () => (async function* () {
+    yield new TextEncoder().encode('data: {"candidates":[{"content":{"parts":[{"text":"部分"}],"role":"model"}}]}\n\n');
+    throw new Error('socket hang up');
+  })();
+
+  /** Captures the AbortSignal the provider hands to fetch, which is the only place the abort shows */
+  const capturingFetch = (response) => {
+    const seen = [];
+    const fn = async (_url, init) => { seen.push(init.signal); return response; };
+    fn.signals = seen;
+    return fn;
+  };
+
+  test('**the fetch is aborted when the stream dies partway**', async () => {
+    const f = capturingFetch({ ok: true, status: 200, headers: new Headers(), body: dyingBody() });
+    const p = new GeminiProvider(AI, { fetchImpl: f });
+    await assert.rejects(p.send({ messages: [{ role: 'user', content: 'q' }] }));
+    assert.equal(f.signals.length, 1, 'expected exactly one request');
+    assert.equal(f.signals[0].aborted, true,
+      'the stream failed mid-body and the fetch was never aborted — the connection leaks, and every retry opens another');
+  });
+
+  test('a response that never started streaming is left alone', async () => {
+    // The other half of the same gate: a 4xx is fully read by errorFromResponse, and aborting it
+    // afterwards is what trips the libuv assertion on Windows
+    const f = capturingFetch(errResponse(429, { error: { message: 'rate limited' } }));
+    const p = new GeminiProvider(AI, { fetchImpl: f });
+    await assert.rejects(p.send({ messages: [{ role: 'user', content: 'q' }] }));
+    assert.equal(f.signals[0].aborted, false,
+      'aborting a response whose body was already consumed is what the streaming gate exists to prevent');
+  });
+});
