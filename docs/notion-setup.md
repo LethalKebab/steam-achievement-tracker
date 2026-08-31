@@ -1,146 +1,161 @@
-# 连接 Notion 攻略库
+# Connecting Notion
 
-连上之后,程序会把生成的攻略写进你的 Notion,并且在你解锁成就时自动勾上攻略里对应的复选框。
+Once connected, the program writes generated guides into your Notion and ticks the matching checkboxes as you unlock achievements.
 
-四步,大约 10 分钟,全程在浏览器和程序界面里完成,**不需要用命令行**。
+Four steps, about 10 minutes, all of it in the browser and the program's own UI. **No command line required.**
 
-> 这是给使用者看的操作步骤。想了解勾选同步和状态收敛的规则,看 [guides.md](guides.md);
-> 每个配置项的含义在 [configuration.md](configuration.md)。
+> This is the operator's walkthrough. For the rules behind checkbox sync and status convergence, see [guides.md](guides.md). For what each setting means, see [configuration.md](configuration.md).
+>
+> **UI labels are quoted verbatim in Chinese**, because that is what the buttons actually say.
 
 ```mermaid
 flowchart LR
-    A["① 建 connection<br/>在 Notion 网站上"] --> B["② 授权页面<br/>最容易漏的一步"]
-    B --> C["③ 填进程序<br/>设置 → Notion"]
-    C --> D["④ 保存并验证<br/>当场告诉你结果"]
+    A["① Create a connection<br/>on the Notion site"] --> B["② Authorise the page<br/>the step most often missed"]
+    B --> C["③ Enter it in the app<br/>设置 → Notion"]
+    C --> D["④ 保存并验证<br/>tells you the result on the spot"]
     style B stroke-width:3px
 ```
 
-第 ② 步单独标出来,是因为绝大多数「连不上」都出在那里 —— 建了 connection,但没把页面授权给它。
+Step ② is called out separately because the overwhelming majority of "it won't connect" reports come from there — the connection was created, but no page was ever shared with it.
 
 ---
 
-## ① 在 Notion 建一个 connection
+## ① Create a connection in Notion
 
-打开 [开发者页面](https://app.notion.com/developers/connections) → **New connection**。
+Open the [developer page](https://app.notion.com/developers/connections) → **New connection**.
 
-- **Name** 随便填,比如 `Steam 攻略`
-- **Type** 选 **Internal**
-- **Associated workspace** 选你放攻略的那个工作区
+- **Name** — anything, e.g. `Steam 攻略`
+- **Authentication method** — stick with `Access token`
 
-建好之后进 **Configuration** 标签页,里面有一串 **Access token**,`ntn_` 或 `secret_` 开头。点 **Show** → **Copy**,先存到记事本里,第 ③ 步要用。
+<img width="720" alt="New connection page" src="https://github.com/user-attachments/assets/b2ee037a-0274-4d36-a5c1-4d80efdcbd88" />
 
-> **老界面上这几个字不一样**:`New connection` 写作 `New integration`,`Access token` 写作
-> `Internal Integration Secret`(建完就直接显示在页面上,不在 Configuration 标签页里),开发者页面
-> 在 `notion.so/my-integrations`。指的是同一套东西。
+<img width="400" alt="Authentication method options" src="https://github.com/user-attachments/assets/799391c5-e751-44ba-8636-ad41fc831a64" />
+
+Once created, go to the **Configuration** tab. It holds an **Access token** starting with `ntn_` or `secret_`. Click **Show** → **Copy** and keep it somewhere for step ③.
+
+<img width="720" alt="Access token field" src="https://github.com/user-attachments/assets/0136e04f-6e6e-49dd-864e-dd61d086efc9" />
+
+> **The older UI uses different words for these**: `New connection` was `New integration`, `Access token` was `Internal Integration Secret` (shown directly on the page after creation, not in a Configuration tab), and the developer page was at `notion.so/my-integrations`. They are the same things.
 >
-> Notion 这几个名字改过不止一轮,所以**屏幕上的字和这里对不上就按屏幕走**。程序不认叫法也不认
-> 前缀,`ntn_` 和 `secret_` 都收。
+> Notion has renamed these more than once, so **if the words on screen don't match this page, follow the screen.** The program cares about neither the name nor the prefix — it accepts both `ntn_` and `secret_`.
 
-> **这串东西等于你 Notion 的钥匙**,别发给别人、别贴到聊天里。程序只把它存在你自己电脑上的 `config.json`(权限 600)。
-
----
-
-## ② 把页面授权给它
-
-**这一步漏了,后面一定连不上。** 刚建好的 connection 默认**什么都看不见** —— 哪怕它属于你自己的工作区。你得明确告诉 Notion「这个 connection 可以碰这一页」。
-
-在 Notion 里打开你打算放攻略的那一页,然后:
-
-```
-页面右上角
-   ••• (更多)
-      └─ Add connections / 添加连接
-            └─ 搜你第 ① 步起的名字 → 选中
-```
-
-有的 Notion 版本要先点「+ 添加连接」。
-
-**怎么知道成功了**:那一页的 `•••` 菜单里会出现你这个 connection 的名字。
-
-**授权父页面之后,它底下所有子页面都跟着授权了** —— 所以选一个够高的页面授权一次就够,不用一页页点。
+> **This string is the key to your Notion.** Don't send it to anyone or paste it into a chat. The program stores it only in `config.json` on your own machine (mode 600).
 
 ---
 
-## ③ 回到程序里填,选一条路
+## ② Share the page with it
 
-打开程序 → 右上角 **⚙️ 设置** → 上面的步骤条点到 **Notion** 这一步。
+Create a new page in the left sidebar. Name it whatever you like, e.g. "Steam games", then click **Empty page**.
 
-把第 ① 步复制的密钥贴进 **Access token**。接下来有两条路:
+<img width="200" alt="Creating a new empty page" src="https://github.com/user-attachments/assets/a887028f-4b3b-46fa-a0ae-f791d47fb74a" />
+
+Open the page you intend to keep guides under, then:
+
+```
+top-right of the page
+   ••• (More)
+      └─ Connections
+            └─ search for the name you used in step ① → select it
+```
+
+<img width="720" alt="Adding the connection to a page" src="https://github.com/user-attachments/assets/cc58e3ca-1bdc-4452-b2ca-ed41a599b72f" />
+
+Some Notion versions require clicking "+ Add connections" first.
+
+**How to tell it worked**: your connection's name now appears in that page's `•••` menu.
+
+**Authorising a parent page authorises every page beneath it** — so pick a high enough page and do it once, rather than clicking through page by page.
+
+---
+
+## ③ Back in the app: pick one of two routes
+
+Open the program → **⚙️ 设置** (top right) → click through to the **Notion** step on the step bar.
+
+Paste the token from step ① into **Access token**. From there, two routes:
 
 ```mermaid
 flowchart TD
-    S["贴好 Access token"] --> L["没有现成的库<br/>▸ 点「＋ 新建一个攻略数据库」<br/>▸ 选父页面 → 起名字 → 建立<br/>ID 自动填好,属性也配好了"]
-    S --> R["已经有攻略数据库<br/>▸ 手动填「攻略数据库 ID」<br/>要从网址里抠 32 位,见下"]
+    S["Access token pasted"] --> L["No database yet<br/>▸ click 「＋ 新建一个攻略数据库」<br/>▸ pick a parent page → name it → create<br/>ID filled in automatically, properties configured"]
+    S --> R["Already have a guide database<br/>▸ fill in 「攻略数据库 ID」 by hand<br/>needs the 32 hex chars from the URL, see below"]
     style L stroke-width:3px
 ```
 
-**左边这条路不用碰网址,也不会填错** —— 没有现成库的话就走它。程序会把数据库连同四个状态选项一起建好,ID 直接写进配置。
+**The left route never touches a URL and cannot be filled in wrong** — take it if you have no existing database. The program creates the database along with all four status options and writes the ID straight into the config.
 
-### 如果走右边:数据库 ID 怎么取
+### If you take the right route: getting the database ID
 
-在 Notion 里**把数据库整页打开**(不是嵌在别的页面里的那种小表格),然后看浏览器地址栏:
+Open the database **as a full page** in Notion (not a small table embedded in another page), then look at the address bar:
 
 ```
-https://notion.so/我的攻略库-3bd1fee6252b816da1ccf9c50b8e91c2?v=8a2f...
-                            └────────── 要的就是这 32 位 ──────────┘  └─ ? 之后全不要
+https://app.notion.com/p/Steam-Guides-3cc90c1c4bd680089a1dff2a79a88148?v=8f3d21a4c9b6407a8e2f1c5d6a7b8c90&pvs=12
+                                      └──── these 32 characters ─────┘ └─ drop everything after '?'
 ```
 
-取 `?` 前面那段纯十六进制(只有 `0-9` 和 `a-f`),**标题和连字符都不要**。
+Take the pure hexadecimal run before the `?` (only `0-9` and `a-f`). **Drop the title and the hyphens.**
 
-三种常见的填错:
+Three common mistakes:
 
-| 填成了 | 为什么不行 |
+| Entered | Why it fails |
 |---|---|
-| 整条链接 | 里面混着标题和查询参数 |
-| `?v=` 后面那段 | 那是**视图** ID,不是数据库 ID |
-| 页面 ID | 数据库嵌在页面里时容易抄成外层页面的 ID |
+| The whole link | It carries the title and query parameters too |
+| The part after `?v=` | That is a **view** ID, not a database ID |
+| The page ID | Easy to copy the outer page's ID when the database is embedded in a page |
 
-填错了不用担心:保存时程序会分别告诉你是「这不是一个数据库」还是「还没授权给 connection」—— 这两件事修法完全不同,所以它不会合成一句含糊的话。
+Getting it wrong is not a problem: on save, the program tells you separately whether this is "not a database" or "not shared with the connection" — the fixes are completely different, so it never merges them into one vague sentence.
 
 ---
 
 ## ④ 保存并验证
 
-按 **「保存并验证」**。程序会当场把该问的一次问完,而不是等你以后生成攻略时才报错:
+<img width="720" alt="Save and verify — success" src="https://github.com/user-attachments/assets/5bb13ef1-7b77-4a41-aad7-6a75bd7df3fe" />
 
-| 它检查什么 | 不对的话会怎样 |
+<img width="720" alt="Save and verify — result detail" src="https://github.com/user-attachments/assets/51e8d3a0-8016-47cf-bda1-b3c6bf691ccd" />
+
+On success it should say something like:
+
+> 建好了:「Steam 攻略」,状态选项 Not started / In progress / Staged / Done。ID 已填好并存盘。
+
+Press **「保存并验证」**. The program asks everything it needs to ask right then, rather than failing later when you first generate a guide:
+
+| What it checks | What happens if it's wrong |
 |---|---|
-| 密钥能不能用 | 直接说密钥不可用 |
-| 这个 ID 是不是真的指向数据库 | 把「不是数据库」和「没授权」分开告诉你 |
-| 有没有标题属性 | 说清楚缺什么 |
-| 状态选项齐不齐 | 缺的话旁边出现**「帮我补上」**,点一下自动补 |
-| 能不能写进去 | 建一个页面再立刻归档来验证,只有读权限会当场报出来 |
+| Whether the token works | Says the token is unusable |
+| Whether the ID really points at a database | Reports "not a database" and "not shared" separately |
+| Whether there is a title property | States exactly what is missing |
+| Whether the status options are complete | If not, a **「帮我补上」** button appears — one click fills them in |
+| Whether it can actually write | Creates a page and immediately archives it; a read-only connection is reported on the spot |
 
-全都通过就会自动跳回 Dashboard。有问题的话页面会**停在这里**把问题列出来,不会跳走 —— 每一条都写了具体怎么修。
+If everything passes, it returns to the Dashboard automatically. If anything fails, the page **stays here** and lists the problems rather than navigating away — each one says specifically how to fix it.
 
-> 最后一项值得单说:只读的检查查不出「这个 connection 只有读权限」,而那恰好能一路绿灯到第一次生成攻略才 403。所以这里会真的建一页再立刻归档掉。
+> The last row is worth calling out: a read-only inspection cannot detect "this connection only has read permission", and that particular fault stays green all the way to a 403 on your first guide generation. So it genuinely creates a page and archives it again.
 
-### 关于状态选项
+### About the status options
 
-程序会往攻略页写四种状态:`Not started`、`In progress`、`Staged`、`Done`。
+The program writes four statuses to guide pages: `Not started`, `In progress`, `Staged`, `Done`.
 
-其中 `Not started` / `In progress` / `Done` 是 Notion 建状态属性时**自带的**,所以手工建的库通常只差一个 `Staged` —— 那正是「帮我补上」一键能搞定的情况。
+Three of those — `Not started` / `In progress` / `Done` — are **Notion's own defaults** when you create a status property, so a hand-made database is usually short only `Staged`, which is exactly the case 「帮我补上」 handles in one click.
 
-**你自己另外加的状态(比如 `Paused`)程序永远不会去改。** 校验只问「这次要写的这个值在不在选项里」,不管里面还有什么。
+**Statuses you added yourself (say `Paused`) are never touched.** Validation only asks whether the value being written this time is among the options; it does not care what else is in there.
 
 ---
 
-## 连上之后会发生什么
+## What happens once it's connected
 
-- 没有攻略的游戏,行尾会出现 **✨ 生成** —— 前提是你也配了 AI(设置里的第 ② 步)
-- 你在 Steam 解锁成就后,程序会自动勾上 Notion 攻略里对应的复选框
-- 游戏打满会把攻略页标成 `Done`;开发者加了新成就、掉出 100% 之后会退回 `Staged`
-- 这些都在打开 Dashboard 和点「立即同步」时自动跑,不用管
+- Games with no guide get a **✨ 生成** button at the end of the row — provided you also configured AI (step ② in settings)
+- When you unlock an achievement on Steam, the program ticks the matching checkbox in the Notion guide
+- Completing a game marks its guide page `Done`; if the developer adds achievements and it drops below 100%, it goes back to `Staged`
+- All of this runs automatically when you open the Dashboard and when you press 「立即同步」 — nothing to manage
 
-## 命令行(可选)
+## Command line (optional)
 
-装了 Node、想从终端检查的话:
+If you have Node installed and want to check from a terminal:
 
 ```bash
-node tracker.js notion-check                # 只读体检:token、库、标题属性、状态选项、页面数
-node tracker.js notion-check --fix          # 试着补上缺的状态选项
-node tracker.js notion-check --probe-write  # 建一页再归档,验证真的有写权限
-node tracker.js init --notion --create      # 命令行版的「帮我建一个」
+node tracker.js notion-check                # read-only health check: token, database, title property, status options, page count
+node tracker.js notion-check --fix          # try to add the missing status options
+node tracker.js notion-check --probe-write  # create a page and archive it, to prove write access
+node tracker.js init --notion --create      # the command-line version of 「新建一个攻略数据库」
 ```
 
-打包版的用户不需要这些 —— 设置页里的「保存并验证」跑的是同一套检查。
+Users of the packaged build need none of this — 「保存并验证」 on the settings page runs the same checks.
