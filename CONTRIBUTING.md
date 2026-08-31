@@ -112,4 +112,4 @@ A build you make yourself reads **this checkout's** `config.json` and `data/`, t
 
 ## Reporting a bug
 
-Issues are welcome. **Do not paste `config.json` or a backup zip into one** — both carry your Steam API key, Notion token and AI keys in plain text, and this repository is public. The output of `node tracker.js status` is safe to share.
+Issues are welcome — except for a **security** problem, which goes through [`SECURITY.md`](SECURITY.md) privately rather than into a public issue. **Do not paste `config.json` or a backup zip into one** — both carry your Steam API key, Notion token and AI keys in plain text, and this repository is public. The output of `node tracker.js status` is safe to share.
