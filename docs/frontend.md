@@ -98,6 +98,8 @@ The body is **weight 800** at 27px.
 
 **In English the compounding does not apply.** The whole wordmark is Latin there, so it is a plain 0.86-against-1 comparison and the weight gap (500 against 800) carries most of the hierarchy. Any future change has to be looked at in both languages — a value tuned against Han ink alone will be wrong in the one where nothing compounds.
 
+**The two scripts share a baseline — there is no vertical nudge.** A `vertical-align: 0.16em` lift used to sit on `.wm-latin`, and enlarging STEAM exposed it: a length `vertical-align` resolves against the element's own font-size, so the same declaration grew with the word and it visibly rode above the Chinese. Measured on this font at the shipping sizes, ink relative to each own baseline — STEAM (23.22px/500) 18.0 up and 1.0 down, 成就追踪器 (27px/800) 24.0 up and 3.0 down. Sharing the baseline puts the bottoms flush and leaves the Han taller at the top, which is just what a smaller Latin word beside larger Han looks like. **If it ever looks wrong again, check the size first** — the lift was compensating for something the scripts do not actually do.
+
 **The word gap is a real character, not a margin.** 成就追踪器 is one uninterrupted phrase and its two spans sit flush; in English the same markup produced 「AchievementTracker」. It is fixed with a `.wm-gap` span holding a non-breaking space, shown only under `:root[lang="en"]`. A margin would have looked right and left the *text* still running the two words together — which is what a screen reader announces and what copying the heading puts on the clipboard.
 
 ### Three attempts at a *drawn* wordmark were reverted

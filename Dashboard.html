@@ -340,7 +340,15 @@
       text-transform: uppercase;
       color: var(--text-3);
       margin-right: 0.42em;
-      vertical-align: 0.16em;
+      /* **No raise: the two scripts share a baseline, which is what "the same height" means here.**
+         There used to be a `vertical-align: 0.16em` lift, and enlarging STEAM made it obvious — a
+         length `vertical-align` resolves against the element's own font-size, so the same 0.16em
+         grew with it and the word visibly rode above the Chinese.
+         Measured on this font at the shipping sizes, ink relative to each own baseline: STEAM
+         (23.22px/500) reaches 18.0 up and 1.0 down; 成就追踪器 (27px/800) reaches 24.0 up and 3.0
+         down. Sharing the baseline puts the bottoms flush and leaves the Han taller at the top,
+         which is simply what a smaller Latin word beside larger Han looks like — the lift was
+         inventing a problem the scripts do not have. */
     }
     /* 「成就」 is this tool's keyword, so it gets the accent. All white is too flat, and colouring the whole phrase is too noisy */
     .wm-key { color: var(--accent); }
