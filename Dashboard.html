@@ -1729,8 +1729,9 @@
       max-width: min(420px, calc(100vw - var(--s6)));
       max-height: 60vh;
       overflow-y: auto;
-      /* Room reserved on the right for the close button */
-      padding: var(--s3) var(--s6) var(--s3) var(--s4);
+      /* Room reserved on the right for the corner buttons — two side by side while live
+         (cancel + collapse), one while finished (close), so this has to fit the wider pair */
+      padding: var(--s3) 60px var(--s3) var(--s4);
       border: 1px solid rgba(140, 198, 63, 0.5);
       border-left: 3px solid var(--ok);
       border-radius: var(--r-md);
@@ -1764,9 +1765,11 @@
     #gen-bar .gen-link.danger { color: var(--text-2); }
     #gen-bar .gen-link.danger:hover:not(:disabled) { color: var(--danger); }
     #gen-bar .gen-link.armed { color: var(--danger); font-weight: 600; }
-    /* A job running = it can only be collapsed; finished = it can be closed. Exactly one of the two buttons is ever visible */
+    /* A job running = it can be collapsed (and cancelled); finished = it can only be closed.
+       genCancel and genToggle always show together, genClose only on its own */
     #gen-bar.live #genClose,
-    #gen-bar:not(.live) #genToggle { display: none; }
+    #gen-bar:not(.live) #genToggle,
+    #gen-bar:not(.live) #genCancel { display: none; }
     /* Collapsed = one line only. **The height is capped with max-height rather than
        giving the text nowrap** — the progress is several lines joined with <br>, and
        nowrap does not stop a <br>, which expands it regardless */
@@ -1792,6 +1795,10 @@
       display: inline-flex;
     }
     #gen-bar .gen-close:hover { color: var(--text); background: rgba(255, 255, 255, 0.08); }
+    /* genCancel sits immediately left of the toggle/close corner rather than stacked on it —
+       while live the two are shown together, so they need two positions, not one */
+    #gen-bar #genCancel { right: calc(var(--s1) + 26px); }
+    #gen-bar #genCancel:hover { color: var(--danger); background: rgba(255, 255, 255, 0.08); }
     /* On a narrow screen the two corners crowd each other, so it spans a row and yields to the sync status bar below */
     @media (max-width: 720px) {
       #gen-bar { left: var(--s3); right: var(--s3); bottom: 76px; max-width: none; }
@@ -2403,6 +2410,12 @@
       <circle cx="12" cy="12" r="9"/>
       <path d="M12 7v5.3l3.3 2"/>
     </symbol>
+    <!-- The cancel button, and the "cancelled" line in a finished job's report — same badge shape as
+         i-check/i-clock (a circle plus a glyph) so the three read as one family of status marks -->
+    <symbol id="i-stop" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9"/>
+      <rect x="9" y="9" width="6" height="6" rx="1"/>
+    </symbol>
     <symbol id="i-search" viewBox="0 0 24 24">
       <circle cx="10.8" cy="10.8" r="6.8"/>
       <path d="m15.8 15.8 4.4 4.4"/>
@@ -2592,8 +2605,14 @@
     in the JS). Making one button change its icon and behaviour by state means anyone
     reading the code has to first work out which face it is wearing; two, each doing one
     thing, with CSS deciding which shows.
+
+    genCancel is a third, sitting beside genToggle rather than replacing it — collapsing and
+    stopping the run are two different requests, and the run is still worth collapsing while
+    it goes on (or cancelling, while collapsed). It shares genToggle's visibility rule
+    (**live only**): a finished job has nothing left to cancel.
   -->
   <div id="gen-bar" role="status">
+    <button type="button" class="gen-close" id="genCancel" title="取消生成" data-t-title="gen.cancelOk" aria-label="取消生成" data-t-aria-label="gen.cancelOk"><svg class="ic"><use href="#i-stop"/></svg></button>
     <button type="button" class="gen-close" id="genToggle" title="收起(任务仍在进行)" data-t-title="gen.collapseTitle" aria-label="收起" data-t-aria-label="gen.collapse"><svg class="ic"><use href="#i-chevron"/></svg></button>
     <button type="button" class="gen-close" id="genClose" title="关闭" data-t-title="ui.close" aria-label="关闭" data-t-aria-label="ui.close"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
@@ -2969,6 +2988,9 @@
       'gen.ok':               ['生成', 'Generate'],
       'gen.queued':           ['《{game}》已排队(前面还有 {n} 个)', '{game} is queued — {n} ahead of it'],
       'gen.running':          ['⏳ 生成《{game}》…', '⏳ Generating {game}…'],
+      'gen.cancelOk':         ['取消生成', 'Cancel generation'],
+      'gen.cancelTitle':      ['取消《{game}》的生成?', 'Cancel generating {game}?'],
+      'gen.cancelBody':       ['已经查到、写好的部分会留在草稿里,不会丢。', 'Anything already researched and written stays in the draft — nothing is lost.'],
 
       // ---- The two-click buttons on a generation result ------------------------
       'res.actionFailed':     ['{label}失败:{reason}', '{label} failed: {reason}'],
@@ -2982,6 +3004,7 @@
 
       // ---- What a finished generation reports ----------------------------------
       'res.genFailed':        ['《{game}》生成失败:{reason}', 'Generating {game} failed: {reason}'],
+      'res.genCancelled':     ['已取消:《{game}》', 'Cancelled: {game}'],
       'res.chunkFailed':      ['第 {chunk}/{of} 段({count} 个成就)未生成:{reason}', 'Part {chunk} of {of} ({count} achievements) was not generated: {reason}'],
       'res.draftKept':        ['《{game}》校验没过,已存草稿,没写进攻略。', '{game} did not pass the checks. The draft is saved; nothing was written to the guide.'],
       'res.noSearch':         ['没联网,内容是模型凭已有知识写的。', 'No web access — the content is what the model already knew.'],
@@ -3266,6 +3289,7 @@
     const GEN_WARN = icon('warn');
     const GEN_OK = icon('check');
     const GEN_QUEUE = icon('clock');
+    const GEN_CANCEL = icon('stop');
     const GEN_SEARCH = icon('search');
     const GEN_BOOK = icon('book');
 
@@ -5635,6 +5659,15 @@
      */
     let genCollapsed = false;
     let genLive = false;
+    /**
+     * The job the Cancel button targets — set from `guideGenStatus`'s own `appid`/`game` each time
+     * it reports one running, never from what the button that started it happened to click.
+     * Otherwise the bar would keep pointing at whichever game the user pressed 生成/重写 on most
+     * recently, which after a queued job actually starts running is a **different** game than the
+     * one the bar is now showing progress for — cancel would hit the wrong job with no error at all.
+     */
+    let genRunningAppid = null;
+    let genRunningGame = '';
 
     function syncGenChrome() {
       // **Boolean() cannot be dropped**, for the same reason as the two on the sync button:
@@ -5653,6 +5686,45 @@
     document.getElementById('genClose').addEventListener('click', function (e) {
       e.stopPropagation();
       genBar.style.display = 'none';
+    });
+
+    const genCancelBtn = document.getElementById('genCancel');
+    genCancelBtn.addEventListener('click', async function (e) {
+      // Same reason as the other two buttons: while collapsed the bar itself is a "click to
+      // expand" target, and bubbling up would fold it in passing
+      e.stopPropagation();
+      if (!genRunningAppid) return;
+      const appid = genRunningAppid;
+      const name = genRunningGame || appid;
+      const ok = await askConfirm({
+        title: t('gen.cancelTitle', { game: name }),
+        body: t('gen.cancelBody'),
+        okText: t('gen.cancelOk'),
+        danger: true,
+      });
+      if (!ok) return;
+      // Disabled until the next poll — not to prevent a double-send (a second cancel on an
+      // already-cancelling job is harmless, see cancelGuideGen), but because the confirm dialog
+      // makes a second click while waiting an easy accident, and a button that visibly did
+      // something is less alarming than one that silently accepted a second click
+      genCancelBtn.disabled = true;
+      rpc
+        .withSuccessHandler(function (r) {
+          // **The actual outcome never arrives here.** A successful cancel only tears down the
+          // in-flight request; the job's own promise still has to unwind (reject, run its
+          // `.catch`, call `guideGenState.end`) before `finished` carries a record of it — that
+          // is what the next poll picks up, same as any other ending. This handler only has to
+          // report a request that could not even be issued
+          if (!r || !r.cancelled) {
+            genCancelBtn.disabled = false;
+            showGen(GEN_WARN + ' ' + escapeHtml((r && r.error) || t('gen.cancelOk')), true, true);
+          }
+        })
+        .withFailureHandler(function (err) {
+          genCancelBtn.disabled = false;
+          showGen(GEN_WARN + ' ' + escapeHtml(String(err)), true, true);
+        })
+        .cancelGuideGen(appid);
     });
     // Collapsed, the whole strip means "click me to expand". **Only while collapsed** — expanded it
     // contains links (open the guide), and a fully clickable strip would swallow a link click as a
@@ -6267,6 +6339,15 @@
      */
     function renderFinished(f) {
       const game = escapeHtml(f.game || '');
+      // **Checked before `f.error`, never folded into it.** A cancellation carries `error: null` —
+      // the run did exactly what was asked — and `res.genFailed`'s wording ("生成失败") would tell
+      // the person who just pressed Cancel that something went wrong. warnLines still applies:
+      // whatever was salvaged before the cancel landed is exactly what a mid-run cancellation most
+      // needs to say
+      if (f.result && f.result.cancelled) {
+        return '<span class="warn">' + GEN_CANCEL + ' ' +
+          escapeHtml(t('res.genCancelled', { game: f.game || '' })) + '</span>' + warnLines(f.warnings);
+      }
       if (f.error) {
         return '<span class="warn">' + GEN_WARN + ' ' +
           escapeHtml(t('res.genFailed', { game: f.game || '', reason: f.error })) + '</span>' + warnLines(f.warnings);
@@ -6428,6 +6509,14 @@
           const doneTail = genDoneHtml.length ? '<br>' + genDoneHtml.join('<br>') : '';
 
           if (s.running) {
+            // **What the Cancel button targets, read from the state that is actually running** —
+            // never from the appid the button that started it was on, which may by now be a
+            // different, already-drained queue entry. Re-enabled here too: the one case that needs
+            // it is a cancel that raced the job finishing on its own (see the comment on the
+            // button's own handler), and this is the only path that still shows `s.running`.
+            genRunningAppid = s.appid;
+            genRunningGame = s.game;
+            genCancelBtn.disabled = false;
             // Things already known to have gone wrong mid-run (a shard not written). **Displayed
             // separately from note** — note is "what is happening now" and is covered by the next
             // event three seconds later, while these have to stay until the result appears, or the
@@ -6439,6 +6528,8 @@
             showGen('⏳ 《' + s.game + '》' + round + (s.note ? ' · ' + s.note : '') + waiting + warns + doneTail, false, true);
             return;
           }
+          genRunningAppid = null;
+          genRunningGame = '';
           // **Do not stop polling while the queue is non-empty.** Between one finishing and the next
           // actually starting there is a gap (the server has to build the provider first), and at
           // that instant running is false while the queue is not — under the old logic polling
