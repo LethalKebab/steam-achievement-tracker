@@ -6,6 +6,16 @@ Everything is in `data/steam.db`, a single SQLite file (gitignored). `openDb()` 
 sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DESC LIMIT 10"
 ```
 
+**What that path is relative to depends on how the program was started**, and `config.json` and `guides/` follow it:
+
+| Started as | Rooted at |
+|---|---|
+| `node tracker.js …`, or `npm start` in `launcher/` | the checkout |
+| a build you made yourself (`npm run build`) | the checkout as well — `postbuild.js` leaves a pointer next to the exe |
+| the release zip | `resources\tracker\` inside the extracted folder |
+
+Only the third is a surprise, and it is why the whole extracted folder is the thing to move or back up. `TRACKER_DATA_DIR` overrides all three; `dataDir` in `launcher/local.config.json` is what sets it for a packaged build.
+
 ## Tables
 
 | Table | Holds |
@@ -87,7 +97,7 @@ Six decisions worth knowing before you write queries:
 
 Which language a guide is written in — `'zh'` or `'en'`, defaulting to `'zh'`. It is written after a guide is successfully generated or rewritten, and never by guide *discovery*, which registers pages it found and knows nothing about their contents.
 
-**It is a display fact and has no correctness role.** Two surfaces read it: the marker in the achievement panel's header, and the wording of the rewrite dialog's title. Matching does not — both the reverse lookup and the `paraphrased-description` check accept either language's description — so a row carrying the wrong value costs a marker, never a tick. That is deliberate, because the rows that predate the column carry an assumed value rather than a recorded one: every guide in the library at the time was Chinese.
+**It is a display fact and has no correctness role.** Two surfaces read it: the marker in the achievement panel's header, and the wording of the rewrite dialog's title. Matching does not — the reverse lookup, the `paraphrased-description` check and the same-name ambiguity rule all accept either language's description — so a row carrying the wrong value costs a marker, never a tick. That is deliberate, because the rows that predate the column carry an assumed value rather than a recorded one: every guide in the library at the time was Chinese.
 
 Anything other than `'en'` is stored as `'zh'`. A third value would make the marker unreachable rather than wrong, which is the harder failure to notice.
 

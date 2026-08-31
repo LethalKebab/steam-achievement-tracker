@@ -57,7 +57,7 @@ Three details are load-bearing, and each of them fails silently rather than loud
 
 ## Self-update
 
-The app checks GitHub Releases 10 seconds after launch and then once a day, offers the new version in a native dialog, and on acceptance downloads, verifies, quits, replaces itself and restarts. The full rationale — including why `electron-updater` is unusable here and why NSIS is not an option — is in [docs/self-update.md](../docs/self-update.md). **Read that before changing any of this.** What follows is what the code does.
+The app checks GitHub Releases 10 seconds after launch and then once a day, offers the new version in an in-app prompt (a web page — native dialogs do not survive here, see below), and on acceptance downloads, verifies, quits, replaces itself and restarts. The full rationale — including why `electron-updater` is unusable here and why NSIS is not an option — is in [docs/self-update.md](../docs/self-update.md). **Read that before changing any of this.** What follows is what the code does.
 
 ```
 每天一次 → GitHub API 比版本
@@ -104,7 +104,9 @@ That is a **Job Object**: Electron puts its children in one with kill-on-close, 
 
 **Failure directions, deliberately different:** the *check* is silent (offline is the normal case, and an error box every morning trains you to dismiss it), while a *download or verification failure after the user clicked 立即更新* says so out loud — they are standing there waiting for it. If the helper itself fails, only program files are damaged (no user data is in the zip), so the message points at a manual re-download and the log in `%TEMP%\steam-tracker-update\apply-update.log`.
 
-**Turning it off:** `"autoUpdate": false` in `local.config.json` (same file, same three lookup locations as `dataDir`). Per-version dismissal is the checkbox in the dialog, remembered in `update-state.json` next to the exe.
+**Turning it off:** `"autoUpdate": false` in `local.config.json` (same file, same three lookup locations as `dataDir`). Absent means on. Per-version dismissal is the checkbox in the dialog, remembered in `update-state.json` next to the exe.
+
+**A build made from a working tree gets it off by default**, in the file `postbuild.js` generates for it. Not for safety — the update path cannot lose data (no manifest in a freshly built app directory, so it overwrites rather than deletes) — but because the offer is wrong on its face: accepting it replaces your build with the published release, and you carry on testing a change the code no longer contains. Write `launcher/local.config.json` yourself to opt back in.
 
 ### Rehearsing it
 
@@ -115,7 +117,7 @@ $env:TRACKER_UPDATE_FORCE_TAG = 'v1.1.2'
 & .\dist\SteamAchievementTracker\SteamAchievementTracker.exe
 ```
 
-A forced tag skips the is-it-newer check, so the whole path runs without cutting a release. **Set the rehearsal up from the zip, never by copying `dist/SteamAchievementTracker/`** — `postbuild.js` drops your `local.config.json` into that folder, which points at your real CLI data directory, and the rehearsal would then operate on your actual database. Plant fake `config.json` / `data/steam.db` / a guide inside `resources/tracker/`, plus a file the target version doesn't have, and write an `update-manifest.json` listing the zip's contents plus that extra file. Then check afterwards that the extra file is gone and the planted data is byte-identical.
+A forced tag skips the is-it-newer check, so the whole path runs without cutting a release. **Set the rehearsal up from the zip, never by copying `dist/SteamAchievementTracker/`** — `postbuild.js` always leaves a `local.config.json` in that folder, pointing at a real data directory, and the rehearsal would then operate on your actual database. A generated one also has auto-update switched off, so a copy of that folder is the wrong thing to rehearse with twice over. Plant fake `config.json` / `data/steam.db` / a guide inside `resources/tracker/`, plus a file the target version doesn't have, and write an `update-manifest.json` listing the zip's contents plus that extra file. Then check afterwards that the extra file is gone and the planted data is byte-identical.
 
 Rehearsed against a real earlier release: files deleted by manifest, extract, restart, and every planted user file intact. Compare against the two logs in `%TEMP%\steam-tracker-update\` — `updater.log` is the app's half, `apply-update.log` is the helper's. **Which of the two is missing tells you which half failed**, which is the whole reason both exist.
 
@@ -137,6 +139,8 @@ npm run build
 ```
 
 Output goes to the **repo root** `dist/`, not inside `launcher/` — the built app is what you actually open, so it shouldn't be buried under the wrapper's source. `postbuild.js` then renames electron-builder's `win-unpacked` to the product name and drops a `SteamAchievementTracker.lnk` at the repo root, so launching is one double-click from the top level.
+
+**That rename deletes the previous build's directory, and a packaged build's data lives inside it** (see the two sections below). So `postbuild.js` writes a `local.config.json` next to the exe pointing at the repo root whenever `launcher/` holds none of its own: the built exe then reads the same `config.json` and `data/` as `node tracker.js serve`, and nothing of the user's is in `dist/` for the next build to take. Should it find data there anyway — a directory built before this, or one whose `dataDir` had gone missing — it **refuses the delete and fails the build**, naming what it found. The generated file also sets `"autoUpdate": false`; that half is about code rather than data, and the reasoning is under "Turning it off" above.
 
 `zip` is the target deliberately, **not** electron-builder's `portable` target — the NSIS `portable` target self-extracts to a temp directory on every launch, which would silently lose `config.json` and the SQLite database between runs. The `zip` target ships a real, stable folder: unzip once anywhere and the data persists across runs, exactly like running the CLI from a normal checkout.
 
@@ -175,6 +179,14 @@ gh release create v<version> \
   "dist/SteamAchievementTracker-<version>-manifest.json" \
   --notes-file <notes>
 ```
+
+**The notes are English, and every control they name needs both languages.** The interface has been bilingual since v1.2.4, so 「重写」 on its own tells an English-interface reader to press something that is not on their screen — write **Rewrite** (「重写」), the convention `docs/` uses.
+
+**Windows' own dialogs are the trap that looks identical and is not.** 「已保护你的电脑」 is what a *Chinese* Windows says; an English one reads "Windows protected your PC" → **More info → Run anyway**. Every release through v1.2.4 quoted only the Chinese, which was never right for a reader on an English system — that half predates the bilingual interface and has nothing to do with it. Lead with the English and put the Chinese after it.
+
+Real example data — an achievement name, a section heading, a line of generated prose — stays in whatever language it actually was. Translating it would misreport what the feature produced.
+
+**Nothing checks any of this.** Release notes are written by hand and live on GitHub rather than in the repo, so the walkthrough-doc guard in `test/i18n-boundary.test.js` cannot see them. This checklist is the only gate.
 
 **Upload the manifest every time.** Forgetting it is not loud: that release installs fine, and the damage shows up one release later as an update that leaves stale files behind. The updater treats a missing manifest as "fall back to overwrite" precisely so a slip here degrades instead of breaking, but the degradation is silent.
 
@@ -217,19 +229,19 @@ Release notes must cover, at minimum: the **SmartScreen warning** (unsigned buil
 
 From 1.1.4 on the app updates itself, so the manual instruction is a fallback rather than the main path — but it still has to be there: everyone on ≤1.1.3 has to make that one hop by hand, since those builds have no updater in them at all.
 
-## Personal use: pointing the launcher at an existing CLI checkout
+## Pointing a build at a particular data directory
 
-If you already have a `data/`/`config.json` from running the CLI directly and don't want the launcher keeping a second, separate copy, create `launcher/local.config.json`:
+A build made here already reads this checkout's `data/`/`config.json`, because `postbuild.js` generates the pointer when `launcher/` holds none. Write `launcher/local.config.json` yourself to name a **different** directory, or to change what the generated one decides:
 
 ```json
 { "dataDir": "D:/GitHub/steam-achievement-tracker" }
 ```
 
-It's gitignored, and `npm run build` copies it next to the built exe automatically (`postbuild.js`) — `dist/` is wiped on every rebuild, so the source of truth deliberately lives in `launcher/` where builds can't touch it.
+It's gitignored, and `npm run build` copies it next to the built exe instead of generating one — `dist/` is rebuilt every time, so the source of truth deliberately lives in `launcher/` where builds can't touch it. **Your copy is taken verbatim**, including its silence about `autoUpdate`, which reads as on.
 
 At startup `main.js` looks for `local.config.json` in three places, first hit wins:
 
-1. **next to the exe** — where the build copies it; this is the one that actually gets used
+1. **next to the exe** — where the build puts it, copied or generated; this is the one that actually gets used
 2. `app.getPath('userData')` (`%APPDATA%\steam-achievement-tracker-launcher\`) — survives deleting and re-extracting the whole app folder
 3. `launcher/` itself — dev mode (`npm start`)
 
@@ -237,7 +249,7 @@ Whichever matches is passed to the child process as `TRACKER_DATA_DIR`. `lib/con
 
 **Why exe-adjacent is first, not `userData`:** `userData` lives under the user profile, which sandboxed or virtualized processes can silently redirect — the same absolute path resolving to different content depending on which process asks. That cost a long debugging session here: a file created by one tool was invisible to the real desktop session while every check insisted it existed. The exe-adjacent copy travels with the app and has exactly one interpretation.
 
-None of this exists on a friend's machine — no file in any of the three locations, so `TRACKER_DATA_DIR` never gets set and `DATA_ROOT` falls back to `ROOT`, i.e. `resources/tracker/`, same as if the feature weren't there. (Note that this is *not* "beside their exe" — see the note under "Why `zip`" above, and mind it before writing anything that deletes files in the app folder.)
+None of this exists on a friend's machine — the zip carries no `local.config.json` at all (it is sealed before `postbuild.js` writes one), so no file is in any of the three locations, `TRACKER_DATA_DIR` never gets set, and `DATA_ROOT` falls back to `ROOT`, i.e. `resources/tracker/`, same as if the feature weren't there. (Note that this is *not* "beside their exe" — see the note under "Why `zip`" above, and mind it before writing anything that deletes files in the app folder.)
 
 ## Known scope limitations (deliberate, not oversights)
 

@@ -780,3 +780,72 @@ test('a 401 names the real vendor and its env var, not a hardcoded Anthropic', a
 // ---------------------------------------------------------------------------
 // Spend caps
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Cancellation (the Dashboard's Cancel button)
+// ---------------------------------------------------------------------------
+
+/**
+ * A fetch that never resolves on its own — the shape of a real in-flight request. It only settles
+ * when whatever AbortController owns `init.signal` fires, exactly like the real thing: `#once`
+ * always passes its own `ac.signal`, whether `ac.abort()` was triggered by the idle timer or by an
+ * external signal relayed into it, and the two are told apart afterwards by asking the external
+ * signal itself, not by which one fired first.
+ */
+function hangingFetch() {
+  return (url, init) => new Promise((_resolve, reject) => {
+    const onAbort = () => {
+      const err = new Error('The operation was aborted.');
+      err.name = 'AbortError';
+      reject(err);
+    };
+    if (init.signal.aborted) return onAbort();
+    init.signal.addEventListener('abort', onAbort);
+  });
+}
+
+test('an external signal aborts an in-flight request and is reported as cancelled, not a timeout', async () => {
+  const ac = new AbortController();
+  const p = new AnthropicProvider(AI, { fetchImpl: hangingFetch() });
+  const sent = p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], signal: ac.signal });
+  ac.abort();
+  await assert.rejects(sent, (err) => {
+    assert.equal(err.cancelled, true, 'a user-requested cancel must carry cancelled: true');
+    assert.equal(err.retryable, false, 'a cancellation must never be retried');
+    assert.doesNotMatch(err.message, /秒没结束/, 'must not read as "took too long" — nobody was waiting on the network');
+    return true;
+  });
+});
+
+test('an already-aborted signal is honoured before the request even starts', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const p = new AnthropicProvider(AI, { fetchImpl: hangingFetch() });
+  await assert.rejects(
+    p.send({ system: 's', messages: [{ role: 'user', content: 'q' }], signal: ac.signal }),
+    (err) => { assert.equal(err.cancelled, true); return true; }
+  );
+});
+
+test('the same abort with no external signal is still the idle-timeout error, not a cancellation', async () => {
+  const p = new AnthropicProvider({ ...AI, requestTimeoutMs: 5 }, { fetchImpl: hangingFetch() });
+  await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (err) => {
+    assert.equal(err.cancelled, false, 'nothing outside the process asked for this — the network was just slow');
+    assert.match(err.message, /秒没结束/);
+    return true;
+  });
+});
+
+test('createSession.ask forwards signal to provider.send, and dropLastTurn leaves no half-written turn behind', async () => {
+  const ac = new AbortController();
+  const p = new AnthropicProvider(AI, { fetchImpl: hangingFetch() });
+  const session = createSession(p);
+  const asked = session.ask('q', { signal: ac.signal });
+  ac.abort();
+  await assert.rejects(asked, (err) => { assert.equal(err.cancelled, true); return true; });
+  // ask() pushes the user turn before awaiting the reply — dropLastTurn is what a caller (the
+  // retry ladder in guidegen.js) uses to undo that before deciding what to do next
+  assert.equal(session.messages.length, 1);
+  session.dropLastTurn();
+  assert.equal(session.messages.length, 0);
+});

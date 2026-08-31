@@ -1,0 +1,57 @@
+# Static analysis, for the class of defect the test suite structurally cannot reach.
+#
+# The suite here is unusually strong on *this project's own* failure modes — path containment,
+# zip-slip, the CSRF and DNS-rebinding boundary, sha256 on the downloaded release. What it has no
+# way to find is the defect nobody thought to write a case for. The escaping drift in the progress
+# bar is the example: fifteen call sites handed unescaped game names to `innerHTML`, every one of
+# them beside a sibling that escaped correctly, and 1383 passing tests said nothing, because a test
+# only ever asserts a question somebody already asked.
+#
+# **ubuntu-latest, unlike tests.yml.** That file runs on Windows for a product reason — a
+# `selfupdate.test.js` case is skipped off-Windows and it is the one that executes what was
+# generated. This job runs no tests and builds nothing: it parses source. The platform cannot change
+# the answer, and Linux runners are cheaper and quicker.
+#
+# **The default query suite, not `security-extended`.** Extended trades precision for recall, and a
+# check that reports things nobody acts on trains the reader to skip the whole class — worse than
+# not having it. Widen it once the default is reliably empty.
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays, 03:00 UTC. The scheduled run is the point of the whole file: it re-analyses unchanged
+    # code against rules written after it was merged, which is how a defect that was not yet
+    # *describable* when it landed eventually gets named
+    - cron: '0 3 * * 1'
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+
+    permissions:
+      # Writing the findings back to the Security tab is the entire output; without it the job runs
+      # and reports into the void
+      security-events: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          # One value covers both — and it reaches the inline scripts in Dashboard.html and
+          # Setup.html, which is where most of this project's JavaScript actually lives
+          languages: javascript-typescript
+
+      # No build step: JavaScript is analysed from source, and this repository has nothing to
+      # compile. `autobuild` would only try to guess at launcher/ and fail loudly for no gain
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:javascript-typescript'

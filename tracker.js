@@ -133,10 +133,13 @@ function applyAiFlags(config) {
     // The key-switching rule (env var → keys slot → legacy only for its own vendor) lives in one
     // place, resolveAiKey in lib/config.js, and the setup page goes through it too
     //
-    // model is cleared when unspecified: the one in config.json belongs to the previous vendor
-    // (claude-* / gemini-* / deepseek-*), and carrying it across necessarily trips
-    // assertModelMatchesProvider
-    config.ai = switchAiProvider(config.ai, provider, process.env, { model: model ?? '' });
+    // **Without `--model`, nothing is passed and switchAiProvider reaches for that vendor's own
+    // pinned model.** Passing '' here is not the same thing: it is a value, so the ?? inside never
+    // fires and the pin is cleared instead of read — a model pinned for Anthropic would not survive
+    // switching to Gemini and back. What must not happen is carrying the *previous* vendor's model
+    // across (claude-* / gemini-* / deepseek-* trips assertModelMatchesProvider), and per-vendor
+    // storage is what prevents that
+    config.ai = switchAiProvider(config.ai, provider, process.env, { model });
   } else if (model) {
     config.ai.model = model;
   }
@@ -791,8 +794,12 @@ function cmdStatus() {
 
 async function cmdGuides() {
   const { config, db } = withSteam({ requireSteam: false });
-  const wantLocal = flags.has('--local') || flags.has('--all') || flags.size === 0;
-  const wantNotion = flags.has('--notion') || flags.has('--all') || flags.size === 0;
+  // **The default is "no source was selected", not "no flags were given".** Any other flag —
+  // `--force`, which `guides.conflict` tells the user to add — leaves both sources selected, so the
+  // advice it gives is advice that runs
+  const noSelector = !flags.has('--local') && !flags.has('--notion') && !flags.has('--all');
+  const wantLocal = flags.has('--local') || flags.has('--all') || noSelector;
+  const wantNotion = flags.has('--notion') || flags.has('--all') || noSelector;
 
   if (wantLocal) {
     const r = syncGuidesFromMarkdown(db, config, { force: flags.has('--force') });
@@ -1809,8 +1816,10 @@ function cmdLog() {
   const { db } = withSteam({ requireSteam: false });
   const rows = recentSyncLog(db, Number(positional[0] ?? 30));
   if (!rows.length) return console.log(clog('log.empty'));
+  // The locale follows the interface language, not the machine — the same rule as cmdStatus
+  const locale = messageLanguage() === 'en' ? 'en-GB' : 'zh-CN';
   for (const r of rows.reverse()) {
-    const ts = new Date(r.ts).toLocaleString('zh-CN');
+    const ts = new Date(r.ts).toLocaleString(locale);
     console.log(`${ts}  ${r.game_name || '—'}  ${r.achievement || ''}  ${r.result}`);
   }
 }

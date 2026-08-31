@@ -522,3 +522,121 @@ describe('clog resolves against both terminal tables at runtime', () => {
     setMessageLanguage('zh');
   });
 });
+
+/**
+ * UI labels quoted in the walkthrough docs
+ * ------------------------------------------------
+ * `notion-setup.md` tells someone which button to press, and it is reached **from inside the
+ * program** — `Setup.html`'s 「配置图解 ↗」 link — so a label that no longer exists sends a reader
+ * looking for a control that is not on their screen.
+ *
+ * **This went wrong once already and nothing reported it.** The interface became bilingual, every
+ * label grew an English half, and the docs kept quoting only the Chinese one for a full release.
+ * `guides.md` was worse: it named 「搬去 Notion」, a control that exists in neither language — the
+ * button's own text is `Notion` and only its tooltip mentions 搬到.
+ *
+ * The rule: **every 「…」 in a walkthrough doc has to appear in one of the message tables.** That is
+ * the same property `i18n-boundary` already enforces on the tables themselves, extended one surface
+ * out to the prose that quotes them.
+ *
+ * **Why only these three files.** 「…」 means "a control you click" here and nowhere else.
+ * `frontend.md` and `ai-guide-writing.md` are design records whose quotes are prompt fragments,
+ * achievement names and labels that were deliberately reverted — none of them are current controls.
+ * README mixes labels with rhetorical quotes (「反悔」, and 「Windows 已保护你的电脑」 is Windows'
+ * dialog, not ours); four of its seven would need exempting, which is the exemption list long
+ * enough to rot that the header of this file warns about.
+ *
+ * **What makes it red**: rename a control in the table without touching the doc, or quote a label
+ * in one of these three files that no table defines.
+ */
+describe('UI labels quoted in the walkthrough docs', () => {
+  const WALKTHROUGHS = ['docs/notion-setup.md', 'docs/guides.md', 'docs/configuration.md'];
+
+  /**
+   * Comments are stripped first. The house style is to name the control in the comment beside it
+   * (`/* … the full-width 「保存并验证」 *\/`), so leaving them in would let a doc keep quoting a
+   * label that only survives in a comment about it.
+   */
+  const tables = () =>
+    [stripComments(read('Setup.html')), stripComments(read('Dashboard.html')),
+      JSON.stringify(MESSAGES), JSON.stringify(CLI_MESSAGES), JSON.stringify(TRACKER_MESSAGES)].join('\n');
+
+  const labelsIn = (f) => [...read(f).matchAll(/「([^」]+)」/g)].map((m) => m[1]);
+
+  test('every label a walkthrough quotes is one the program actually shows', () => {
+    const haystack = tables();
+    const all = WALKTHROUGHS.flatMap((f) => labelsIn(f).map((l) => [f, l]));
+    // Without this the assertion is satisfied by an extraction that returns nothing, and an empty
+    // assertion is worse than none. 15 is roughly half of what the three files carry today, so an
+    // ordinary edit never approaches it
+    assert.ok(all.length >= 15,
+      `only ${all.length} quoted labels were found — the extraction is broken, not the rule satisfied`);
+    const missing = all.filter(([, l]) => !haystack.includes(l)).map(([f, l]) => `${f}: 「${l}」`);
+    assert.deepEqual(missing, [], 'these docs quote a label no message table defines');
+  });
+
+  /**
+   * The contiguous run of `>` lines that line `i` belongs to, or null when it is not in one.
+   */
+  const quoteBlock = (lines, i) => {
+    if (!/^\s*>/.test(lines[i])) return null;
+    let from = i, to = i;
+    while (from > 0 && /^\s*>/.test(lines[from - 1])) from--;
+    while (to < lines.length - 1 && /^\s*>/.test(lines[to + 1])) to++;
+    return lines.slice(from, to + 1);
+  };
+
+  /**
+   * Whether a block quote carries the English half on a line of its own.
+   *
+   * **Both halves are counted rather than testing for "has Latin in it"**: the Chinese half of these
+   * messages embeds English option names (`状态选项 Not started / In progress / …`), so a presence
+   * test would let the Chinese line vouch for itself and exempt its own block. A line that is still
+   * quoting a label is not a translation of one either, so those are excluded outright.
+   */
+  const carriesEnglish = (block) => block.some((l) => !l.includes('「')
+    && (l.match(/[A-Za-z]/g) ?? []).length > (l.match(/[一-鿿]/g) ?? []).length);
+
+  /**
+   * The label alone is not enough — 「保存并验证」 on its own is exactly what the docs carried while
+   * the English half went unmentioned for a release. Each one has to be given English first with
+   * the Chinese in parentheses, which is what these files now say they do.
+   *
+   * **A block quote reproducing what the program prints is the one exception.** Those strings carry
+   * the corner brackets themselves (`notion.created` is `创建成功:「{name}」,…`), so rewriting one
+   * into English-then-parenthesis would misquote the program — the exact failure the rest of this
+   * file exists to catch. The English half is still required; in a quotation it sits on its own line
+   * beside the Chinese, so the block is asked for it rather than the 80 characters before the label.
+   */
+  test('a quoted label is preceded by its English half', () => {
+    const bad = [];
+    for (const f of WALKTHROUGHS) {
+      const lines = read(f).split('\n');
+      lines.forEach((line, i) => {
+        const block = quoteBlock(lines, i);
+        if (block && carriesEnglish(block)) return;
+        for (const m of line.matchAll(/(.{0,80})「([^」]+)」/g)) {
+          const [, before, label] = m;
+          // The Chinese half sits in parentheses directly after the English one. A label that opens
+          // a parenthesis it did not close is being quoted bare
+          if (!/[(（]\s*$/.test(before)) bad.push(`${f}: 「${label}」`);
+        }
+      });
+    }
+    assert.deepEqual(bad, [], 'these labels are quoted without the English half in front of them');
+  });
+
+  /**
+   * The exemption is pinned here rather than left to whichever document happens to use it, so that
+   * neither half of what makes a quotation bilingual can be dropped without a test going red.
+   */
+  test('the block-quote exemption needs a real English line, not merely a block quote', () => {
+    const zh = '> 创建成功:「Steam 攻略」,状态选项 Not started / In progress / Staged / Done。ID 已填好并保存。';
+    const en = '> Created: Steam 攻略, status options Not started / In progress / Staged / Done. The ID is filled in and saved.';
+    assert.equal(carriesEnglish([zh, '>', en]), true, 'the line beside it is the English half');
+    assert.equal(carriesEnglish([zh, '>']), false,
+      'the Chinese half embeds English option names and must not vouch for itself');
+    assert.equal(carriesEnglish(['> Click 「保存并验证」 when you are done.']), false,
+      'a line still quoting the label is not a translation of it');
+  });
+});

@@ -80,9 +80,10 @@ const TRACKER_ROOT = app.isPackaged ? join(process.resourcesPath, 'tracker') : j
  * else) it returns null and the data lands next to the exe, exactly as it would without this
  * feature.
  *
- * dist/ is rebuilt on every build, so the copy next to the exe is placed there automatically by the
- * build script in package.json, copied from launcher/local.config.json — the source file lives under
- * launcher/ and is unaffected by the build.
+ * dist/ is rebuilt on every build, and **postbuild.js always leaves one next to the exe**: where
+ * launcher/local.config.json exists it is copied, and where it does not, one pointing at the
+ * repository root with auto-update off is generated. Both keep a local build's data outside the
+ * directory the rename step deletes. The source file under launcher/ is unaffected by the build.
  */
 function localConfigCandidates() {
   return [
@@ -702,7 +703,7 @@ function createTray() {
 
 /**
  * Only one instance is allowed. **This is not fastidiousness, it is a hard constraint imposed by the
- * hardcoded 8777** (see 「已知取舍」 in the README): a second instance would spawn its own `serve`,
+ * hardcoded 8777** (see `docs/configuration.md`): a second instance would spawn its own `serve`,
  * that one necessarily hits EADDRINUSE and dies instantly, and `serverProcess.on('exit')` cannot tell
  * "the port is held by another copy of ourselves" from "the service really crashed" — so
  * double-clicking the exe a second time produces a 「后台服务意外退出(代码 1)」 error box. Neither

@@ -3,13 +3,13 @@
  *
  * 1. electron-builder always names the unpacked directory win-unpacked; rename it to the product
  *    name — sitting under dist/ in the repository root, it has to be recognisable at a glance.
+ *    The previous build's directory is deleted to make room, and **that delete is refused while any
+ *    of the user's own files are still inside it**.
  * 2. **Write the update manifest**: which files this version installed. Self-update uses it to decide
  *    what to delete (see the comments below, and docs/self-update.md).
- * 3. Copy the machine-specific local.config.json next to the exe. The source file lives under
- *    launcher/, dist/ is rebuilt on every build, and without the copy it would have to be put back
- *    by hand every time.
- *    Absent (somebody else cloned and built) it is skipped — a build meant for distribution should
- *    carry nobody's local paths.
+ * 3. Write the local.config.json naming this build's data directory. launcher/'s own copy wins when
+ *    there is one; otherwise one pointing at the repository root is generated, which is what keeps a
+ *    local build's data out of dist/ and therefore out of step 1's way.
  * 4. Put a shortcut in the repository root, so it can be double-clicked without navigating into
  *    dist/. A .lnk stores absolute paths, so like local.config.json it is machine-specific and does
  *    not go into the repository.
@@ -24,7 +24,7 @@ import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildManifest, machineLocalEntries } from './updater.js';
+import { buildManifest, generatedLocalConfig, machineLocalEntries, userDataEntries } from './updater.js';
 
 /** A PowerShell single-quoted string: an inner single quote is written twice */
 const psQuote = (s) => `'${s.replace(/'/g, "''")}'`;
@@ -42,6 +42,23 @@ const exePath = join(appDir, `${PRODUCT}.exe`);
 
 // --- 1. win-unpacked → the product name ---
 if (existsSync(unpacked)) {
+  // **A build is not allowed to destroy data on its way to succeeding.** The delete below takes the
+  // whole previous app directory, and user data sits inside it at resources/tracker/ — so it is
+  // refused up front rather than reported afterwards, when there is nothing left to report about.
+  // Step 3 keeps data out of dist/ in the first place, which leaves two ways to arrive here: a
+  // directory built before step 3 did that, or one whose dataDir had gone missing, sending main.js
+  // back to storing beside the exe. Both want a person, not a default.
+  const stranded = userDataEntries(appDir);
+  if (stranded.length > 0) {
+    console.error(
+      `[postbuild] ${appDir} 里有用户数据,拒绝删除:\n` +
+        stranded.map((p) => `             ${p}`).join('\n') +
+        '\n           本地构建的数据现在统一放在仓库根目录,这几项是旧布局留下的。\n' +
+        '           要留就把它们移到仓库根目录,不要就删掉整个目录,然后重新 build。'
+    );
+    process.exit(1);
+  }
+
   // **The delete and the rename have to be in the same try.** With the program running the directory
   // is in use and both steps fail for exactly the same reason, and the delete runs first — so
   // guarding only the rename means a real problem throws a bare EPERM stack and the message written
@@ -101,13 +118,32 @@ const manifestPath = join(distDir, `${PRODUCT}-${version}-manifest.json`);
 writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 console.log(`[postbuild] 更新清单:${manifest.files.length} 个文件 → ${manifestPath}`);
 
-// --- 3. The machine's data-directory config ---
+// --- 3. The data directory this build reads ---
+// **Without this file a local build stores its data inside the directory step 1 deletes.** DATA_ROOT
+// falls back to ROOT, which in a packaged build is resources/tracker/ — so config.json and the
+// database land in dist/, and the next build takes them with it. Pointing it at the repository root
+// removes that, and makes `node tracker.js serve`, `npm start` and the built exe read one dataset,
+// in the place CONTRIBUTING.md and .gitignore already name.
+//
+// **Auto-update is off in the generated file, and that is about code rather than data.** A build made
+// from a working tree offering to replace itself with the published release ends with somebody
+// testing a change against code that no longer contains it. The update path itself is safe for data
+// (no manifest in the app directory ⇒ overwrite, never delete), so this is not a second guard for
+// step 1. A hand-written launcher/local.config.json says nothing about autoUpdate and is copied
+// verbatim — that file is the machine owner's answer, not ours.
+//
+// **None of this reaches anyone else's machine**: the zip was sealed back at the electron-builder
+// step and does not contain it, and a copy of this folder carried elsewhere finds the path missing,
+// which loadDataDirOverride ignores rather than uses.
 const localCfg = join(here, 'local.config.json');
+const appLocalCfg = join(appDir, 'local.config.json');
 if (existsSync(localCfg)) {
-  copyFileSync(localCfg, join(appDir, 'local.config.json'));
+  copyFileSync(localCfg, appLocalCfg);
   console.log('[postbuild] 已复制 local.config.json 到 exe 旁边');
 } else {
-  console.log('[postbuild] 没有 local.config.json,跳过(分发用的 build 就该是这样)');
+  const generated = generatedLocalConfig(repoRoot);
+  writeFileSync(appLocalCfg, `${JSON.stringify(generated, null, 2)}\n`);
+  console.log(`[postbuild] 已生成 local.config.json:数据目录 ${generated.dataDir},自动更新关闭`);
 }
 
 // --- 4. The shortcut in the repository root ---

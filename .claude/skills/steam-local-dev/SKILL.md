@@ -20,8 +20,10 @@ Secrets (`steamApiKey`, `steamId`, `notion.token`) live in `config.json` — mod
 ## Dev loop
 
 ```bash
-node tracker.js <cmd>    # init | sync | serve | status | guides | checkbox-sync | import | export | log
-node --test              # test/matching.test.js
+node tracker.js <cmd>    # init | sync | serve | status | guides | checkbox-sync | guide-status | guide-lint
+                         #   | notion-check | ai-check | guide-gen | guide-to-notion | drafts | audit
+                         #   | export | backup | restore | log
+node --test --test-reporter=dot   # the whole suite (dot prints no summary — green = exit code, no X)
 node --check lib/x.js    # syntax check
 ```
 
@@ -89,7 +91,7 @@ sqlite3 data/steam.db "SELECT COUNT(*) FROM achievements WHERE appid = '3117820'
 
 ## `games` table schema
 
-`appid` (PK) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` (♥) / `priority` (★) / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at`
+`appid` (PK) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` (♥) / `priority` (★) / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` (the 🔔 transition stamps) / `cover_url`
 
 - `status`: `''` normal, `'Unvetted'`, `'Manual'`
 - `has_achievements = 0` replaces the old `'N/A'` string in a numeric column; `NULL` = not synced yet

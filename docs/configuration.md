@@ -47,7 +47,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
     "concurrency": 3,         // how many passes are written at once; 1 = one at a time
 
-    "maxSearches": 8,         // web_search calls per request
+    "maxSearches": 30,        // web_search calls per request
     "maxFetches": 10,         // web_fetch calls per request
     "maxFetchTokens": 50000,  // how much of one page to pull back
     "allowedDomains": [],     // non-empty = hard restrict search to these; empty = no limit
@@ -67,11 +67,13 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 
 **`ai.provider` and `ai.providers`** — `providers` holds one block per vendor and `provider` names which one is live. Switching between them is a one-word edit, and each vendor keeps its own `apiKey` and `model` across the switch.
 
-You do not have to edit the file by hand: the settings page (设置 → 第 2 步) writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· 已配置` in the dropdown, and the key field's 「已配置,留空就不改」 badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
+You do not have to edit the file by hand: step 2 of the **Settings** (「设置」) page writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· configured` (「· 已配置」) in the dropdown, and the key field's **Configured — blank keeps it** (「已配置,留空就不改」) badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
 
 Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — and the reason is the same for all three: **more than one provider reads them, and the right value differs per vendor.** A model name is vendor-specific (`claude-*` / `gemini-*` / `deepseek-*`), so one shared `model` field has to be wiped every time you switch, which silently discards a version you pinned. `baseUrl` is read by both the Anthropic and DeepSeek paths, and one vendor's endpoint address is meaningless to the other. Everything else stays at the `ai.*` level: the budgets (`maxTokens`, `chunkSize`, `effort`, …) are correct at the same value for every vendor, and the single-vendor knobs (`geminiTools`, `webFetch`, `searchTool`, `anthropicExtras`, …) are only ever read by the one provider they belong to, so a leftover value is ignored rather than misapplied.
 
 The older flat `ai.apiKey` / `ai.model` still work and need no edit. They are treated as belonging to whatever `ai.provider` says in the file — so on load they are adopted into that vendor's block, and they are **never** offered to a different vendor. That refusal is the point: handing DeepSeek's key to `api.anthropic.com` produces a 401 whose message says to check `ANTHROPIC_API_KEY`, sending you after a variable that was set correctly all along. An empty key instead reports which vendor is unconfigured.
+
+Saving from the **Settings** page writes that adoption into the file: the flat fields are cleared and each vendor's block holds what they carried. Nothing is lost in the move, and a file already using `providers` is unaffected.
 
 Environment variables win over both, and they are looked up **by the vendor being asked for** rather than by the one written in the file.
 
@@ -87,9 +89,9 @@ Everything written for a person follows it. Messages that can reach the Dashboar
 
 The split between those tables is by audience: only the terminal ones may name a command line, because the packaged app's user has no terminal to run one in.
 
-**A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing 「重写」 is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
+**A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing **Rewrite** (「重写」) is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
 
-**`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
+**`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. (The packaged Windows app additionally re-runs the same check each time its window is shown, since its server process can live in the tray for days.) Set it to `0` if you'd rather only ever sync manually.
 
 Either way, the **立即同步** button next to the "上次同步" line on the Dashboard starts a sync on demand, ignoring `syncStaleHours` entirely. It's the same background sync, so the usual progress bar and automatic refresh apply, and the button greys out while one is running — including a sync you started from the CLI or another tab.
 
@@ -259,5 +261,5 @@ The server only ever listens on `127.0.0.1`, so the Dashboard is reachable from 
 
 There is no built-in scheduler. Two ways to get regular updates:
 
-- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), ticks the guide checkboxes for whatever that sync turned up (see `checkboxSyncOnServe`), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup.
-- **A real daily job** — on macOS, a launchd plist running `node tracker.js sync`. Note it only fires while the machine is awake; launchd will run a missed job on wake, but a machine that's off for a week syncs nothing.
+- **Do nothing** — starting `serve` syncs in the background when data is stale (see `syncStaleHours` above), ticks the guide checkboxes for whatever that sync turned up (see `checkboxSyncOnServe`), and the Dashboard's **立即同步** button covers the rest. Leaving `serve` running for days does *not* keep syncing: the staleness check only runs at startup (the packaged app re-checks on window show).
+- **A real daily job** — a Windows Task Scheduler task running `node tracker.js sync` (`schtasks /create /sc daily …`). It only fires while the machine is awake; a machine that's off for a week syncs nothing.
