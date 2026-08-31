@@ -10,17 +10,17 @@ sqlite3 data/steam.db "SELECT name, achieved, total FROM games ORDER BY rate DES
 
 | Table | Holds |
 |---|---|
-| `games` | one row per appid: name, achieved/total, completion rate, status, ♥/★/family flags |
-| `achievements` | per-achievement detail — CN + EN names, description, hidden flag, icon URL |
-| `guides` | appid → guide location, plus `kind` (`notion` or `local`) |
+| `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
+| `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL |
+| `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
 | `sync_log` | every checkbox change, skip and failure, for after-the-fact auditing |
 | `meta` | last sync timestamp and other odds and ends |
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
+`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
 
-Five decisions worth knowing before you write queries:
+Six decisions worth knowing before you write queries:
 
 - **"This game has no achievements" is `has_achievements = 0` with `NULL` counts** — not a `0` total, and not a string like `N/A` sitting in a numeric column. `total IS NULL AND has_achievements IS NULL` means "not synced yet", which is a different thing.
 - **`status` and `sync_locked` are separate columns.** `status` is the label you see and sort by (`''`, `Unvetted`, `Manual`); `sync_locked` is what actually makes a sync skip the row. The Dashboard moves both together, but you can keep the label while re-enabling the daily refresh:
@@ -45,6 +45,16 @@ Five decisions worth knowing before you write queries:
 
   A repeat of either event overwrites the stamp with the newer time, so "how long ago" always refers to the most recent occurrence.
 
+- **`name` is the localised title and `name_en` is the English one.** The sync hunts for a Chinese name for `name`; roughly a third of a Chinese-language library ends up stored under a title that contains no English at all. Which of the two a row *displays* is `uiLanguage`'s decision (see [configuration.md](configuration.md)); search matches either, whichever is on screen.
+
+  Owned games get it free: `GetOwnedGames` ignores `l=` and answers in English either way, so one response fills the whole owned library. Rows that never appear there (family-shared, delisted, hand-added) cost one `appdetails?l=english` call each, once.
+
+  `''` means "no English title on record", and it is deliberately not a copy of `name` — those are two different facts, and a display layer needs to tell them apart to know whether a second name exists. `name_en = name` is a real and normal state: it is what an English-titled game stores, and also what a game published only in Japanese stores, since `l=english` answers with its Japanese title. Clearing it is safe — the next sync re-fills it:
+
+  ```sql
+  UPDATE games SET name_en = '' WHERE appid = '...';
+  ```
+
 - **`cover_url` is a cache, and it is normally `NULL`.** The Dashboard builds a cover URL from the appid — `cdn.akamai.steamstatic.com/steam/apps/<appid>/header.jpg` — which works for the large majority of a library and costs no extra request. It fails for games whose store art Steam has moved under a content-hash path (`store_item_assets/steam/apps/<appid>/<hash>/header.jpg`); that hash cannot be derived from anything we hold, and it differs per asset, so the header's hash tells you nothing about the capsule's. Measured over 314 games in August 2026: 9 failed, every one of them a recent appid, and four alternative host/path spellings 404'd for all of them.
 
   So a broken image triggers one `appdetails` lookup, and the authoritative URL it returns is stored here. Only those games ever get a value. Clearing it is safe — the next page view re-discovers it:
@@ -54,6 +64,32 @@ Five decisions worth knowing before you write queries:
   ```
 
   A failed lookup is deliberately **not** cached. Rate limiting and not-yet-published store pages both produce "no cover" and both stop being true later; recording that as a fact would retire the game's artwork permanently.
+
+### `achievements` columns
+
+`appid` + `api_name` (composite primary key) / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon`
+
+- **Both languages come from one sync, not two.** `fetchGameSchema` calls `GetSchemaForGame` twice, once per language, because the name has always been stored in both. The English description arrives in the response fetched for the English *name*, so storing it costs no extra request.
+
+- **A hidden achievement stores `''` for both descriptions.** The description is the spoiler; blanking one language and not the other would publish it in the other. `hidden = 1` with both empty is the normal, correct state for those rows — not a failed fetch.
+
+- **`description_en = ''` on a row whose `description` is set means that game's detail predates the column.** That is the whole backfill signal: `selectSchemaTargets` re-fetches any game with Chinese descriptions and not one English one, **including games at 100%**, which the other two fetch reasons deliberately skip. It is one pass per game and then never again. To force one game through it:
+
+  ```sql
+  UPDATE achievements SET description_en = '' WHERE appid = '...';
+  ```
+
+  The test is per game rather than per row on purpose: an individual achievement can come back without an English description, and asking per row would put its game in the queue on every sync forever.
+
+- **`game_name` is a denormalised copy of `games.name`,** used only as a fallback when the `games` row is gone. It is not a second name to keep bilingual — resolve a display name from `games.name_en || games.name` instead.
+
+### `guides.lang`
+
+Which language a guide is written in — `'zh'` or `'en'`, defaulting to `'zh'`. It is written after a guide is successfully generated or rewritten, and never by guide *discovery*, which registers pages it found and knows nothing about their contents.
+
+**It is a display fact and has no correctness role.** Two surfaces read it: the marker in the achievement panel's header, and the wording of the rewrite dialog's title. Matching does not — both the reverse lookup and the `paraphrased-description` check accept either language's description — so a row carrying the wrong value costs a marker, never a tick. That is deliberate, because the rows that predate the column carry an assumed value rather than a recorded one: every guide in the library at the time was Chinese.
+
+Anything other than `'en'` is stored as `'zh'`. A third value would make the marker unreachable rather than wrong, which is the harder failure to notice.
 
 ## What Steam can't tell us
 
@@ -99,7 +135,7 @@ Three things about it are load-bearing, and each fails silently if changed:
 
 Restoring **replaces** the tables — it is a restore, not a merge, so rows on this machine that aren't in the backup are gone. Guide *files* are the exception: they are written over, never deleted, because losing a hand-written `.md` is unrecoverable while an extra unreferenced file costs nothing.
 
-`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides, and any of them can be written back from that game's 备份 button on the Dashboard, so they are worth carrying to a new machine. It also means the zip grows with every overwrite (a Notion page dumps as ~120 KB of block JSON); Settings → Step 4 → 攻略备份 lists them biggest-first for pruning, with a 全部删除 at the foot of the list.
+`guides/.drafts/` is left out (unfinished AI output, which `node tracker.js drafts --clean` exists to delete). `guides/.backups/` is kept — those are previous versions of real guides, and any of them can be written back from that game's 备份 button on the Dashboard, so they are worth carrying to a new machine. It also means the zip grows with every overwrite (a Notion page dumps as ~120 KB of block JSON); 设置 → 第 4 步 → 攻略备份 lists them biggest-first for pruning, with a 全部删除 at the foot of the list.
 
 ## Exporting to a spreadsheet
 

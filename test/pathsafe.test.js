@@ -1,13 +1,16 @@
 /**
- * 路径包含性:四处检查,一个判据
+ * Path containment: four checks, one predicate
  * ------------------------------------------------------------------
- * 这个文件保的是一个**具体漏过的位**:`startsWith(root)` 不带分隔符时,
- * `…/guides-evil/x.md` 会被判成"在 `…/guides` 里面",因为前者确实以后者开头。
- * 前缀相同的**兄弟目录**是这类检查最经典的漏法,而这个项目里同一个问题
- * 有四个答案(见 `lib/pathsafe.js` 的表),其中两处漏掉了它。
+ * What this file protects is a **specific bit that was missed**: without a separator,
+ * `startsWith(root)` judges `…/guides-evil/x.md` to be "inside `…/guides`", because the
+ * former really does start with the latter.
+ * A **sibling directory sharing a prefix** is the classic way this kind of check leaks,
+ * and in this project the same question had four answers (see the table in
+ * `lib/pathsafe.js`), two of which missed it.
  *
- * 所以这里测两层:判据本身,以及**四个调用方是不是真的都走了它** ——
- * 判据抽出来了而某一处仍旧自己写一遍,是这次修复唯一有意义的回归方式。
+ * So there are two layers here: the predicate itself, and **whether all four callers
+ * genuinely route through it** — the predicate being extracted while one place still
+ * writes its own is the only meaningful regression for this fix.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -22,60 +25,61 @@ import { parseArchiveId } from '../lib/guidearchive.js';
 const R = (...p) => resolve(join(...p));
 
 describe('isInside', () => {
-  test('子文件和更深的子目录都算在里面', () => {
+  test('a child file and a deeper subdirectory both count as inside', () => {
     assert.equal(isInside(R('/a/guides'), R('/a/guides/x.md')), true);
     assert.equal(isInside(R('/a/guides'), R('/a/guides/sub/x.md')), true);
   });
 
-  test('**前缀相同的兄弟目录不算** —— 这就是漏过的那一位', () => {
+  test('**a sibling directory sharing the prefix does not count** — this is the bit that was missed', () => {
     assert.equal(isInside(R('/a/guides'), R('/a/guides-evil/x.md')), false);
     assert.equal(isInside(R('/a/guides'), R('/a/guidesX')), false);
     assert.equal(isInside(R('/a/guides'), R('/a/guides.bak/x.md')), false);
   });
 
-  test('往上跳出去的不算', () => {
+  test('anything that climbs out does not count', () => {
     assert.equal(isInside(R('/a/guides'), R('/a/x.md')), false);
     assert.equal(isInside(R('/a/guides'), R('/b/x.md')), false);
   });
 
-  test('根自己不算在里面 —— 调用方要的都是"根底下的某个文件"', () => {
+  test('the root itself does not count as inside — every caller wants "some file under the root"', () => {
     assert.equal(isInside(R('/a/guides'), R('/a/guides')), false);
   });
 
-  test('`..` 先被规范化掉,绕回来的照样算在里面', () => {
+  test('`..` is normalised away first, so a path that comes back round still counts as inside', () => {
     assert.equal(isInside(R('/a/guides'), R('/a/guides/sub/../x.md')), true);
   });
 });
 
 describe('containedPath', () => {
-  test('正常的段拼出绝对路径', () => {
+  test('ordinary segments assemble into an absolute path', () => {
     assert.equal(containedPath(R('/a/guides'), 'x.md'), R('/a/guides/x.md'));
     assert.equal(containedPath(R('/a/guides'), 'sub', 'x.md'), R('/a/guides/sub/x.md'));
   });
 
-  test('`..` 段返回 null', () => {
+  test('a `..` segment returns null', () => {
     assert.equal(containedPath(R('/a/guides'), '..', 'x.md'), null);
     assert.equal(containedPath(R('/a/guides'), '..', 'guides-evil', 'x.md'), null);
   });
 
-  test('**某一段里藏着分隔符也返回 null** —— 那一段在偷偷改变路径结构', () => {
+  test('**a separator hidden inside a segment returns null too** — that segment is quietly changing the path structure', () => {
     assert.equal(containedPath(R('/a/guides'), `..${sep}..${sep}x.md`), null);
     assert.equal(containedPath(R('/a/guides'), '../x.md'), null);
   });
 
-  test('段里带分隔符但没跑出去的,照样拒 —— 判据是"逐段拼"而不是"最后落在哪"', () => {
-    // 结果确实还在 guides/ 里,但这一段声称自己是一个文件名而实际是两段。
-    // 放行的话,"每一段都是文件名"这个前提就不成立了,而调用方全靠它
+  test('a segment with a separator that does not escape is still refused — the test is "assembled segment by segment", not "where it ends up"', () => {
+    // The result really is still inside guides/, but that segment claims to be one file
+    // name while actually being two. Letting it through breaks the premise that "every
+    // segment is a file name", which every caller relies on
     assert.equal(containedPath(R('/a/guides'), `sub${sep}x.md`), null);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 四个调用方
+// The four callers
 // ---------------------------------------------------------------------------
 
-describe('调用方都走同一个判据', () => {
-  /** 造一个真目录:guides/ 和它的兄弟 guides-evil/ */
+describe('every caller routes through the same predicate', () => {
+  /** Builds a real directory: guides/ and its sibling guides-evil/ */
   const build = () => {
     const base = mkdtempSync(join(tmpdir(), 'sat-pathsafe-'));
     mkdirSync(join(base, 'guides'), { recursive: true });
@@ -85,7 +89,7 @@ describe('调用方都走同一个判据', () => {
     return base;
   };
 
-  test('resolveGuidePath:正常的相对路径读得到', () => {
+  test('resolveGuidePath: an ordinary relative path reads back', () => {
     const base = build();
     try {
       assert.equal(resolveGuidePath(join(base, 'guides'), 'ok.md'), R(base, 'guides', 'ok.md'));
@@ -94,20 +98,20 @@ describe('调用方都走同一个判据', () => {
     }
   });
 
-  test('**resolveGuidePath:兄弟目录要抛,不能读出来**', () => {
+  test('**resolveGuidePath: a sibling directory has to throw and must not be readable**', () => {
     const base = build();
     try {
       assert.throws(
         () => resolveGuidePath(join(base, 'guides'), join('..', 'guides-evil', 'secret.md')),
         /越出了 guides 目录/,
-        'guides-evil/ 被当成 guides/ 的一部分读出来了'
+        'guides-evil/ was read as though it were part of guides/'
       );
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
   });
 
-  test('resolveGuidePath:绝对路径也要过同一道检查', () => {
+  test('resolveGuidePath: an absolute path goes through the same check', () => {
     const base = build();
     try {
       assert.throws(
@@ -119,39 +123,40 @@ describe('调用方都走同一个判据', () => {
     }
   });
 
-  test('parseArchiveId:合法编号解得出来', () => {
+  test('parseArchiveId: a legal id parses', () => {
     const config = { guidesDir: R('/a/guides') };
     const r = parseArchiveId(config, '.backups/730-20260820-122121.md');
     assert.equal(r.dir, '.backups');
     assert.equal(r.file, '730-20260820-122121.md');
   });
 
-  test('parseArchiveId:目录不在那三个里面就拒', () => {
+  test('parseArchiveId: a directory outside those three is refused', () => {
     assert.throws(() => parseArchiveId({ guidesDir: R('/a/guides') }, '.evil/x.md'), /目录不认识/);
   });
 
-  test('parseArchiveId:文件名带分隔符就拒 —— 编号是浏览器传上来的字符串', () => {
+  test('parseArchiveId: a file name with a separator is refused — the id is a string sent up by the browser', () => {
     const config = { guidesDir: R('/a/guides') };
     assert.throws(() => parseArchiveId(config, '.backups/../x.md'), /不合法|越界/);
     assert.throws(() => parseArchiveId(config, `.backups/..${sep}..${sep}x.md`), /不合法|越界/);
   });
 
   /**
-   * **判据必须只有一份。** 抽出来之后最可能的回归不是判据写错,
-   * 是某一处没改过来、继续用自己那份 —— 而那种回归一个测试都不会红,
-   * 因为每一处自己的测试都还在过。所以这里直接查源码。
+   * **There has to be exactly one predicate.** After extracting it, the most likely
+   * regression is not the predicate being wrong but one place never being converted and
+   * carrying on with its own — and that regression turns no test red, because each place's
+   * own tests still pass. So this checks the source directly.
    */
-  test('没有哪个文件还在自己写 `startsWith(root)` 那种包含性检查', async () => {
+  test('no file still writes its own `startsWith(root)` containment check', async () => {
     const { readFileSync } = await import('node:fs');
     const files = ['lib/markdown.js', 'lib/backup.js', 'lib/guidearchive.js', 'lib/server.js'];
     for (const f of files) {
       const src = readFileSync(new URL('../' + f, import.meta.url), 'utf8')
-        .replace(/\/\*[\s\S]*?\*\//g, '')   // 块注释
-        .replace(/^\s*\/\/.*$/gm, '')       // 行注释 —— 注释里提到这个写法是允许的
-        .replace(/^\s*\*.*$/gm, '');        // JSDoc 续行
+        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
+        .replace(/^\s*\/\/.*$/gm, '')       // line comments — mentioning this form in a comment is allowed
+        .replace(/^\s*\*.*$/gm, '');        // JSDoc continuation lines
       assert.doesNotMatch(
         src, /startsWith\(\s*(?:root|base|resolve\()/,
-        `${f} 里还有一份自己写的包含性检查,判据又变成两份了`
+        `${f} still holds a hand-written containment check, so the predicate is back to two copies`
       );
     }
   });

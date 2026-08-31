@@ -4,6 +4,8 @@ The Windows app in [the README](../README.md) covers everyday use. This page is 
 
 The commands are the same either way. The packaged app bundles its own Node runtime and its own copy of the project, so you can run any command below from the app's folder without installing anything — `resources/tracker/` next to the exe.
 
+Everything these commands print follows `uiLanguage` in `config.json` — the same setting as the Dashboard's, `"zh"` or `"en"`. See [configuration.md](configuration.md#uilanguage).
+
 ## Requirements
 
 **Node.js 24 or newer** — check with `node --version`. The project uses Node built-ins only (`node:sqlite`, global `fetch`, `node:http`, `node:test`), so there is nothing to `npm install`.
@@ -72,9 +74,9 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | `init` | Steam API key and SteamID64; `--notion` and `--ai` add those | Steam |
 | `sync` | Full refresh: library, achievement counts, achievement detail | Steam |
 | `sync --fast` | Sampled refresh — the same work the Dashboard does | Steam |
-| `sync --library` | Only check for new games | Steam |
+| `sync --library` | Only check for new games, and fill in any missing English names | Steam |
 | `sync --achievements` | Only refresh achievement counts | Steam |
-| `sync --schema` | Only sync achievement detail | Steam |
+| `sync --schema` | Only sync achievement detail, and backfill any missing English descriptions | Steam |
 | `serve [--port 8777]` | Opens the Dashboard, syncing first if the data is stale | Steam + Notion |
 | `status` | Completion stats and AGCR | — |
 | `log [n]` | The last n sync-log entries | — |
@@ -108,7 +110,7 @@ More on what is stored and what Steam does not expose: [data.md](data.md).
 | `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, verifying it arrived intact | Notion |
 | `guide-to-notion --dry-run` | Previews the conversion, writes nothing | Notion |
 | `notion-check` | Checks token, database, title property, status options, page count | Notion |
-| `notion-check --fix` | Appends missing status options, then re-reads to confirm | Notion |
+| `notion-check --fix` | Appends missing status options, sorts them into board columns, adds the board view, then re-reads to confirm | Notion |
 | `notion-check --probe-write` | Creates and archives one page to prove write access | Notion |
 | `drafts` | Lists what has piled up in `guides/.drafts/` | — |
 | `drafts --clean` | Removes it; `--older-than N` limits to drafts older than N days | — |

@@ -3,47 +3,42 @@ name: achievement-guide-writing
 description: Use when writing, rewriting, or editing a Steam achievement guide for this project (Notion page or local .md file like sultans_game_achievements.md) — covers the checkbox-per-achievement rule required by the daily sync job, when screenshots are worth embedding, and the full workflow for authoring a new guide from Steam + wiki data (pulling ground truth, sourcing wiki content, writing/replacing Notion content, verifying).
 ---
 
-# 写/改 Steam 成就攻略页的规则
+# Writing and editing a Steam achievement guide
 
-适用范围:任何 Notion 攻略页,或本地 `*_achievements.md` 文件。
+Applies to any Notion guide page, and to local `*_achievements.md` files.
+
+The rule identifiers below live in the headings as `[id]`, never in their wording. `SKILL_RULE_DISPOSITION` in `lib/guidegen.js` is keyed by them and cross-checked against this file both ways, so **adding a heading here turns `test/guidegen.test.js` red** — a new section is exactly the moment to say whether it went into the generator's prompt.
 
 ---
 
-## 规则一:每个成就必须单独占一行 checkbox
+## [rule-1] Rule 1: every achievement gets its own checkbox line
 
-`- [ ] **成就名**` / `- [x] **成就名**`,绝对不能:
-- 把多个成就合并写在同一行(比如 `- [x] **A** / [x] **B**`)
-- 把"全部已达成、比较无聊"的一整组成就写成一段不带 checkbox 的说明文字
+`- [ ] **Achievement Name**` / `- [x] **Achievement Name**`. Never:
+- several achievements merged onto one line (`- [x] **A** / [x] **B**`)
+- a whole group of "all done, not very interesting" achievements written as a paragraph with no checkboxes
 
-**已达成的成就写短是可以的,写没是不行的。** 生成器对他已经解锁的那些只写 `- [ ] **名字** — 官方描述` 一行(见 `docs/ai-guide-writing.md`),那仍然满足这条规则:一条一个 checkbox,只是不写正文。这条禁的是把它们并成一段散文 —— 少了那一行,`checkbox-sync` 就再也勾不上它。
-- 把一整类成就(如"声望类共39个")写成纯文字总结
+**Writing an unlocked achievement short is fine; leaving it out is not.** The generator gives an already-unlocked achievement a single `- [ ] **Name** — official description` line (see `docs/ai-guide-writing.md`), and that still satisfies this rule: one checkbox per achievement, just with no notes. What is forbidden is folding them into prose — without that line, `checkbox-sync` can never tick it again.
+- a whole category ("39 reputation achievements") summarised as plain text
 
-**原因**:Notion markdown 里一行只有开头第一个 `[ ]`/`[x]` 会渲染成真正可交互的 checkbox,`/` 后面的会被转义成字面文本 `\[x\]`。而"把已解锁成就同步进攻略页 checkbox"这个日常任务(`node tracker.js checkbox-sync`,见 `steam-checkbox-sync` skill)是靠精确匹配 `- [ ] **成就中文名**` 这样的行首文字来打勾的——合并写或者纯文字总结的内容,同步脚本根本找不到。这也是为什么攻略统一用 checkbox 列表、不用 Notion 内嵌数据库(embedded database):内嵌数据库没法被同步脚本解析,而逐条写真实攻略文字的价值也比数据库表格更高(参考实现:CK3 那次 188 个成就从内嵌数据库改写成 checkbox 格式)。
+**Why**: in Notion markdown only the first `[ ]`/`[x]` on a line renders as a real interactive checkbox; anything after a `/` is escaped into the literal text `\[x\]`. And the daily job that syncs unlocked achievements into the guide page (`node tracker.js checkbox-sync`, see the `steam-checkbox-sync` skill) ticks boxes by matching the line's leading text against `- [ ] **Achievement Name**` exactly — a merged line or a prose summary is something the sync simply cannot find. This is also why guides are checkbox lists rather than Notion embedded databases: an embedded database cannot be parsed by the sync, and writing real guide prose entry by entry is worth more than a database table anyway (reference: the CK3 page, where 188 achievements were rewritten from an embedded database into checkbox form).
 
-### 心得段:前置、步骤、警告分行写
+### [rule-1/notes-lines] The notes section: put prerequisites, steps and warnings on separate lines
 
-`<br>` 在 checkbox 里就是换行,拿它把不同性质的东西拆开:前置/材料清单单独一行、开头写「前置:」;
-步骤超过三步就**一步一行**;会导致失败或走岔路的单独一行、开头写「注意:」。
+`<br>` is a line break inside a checkbox. Use it to separate things of different kinds: prerequisites and material lists get their own line beginning "Prerequisite:"; anything past three steps goes **one step per line**; whatever causes a failure or a wrong turn gets its own line beginning "Careful:".
 
-**判据是"这一行里混没混进两种性质的东西",不是字数。** 六百字挤成一段的时候,内容再对,
-读的人也分不出哪句是准备、哪句是操作、哪句是雷。写完自己看一眼:**能不能一眼指出哪几句是前置、
-哪几句是步骤?** 指不出来就是还没分行。
+**The test is whether one line mixes two kinds of thing, not how long it is.** Six hundred words in a single block can be entirely correct and still leave the reader unable to tell which sentence is preparation, which is the action, and which is the trap. Read it back: **can you point straight at which sentences are prerequisites and which are steps?** If not, it is not yet broken up.
 
-反例(2026-08-21 实际生成出来的,苏丹的游戏「创造」):613 字一整段,里面其实已经写了
-"前置准备:…"和"流程:1)…6)",但全挤在同一个 `<br>` 段里,结构一点都没落到页面上。
+Counter-example, generated 2026-08-21 for 苏丹的游戏 (Sultan's Game), achievement 「创造」: 613 characters in one block. It had in fact written out "前置准备:…" and "流程:1)…6)", but all inside the same `<br>` segment, so none of that structure reached the page.
 
-### 子 checkbox 的分组标签
+### [rule-1/sub-labels] Group labels on sub-checkboxes
 
-条目多到要分类时,**标签单独占一行,不要在每一条前面重复**。十四条各写一遍「前置:」「步骤:」,
-同一个词出现十四次,而它要说的事只有两件。
+When there are enough entries to need grouping, **the label goes on its own line; do not repeat it in front of every entry**. Writing "Prerequisite:" and "Steps:" onto fourteen lines puts one word on screen fourteen times to say two things.
 
-**标签行本身不该是 checkbox。**「前置」不是一件能做完的事,勾它没有意义。同一条判据往下推,
-**「注意」那一组的条目也不该是 checkbox**——警告是出问题时回头查的参考,不是任务,永远勾不掉,
-只会把这条成就的进度永久压低几格。**checkbox 只给"读的人真的能做完、能勾掉"的行。**
+**The label line itself should not be a checkbox.** "Prerequisite" is not a thing that can be finished, so ticking it means nothing. Following the same test one step further, **entries under "Careful" should not be checkboxes either** — a warning is something you come back to when things go wrong, not a task, so it can never be ticked off and only holds this achievement's progress down for good. **A checkbox is for a line the reader can actually finish and tick.**
 
-写法按后端分两种,不能拿一边的套另一边。
+There are two spellings, one per backend, and neither works in the other's place.
 
-#### Notion 页面(默认后端,见 8.0):标签用 `<details>` 折叠
+#### Notion pages (the default backend, see 8.0): labels carried on `<details>`
 
 ```
 - [ ] **创造**<br>你可以创造一切，包括你自己。<br>走「打磨龙眼→创世线」……
@@ -58,16 +53,13 @@ description: Use when writing, rewriting, or editing a Steam achievement guide f
 	</details>
 ```
 
-`fetchAllToDoBlocks`(`lib/notion.js`)把 toggle / column 当**透明容器**——`parent` 原样往下传,
-折叠里的子 checkbox 仍然记在这条成就名下,`--cascade` 的父子关系不受影响。折叠还顺手解决另一件事:
-三十行的长清单折起来只剩三行,整页重新能扫。
+`fetchAllToDoBlocks` (`lib/notion.js`) treats toggle and column blocks as **transparent containers** — `parent` is passed straight through, so a sub-checkbox inside a fold is still recorded under this achievement and `--cascade`'s parent/child relationship is unaffected. Folding also solves something else in passing: a thirty-line list collapses to three, and the page becomes scannable again.
 
-把「注意」降成普通 bullet 还有一个实打实的收益:它们不再是 `to_do` 块,进不了同步的候选池,
-`--cascade` 就不会把一串警告勾成假记录——正是本规则末尾那条代价的正解。
+Demoting "Careful" entries to plain bullets buys one concrete thing as well: they stop being `to_do` blocks, so they never enter the sync's candidate pool and `--cascade` cannot tick a run of warnings into a set of false records — which is the real answer to the cost noted at the end of this rule.
 
-**`guide-gen` 也按后端给这一条。** `buildSystemPrompt({ target })` 收 `'notion'` / `'local'`:Notion 目标拿到上面这版折叠写法,本地 md 目标拿到下面那版 checkbox 标签。**`target` 传不到时退回 checkbox 标签版**——折叠写进本地 md 是静默断区间,checkbox 标签写进 Notion 只是丑一点,两种猜错的代价不对等。分组标签是整份提示词里唯一按后端分岔的规则,别的都不分(见 `groupLabelRule` 的注释)。
+**`guide-gen` gives this rule per backend too.** `buildSystemPrompt({ target })` takes `'notion'` / `'local'`: a Notion target gets the folded form above, a local md target gets the checkbox-label form below. **When `target` does not reach it, it falls back to the checkbox-label form** — a fold written into local md silently truncates a range, while a checkbox label written into Notion is merely a bit ugly, and the costs of guessing wrong are not symmetric. The group label is the only rule in the whole prompt that branches on the backend; nothing else does (see the comment on `groupLabelRule`).
 
-#### 本地 `*_achievements.md`:标签行必须还是 `- [ ]`
+#### Local `*_achievements.md`: the label line has to stay a `- [ ]`
 
 ```
 - [ ] **创造**<br>……
@@ -75,34 +67,21 @@ description: Use when writing, rewriting, or editing a Steam achievement guide f
 		- [ ] 命运商店花 40 点数买「神之侧身像」
 ```
 
-这一条是机制上的硬要求,不是风格:`todoSpans`(`lib/markdown.js`)按「**连续的**、更深缩进的
-checkbox 行」圈定一条成就占哪几行,中间夹一行非 checkbox——普通 bullet、`<details>`、一句小节
-说明都算——会把范围当场截断。实测七行的结构只圈到 1 行,局部重写把新的贴上去、旧的六行还留在
-原地,变成重复。**所以本地 md 的这一层不能用折叠,标签也不能写成普通 bullet。**
+This one is a mechanical requirement rather than a matter of style: `todoSpans` (`lib/markdown.js`) decides which lines an achievement occupies by taking the run of **consecutive**, more deeply indented checkbox lines, and one non-checkbox line in the middle — a plain bullet, a `<details>`, a sentence of section commentary — cuts that range short on the spot. Measured: a seven-line structure was read as one line, the partial rewrite pasted the new entry in, and the old six lines stayed where they were as a duplicate. **So this layer of a local md cannot use a fold, and the label cannot be a plain bullet.**
 
-分组只在条目多到要分的时候用;五六条以内直接平铺,不用套一层。
+Group only when there are enough entries to need grouping; five or six go flat, with no extra layer.
 
-### 子任务/子收集品:嵌套 checkbox 要满足三个条件
+### [rule-1/nesting] Sub-tasks and sub-collectibles: nesting needs three conditions
 
-子 checkbox **默认不写**。下面三条**同时**成立才嵌套:
+Sub-checkboxes are **off by default**. All three of these have to hold **at once**:
 
-1. **每一条都有自己的身份**——一个神庙名、一份配方、一条支线任务名、一处收集品位置,
-   是要去找、去查、去认的具体东西。**序号不是身份**:`第1天`/`第2天`、`第1关`/`第2关`、
-   `1/10`、`步骤一`/`步骤二` 只是把一个数字拆开写,一条信息都没多。
-2. **这一行除了「第几个」之外写得出做法。** 判据**不是游戏有没有计数器**——计数器只告诉
-   用户"还差几个",从不告诉他"缺的那个怎么拿",而后者正是攻略的全部价值。
-   `第1天`…`第7天` 写不出任何做法,不嵌套;百科全书三十个词条各有各的入手方式,**嵌套**,
-   每一行就写那个词条怎么拿。十件收集品掉落方式完全一样的也不嵌套——那十行写的是同一句话。
-3. **每一条都要做**,不是任选其一。互相替代的选项(九个结局里达成任一、五个职业里用任一通关)
-   **不要嵌套**,平铺写在心得那一段——嵌套的语义是"父成就解锁 ⇒ 下面每一条都做过了",
-   互斥选项放进去会变成八条假记录。
+1. **Each line has an identity of its own** — a shrine's name, a recipe, a side quest, a collectible's location: a specific thing to go and find, look up or recognise. **A number is not an identity**: `Day 1`/`Day 2`, `Level 1`/`Level 2`, `1/10`, `Step one`/`Step two` only spell a number out and add nothing.
+2. **The line has something to say beyond "which one it is".** The test is **not whether the game has a counter** — a counter only tells the player how many are left, never how to get the one they are missing, and the second is the entire value of a guide. `Day 1`…`Day 7` has no method to state, so it is not nested; thirty encyclopedia entries each obtained a different way **are** nested, each line saying how that entry is obtained. Ten collectibles that all drop the same way are not nested either — those ten lines say one thing ten times.
+3. **Every line has to be done**, not one of them chosen. Where the lines are **alternatives** (nine endings under "reach any ending", five classes under "finish with any class"), **do not nest** and write them flat in the notes — nesting means "the parent unlocked ⇒ every line below it was done", and putting exclusive options there creates eight false records.
 
-**要跨好几个阶段才能拿到的成就,把流程本身写成子 checkbox。** 上面三条对"长流程"一样成立:
-每一步是一个**具体动作**(在哪个仪式里放什么、去哪触发哪个事件),写得出做法,而且每一步都要做。
-别把嵌套只当成收集品的写法——用户是一个周目里分好几次做完的,他要能一步一步勾掉。
-**三步以内的写在心得里就够,不用拆。**
+**An achievement that takes several stages to reach: write the process itself as sub-checkboxes.** The three conditions hold for a long process just as well: each step is a **specific action** (what to place in which ritual, where to trigger which event), it has a method to state, and every step has to be done. Nesting is not only for collectibles — the reader does this across several sittings in one playthrough and wants to tick it off step by step. **Three steps or fewer belong in the notes and need no breakdown.**
 
-三条都满足就该嵌套,而且要嵌套——那种情况下用户确实要一条一条勾掉:
+When all three hold, nesting is not merely allowed but required — in that case the reader really does tick them off one at a time:
 
 ```
 - [x] **水火不容**<br>完成所有差事<br>一共五个支线：
@@ -110,291 +89,281 @@ checkbox 行」圈定一条成就占哪几行,中间夹一行非 checkbox——�
   - [x] 2.【法夫纳的宝藏】：离开精灵国时...
 ```
 
-反例(2026-08-11 实际生成出来的,Wrap House Simulator):
+Counter-example, generated 2026-08-11 for Wrap House Simulator:
 
 ```
 - [ ] **7天的悠闲**<br>在轻松模式下游玩7天。<br>...
   - [ ] 第1天
-  - [ ] 第2天   ← 一直到第7天,四个难度成就下面各挂一份,共 28 个
+  - [ ] 第2天   ← up to 第7天, one set under each of four difficulty achievements: 28 in all
 ```
 
-三条全不满足:序号没有身份、天数游戏自己在数、而且删掉之后攻略一条信息都不少。
+None of the three holds: a number is not an identity, the game counts the days itself, and deleting them costs the guide nothing.
 
-**一句自检:把那几行删掉,这份攻略少了什么信息吗?** 少不了就不要写。
+**One self-check: delete those lines — does the guide lose any information?** If not, do not write them.
 
-还有一个不写在攻略里、但很实在的代价:`checkbox-sync --cascade` 会按"父成就已解锁 ⇒
-子步骤都做过了"把子框一并勾上(见 `steam-checkbox-sync` skill)。挂在已解锁成就下面的
-无意义子框,会被自动勾成一串什么都没记录的假记录。
+There is one more cost, real but not visible in the guide: `checkbox-sync --cascade` ticks sub-boxes on the rule "the parent achievement is unlocked ⇒ its sub-steps were all done" (see the `steam-checkbox-sync` skill). Meaningless sub-boxes hanging under an unlocked achievement get ticked automatically into a run of records that record nothing.
 
-### 重名成就的处理
+### [rule-1/duplicate-names] Achievements with duplicate names
 
-同一游戏确实会出现**两个成就名字完全一样**(中英文都一样,只有描述不同)——这类必须**把官方描述原文照抄进去**,那是唯一能区分它们的东西。
+One game really can carry **two achievements with identical names** (identical in Chinese and English alike, differing only in description). These **must have the official description copied in verbatim**, because it is the only thing that tells them apart.
 
 ```
 - [ ] **妙手空空**<br>成功偷窃了其他修仙者的物品10次，并且尚未被察觉。<br>开局就能做
 - [ ] **妙手空空**<br>通关且成功偷窃其他修仙者100次<br>需要二周目
 ```
 
-**不要靠给粗体名字加后缀来区分**(比如"·隐秘10次版"/"·通关100次版")。那样看着清楚,但会让成就名不再精确等于任何一个候选片段,于是**两个框都同步不上**了:
+**Do not tell them apart by adding a suffix to the bold name** (「·隐秘10次版」/「·通关100次版」). It looks clearer and it stops the name being exactly equal to any candidate segment, so **neither box syncs any more**:
 
-- 同步是按"成就名精确等于某个候选片段"匹配的,`妙手空空·隐秘10次版` ≠ `妙手空空`
-- 同名成就没全部解锁时,同步本来就拒绝按名字猜(见 `steam-checkbox-sync` skill)
+- the sync matches on "the achievement name is exactly equal to one of the candidates", and `妙手空空·隐秘10次版` ≠ `妙手空空`
+- while same-named achievements are not all unlocked, the sync already refuses to guess by name (see the `steam-checkbox-sync` skill)
 
-抄了描述原文之后,同步能靠描述认出是哪一个,正常勾选;想加"·隐秘10次版"这种说明,放到第三段自己的心得里,别动粗体名字。
+With the description copied in, the sync can tell which is which by description and ticks normally. Anything you want to add of the "the stealth-10 one" kind goes in the third part with your own notes; leave the bold name alone.
 
-### 写后验证
+### [rule-1/verify] Verify after writing
 
-写完之后**一定要重新 fetch 页面验证 checkbox 真的落地了**,不要假设 `notion-update-page` 调用成功=内容正确。更完整的验证步骤见规则九末尾。
-
----
-
-## 规则二:截图只贴真正有信息量的
-
-### 值得贴的截图
-- 地图位置/路线标注
-- UI 界面/菜单选项(如关键对话选项、装备配置界面)
-- 隐藏道路/入口的具体位置
-- Boss 机制演示(如果文字难以描述清楚)
-- 关键物品/道具的精确位置
-
-### 贴不了截图的时候:带时间点的视频链接
-
-找物/解谜类游戏里,位置往往只能靠画面说清,而 `guide-gen` 那条流水线**给不出可靠的游戏内截图** ——
-模型截不了图,也看不见图,没法核对贴的对不对。替代品是**带时间点**的视频链接:
-「对照 B站 BVxxxxxx 的 5-2 段落(01:56)」。**这一节是规则二里唯一进了生成提示词的**。
-
-**万能话不算答案。**「留意角落」「注意被遮挡的」「多找找」放到哪一关都成立,读的人拿不到
-任何新信息。写不出具体位置就给时间点,两样都没有就说清楚这一条为什么难找
-(比如「不在待找清单上,提示系统定位不到」)——那也是信息。
-
-### 不要贴的截图
-- "成就解锁弹窗"截图——除了标题文字本身不提供任何新信息
-- 纯装饰性的游戏封面/宣传图
-- 拿不准具体拍的是什么就别贴,改成贴参考攻略链接
-
-### 来源攻略有图时的处理
-如果参考的原始攻略(wiki、TrueAchievements、Steam Guides 等)本身就配了地图/UI/选项截图,跟着配等价的图,不要只写纯文字。
+When you are done, **fetch the page again and confirm the checkboxes really landed**. Do not assume that `notion-update-page` returning success means the content is right. The fuller verification steps are at the end of rule 9.
 
 ---
 
-## 规则三:成就条目的写法
+## [rule-2] Rule 2: only embed screenshots that carry information
 
-### 3.1 单条成就格式
+### [rule-2/worth-shots] Screenshots worth embedding
+- map positions and route markings
+- UI screens and menu options (a decisive dialogue choice, an equipment screen)
+- the exact location of a hidden path or entrance
+- a boss mechanic demonstration, where prose struggles to describe it
+- the precise location of a key item
 
-**标准格式**:`- [x] **成就名**<br>官方成就描述(原文照抄,强烈建议)<br>自己的攻略/心得(可选)`
+### [rule-2/video-instead] When a screenshot is not possible: a video link with a timestamp
 
-三段都写在同一个 bullet 里用 `<br>` 换行,不单独起小标题。
+In hunting and puzzle games a location often can only be shown on screen, and the `guide-gen` pipeline **cannot produce a reliable in-game screenshot** — the model cannot take one and cannot see one, so it has no way to check that what it embedded is right. The substitute is a video link **with a timestamp**: "compare against the 5-2 chapter of <video> (01:56)". **This subsection is the only part of rule 2 that went into the generator's prompt.**
 
-**为什么描述要照抄原文、不要改写**——这两段文字各有各的机器用途,不只是给人看的:
+**A generality is not an answer.** "check the corners" and "look for anything obscured" are true of every level ever made and give the reader nothing new. Where you cannot give the actual location, give a timestamp; where you have neither, say plainly why this one is hard to find ("it is not on the to-find list, so the hint system cannot locate it") — that is information too.
 
-| 这一段 | 谁在用 | 缺了会怎样 |
+### [rule-2/no-shots] Screenshots not to embed
+- the achievement unlock popup — beyond its own title text it carries nothing
+- purely decorative cover art and promotional images
+- anything where you are unsure what is actually being shown; link to a reference guide instead
+
+### [rule-2/source-images] When the source guide has images
+Where the guide you worked from (a wiki, TrueAchievements, a Steam guide) had map, UI or menu screenshots of its own, provide equivalent images rather than prose alone.
+
+---
+
+## [rule-3] Rule 3: how an achievement entry is written
+
+### [3.1] 3.1 The format of a single entry
+
+**The standard form**: `- [x] **Achievement Name**<br>official description (copied verbatim, strongly preferred)<br>your own notes (optional)`
+
+All three parts go in the same bullet separated by `<br>`, never under their own sub-headings.
+
+**Why the description is copied rather than reworded** — the two pieces of text each have a machine use, not only a human one:
+
+| This part | Who uses it | What breaks without it |
 |---|---|---|
-| **成就名**(粗体、行首、后面紧跟 `<br>` 或冒号/破折号) | `checkbox-sync` 靠它勾选 | 勾不上 |
-| **官方描述原文** | `audit` 靠它反查这个框是哪个成就;重名成就也靠它区分 | 审计查不了这个框,重名成就永远同步不上 |
+| **The achievement name** (bold, at the start of the line, followed immediately by `<br>` or a colon or a dash) | `checkbox-sync` ticks by it | it never ticks |
+| **The official description, verbatim** | `audit` traces a box back to its achievement by it; duplicate names are told apart by it | the audit cannot account for that box, and duplicate-named achievements never sync |
 
-改写过的描述(比如把"成功偷窃了其他修仙者的物品10次,并且尚未被察觉"写成"隐秘偷窃10次")机器就对不上了。想补充说明、写攻略心得,写在第三段,别改第二段。如果参考的 wiki 对这个成就有明确的难度评级,顺手带一句到"自己的攻略/心得"里(比如"难度:较高"),不用单独起字段。
+A reworded description ("隐秘偷窃10次" for "成功偷窃了其他修仙者的物品10次,并且尚未被察觉") no longer matches. Anything you want to add goes in the third part; leave the second alone. Where the wiki you worked from gives an explicit difficulty rating, carry a mention of it into your own notes rather than creating a field for it.
 
-**描述和心得的取舍**:
-- **纯剧情推进自动解锁的成就**:只写名字即可
-- **有机制但很简单的成就**:写一句官方描述或一句话攻略
-- **有坑/有技巧/容易错过的成就**:详细写步骤,包括前置条件、关键选择节点、容易翻车的地方。这是攻略最有价值的部分
-- **不管成就自己有没有解锁,有值得记录的门道就写清楚**——这是"怎么打过的"记录,不是"还剩什么没做"的任务清单
+**How much to write**:
+- **an achievement that unlocks automatically as the story progresses**: the name is enough
+- **an achievement with a mechanic but a simple one**: the official description, or a one-line note
+- **an achievement with a trap, a trick, or something easy to miss**: write out the steps, the prerequisites, the decisive choices and where it goes wrong. This is the most valuable part of a guide
+- **whether or not the achievement is unlocked, write down anything worth recording** — this is a record of how the game was played, not a to-do list of what is left
 
-**附加标注**:
-- **位置标注**:如果成就涉及特定地图位置,在条目开头标 `位置 XXX`
-- **前置条件标注**:如果成就有角色背景/技能/perk 要求,用 `※需要有背景X` 标注
-- **互斥标注**:如果两个成就互相冲突,用 `<span underline="true">如果进行此动作则无法获得X成就。</span>` 警告
-- **易错过标注**:如果成就在某个时间点后会永久错过,标注"易错过！！"
-- **DLC 排除标注**:如果成就不含 DLC 内容,标注"※除去追加内容"
+**Additional notations**:
+- **Location**: for anything tied to a specific place on the map, begin the entry with `位置 XXX`
+- **Prerequisite**: where a background, skill or perk is required, use `※需要有背景X`
+- **Mutually exclusive**: where two achievements conflict, warn with `<span underline="true">如果进行此动作则无法获得X成就。</span>`
+- **Missable**: where passing some point loses the achievement permanently, mark it `易错过!!`
+- **DLC excluded**: where an achievement does not include DLC content, mark it `※除去追加内容`
 
-### 3.2 参考外部攻略时的做法
+### [3.2] 3.2 Working from an external guide
 
-参考攻略(wiki、TrueAchievements、Steam Guides、B站视频等)用来**理解机制后用自己的话消化重写**,不是照搬原文。
+A reference guide (a wiki, TrueAchievements, a Steam guide, a video) is there so you can **understand the mechanics and then rewrite them in your own words**, not to be copied.
 
-极少数情况下(如某个操作时机/判定条件的英文原文表述特别精确、翻译容易走样),可以保留英文原句,但要简短,前面加中文说明上下文。
+In the rare case where the original phrasing of a timing window or a trigger condition is unusually precise and easily lost in translation, keeping the original sentence is fine, provided it is short and preceded by a note giving the context.
 
-收集品攻略可以贴 B站 BV 号或链接,不需要嵌入视频。
+A collectible guide may cite a video by its identifier or link; embedding the video is not needed.
 
-### 3.3 "补充"：攻略写完后的追加发现
+### [3.3] 3.3 "Addendum": something found after the guide is written
 
-攻略已经写得差不多之后发现新的细节或条件,用 `补充1`、`补充2` 追加在原条目后面。
+Where a new detail or condition turns up once the guide is largely done, append it to the existing entry as `补充1`, `补充2`.
 
-### 3.4 子页面与嵌入式追踪工具
+### [3.4] 3.4 Sub-pages and embedded tracking tools
 
-对于收集品特别多的游戏,可以创建子页面存放详细攻略,主页面只放成就列表加链接。
+For a game with a great many collectibles, a sub-page may hold the detailed guide while the main page keeps the achievement list plus a link.
 
-也可以在攻略页底部嵌入 Notion 数据库做追踪,如全秘籍收集表、全结局分支表。
+A Notion database may also be embedded at the foot of the page as a tracker — a table of every cheat found, or of every ending branch.
 
-### 3.5 游戏机制速查
+### [3.5] 3.5 Game-mechanic quick reference
 
-如果游戏有需要反复查阅的操作说明(如调酒配方、陶艺操作),可以在成就列表前面写一小段机制说明。参考数据表(如 coop 优先度、职业解锁条件)也可以放开头。这是功能性速查,不是文档包装。
-
----
-
-## 规则四:页面结构
-
-### 4.1 开头:极简
-
-**只需要一行 `appid: NNNNNN`**,单独一行放在最前面(GUIDES-sync 脚本(`syncGuidesFromNotion`,见 `steam-guide-sync` skill)靠这行匹配 Notion 页面和 Steam appid,没有这行页面永远不会被自动收进 GUIDES 表,也就不会出现在 Dashboard 的攻略链接里)。
-
-**绝对不要**在开头写:大标题、成就统计、剧透警告、中文名字来源说明、攻略参考来源段落、新手建议。
-
-**"不写大标题"只对 Notion 页面成立。** 本地 `*_achievements.md` **必须**有一行 `# 游戏名` —— `syncGuidesFromMarkdown` 是拿前 15 行里第一个 `^#` 当攻略名字的(没有就退化成文件名),而 Notion 页面的名字来自 title 属性、不需要正文里再写一遍。少了这行,guides 表里的名字会变成第一个小节标题(踩过:登记成了 `# 一、店铺日常与鉴定`)。
-
-如果确实有非常重要的参考攻略链接,可以在 `appid` 下面贴一两个链接,但不组织成"参考来源"段落。
-
-### 4.2 分节:按游戏自身的成就分类走
-
-分节按游戏自身的成就分类来(主线/支线/收集/战斗/杂项等),分类方式跟着游戏本身走。
-
-**同一类事必须在同一个小节里,判据看官方描述、不看解锁途径。**《马特的寻猫游戏》四条
-「将吉祥物替换为 X」曾被拆成两处 —— 两条要在商店买,归了「宝石与商店」;另外两条是彩蛋,
-归了「吉祥物替换」。两边各自都说得通,合起来就是读的人得在两个小节之间来回找同一件事。
-同理:「解锁全部 X」那一组、同一个东西的 100/500/1000 三档,都各自成一组,不要散开。
-
-生成攻略这条路上程序会兜底(`lib/guidecluster.js` 按官方描述的公共前缀识别同类簇,
-被拆开就并回人数最多的那一节),但**只在分了段的时候**才跑 —— 成就数不到 `ai.chunkSize`
-的游戏一段写完,没有那一趟,全靠这条规则。手写攻略同样没有兜底。
-
-节标题不要标注"共N个, M项未完成"之类的统计数字。
-
-如果要按分类(比如按 DLC)给已有的成就列表分组,优先用规则九提到的 `update_content` 精确定位插入分组标题,不要整页重新转录。
-
-### 4.3 结尾:写完就停
-
-不写结尾备注/总结段。不写"这份攻略哪里还不完整""来源是什么""参考链接汇总"。写完最后一个成就直接结束。
-
-### 4.4 DLC 的处理
-
-DLC 成就当作游戏的普通一节来处理,不要写成"DLC: XXX(3个成就,暂无中文翻译)"这种带括号注释的格式。如果 DLC 暂时没有中文翻译,直接在成就条目里用英文名即可。
+Where a game has operating details worth looking up repeatedly (cocktail recipes, pottery controls), a short section of mechanics may go before the achievement list. Reference tables (co-op priorities, class unlock conditions) may go at the top too. This is a functional reference, not documentation wrapping.
 
 ---
 
-## 规则五:长内容用 `<details><summary>` 折叠
+## [rule-4] Rule 4: page structure
 
-适用于:全结局对照表、收集品全清单、按区域分组的图鉴列表、支线任务全流程、全收集表。
+### [4.1] 4.1 The opening: minimal
 
-折叠块内可以是:嵌套的 checkbox 列表、HTML `<table>` 表格、图片+文字说明。
+**One line, `appid: NNNNNN`**, on its own at the very top. The guide sync (`syncGuidesFromNotion`, see the `steam-guide-sync` skill) matches a Notion page to a Steam appid by this line; without it the page is never picked up into the guides table and never appears as a guide link on the Dashboard.
 
-**折叠装的是某一条成就底下的辅料,不是成就列表本身 —— 成就那一行永远不进折叠。** 把一整节的成就打包折起来,那一节在 Notion 上点开是空的;实测《马特的寻猫游戏》整节 `## 世界全清` 的 13 条成就被塞进一个叫「世界 1~12 全清与通关」的折叠里,同步照样认得出,但读的人看到的是一个空小节。`unwrapAchievementToggles`(`lib/guidegen.js`)会把这种折叠拆开 —— 判据是「顶层折叠 + 里面有 checkbox 能反查到真成就」,缩进在成就底下的分组标签折叠(规则一)不受影响。
+**Never** open with a title, achievement statistics, a spoiler warning, a note on where the Chinese names came from, a paragraph of sources, or advice for new players.
 
-**下限:内容到了 10 行,或者比它所属那条成就的正文还长,才折。** 不到就直接摊开 —— 折叠是一层要点开的成本,三五行的表折起来只是把信息藏了。
+**"No top-level heading" holds for Notion pages only.** A local `*_achievements.md` **must** carry a `# Game Name` line — `syncGuidesFromMarkdown` takes the first `^#` in the first 15 lines as the guide's name (falling back to the file name), while a Notion page's name comes from its title property and does not need repeating in the body. Without that line the name in the guides table becomes the first section heading; this has happened, and the guide registered as `# 一、店铺日常与鉴定`.
 
-分组标签(规则一)不看行数:那里的折叠是**标签的载体**(标签不能是 checkbox),不是为了省地方,所以两条规则量的不是同一样东西。
+Where there really is an important reference guide, a link or two may go under the `appid` line, but not organised into a "sources" section.
 
-**只有 Notion 页面能把折叠夹在成就和它的子步骤之间**。本地 `*_achievements.md` 里这么写会把 `todoSpans` 的区间截断,见规则一「子 checkbox 的分组标签」;本地 md 的折叠只能用在不含成就子步骤的长内容上(全结局对照表、图鉴列表等)。
+### [4.2] 4.2 Sections: follow the game's own achievement categories
 
-### 表格的使用
+Divide into sections along the game's own categories (main story / side content / collectibles / combat / miscellaneous), following how the game itself divides them.
 
-信息列数较多、纯文字难以对齐时,可以在 `<details>` 内或正文中使用 HTML `<table>`。能用 checkbox 列表说清楚的优先用列表。
+**Things of the same kind belong in the same section, judged by the official description, not by how they unlock.** The four 「将吉祥物替换为 X」 achievements in 《马特的寻猫游戏》 were once split across two sections — two are bought in a shop and went under 「宝石与商店」, the other two are easter eggs and went under 「吉祥物替换」. Each half made sense on its own, and together they meant the reader had to look in two sections for one thing. Likewise the "unlock every X" group, and the 100/500/1000 tiers of the same thing, are each one group and are not scattered.
 
-### 删除线的使用
+On the generated path the program has a backstop (`lib/guidecluster.js` identifies same-kind clusters by the common prefix of the official descriptions and merges a split cluster back into whichever section holds the most of it), but **it only runs when the guide was sharded** — a game with fewer achievements than `ai.chunkSize` is written in one pass and never makes that trip, so it rests entirely on this rule. A hand-written guide has no backstop either.
 
-可以用 `~~text~~` 标记已废弃/已解锁的内容,不要滥用。
+Section headings carry no counts ("12 total, 3 remaining").
 
----
+To group an existing achievement list by category (by DLC, say), prefer the `update_content` targeted insertion described in rule 9 over re-transcribing the whole page.
 
-## 规则六:中英文混用
+### [4.3] 4.3 The ending: stop when you are done
 
-- 游戏没有官方中文的:成就名保留英文,描述/攻略写中文
-- 游戏有官方中文的:成就名用中文
-- 游戏术语(Build、Boss、DLC、NPC 等)直接用英文,不强行翻译
-- 如果成就名本身就是中文,不需要加英文原名
+No closing note, no summary. Nothing about what the guide is still missing, where it came from, or a collected list of links. Finish the last achievement and stop.
 
----
+### [4.4] 4.4 Handling DLC
 
-## 规则七:不要在攻略里提数据来源
-
-不要在攻略正文里写"勾选状态来自Steam真实解锁数据"之类的说明。
+Treat DLC achievements as an ordinary section of the game. Do not label them with parenthetical notes about the release they came from; a section heading naming the DLC is enough.
 
 ---
 
-## 规则八:写攻略前的准备工作
+## [rule-5] Rule 5: fold long content into `<details><summary>`
 
-### 8.0 先决定写到哪个后端 —— 默认 Notion
+Applies to: full ending comparison tables, complete collectible lists, bestiary lists grouped by region, the full walkthrough of a side quest chain, complete collection tables.
 
-**只要 Notion 是连着的**(`config.json` 里有 `notion.token`),新攻略就**建在 Notion 的 Overview 数据库里**,不要默认写本地 `guides/*.md`。除非另有交代:
+A folded block may hold: a nested checkbox list, an HTML `<table>`, images with captions.
 
-- `Status` 属性填 **`Not started`**。这个属性记的是**游戏**的进度,不是攻略写没写(数据库里好几个标 Done 的游戏其实还没写攻略)
-- 页面 **icon** 设成这个游戏的图片。可靠来源是 `GetOwnedGames` 返回的 `img_icon_url`(一段 hash),拼成
-  `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/<appid>/<hash>.jpg` —— 别猜 CDN 路径,设之前先 HEAD 一下确认是 200 + image/*,不然只会留一个破图 icon
-- 建完页面跑 `node tracker.js guides --notion` 登记,然后**重新 fetch 页面**验证(规则九末尾)
+**A fold holds the supporting material under an achievement, never the achievement list itself — an achievement's own line never goes inside a fold.** Fold a whole section's achievements away and opening that section in Notion shows nothing. Measured on 《马特的寻猫游戏》: all 13 achievements of the `## 世界全清` section were put inside a fold titled 「世界 1~12 全清与通关」; the sync still recognised them, and what the reader saw was an empty section. `unwrapAchievementToggles` (`lib/guidegen.js`) takes that kind of fold apart — the test is "a top-level fold whose checkboxes resolve back to real achievements", so a group-label fold indented under an achievement (rule 1) is unaffected.
 
-原因:Overview 数据库是攻略的主存放处(近百个页面,本地只有 2 个早期文件)。**一个 appid 只能有一个后端**,所以先写成本地 md 之后还得删掉重写成 Notion 页面,白跑一趟。
+**The floor: fold it once it reaches 10 lines, or once it is longer than the body of the achievement it belongs to.** Under that, leave it open — a fold costs a click, and a three-line table folded away is just information hidden.
 
-### 8.1 确定成就列表和勾选状态
+Group labels (rule 1) do not go by line count: the fold there is **the carrier for the label** (a label cannot be a checkbox) rather than a way to save space, so the two rules are not measuring the same thing.
 
-1. 读 `achievements` 表拿该游戏全部成就的中英文名,再用 `SteamClient.fetchPlayerAchievements(appid)` 拿真实解锁状态,按 api_name 拼起来(具体命令见 `steam-guide-sync` skill)
-2. 如果 ACHIEVEMENTS 表还没有这个 appid 的记录,会报错提示先跑 `syncAchievementSchema`
-3. 用这个数据来写 checkbox 的 `[x]`/`[ ]` 状态——这是唯一权威数据源,不要凭印象猜
+**Only a Notion page can put a fold between an achievement and its sub-steps.** In a local `*_achievements.md` that truncates `todoSpans`' range — see rule 1, "group labels on sub-checkboxes". A fold in a local md is only for long content that contains no achievement sub-steps (ending tables, bestiary lists).
 
-### 8.2 确定成就分类
+### [rule-5/tables] Using tables
 
-- 先看游戏内成就列表的分类(Steam 客户端里可以看到)
-- 如果没有清晰分类,按游戏机制自己判断
-- 参考 TrueAchievements 或 Steam 社区攻略的分类方式
+Where there are many columns and plain text will not align, an HTML `<table>` may be used inside a `<details>` or in the body. Prefer a checkbox list wherever one says it clearly.
 
-### 8.3 收集攻略素材
+### [rule-5/strikethrough] Using strikethrough
 
-- Steam 社区攻略(中文+英文)
+`~~text~~` may mark content that is obsolete or already unlocked. Do not overuse it.
+
+---
+
+## [rule-6] Rule 6: mixing languages
+
+- **A Chinese guide**: where the game has no official Chinese, keep the achievement name in English and write the description and notes in Chinese; where it does, use the Chinese name.
+- **An English guide**: use the official English name; where a game ships only a Chinese name, keep that name as it stands rather than translating it — a translated name matches nothing.
+- Terms of art (build, boss, DLC, NPC) stay in English in either language and are not forced into translation.
+- Where the achievement name is already in the guide's own language, the other name is not added.
+
+The guide's language follows the interface language and is recorded in `guides.lang`; see `docs/ai-guide-writing.md`.
+
+---
+
+## [rule-7] Rule 7: do not mention where the data came from
+
+The body of a guide never explains that ticked state comes from Steam's real unlock data, or anything of that kind.
+
+---
+
+## [rule-8] Rule 8: preparation before writing
+
+### [8.0] 8.0 Decide the backend first — Notion by default
+
+**As long as Notion is connected** (`config.json` holds a `notion.token`), a new guide is **created in Notion's Overview database** rather than defaulting to a local `guides/*.md`. Unless told otherwise:
+
+- set `Status` to **`Not started`**. That property records the **game's** progress, not whether the guide has been written (several games marked Done in the database have no guide yet)
+- set the page **icon** to the game's image. The reliable source is `img_icon_url` from `GetOwnedGames` (a hash), assembled into
+  `https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/<appid>/<hash>.jpg` — do not guess CDN paths, and HEAD the URL first to confirm 200 plus `image/*`, or all you get is a broken icon
+- once the page exists, run `node tracker.js guides --notion` to register it, then **fetch the page again** to verify (end of rule 9)
+
+Why: the Overview database is where guides live (getting on for a hundred pages; only two early files are local). **One appid can have only one backend**, so writing a local md first means deleting it and rewriting it as a Notion page — a wasted trip.
+
+### [8.1] 8.1 Establish the achievement list and the unlock state
+
+1. Read the `achievements` table for the game's full list of names, then take the real unlock state from `SteamClient.fetchPlayerAchievements(appid)` and join the two on `api_name` (the commands are in the `steam-guide-sync` skill)
+2. Where the achievements table has no rows for this appid, it reports that `syncAchievementSchema` has to run first
+3. Use that data to fill the `[x]`/`[ ]` state — it is the only authoritative source, and it is never guessed from memory
+
+### [8.2] 8.2 Establish the categories
+
+- start from the game's own in-game achievement categories (visible in the Steam client)
+- where there is no clear division, judge by the game's mechanics
+- TrueAchievements and Steam community guides are worth consulting for how they divide it
+
+### [8.3] 8.3 Gather material
+
+- Steam community guides, in Chinese and English
 - TrueAchievements / PlayStationTrophies
-- wiki(Fandom Wiki 等)
-- 中文攻略站(3DM、游民星空、18183、doyo.cn、dvg.cn 等)
-- B站视频攻略(收集品类成就尤其适合)
-- NGA/贴吧中文社区讨论
-- 优先用信息密度高、有具体步骤的攻略
+- wikis (Fandom and others)
+- Chinese guide sites (3DM, Gamersky, 18183, doyo.cn, dvg.cn)
+- Bilibili video guides, particularly suited to collectible achievements
+- NGA and Tieba community discussion
+- prefer guides with high information density and concrete steps
 
-**大型 wiki 页面的抓取方式**:直接用 `WebFetch` 抓大页面容易被截断(观察到的现象,大概率是摘要模型 + 15 分钟缓存的限制导致的),改用 Browser pane 的 `get_page_text(max_chars=400000)`;内容量接近或超过这个上限,先存成文件再读,不要指望一次工具调用能拿到完整内容。
+**Fetching a large wiki page**: `WebFetch` on a large page is easily truncated (observed; most likely the summarising model plus a 15-minute cache). Use the Browser pane's `get_page_text(max_chars=400000)` instead, and where the content approaches or exceeds that ceiling, save it to a file and read it from there rather than expecting one tool call to return all of it.
 
-### 8.4 大型游戏:把匹配工作委托给子 agent
+### [8.4] 8.4 Large games: delegate the matching to a sub-agent
 
-成就数量多(100+)的游戏,"把每条 Steam 成就匹配到对应 wiki 条目、消化改写成攻略文字"这一步体量大、但对主对话没有额外的判断价值,适合委托给一个后台 sub-agent(sonnet 足够)去读完整 wiki 内容、逐条匹配、写攻略文字,不用在主对话里一条条做。**子 agent 交回结果前,应该自己先按规则九末尾的验证步骤检查一遍**,尤其是勾选状态是否跟 8.1 拿到的真实 `achieved` 数据一致——不要假设子 agent 的匹配和转写没有出错就直接交回。
-
----
-
-## 规则九:用 `notion-update-page` 写入/替换内容
-
-### 9.1 选对命令
-
-- **整页重写**(比如把内嵌数据库转成 checkbox 列表、从头换一版攻略):用 `replace_content`。原页面如果有内嵌数据库或其他块要清掉,必须带 `allow_deleting_content=true`,否则调用会报错拒绝执行。
-- **插入/追加**(比如开头加 `appid:` 行):用 `insert_content`,`position={"type":"start"}` 插到最前面,`{"type":"end"}` 追加到最后。
-- **局部精确替换**(比如给已有成就列表按 DLC 分组插入标题、修正个别 checkbox、改一两句攻略文字):用 `update_content` 的 `content_updates`,每条给 old_str/new_str 做精确匹配替换。比整页重新转录风险低得多——重新转录几十 KB 内容,出现转写错误的概率远高于对几个分组边界做定点插入。
-
-### 9.2 大内容分批写
-
-内容量接近单次调用的长度上限时,不要硬塞一次 `replace_content`,拆成 `replace_content` 打头 + 后续 `insert_content` 接着写完,避免内容被截断。
-
-### 9.3 写完之后的验证(不要假设调用成功=内容正确)
-
-- **checkbox 真的落地了**:重新 fetch 页面确认(规则一已经提过,这里是完整版)。
-- **勾选状态跟真实数据一致**:对照 8.1 从 `getAllAchievementsForGame`/`getUnlockedAchievements` 拿到的真实 `achieved` 布尔值,逐条核对,不要凭猜测或凭 wiki 描述判断解锁状态。
-- **分组标题落在了正确的成就前面**:如果做了按 DLC/分类分组,重新 fetch 确认每个标题插入的位置没有偏移。
-- **HTML-like 语法(如 `<details>`)有没有被转义**:Notion API 有时会把内容里的 `<`/`>` 原样转成字面文本 `&lt;`/`&gt;`,而不是真正生成对应的块——只有重新读取页面实际内容才能发现这个问题,不能假设写入的是自己发送的那段 markdown。
-- **原页面有 API 保留不了的内容,先跟用户说清楚再丢弃**:比如 bookmark 块,Notion API 有时只暴露一个自引用锚点、拿不到真实的目标 URL——发现这种"这块内容会被替换掉但救不回来"的情况,应该在操作前告知用户,而不是操作完之后才发现丢了。
+For a game with a great many achievements (100+), the step of matching each Steam achievement to its wiki entry and rewriting it as guide prose is bulky and adds no judgement the main conversation needs. It suits a background sub-agent (sonnet is enough) that reads the full wiki content, matches entry by entry and writes the prose, rather than being done one at a time in the main conversation. **Before it hands anything back, the sub-agent should run the verification at the end of rule 9 on its own output**, particularly whether the ticked state matches the real `achieved` data from 8.1 — do not assume its matching and rewriting came through clean.
 
 ---
 
-## 规则十:写完后自检清单
+## [rule-9] Rule 9: writing content with `notion-update-page`
 
-1. [ ] 每个成就都是独立的 `- [x]` / `- [ ]` checkbox 行?
-2. [ ] 没有任何合并行(如 `[x] A / [x] B / [x] C`)?
-3. [ ] 没有把整组成就写成纯文字总结?
-4. [ ] 开头只有 `appid: NNNNNN`,没有标题、统计、剧透警告、来源说明?
-5. [ ] 节标题里没有"共N个,M项未完成"之类的统计?
-6. [ ] 结尾没有"备注"/"参考来源"/"总结"段落?
-7. [ ] 没有"勾选状态来自Steam真实解锁数据"之类的数据来源说明?
-8. [ ] 没有"暂无中文翻译"/"推测"/"待确认"这类文档化备注?
-9. [ ] 长列表用 `<details><summary>` 折叠了?分组标签(前置/步骤/注意)和警告条目没占着 checkbox?
-       Notion 页用 `<details>`,本地 md 用 `- [ ]` 标签行。
-       折叠里装的是辅料而不是成就本身 —— 每个小节点开都直接看得见成就?
-10. [ ] 没有无意义的成就弹窗截图?
-11. [ ] 如果原始攻略有地图/UI 截图,跟着配了等价的图?
-12. [ ] 写完 fetch 页面验证了 checkbox 真的落地?
-13. [ ] 嵌套的子 checkbox 三个条件都满足(有身份、每行写得出做法、每条都要做)?删掉它们攻略会少信息?
-       反过来查一遍:**全收集类的成就有没有被写成一段笼统的话?** 每件东西入手方式不同的,
-       就该一件一行,长就折叠起来,而不是concat成"随进度逐步解锁"这种等于没写的句子。
-14. [ ] 互斥成就标注了冲突警告?
-15. [ ] 有背景/perk 要求的成就标注了前置条件?
-16. [ ] 勾选状态逐条核对过真实 `achieved` 数据,不是凭印象/wiki 描述判断的?
-17. [ ] 用了 `<details>` 等 HTML-like 语法的,重新 fetch 确认没有被转义成字面文本?
-18. [ ] 原页面有 API 保留不了的内容(如 bookmark 块)的,已经跟用户说清楚了?
+### [9.1] 9.1 Pick the right command
+
+- **Rewriting the whole page** (converting an embedded database into a checkbox list, replacing a guide wholesale): `replace_content`. Where the page holds an embedded database or other blocks to clear, `allow_deleting_content=true` is required or the call refuses.
+- **Inserting or appending** (adding the `appid:` line at the top): `insert_content`, with `position={"type":"start"}` for the top and `{"type":"end"}` to append.
+- **A targeted replacement** (inserting DLC group headings into an existing list, correcting individual checkboxes, changing a sentence or two): `update_content` with `content_updates`, each giving old_str/new_str for an exact match. Far lower risk than re-transcribing the page — re-transcribing tens of KB carries a much higher chance of a transcription error than inserting at a few group boundaries.
+
+### [9.2] 9.2 Write large content in batches
+
+Where the content approaches the per-call length limit, do not force it into one `replace_content`. Split it into a leading `replace_content` followed by `insert_content` calls, so nothing is truncated.
+
+### [9.3] 9.3 Verification afterwards — a successful call is not a correct page
+
+- **the checkboxes really landed**: fetch the page again and confirm (rule 1 mentions this; this is the full version)
+- **the ticked state matches the real data**: check entry by entry against the real `achieved` booleans from 8.1, never against a guess or a wiki's description
+- **group headings landed in front of the right achievements**: where grouping was done, fetch again and confirm no heading shifted
+- **HTML-like syntax (such as `<details>`) was not escaped**: Notion's API sometimes turns `<`/`>` in the content into the literal text `&lt;`/`&gt;` rather than producing the corresponding block, and only reading the page back reveals it. Never assume what landed is the markdown that was sent
+- **content the API cannot preserve is discussed before it is discarded**: a bookmark block, for instance, where the API sometimes exposes only a self-referencing anchor and not the real target URL. Where a block is going to be replaced and cannot be recovered, say so before the operation rather than discovering it afterwards
+
+---
+
+## [rule-10] Rule 10: the self-check list
+
+1. [ ] Is every achievement its own `- [x]` / `- [ ]` checkbox line?
+2. [ ] Are there no merged lines (`[x] A / [x] B / [x] C`)?
+3. [ ] Is no group of achievements written as a prose summary?
+4. [ ] Does the page open with `appid: NNNNNN` alone — no title, statistics, spoiler warning or note on sources?
+5. [ ] Do the section headings carry no counts?
+6. [ ] Is there no closing "notes" / "sources" / "summary" section?
+7. [ ] Is there nothing about where the ticked state came from?
+8. [ ] Are there no documentation-style asides — "no translation yet", "presumably", "to be confirmed"?
+9. [ ] Are long lists folded into `<details><summary>`? Are the group labels (prerequisite / steps / careful) and the warning entries kept off checkboxes?
+       Notion pages use `<details>`; local md uses a `- [ ]` label line.
+       Does each fold hold supporting material rather than the achievements themselves — is every section's achievements visible the moment it is opened?
+10. [ ] Are there no pointless achievement-popup screenshots?
+11. [ ] Where the source guide had map or UI screenshots, are there equivalent images?
+12. [ ] Was the page fetched again afterwards to confirm the checkboxes landed?
+13. [ ] Do the nested sub-checkboxes meet all three conditions (an identity, a method to state, every line required)? Does deleting them cost the guide information?
+       And check it from the other side: **has a complete-collection achievement been written as one vague sentence?** Where each item is obtained a different way, it is one line per item, folded if long, rather than concatenated into something like "unlocked gradually as you progress", which says nothing.
+14. [ ] Are conflicting achievements marked with the mutual-exclusion warning?
+15. [ ] Are achievements requiring a background or perk marked with their prerequisite?
+16. [ ] Was the ticked state checked entry by entry against the real `achieved` data, rather than judged from memory or from a wiki description?
+17. [ ] Where HTML-like syntax such as `<details>` was used, was the page fetched again to confirm it was not escaped into literal text?
+18. [ ] Where the original page held content the API cannot preserve (a bookmark block), was the user told?

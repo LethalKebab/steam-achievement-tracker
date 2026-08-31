@@ -1,25 +1,30 @@
 /**
- * 供应商 × 攻略生成的**接缝**测试
+ * The **seam** between providers and guide generation
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这个文件补的是一个真实存在的空洞:**`guidegen.js` 从来没有被真的供应商驱动过。**
+ * This file fills a hole that really existed: **`guidegen.js` had never been driven by a real
+ * provider.**
  *
- * `ai.test.js` / `ai-gemini.test.js` 测的是供应商自己(组装请求、拆流、判错),
- * `guidegen.test.js` 测的是编排,但它用的是手写的 `fakeProvider` —— 一个恰好实现了
- * 编排层当下会用到的那几个字段的桩。于是**两边各自都是绿的,而它们之间的约定谁也没验**:
- * 桩返回什么形状,是照着编排层写的,不是照着供应商写的。真供应商多一个字段、少一个
- * 字段、或者字段名不一样,749 个测试一个都不会红。
+ * `ai.test.js` / `ai-gemini.test.js` test the providers themselves (assembling the request,
+ * unpacking the stream, judging failures), and `guidegen.test.js` tests the orchestration — but
+ * with a hand-written `fakeProvider`, a stub that happens to implement the few fields the
+ * orchestration layer uses today. So **each side is green on its own while the contract between
+ * them is verified by nobody**: the shape the stub returns was written from the orchestration
+ * layer, not from the providers. A real provider with one field more, one field fewer, or a
+ * different field name turns not one of the 749 tests red.
  *
- * 这个空洞正好对着已经炸过一次的地方:web_fetch 成功被读成失败,**只在官方端点默认
- * 开着**,而所有实盘都跑在 DeepSeek 的兼容端点上,于是它一路跑到用户手上才炸。
- * 同一个形状的坑还在:官方端点是唯一会发 `thinking` / `output_config` / `fallbacks`
- * 的路径,而那条路径从来没有端到端跑过。
+ * That hole sits exactly over the place that has already blown up once: a successful web_fetch
+ * read as a failure, **on by default only on the official endpoint**, while every real run went
+ * through DeepSeek's compatible endpoint — so it reached the user before it blew up. A pit of
+ * the same shape is still there: the official endpoint is the only path that sends `thinking` /
+ * `output_config` / `fallbacks`, and that path has never run end to end.
  *
- * 所以这里走的是**真** `createProvider` → 真供应商 → 真 `createSession` → 真
- * `generateGuide`,只把 `fetch` 换掉,喂进各家**真实线格式**的字节。
+ * So this goes through the **real** `createProvider` → the real provider → the real
+ * `createSession` → the real `generateGuide`, swapping out only `fetch` and feeding in bytes in
+ * each vendor's **real wire format**.
  *
- * 全部离线:一个字节都不发出去,也不需要任何 API key。
+ * Entirely offline: not one byte goes out, and no API key is needed.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -32,7 +37,7 @@ import { createProvider } from '../lib/ai.js';
 import { generateGuide } from '../lib/guidegen.js';
 
 // ---------------------------------------------------------------------------
-// 脚手架
+// Scaffolding
 // ---------------------------------------------------------------------------
 
 const DEFS = [
@@ -50,9 +55,10 @@ function freshEnv(ai) {
   const db = openDb(':memory:');
   insertGame(db, { appid: '1', name: '测试游戏' });
   replaceAchievements(db, '1', DEFS.map(toRow));
-  // `effort` 的默认值住在 `lib/config.js` 的 DEFAULTS 里(没导出),供应商自己**没有**
-  // 默认值 —— `this.effort` 只在 `ai.effort` 有值时才成立。所以绕过 loadConfig 直接
-  // new 一个供应商,是拿不到那个旋钮的。这里显式写上,和 config.js 的默认保持一致
+  // The default for `effort` lives in `lib/config.js`'s DEFAULTS (not exported), and the
+  // providers themselves have **no** default — `this.effort` only holds when `ai.effort` has a
+  // value. So constructing a provider directly, bypassing loadConfig, does not get that knob.
+  // Written out explicitly here, matching the default in config.js
   return { db, config: { guidesDir: dir, ai: { maxAchievements: 100, maxRetries: 0, effort: 'high', ...ai } } };
 }
 
@@ -63,7 +69,7 @@ const fakeSteam = (unlocked = ['A']) => ({
   async fetchGlobalAchievementPercentages() { return null; },
 });
 
-/** 模型写的正文。两个成就各一个 checkbox,全是 `- [ ]` —— 打勾是程序的事 */
+/** The body the model writes. One checkbox per achievement, all `- [ ]` — ticking is the program's job */
 const BODY = [
   '```markdown',
   '## 主线',
@@ -73,7 +79,7 @@ const BODY = [
   '```',
 ].join('\n');
 
-/** 切成 7 字节一块:既拆开事件,也拆开多字节汉字 */
+/** Sliced into 7-byte chunks: this splits events apart and splits multi-byte characters apart too */
 function streamOf(text) {
   const bytes = new TextEncoder().encode(text);
   return (async function* () {
@@ -91,11 +97,12 @@ function fakeFetch(bodyFor) {
   return fn;
 }
 
-// --- Anthropic 的线格式 -----------------------------------------------------
+// --- The Anthropic wire format ----------------------------------------------
 
 /**
- * 一条真实形状的完整消息:先一次服务端搜索(带流式 JSON 入参),再一次**成功**的抓页
- * (它的 content 是**对象**,不是数组 —— 那正是炸到用户手上的那个形状),然后是正文。
+ * One complete message in its real shape: first a server-side search (with streaming JSON
+ * input), then a **successful** fetch (whose content is an **object**, not an array — exactly
+ * the shape that blew up in the user's hands), then the body.
  */
 const anthropicSse = (text) => [
   { type: 'message_start', message: { id: 'msg_1', model: 'claude-opus-5', usage: { input_tokens: 100, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } },
@@ -115,9 +122,9 @@ const anthropicSse = (text) => [
   .map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
   .join('');
 
-// --- Gemini 的线格式 --------------------------------------------------------
+// --- The Gemini wire format -------------------------------------------------
 
-/** 思考分片和正文在同一个 parts 数组里,只差一个 `thought: true` */
+/** Thought parts and prose share one parts array, separated only by `thought: true` */
 const geminiSse = (text) => [
   {
     candidates: [{
@@ -134,23 +141,25 @@ const geminiSse = (text) => [
   .join('');
 
 // ---------------------------------------------------------------------------
-// 三家都要能把同一份攻略走完整条流水线
+// All three vendors have to carry the same guide through the whole pipeline
 // ---------------------------------------------------------------------------
 
 /**
- * 三家的**产出必须逐字节相同** —— 攻略内容是模型写的,而这条流水线上其余的一切
- * (剥 markdown 围栏、拼段、写头、机械打勾、登记)都不该认识供应商是谁。
- * 任何一家在这里跑出不一样的结果,都是编排层漏了某家的形状。
+ * The three vendors' **output has to be byte-identical** — the guide content is written by the
+ * model, and everything else on this pipeline (stripping the markdown fence, joining segments,
+ * writing the header, mechanical ticking, registration) should not know which vendor is which.
+ * Any vendor producing a different result here means the orchestration layer missed that
+ * vendor's shape.
  */
 const CASES = [
-  { name: 'anthropic(官方端点)', ai: { provider: 'anthropic', apiKey: 'k' }, sse: anthropicSse },
-  { name: 'deepseek(Anthropic 兼容端点预设)', ai: { provider: 'deepseek', apiKey: 'k' }, sse: anthropicSse },
+  { name: 'anthropic (official endpoint)', ai: { provider: 'anthropic', apiKey: 'k' }, sse: anthropicSse },
+  { name: 'deepseek (Anthropic-compatible endpoint preset)', ai: { provider: 'deepseek', apiKey: 'k' }, sse: anthropicSse },
   { name: 'gemini', ai: { provider: 'gemini', apiKey: 'k' }, sse: geminiSse },
 ];
 
-describe('真供应商驱动整条流水线', () => {
+describe('a real provider driving the whole pipeline', () => {
   for (const c of CASES) {
-    test(`${c.name}:一轮过关、落盘、机械打勾、登记`, async () => {
+    test(`${c.name}: one round passes, lands, is mechanically ticked and registered`, async () => {
       const { db, config } = freshEnv(c.ai);
       const fetchImpl = fakeFetch(() => c.sse(BODY));
       const provider = await createProvider(config, { fetchImpl });
@@ -163,46 +172,53 @@ describe('真供应商驱动整条流水线', () => {
 
       assert.equal(r.ok, true, r.reason ?? '');
       assert.equal(r.rounds, 1);
-      assert.equal(fetchImpl.calls.length, 1, '两个成就只该发一次请求');
+      assert.equal(fetchImpl.calls.length, 1, 'two achievements should take exactly one request');
       assert.ok(existsSync(r.path));
 
       const text = readFileSync(r.path, 'utf8');
-      assert.match(text, /- \[x\] \*\*第一步\*\*/, '已解锁的要被机械打勾');
-      assert.match(text, /- \[ \] \*\*第二步\*\*/, '没解锁的不许勾');
+      assert.match(text, /- \[x\] \*\*第一步\*\*/, 'the unlocked one has to be mechanically ticked');
+      assert.match(text, /- \[ \] \*\*第二步\*\*/, 'the locked one must not be ticked');
       assert.match(text, /^# 测试游戏/);
       assert.match(text, /^appid: 1$/m);
-      assert.ok(!text.includes('```'), 'markdown 围栏必须剥掉');
+      assert.ok(!text.includes('```'), 'the markdown fence has to be stripped');
 
       assert.equal(allGuides(db).length, 1);
       assert.ok(r.registered);
 
-      // **「能搜 ≠ 搜了」是这套准入设计的关键读数**,而它要穿过供应商 → session →
-      // 编排层三层才到得了调用方。桩不返回这个字段,所以此前没有任何测试覆盖它。
-      // **收尾报表这一路三家是齐的**;实时进度不是,见下面那条
+      // **"can search ≠ did search" is the key reading of this admission design**, and it has to
+      // cross three layers — provider → session → orchestration — to reach the caller. The stub
+      // does not return this field, so nothing covered it before.
+      // **The closing report is consistent across all three**; the live progress is not, see the
+      // case below
       assert.deepEqual(r.searchQueries, ['测试游戏 成就']);
-      assert.ok(events.some((e) => e.phase === 'tool'), '联网工具至少要变成一条进度事件');
+      assert.ok(events.some((e) => e.phase === 'tool'), 'a web tool has to become at least one progress event');
     });
   }
 
   /**
-   * **进度事件的归一化只做了一半,而这半边是三家里唯二的行为差异。**
+   * **Progress-event normalisation is only half done, and this half is one of the only two
+   * behavioural differences among the three vendors.**
    *
-   * `ai.js` 顶上写着「进度事件也归一化(text / tool / tool-result / search),CLI 的
-   * 实时输出和 guidegen 的进度条因此不认识任何一家的原始格式」。`search` 这一档
-   * **只有 Gemini 在发**:它的 `groundingMetadata.webSearchQueries` 在每个 chunk 里
-   * 都重复出现,所以边流边报得出查询词。Anthropic 那边查询词是 `server_tool_use` 块的
-   * **流式 JSON 入参**,`content_block_start` 的时候还没到,于是 `emitProgress` 只发得出
-   * `{type:'tool', name:'web_search'}` —— 一个原始的、英文的线格式工具名,直接进了
-   * 进度条。
+   * The top of `ai.js` says progress events are normalised too (text / tool / tool-result /
+   * search), so the CLI's live output and guidegen's progress bar know no vendor's raw format.
+   * The `search` case is **emitted only by Gemini**: its
+   * `groundingMetadata.webSearchQueries` repeats in every chunk, so the query can be reported
+   * while streaming. On Anthropic the query lives in the `server_tool_use` block's **streaming
+   * JSON input**, which has not arrived at `content_block_start`, so `emitProgress` can only
+   * emit `{type:'tool', name:'web_search'}` — a raw, English, wire-format tool name that goes
+   * straight into the progress bar.
    *
-   * 后果两条,都不报错:跑 Claude / DeepSeek 时进度条上滚的是 `web_search` 而不是
-   * 「搜索「怎么拿到XX成就」」,**并且看不出模型在搜什么**;而同一个界面在 Gemini 上
-   * 是中文加查询词。收尾的 `searchQueries` 三家一致,所以事后报表看不出这个差。
+   * Two consequences, neither of which raises an error: running Claude / DeepSeek scrolls
+   * `web_search` past the progress bar rather than a searching-for line, **and gives no way to
+   * see what the model is searching for**; while the same interface on Gemini shows the query.
+   * The closing `searchQueries` is consistent across all three, so an after-the-fact report
+   * cannot reveal this difference.
    *
-   * 这里钉的是**当下真实的行为**,不是应该的行为 —— 改 `emitProgress` 让 Anthropic 也
-   * 在 `content_block_stop` 时补一条 `search` 事件是另一件事,改完把这条测试翻过来。
+   * What is pinned here is **current real behaviour**, not what it ought to be — changing
+   * `emitProgress` so Anthropic also emits a `search` event at `content_block_stop` is a
+   * separate matter, and this test gets inverted when that happens.
    */
-  test('实时搜索词只有 gemini 报得出,anthropic 系报的是原始工具名', async () => {
+  test('only gemini can report a live search query; the anthropic family reports the raw tool name', async () => {
     const seen = {};
     for (const c of CASES) {
       const { db, config } = freshEnv(c.ai);
@@ -214,11 +230,11 @@ describe('真供应商驱动整条流水线', () => {
       seen[c.ai.provider] = events.filter((e) => e.phase === 'tool').map((e) => e.name);
     }
     assert.deepEqual(seen.gemini, ['搜索「测试游戏 成就」']);
-    assert.deepEqual(seen.anthropic, ['web_search'], '线格式的工具名漏进了进度条');
-    assert.deepEqual(seen.deepseek, ['web_search'], '和 anthropic 同一个类,同一个行为');
+    assert.deepEqual(seen.anthropic, ['web_search'], 'a wire-format tool name leaked into the progress bar');
+    assert.deepEqual(seen.deepseek, ['web_search'], 'the same class as anthropic, so the same behaviour');
   });
 
-  test('三家产出的攻略正文逐字节相同', async () => {
+  test('the guide body the three vendors produce is byte-identical', async () => {
     const texts = [];
     for (const c of CASES) {
       const { db, config } = freshEnv(c.ai);
@@ -226,41 +242,43 @@ describe('真供应商驱动整条流水线', () => {
       const r = await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
       texts.push(readFileSync(r.path, 'utf8'));
     }
-    assert.equal(texts[0], texts[1], 'anthropic 和 deepseek 预设走的是同一个类,不该有差');
-    assert.equal(texts[0], texts[2], 'gemini 的产出和 anthropic 不一致 —— 编排层认出了供应商');
+    assert.equal(texts[0], texts[1], 'the anthropic and deepseek presets go through the same class and should not differ');
+    assert.equal(texts[0], texts[2], 'gemini output differs from anthropic — the orchestration layer recognised the vendor');
   });
 
   /**
-   * **模型没写 markdown 围栏的时候,思考分片才真的会落进文件。**
+   * **Thought parts only really land in the file when the model writes no markdown fence.**
    *
-   * 这条测试的第一版用的是带围栏的 BODY,于是它**永远是绿的**:`extractMarkdown`
-   * 只取围栏里的那一段,思考在围栏外,怎么漏都到不了文件。变异验证当场发现了 ——
-   * 把 `ai-gemini.js` 里的 `if (p?.thought)` 改成恒假,9 个测试照样全绿。
+   * The first version of this test used the fenced BODY, which made it **permanently green**:
+   * `extractMarkdown` takes only what is inside the fence, the thoughts are outside it, and no
+   * amount of leaking reaches the file. Mutation testing found it immediately — turning
+   * `if (p?.thought)` in `ai-gemini.js` into a constant false left all 9 tests green.
    *
-   * 而围栏不是保证:`extractMarkdown` 自己就留着「一个围栏都没有 ⇒ 整段当正文」这条
-   * 兜底。两件事一叠加,思考过程就写进了用户的攻略,而**校验器抓不到** —— 那几行
-   * 既不是 checkbox 也不违反任何规则。所以这里故意不发围栏。
+   * And a fence is no guarantee: `extractMarkdown` itself keeps a "no fence at all ⇒ treat the
+   * whole thing as body" fallback. Stack those two and the chain of thought is written into the
+   * user's guide while **the validator cannot catch it** — those lines are neither checkboxes
+   * nor a violation of any rule. So no fence is sent here on purpose.
    */
-  test('gemini 的思考分片不能混进攻略文件(模型没写围栏时)', async () => {
+  test('gemini thought parts must not get into the guide file (when the model writes no fence)', async () => {
     const bare = BODY.replace(/^```markdown\n/, '').replace(/\n```$/, '');
-    assert.ok(!bare.includes('```'), '这条测试的前提就是没有围栏,有围栏它验不到东西');
+    assert.ok(!bare.includes('```'), 'the premise of this test is that there is no fence; with one it verifies nothing');
 
     const { db, config } = freshEnv({ provider: 'gemini', apiKey: 'k' });
     const provider = await createProvider(config, { fetchImpl: fakeFetch(() => geminiSse(bare)) });
     const r = await generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1' });
 
     const text = readFileSync(r.path, 'utf8');
-    assert.match(text, /- \[ \] \*\*第二步\*\*/, '正文本身要照常落盘');
-    assert.ok(!text.includes('先查一下'), '模型的思考过程被写进了用户的攻略');
+    assert.match(text, /- \[ \] \*\*第二步\*\*/, 'the body itself still has to land');
+    assert.ok(!text.includes('先查一下'), 'the model chain of thought was written into the user guide');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 官方端点专属的那几个字段 —— 唯一一条没有实盘跑过的路径
+// The fields exclusive to the official endpoint — the one path no real run has exercised
 // ---------------------------------------------------------------------------
 
-describe('官方 Anthropic 端点发出去的请求', () => {
-  /** 跑一轮,把真正发出去的那个请求体和请求头拿回来 */
+describe('the request sent to the official Anthropic endpoint', () => {
+  /** Run one round and hand back the request body and headers actually sent */
   async function capture(ai) {
     const { db, config } = freshEnv(ai);
     const fetchImpl = fakeFetch(() => anthropicSse(BODY));
@@ -269,38 +287,38 @@ describe('官方 Anthropic 端点发出去的请求', () => {
     return fetchImpl.calls[0];
   }
 
-  test('两个联网工具都声明,而且是 _20260209 那一版', async () => {
+  test('both web tools are declared, and at the _20260209 version', async () => {
     const { body } = await capture({ provider: 'anthropic', apiKey: 'k' });
     assert.deepEqual(
       body.tools.map((t) => t.type),
       ['web_search_20260209', 'web_fetch_20260209'],
-      'web_fetch 只在官方端点默认开 —— 它成功时的形状曾经被读成失败,那个 bug 就藏在这条路径上'
+      'web_fetch is on by default only on the official endpoint — its success shape was once read as a failure, and that bug hid on this path'
     );
     assert.ok(
       !body.tools.some((t) => /code_execution/.test(t.type)),
-      '_20260209 自带动态过滤,再声明 code_execution 会让模型看到两个执行环境'
+      '_20260209 carries dynamic filtering, so declaring code_execution as well shows the model two execution environments'
     );
   });
 
-  test('thinking / output_config / fallbacks 三个字段各发各的', async () => {
+  test('thinking / output_config / fallbacks are each sent on their own terms', async () => {
     const { body, headers } = await capture({ provider: 'anthropic', apiKey: 'k' });
     assert.deepEqual(body.thinking, { type: 'adaptive' });
-    assert.ok(!('budget_tokens' in body.thinking), 'budget_tokens 在官方端点是 400,在兼容端点更糟(200 但反向)');
+    assert.ok(!('budget_tokens' in body.thinking), 'budget_tokens is a 400 on the official endpoint, and worse on the compatible one (200, but inverted)');
     assert.deepEqual(body.output_config, { effort: 'high' });
     assert.equal(body.fallbacks, 'default');
     assert.equal(
       headers['anthropic-beta'], 'server-side-fallback-2026-07-01',
-      'scalar 形态的 fallbacks 配 -2026-07-01;和数组形态的 -2026-06-01 配错会 400'
+      'the scalar form of fallbacks pairs with -2026-07-01; pairing it with the array form -2026-06-01 is a 400'
     );
-    assert.equal(body.stream, true, 'max_tokens 管的是 thinking + 正文,不流式会先撞 HTTP 超时');
+    assert.equal(body.stream, true, 'max_tokens caps thinking plus prose, so without streaming the HTTP timeout comes first');
   });
 
-  test('兼容端点上这三个字段的命运不一样,不能捆在一个开关上', async () => {
+  test('these three fields have different fates on the compatible endpoint and cannot ride one switch', async () => {
     const { body, headers } = await capture({ provider: 'deepseek', apiKey: 'k' });
-    assert.equal(body.thinking, undefined, '兼容端点默认不发 thinking');
-    assert.deepEqual(body.output_config, { effort: 'high' }, 'DeepSeek 的 /anthropic 实测认得 effort —— 唯一有效的那个旋钮');
+    assert.equal(body.thinking, undefined, 'the compatible endpoint does not send thinking by default');
+    assert.deepEqual(body.output_config, { effort: 'high' }, 'DeepSeek /anthropic is measured to understand effort — the one knob that has any effect');
     assert.equal(body.fallbacks, undefined);
     assert.equal(headers['anthropic-beta'], undefined);
-    assert.deepEqual(body.tools.map((t) => t.type), ['web_search_20260209'], '兼容端点声明 web_fetch 会整个请求 400');
+    assert.deepEqual(body.tools.map((t) => t.type), ['web_search_20260209'], 'declaring web_fetch on the compatible endpoint 400s the whole request');
   });
 });

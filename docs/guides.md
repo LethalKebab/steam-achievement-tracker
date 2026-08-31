@@ -18,7 +18,7 @@ Those pages live in a Notion **database**, not a plain page. The tool reads it w
 
 Already have a database you want to use? Run `node tracker.js init --notion` instead and paste its ID: open the database as a full page and take the 32-character hex string from the URL, the part *before* `?v=` (that part is the view ID, not the database).
 
-In the packaged app, step 3 is the **④ Notion 攻略同步** section of the setup page — reachable on first run, and afterwards from the **设置** button on the Dashboard. It has the same **帮我建一个** flow, and the same manual field if you already have a database. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
+In the packaged app, step 3 is the **第 3 步 · Notion 攻略同步** section of the setup page — reachable on first run, and afterwards from the **设置** button on the Dashboard. It has the same **新建一个攻略数据库** flow, and the same manual field if you already have a database. Leaving the secret blank there keeps whatever is already saved rather than clearing it.
 
 ### What the database needs
 
@@ -45,7 +45,7 @@ node tracker.js guides --notion   # finds pages not yet registered and links the
 
 `notion-check` exists because every failure on this path looks like every other one: a bad token, an ID that isn't a database, a database that was never shared, a status option that's missing.
 
-**The setup page runs the same check when you connect a database**, so you do not have to know this command exists to find out your database is unusable. Pasting an ID validates the whole schema, not just that the ID resolves; anything wrong is reported there and then, with a 帮我补上 button when it is the kind of problem the program can fix. It also creates one page and immediately archives it — that is the only way to tell a read-only connection from a working one, and a read-only token otherwise passes every check and fails at the first `guide-gen`.
+**The setup page runs the same check when you connect a database**, so you do not have to know this command exists to find out your database is unusable. Pasting an ID validates the whole schema, not just that the ID resolves; anything wrong is reported there and then, with a 帮我补上 or 套用 button when it is the kind of problem the program can fix. It also creates one page and immediately archives it — that is the only way to tell a read-only connection from a working one, and a read-only token otherwise passes every check and fails at the first `guide-gen`.
 
 Appending options writes to your database, so it only ever happens from a button or `--fix`, never silently on save. Existing options are carried over untouched; nothing is renamed or removed. Measured against the live API: a status property missing `Staged` has it added, and the existing options keep their colours. Whether it worked is still decided by reading the database back afterwards rather than by the API's response code, because Notion accepts *some* status-property edits with a 200 and changes nothing (option *groups* behave that way), and a repair that lies about succeeding is worse than one that admits it cannot. If that ever happens you get told exactly which options to add by hand.
 
@@ -311,7 +311,7 @@ the dialog: adjacent rows here often differ only by a timestamp, so moving the q
 from the row it is about is exactly the wrong thing to do. An armed button stays armed until
 you click elsewhere, press Escape, or close the panel — it does not time out.
 
-### Settings → Step 4 → 攻略备份
+### 设置 → 第 4 步 → 攻略备份
 
 The same files, sorted **biggest first**, with 查看 and 删除 — plus a **全部删除** at the foot
 of the list. This view answers a different question — what is taking up space, since every

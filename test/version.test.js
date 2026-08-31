@@ -1,28 +1,34 @@
 /**
- * 版本号只有一个 —— 三处必须相等
+ * There is only one version number — three places have to agree
  * ------------------------------------------------
- * 这个仓库里写着版本号的地方有三个:根 `package.json`、`launcher/package.json`、
- * 以及 `launcher/package-lock.json`(它自己写两遍)。**只有 launcher 那个有运行时
- * 读者** —— `app.getVersion()` 和 `postbuild.js` 都读它,zip 和清单的文件名由它拼,
- * tag 也必须等于它。另外两个没有任何代码会读。
+ * Three places in this repository carry a version: the root `package.json`,
+ * `launcher/package.json`, and `launcher/package-lock.json` (which writes it twice).
+ * **Only the launcher one has a runtime reader** — `app.getVersion()` and `postbuild.js`
+ * both read it, the zip and manifest file names are assembled from it, and the tag has to
+ * equal it. Nothing reads the other two.
  *
- * 没人读的号就是会漂的号,而漂了不出声:
+ * A number nobody reads is a number that drifts, and it drifts silently:
  *
- * 1. **根的那个会被打包带走。** `extraResources` 把它复制成
- *    `resources/tracker/package.json`,那是用户在自己磁盘上**唯一**能读到
- *    「我这份 tracker 代码是哪一版」的地方。它错了不会报错,只会把一次排查带偏 ——
- *    2026-08-14 就发生过一次:一份 1.1.2 的 bug 报告,因为两个计数器看起来像两个
- *    独立的事实,多花了一轮才定位到「报告的人根本没在跑 1.1.2 的代码」。
- * 2. **锁文件那两处由 `npm install --package-lock-only` 补**,漏了这一步构建照样
- *    成功:zip 用一个号命名,锁文件里躺着另一个号,没有任何环节会红。
+ * 1. **The root one is carried into the package.** `extraResources` copies it as
+ *    `resources/tracker/package.json`, which is the **only** place a user can read on their
+ *    own disk to learn "which version of the tracker code do I have". Getting it wrong
+ *    raises no error and merely sends an investigation off course — which happened once on
+ *    2026-08-14: a bug report against 1.1.2 took an extra round to trace, because the two
+ *    counters looked like two independent facts, before establishing that the reporter was
+ *    not running 1.1.2's code at all.
+ * 2. **The two places in the lock file are filled in by `npm install --package-lock-only`**,
+ *    and skipping that step still builds successfully: the zip is named with one number
+ *    while another sits in the lock file, and nothing anywhere goes red.
  *
- * 这三处以前是**故意**分成两个计数器的(tracker 2.x / app 1.x,理由见
- * `launcher/README.md` 的「Cutting a release」)。四个 release 下来两个号一直是
- * 同步 bump 的,第二个号从来没携带过信息,所以 2026-08-14 合并成一个。
+ * These three used to be **deliberately** split into two counters (tracker 2.x / app 1.x,
+ * the reasoning is in "Cutting a release" in `launcher/README.md`). Across four releases
+ * the two were always bumped together and the second one never carried any information, so
+ * they were merged into one on 2026-08-14.
  *
- * **这个文件够不着的那一半:git tag。** 测试看不见 tag,所以「tag 等于 launcher
- * 的版本号」仍然只能靠发布清单里那一步人工保证。这里能做的是保证**仓库内部**先自洽,
- * 这样清单上就只剩一个号要对。
+ * **The half this file cannot reach: the git tag.** A test cannot see the tag, so "the tag
+ * equals the launcher's version" still has to be guaranteed by hand at that step in the
+ * release checklist. What can be done here is making **the repository internally**
+ * consistent first, leaving only one number for the checklist to match.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,49 +41,51 @@ const launcher = readJson('../launcher/package.json');
 const lock = readJson('../launcher/package-lock.json');
 
 /**
- * 基准是 launcher 的 —— 不是随便挑的:它是唯一有运行时读者的那个,
- * 也是 zip 名、清单名和 tag 必须匹配的那个。另外两个是跟随者。
+ * The launcher's is the reference, and not arbitrarily: it is the only one with a runtime
+ * reader, and the one the zip name, the manifest name and the tag have to match. The other
+ * two follow it.
  */
 const expected = launcher.version;
 
-describe('版本号对齐', () => {
-  test('launcher 的版本号是三段式,没有 v 前缀也没有空白', () => {
-    // postbuild.js 拿它拼文件名(`SteamAchievementTracker-<version>-win.zip`),
-    // 混进一个 `v` 或者尾随空格,产出的文件名就和 tag 对不上 —— 而这在构建时不报错。
+describe('version alignment', () => {
+  test('the launcher version is three-part, with no v prefix and no whitespace', () => {
+    // postbuild.js assembles file names from it
+    // (`SteamAchievementTracker-<version>-win.zip`), and a stray `v` or trailing space makes
+    // the produced file name disagree with the tag — which raises no error at build time.
     assert.match(
       expected,
       /^\d+\.\d+\.\d+$/,
-      `launcher/package.json 的 version 是 ${JSON.stringify(expected)},应该是纯三段式`
+      `launcher/package.json's version is ${JSON.stringify(expected)}, and should be plain three-part`
     );
   });
 
-  test('根 package.json 和 launcher 同号', () => {
+  test('the root package.json matches the launcher', () => {
     assert.equal(
       root.version,
       expected,
-      `根 package.json 是 ${root.version},launcher 是 ${expected}。` +
-        '两处必须相同 —— 根那份会被打包成 resources/tracker/package.json,' +
-        '是用户能读到的唯一版本号。'
+      `the root package.json is ${root.version} while the launcher is ${expected}. ` +
+        'The two have to match — the root one is packaged as resources/tracker/package.json ' +
+        'and is the only version number a user can read.'
     );
   });
 
-  test('锁文件顶层和 launcher 同号', () => {
+  test('the lock file\'s top level matches the launcher', () => {
     assert.equal(
       lock.version,
       expected,
-      `launcher/package-lock.json 顶层是 ${lock.version},应为 ${expected}。` +
-        '在 launcher/ 里跑 `npm install --package-lock-only`。'
+      `launcher/package-lock.json's top level is ${lock.version}, expected ${expected}. ` +
+        'Run `npm install --package-lock-only` inside launcher/.'
     );
   });
 
-  test('锁文件里根包条目和 launcher 同号', () => {
-    // 锁文件把自己的版本号写两遍,`packages[""]` 是第二处。只对齐顶层
-    // 会留下一个半修好的锁文件,而它同样不出声。
+  test('the lock file\'s root package entry matches the launcher', () => {
+    // The lock file writes its own version twice, and `packages[""]` is the second place.
+    // Aligning only the top level leaves a half-fixed lock file, which is likewise silent.
     assert.equal(
       lock.packages?.['']?.version,
       expected,
-      `launcher/package-lock.json 的 packages[""] 是 ${lock.packages?.['']?.version},应为 ${expected}。` +
-        '在 launcher/ 里跑 `npm install --package-lock-only`。'
+      `launcher/package-lock.json's packages[""] is ${lock.packages?.['']?.version}, expected ${expected}. ` +
+        'Run `npm install --package-lock-only` inside launcher/.'
     );
   });
 });

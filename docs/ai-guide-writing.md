@@ -1,704 +1,502 @@
-# AI 攻略生成
+# AI guide generation
 
-这份文档记的是**为什么是现在这样**,以及**哪些做法已经被排除掉了**。动手改之前先读一遍,
-不要重新推导 —— 下面每一条都付过代价。
+This document records **why it is the way it is** and **which approaches have already been excluded**. Read it before changing anything and do not re-derive — every line below was paid for.
 
-## 要解决什么
+Prompt text and UI strings are quoted verbatim in Chinese, because that is what the code actually sends and shows.
 
-写一份攻略原本必须经过一次 Claude Code 会话:拉 Steam 成就数据、查 wiki、逐条消化改写、
-写进 Notion、再回读验证(完整流程见 `.claude/skills/achievement-guide-writing/SKILL.md`)。
-目标是让**用这个应用的人自己**用他们自己的 AI API key 生成攻略,不必经过某一次对话。
+## What this solves
 
-## 已定的决策
+Writing a guide used to require a Claude Code session: pull the Steam achievement data, read wikis, digest and rewrite entry by entry, write it into Notion, then read it back to verify (the full procedure is in `.claude/skills/achievement-guide-writing/SKILL.md`). The goal is to let **the people using this app** generate guides with their own AI API key, without going through a conversation.
 
-| | 决定 | 为什么 |
+## Settled decisions
+
+| | Decision | Why |
 |---|---|---|
-| 面向谁 | 打包进 app,给用户用 | 不是只给作者的 CLI 工具 |
-| 联网研究 | **用供应商自带的服务端搜索** | 自建「搜索 API + 抓页 + HTML→文本」是整个方案里最大的一块;供应商自带的话这块归零 |
-| 供应商 | 「有服务端搜索」是**硬性准入** | 混进一家没有搜索的,会让质量取决于用户选了谁,而用户看不出这个差别 |
-| 质量目标 | 成品,不是初稿 | 靠机器闸门达成,不是靠「让模型写得更好」 |
-| 规模 | **分段写,上限 500** | 真正的约束不是清单装不下(清单很小),是**正文写不了那么长** —— 400 个成就约六万字,超过任何一家的单次输出上限,而且超了不报错,只表现为「后半段的成就都缺 checkbox」 |
-| 输出后端 | **Notion 连着就写 Notion,`--local` 才写本地** | 用户手写的攻略都在 Notion,机器写的落在别处 = 一套笔记劈成两处。转换器只需要覆盖**我们自己生成的**那几种块,不是通用 markdown 转换器 |
-| 落盘闸门 | **按可逆性分,不按后端分**:新建 = 机器闸门过了就自动写;覆盖 = 必须人工确认 | 加后端时不用重写规则,新后端自然落进「不可逆」那一档 |
-| 花钱 | **只有运行前确认 + 跑完报 token 数**,没有金额、没有上限 | 上限本身要靠一个估不准的金额。DeepSeek / Gemini 没有可信单价,**服务端搜索怎么计费从头到尾没测过**。**一个不可信的上限比没有上限更糟:它看着像防护,实际什么都没防。** 要做回来,先去把搜索计费测出来 |
-| 勾选状态 | **模型一律只写 `- [ ]`,生成完由我们按数据库机械打勾** | 让「勾选状态必须等于真实 achieved」从「要检查的东西」变成结构上不可能违反 |
-| 解锁状态 | **不喂给模型** | 上一条的推论。也更符合 SKILL.md 3.1:攻略是「怎么打过的」记录,不是「还剩什么没做」的清单 |
-| 不过关 | 最多 3 轮修改;仍不过就**留成草稿**,报告哪几条没过 | 丢弃等于烧掉钱和时间还什么都不留;而「哪条没过」本身有信息量 |
-| 重写已有 | 允许,但必须备份 + diff 预览 + 人工确认 | |
-| 重写的粒度 | 整篇之外还有 **`--only`,只重写点名的那几条** | 整篇重写有两个和「写得好不好」无关的代价:**用户手改过的段落和手动勾上的子步骤框全部作废**,以及已经写对的部分被重新掷一次骰子。判据不是省钱,是**保住没被点名的那部分**,而这件事必须由程序保证(按行号 / 块 id 贴回),不能靠「叫模型别动别的」 |
-| 中断 | 已完成部分存草稿 | 每写完一段就落盘,见下 |
+| Audience | Packaged into the app, for users | Not a CLI tool for the author alone |
+| Web research | **Use the vendor's own server-side search** | Building "search API + page fetch + HTML→text" is the single biggest piece of the whole design; with a vendor's own tools that piece drops to zero |
+| Providers | "Has server-side search" is a **hard admission requirement** | Letting one without search in makes quality depend on which vendor the user picked, and the user cannot see that difference |
+| Quality target | A finished product, not a first draft | Achieved through machine gates, not by "making the model write better" |
+| Scale | **Written in shards, ceiling 500** | The real constraint is not that the list doesn't fit (the list is small), it's that **the prose doesn't** — 400 achievements is roughly 60,000 characters, past every vendor's single-response ceiling, and exceeding it doesn't error: it just looks like "every achievement in the second half is missing a checkbox" |
+| Output backend | **Notion when connected; `--local` to opt out** | The user's hand-written guides are all in Notion, so landing machine-written ones elsewhere splits one set of notes across two places. The converter only has to cover the block types **we generate**, not general markdown |
+| Landing gate | **Split by reversibility, not by backend**: new = written automatically once the machine gates pass; overwrite = requires human confirmation | Adding a backend needs no rule rewrite — a new backend naturally lands in the "irreversible" tier |
+| Spending | **Only a pre-run confirmation plus a token count afterwards** — no amounts, no caps | A cap needs an amount it cannot estimate honestly. There is no trustworthy price for DeepSeek or Gemini, and **how server-side search is billed has never been measured, start to finish**. **An untrustworthy cap is worse than no cap: it looks like protection while protecting nothing.** To bring it back, go measure search billing first |
+| Checked state | **The model only ever writes `- [ ]`; we tick mechanically from the database afterwards** | Turns "checked state must equal real `achieved`" from something to be checked into something structurally impossible to violate |
+| Unlock state | **Not fed to the model** | A corollary of the previous row. It also fits SKILL.md 3.1: a guide is a record of *how the game was played*, not a list of what's left |
+| Failing the gate | At most 3 rewrite rounds; still failing ⇒ **keep it as a draft** and report which entries failed | Discarding burns the money and the time and leaves nothing; and "which entry failed" carries information |
+| Overwriting | Allowed, but requires a backup + diff preview + human confirmation | |
+| Rewrite granularity | Beyond whole-guide there is **`--only`, rewriting just the named entries** | A full rewrite has two costs unrelated to writing quality: **every hand-edited passage and every hand-ticked sub-step box is voided**, and the parts that were already right get re-rolled. The criterion is not saving money, it is **preserving what wasn't named** — and that has to be guaranteed by the program (splicing back by line number / block id), never by "telling the model not to touch the rest" |
+| Interruption | Completed parts are kept as a draft | The draft is written after every shard, see below |
+| Language | **A generated guide follows the interface language**, and changing an existing guide's language is done by switching the interface and pressing 「重写」 | One guide per game, so a separate "generate in English" action would be a second button spending the same money on the same guide. See the section below |
 
-## 能保证什么,不能保证什么
+## What is guaranteed and what is not
 
-这是整份设计最重要的一段,UI 上必须如实告诉用户。
+This is the most important section in the design, and the UI must state it honestly.
 
-**机器能验(全部对着本地真实数据):** 每个成就都有独立 checkbox 行 · 没有合并行 ·
-勾选状态等于真实 `achieved` · **描述是不是原文照抄**(直接和 `achievements.description`
-比对)· 重名成就有没有抄描述 · 本地 md 有 `# 游戏名` 那行 · 节标题没有「共 N 个」统计 ·
-没有「数据来源」说明。
+**Machine-verifiable (all against real local data):** every achievement has its own checkbox line · no merged lines · checked state equals real `achieved` · **whether the description is copied verbatim** (compared directly against `achievements.description`) · whether same-named achievements quoted their descriptions · the local md carries the `# 游戏名` line · section headings carry no 「共 N 个」 counts · no "data source" note.
 
-**机器验不了:攻略内容对不对。** 步骤是否可行、难度评级准不准、「易错过」标注是否属实、
-互斥关系是否真实 —— 而这正是攻略的全部价值。
+**Not machine-verifiable: whether the guide's content is correct.** Whether the steps work, whether the difficulty ratings are right, whether the "easy to miss" flags are true, whether the mutual-exclusion relationships are real — and that is the entire value of a guide.
 
-所以这套东西保证的是「**格式和数据一定正确**」,不是「**攻略正确**」。UI 必须写明内容未经验证。
-强制模型给出来源 URL 让人抽查:**已决定不做**。
+So what this system guarantees is **"the format and the data are correct"**, not **"the guide is correct"**. The UI must say the content is unverified. Forcing the model to supply source URLs for spot-checking: **decided against.**
 
-**为什么这件事必须较真:** `audit` 实测过一批已勾选的框反查不出来,原因全是攻略把官方描述
-改写了 —— 而改写描述恰恰是 LLM 无监督生成时必然会做的事。没有这道闸门,这个功能就是在
-稳定地污染匹配系统,而那套匹配规则是踩了三轮假阳性才调准的。
+**Why this has to be taken seriously:** `audit` measured a batch of already-ticked boxes that could not be reverse-resolved, and every cause was the guide having paraphrased the official description — which is exactly what an LLM does by default when generating unsupervised. Without this gate the feature would be steadily poisoning the matching system, and those matching rules took three rounds of false positives to get right.
 
-## 架构
+## Architecture
 
 ```
-lib/ai.js         供应商抽象:请求组装、tool-call 循环、usage 统计。各家的请求结构、
-                  工具定义格式、返回体、错误码都不一样,这层就是为了把差异关在里面
-lib/ai-anthropic.js  Anthropic 的请求格式、块拼装、pause_turn 续跑
-lib/ai-gemini.js     Gemini 的请求格式、chunk 拼装、grounding
-lib/guidegen.js   编排:取成就数据 → 调模型研究+撰写 → 机械打勾 → 交给校验器 →
-                  不过就把具体错误回灌重写(最多 3 轮)→ 落盘
-lib/guidepatch.js 局部重写(`--only`)。**另一条路,不是 generateGuide 的分支**
-lib/guidelint.js  校验器,复用 guides.js / markdown.js 里现成的东西,不重写
+lib/ai.js         Provider abstraction: request assembly, the tool-call loop, usage accounting.
+                  Every vendor differs in request structure, tool declaration format, response
+                  body and error codes; this layer exists to keep those differences inside it
+lib/ai-anthropic.js  Anthropic's request format, block assembly, pause_turn continuation
+lib/ai-gemini.js     Gemini's request format, chunk assembly, grounding
+lib/guidegen.js   Orchestration: fetch achievement data → research + write → mechanical ticking →
+                  hand to the linter → feed specific errors back and rewrite (max 3 rounds) → land
+lib/guidepatch.js Partial rewrite (`--only`). **A separate path, not a branch in generateGuide**
+lib/guidelint.js  The linter, reusing what guides.js / markdown.js already have rather than rewriting it
 ```
 
-服务端的长任务照抄 `lib/server.js` 里 `startBackgroundSync` 那一套:**一个函数、一处并发
-保护、进度靠轮询**。不要为它另起一套状态机 —— 同步那边的教训是两个入口就会有两份并发保护。
+Long server-side jobs copy `startBackgroundSync` in `lib/server.js`: **one function, one concurrency guard, progress by polling.** Do not build a second state machine for this — the lesson from the sync side is that two entry points means two concurrency guards.
 
-### 草稿绝对不能放进 `guides/`
+### Drafts must never go into `guides/`
 
-`syncGuidesFromMarkdown` 会扫 `guides/*.md`,**把任何带 `appid:` 行的文件登记进 guides 表**。
-没过闸门的草稿放在那儿会被自动登记,然后 `checkbox-sync` 就开始拿一份没验过的攻略去勾
-用户的框 —— 正是这套设计明令禁止的事。
+`syncGuidesFromMarkdown` scans `guides/*.md` and **registers any file carrying an `appid:` line into the guides table**. A draft that hasn't passed the gate would be registered automatically, and then `checkbox-sync` would start ticking the user's boxes from an unverified guide — precisely what this design forbids.
 
-草稿写在 `guides/.drafts/`,备份写在 `guides/.backups/`。两者都安全,靠的是
-`syncGuidesFromMarkdown` 用**非递归** `readdirSync` 且只认 `.md`,子目录进不了它的视野。
-测试里直接拿真的发现函数扫一遍草稿目录,断言 `files === 0` —— 那是 `guidegen.test.js`
-里最要紧的一条。
+Drafts go in `guides/.drafts/` and backups in `guides/.backups/`. Both are safe because `syncGuidesFromMarkdown` uses a **non-recursive** `readdirSync` and only accepts `.md`, so subdirectories are outside its view. The test runs the real discovery function over the draft directory and asserts `files === 0` — the single most important assertion in `guidegen.test.js`.
 
-## 联网研究
+## Web research
 
-### 两个工具,分工就是答案
+### Two tools, and the division of labour is the answer
 
-| 工具 | 返回什么 | 关键参数 |
+| Tool | Returns | Key parameters |
 |---|---|---|
-| `web_search_20260209` | `web_search_tool_result` → 一个**结果列表**(摘要形态) | `max_uses`、`allowed_domains`/`blocked_domains`、`user_location` |
-| `web_fetch_20260209` | `web_fetch_tool_result` → 一个 **`document` 块,是页面全文** | `max_uses`、`allowed_domains`、`citations`、`max_content_tokens` |
+| `web_search_20260209` | `web_search_tool_result` → a **result list** (summary form) | `max_uses`, `allowed_domains`/`blocked_domains`, `user_location` |
+| `web_fetch_20260209` | `web_fetch_tool_result` → a **`document` block, the page's full text** | `max_uses`, `allowed_domains`, `citations`, `max_content_tokens` |
 
-「只给摘要还是给全文」是个伪二选一:搜索负责找出候选,**`web_fetch` 负责把全文抓回来**,
-`max_content_tokens` 是控制抓多少的旋钮。
+"Summaries or full text" is a false choice: search finds the candidates, **`web_fetch` brings the full text back**, and `max_content_tokens` is the knob for how much.
 
-三条硬约束:
+Three hard constraints:
 
-1. **`web_fetch` 只能抓「已经出现在对话里」的 URL。** 必须先由搜索把 URL 抛出来才能 fetch。
-   这是编排上的硬顺序,不是实现细节。
-2. **`allowed_domains` 只有硬过滤**,没有软偏好。要偏向中文攻略站先在提示词里说。
-3. **绝对不要再单独声明 `code_execution`。** `_20260209` 版本内部已经跑代码做动态过滤,
-   再加一个会变成两套执行环境、把模型搞糊涂。这是不看文档必然会写出来的 bug。
+1. **`web_fetch` can only fetch URLs that already appeared in the conversation.** Search has to surface the URL first. This is a hard ordering constraint on the orchestration, not an implementation detail.
+2. **`allowed_domains` is a hard filter only** — there is no soft preference. To bias toward Chinese guide sites, say so in the prompt.
+3. **Never declare `code_execution` separately again.** The `_20260209` versions already run code internally for dynamic filtering; adding one produces two execution environments and confuses the model. This is the bug you write if you don't read the docs.
 
-### 两个默认值是故意保守的
+### Two defaults are deliberately conservative
 
-- **`allowedDomains` 默认空(不限制)。** 「中文攻略站在搜索索引里的实际覆盖率」没有实测过,
-  默认就把搜索锁死在几个站上,是拿没量过的假设换质量。真需要硬锁再往这个数组里填。
-- **`maxFetchTokens` 默认 50000。** SKILL.md 8.3 要的是 `get_page_text(400000)` 那个量级,
-  但 `max_content_tokens` 的实际上限没验过。往上调是旋钮,不是改代码。
+- **`allowedDomains` defaults to empty (unrestricted).** "How well Chinese guide sites are actually covered in the search index" has never been measured, and locking search to a handful of sites by default trades quality for an unmeasured assumption. Fill the array if a hard lock is genuinely needed.
+- **`maxFetchTokens` defaults to 50000.** SKILL.md 8.3 wants something on the order of `get_page_text(400000)`, but `max_content_tokens`'s real ceiling has not been verified. Raising it is a knob, not a code change.
 
-`fallbacks` 默认**开**(被分类器拒答时服务端换个模型重跑同一个请求)。代价是多带一个
-beta 头,万一账号不认那个头会整个请求 400 —— 所以 400 的报错里专门提示了去哪关。
+`fallbacks` defaults **on** (the server retries the same request with a different model when the classifier refuses). The cost is one extra beta header; if an account doesn't recognise it the whole request 400s — which is why the 400 message says where to turn it off.
 
-### 还没做的:抓整页正文
+### Not built yet: fetching full page text
 
-兼容端点没有 web_fetch,所以模型**从头到尾只看到搜索结果摘要**。裸抓探过一次:
-游民星空、3DM 能拿到正文,**Fandom wiki 直接 403**,Steam 社区要有效 URL;而且裸抓夹带
-大量导航垃圾,信号大概一半。真要接进来还得在供应商层实现**客户端工具循环**(现在只支持
-服务端工具)—— 那正是这套设计当初特意绕开的那块。
+Compatibility endpoints have no `web_fetch`, so the model **only ever sees search-result summaries, start to finish**. A raw fetch was probed once: 游民星空 and 3DM return usable text, **Fandom wikis 403 outright**, and Steam Community needs a valid URL; on top of that raw fetching drags in a lot of navigation junk, roughly half signal. Wiring it in properly would need a **client-side tool loop** in the provider layer (only server-side tools are supported today) — which is exactly the piece this design deliberately avoided.
 
-## 请求层的硬约束
+## Hard constraints at the request layer
 
-**必须流式,这不是性能选择。** `max_tokens` 是 thinking + 正文的**总**上限,而推理模型
-默认就在思考;一份 60 个成就的攻略配上联网研究,非流式请求会先撞上 HTTP 超时
-(undici 默认 5 分钟)而不是撞上 token 上限。所以这一层自己解析 SSE。
+**Streaming is mandatory, and not for performance.** `max_tokens` is the **combined** ceiling for thinking plus prose, and reasoning models think by default; a 60-achievement guide with web research will hit the HTTP timeout (undici's default 5 minutes) before it hits the token ceiling on a non-streaming request. So this layer parses SSE itself.
 
-**服务端工具循环不是客户端在执行工具。** web_search / web_fetch 全在供应商那边跑完。
-要循环是因为服务端的采样循环有迭代上限(默认 10 次),撞上就返回
-`stop_reason: 'pause_turn'`,把 assistant 那一轮**原样**加回 messages 再发一次。
-**不要额外补一句「继续」** —— 服务端认的是结尾那个 `server_tool_use` 块,多塞一条 user
-消息反而打断它。续跑时前几轮的 content 也必须拼回去还给调用方,不然搜到的资料全丢了。
+**The server-side tool loop is not client-side tool execution.** `web_search` / `web_fetch` run entirely on the vendor's side. The loop exists because the server's sampling loop has an iteration cap (10 by default); hitting it returns `stop_reason: 'pause_turn'`, and you resume by appending the assistant turn back into `messages` **verbatim**. **Never add a "continue" message** — the server resumes off the trailing `server_tool_use` block, and an extra user turn interrupts it. Earlier rounds' content must also be concatenated back into what the caller receives, or all the research is silently lost.
 
-**几个参数在官方端点上是 400,不是被忽略**:`temperature`、`top_p`、`top_k`、
-`thinking.budget_tokens`。深浅只能用 `output_config.effort`。assistant 结尾的 prefill 同样 400。
+**Several parameters are a 400 on the official endpoint, not ignored**: `temperature`, `top_p`, `top_k`, `thinking.budget_tokens`. Depth can only be controlled with `output_config.effort`. A trailing assistant prefill is likewise a 400.
 
-### 一个会撒谎的参数:`thinking.budget_tokens`
+### A parameter that lies: `thinking.budget_tokens`
 
-官方端点上它是 400。DeepSeek 的 `/anthropic` 上**比 400 更糟**:HTTP 200,然后朝反方向走
-—— 要 2000 得到 49653 字思考,要 8000 得到 62107 字,而**完全不发这个字段才 38196 字**。
-一个存在意义就是设上限的参数,在最需要它的地方把下限抬高了,还不报错。
+On the official endpoint it is a 400. On DeepSeek's `/anthropic` it is **worse than a 400**: HTTP 200, and it moves in the opposite direction — asking for 2000 produced 49,653 characters of thinking, asking for 8000 produced 62,107, while **omitting the field entirely produced 38,196**. A parameter whose entire purpose is to impose a ceiling raises the floor at exactly the endpoint where you'd most want it, and doesn't error.
 
-`buildBody` 一律不发它,`ai.test.js` 在两种端点形状上都钉住了这一条。和 Notion 悄悄吞掉
-状态属性的 `groups` 是同一类事情:**200 不等于它照做了。**
+`buildBody` never sends it, and `ai.test.js` pins that on both endpoint shapes. Same family as Notion silently swallowing a status property's `groups`: **a 200 does not mean it did what you asked.**
 
-### 同一家、两个端点、能力不同
+### One vendor, two endpoints, different capabilities
 
-| 端点 | 服务端搜索 | web_fetch |
+| Endpoint | Server-side search | web_fetch |
 |---|---|---|
-| `api.deepseek.com/chat/completions`(OpenAI 兼容) | ❌ | ❌ |
-| `api.deepseek.com/anthropic`(Anthropic 兼容) | ✅ | ❌ 不认 |
+| `api.deepseek.com/chat/completions` (OpenAI-compatible) | ❌ | ❌ |
+| `api.deepseek.com/anthropic` (Anthropic-compatible) | ✅ | ❌ rejected |
 
-**能力是逐个端点量出来的事实,不能从公司名或 baseUrl 推。** 所以只列实测过的端点,
-没量过的一律不发那些扩展字段 —— 给它们新发一个可能被拒的参数,是拿别人的可用性换我们的速度。
+**Capability is a per-endpoint measured fact and cannot be inferred from a company name or a baseUrl.** So only endpoints that were actually probed are listed, and anything unmeasured is sent none of those extension fields — sending them a parameter that might be rejected trades someone else's availability for our convenience.
 
-两个配套开关都是被 400 教出来的:`ai.webFetch`(兼容端点默认不发,它不认,整个请求会挂)、
-以及 `thinking` / `output_config` / `fallbacks` 各自独立的开关。**这三个必须能分开发**:
-同一个 `effort: low`,多带一个 `thinking: {type:'adaptive'}` 就从 43 秒变 87 秒、思考量翻倍
-—— adaptive 会把 effort 顶掉。捆在一个开关上时,唯一管用的旋钮既发不出去、发出去也会被
-同伴压住。
+Both accompanying switches were taught by 400s: `ai.webFetch` (not sent on compatibility endpoints by default — they reject it and the whole request dies), and independent switches for `thinking` / `output_config` / `fallbacks`. **Those three must be separately sendable**: with the same `effort: low`, adding `thinking: {type:'adaptive'}` goes from 43 s to 87 s and doubles the thinking — adaptive overrides effort. Bundled behind one switch, the only knob that works either cannot be sent or gets overridden by its companion.
 
-## 五种「长得像成功」的失败
+## Five failures that look like success
 
-全是 HTTP 200,分支写漏一处就会把坏结果当好结果往下传,所以统一收在 `checkResult()` 里:
+All of them are HTTP 200, and missing one branch passes a bad result downstream, so they are collected in `checkResult()`:
 
-| 情况 | 表面 | 实际 |
+| Case | On the surface | Actually |
 |---|---|---|
-| `stop_reason: 'refusal'` | 200 | 安全分类器拒答,content 空的或半截 |
-| `stop_reason: 'max_tokens'` | 200,**有正文** | 正文被砍了一半 —— 截断的攻略比生成失败更糟 |
-| 停止原因正常,但**一个 `text` 块都没有** | 200,没有工具错误,停止原因也正常 | 这一轮什么都没写。最难查的一种,因为三样表面正常 |
-| 正文里混进**供应商自己的控制符** | 200,停止原因正常,正文**非空** | 正文从那个位置**断掉**了。表面比上一条还正常 |
-| 工具报错 | 200,`stop_reason: 'end_turn'` | 结果块里放的是错误对象 |
+| `stop_reason: 'refusal'` | 200 | The safety classifier refused; content is empty or half-written |
+| `stop_reason: 'max_tokens'` | 200, **with prose** | The prose is cut in half — a truncated guide is worse than a failed run |
+| Normal stop reason but **not one `text` block** | 200, no tool error, normal stop reason | This round wrote nothing. The hardest to diagnose, because all three surface signals look fine |
+| **The vendor's own control tokens** in the prose | 200, normal stop reason, prose **non-empty** | The prose is **cut off** at that point. Looks even more normal than the previous row |
+| Tool error | 200, `stop_reason: 'end_turn'` | The result block contains an error object |
 
-**两个工具的「成功」形状不一样**:web_search 成功是**数组**,web_fetch 成功是**对象**
-(`{type:'web_fetch_result'}`)。把其中一条当成通用规则,两个方向都会出事 —— 用
-`Array.isArray` 判成功会把每一次**成功**抓页记成一条错误,而 `web_fetch` 只在官方端点默认
-开着,所以这种 bug 会一路躲到用户第一次用官方 key。两处判断(校验和进度事件)必须共用
-`toolResultError()`,否则同一个 bug 有两份拷贝。
+**The two tools' "success" shapes differ**: `web_search` succeeds with an **array**, `web_fetch` with an **object** (`{type:'web_fetch_result'}`). Taking either as the general rule breaks in both directions — using `Array.isArray` as the success test records every **successful** fetch as an error, and since `web_fetch` only defaults on at the official endpoint, that bug hides all the way until a user's first run with an official key. Both call sites (validation and progress events) must share `toolResultError()`, or the same bug exists in two copies.
 
-### 严重程度必须分开,一刀切两个方向都错
+### Severity has to be graded; treating them alike is wrong in both directions
 
-- **搜索失败 ⇒ 整轮不可用。** 搜索是研究的入口,它没成,模型就是凭记忆在写 —— 正是
-  `canSearch` 那套准入设计要防的、用户看不出来的质量差别。
-- **抓页失败 ⇒ 报出来,但不拦路。** `web_fetch` 是逐个 URL 的:`url_not_allowed`
-  (模型自己拼一个 URL 就是这个码)和 `url_not_accessible`(404 / 反爬 / 超时,中文攻略站
-  尤其常见)在一次正常研究里几乎必然出现几条。搜了十页、抓失败两页,资料是够的;为此
-  作废整轮是把常态当故障。
+- **Search failure ⇒ the round is unusable.** Search is the entry point to research; without it the model is writing from memory — precisely the invisible quality gap the `canSearch` admission rule exists to prevent.
+- **Fetch failure ⇒ reported, but not blocking.** `web_fetch` is per-URL: `url_not_allowed` (any URL the model constructs itself trips this) and `url_not_accessible` (404 / anti-bot / timeout, routine on Chinese guide sites) appear a few times in any normal research session. Ten pages searched with two fetches failed is enough material; voiding the round for that treats the normal case as a fault.
 
-不拦路 ≠ 不吭声:放进 `warnings`,走进度事件报给用户,`ai-check` 逐条列出来并标明
-「不影响这一轮」。
+Not blocking ≠ silent: they go into `warnings`, reach the user through progress events, and `ai-check` lists each one marked as not affecting the round.
 
-### 控制符判据故意收得很窄
+### The control-token detector is deliberately narrow
 
-误判一次就是白花一轮的钱。攻略正文里合法地带着 `<br>`、`<details>`、`<summary>`、
-`<table>`、`<span underline="true">`,所以只认三种不可能撞车的形状:
+One false positive wastes a paid round. Guide prose legitimately contains `<br>`, `<details>`, `<summary>`, `<table>` and `<span underline="true">`, so it matches only three shapes that cannot collide:
 
-| 形状 | 哪一家 |
+| Shape | Whose |
 |---|---|
-| 尖括号里出现全角竖线 `｜`(U+FF5C) | DeepSeek(`<｜tool▁calls▁begin｜>`) |
-| `<\|…\|>` | Llama / OpenAI(`<\|im_start\|>`) |
-| 闭合式 `</invoke>` `</tool_calls>` `</parameter>` | 通用 |
+| A fullwidth pipe `｜` (U+FF5C) inside angle brackets | DeepSeek (`<｜tool▁calls▁begin｜>`) |
+| `<\|…\|>` | Llama / OpenAI (`<\|im_start\|>`) |
+| The closing forms `</invoke>` `</tool_calls>` `</parameter>` | Generic |
 
-**故意不认开标签**(`<function_calls …>` 之类):它们和真 HTML 长得太像。漏掉一种没见过的
-写法,下次会在「缺 checkbox」上暴露出来,那是便宜得多的方向。
+**Opening tags are deliberately not matched** (`<function_calls …>` and friends): they look too much like real HTML. Missing a novel variant re-surfaces as "missing checkbox", which is a far cheaper direction.
 
-撞上了**不能只把标记删掉接着用**。正文是**断的**,不是脏的:删了标记只会得到一份看起来
-完整、实际少了一截的攻略,而这个项目的偏好一贯是「报出来的失败胜过悄悄少东西」。
+When it fires, **you cannot just strip the markers and carry on**. The prose is **truncated**, not merely dirty: stripping yields a guide that looks complete and is short a section, and this project's bias is consistently "a reported failure beats a silent omission".
 
-## 一段写不出来时的三级阶梯
+## A three-rung ladder for a shard that won't write
 
-**原样再问 → 切成两半 → 记下来接着跑。** 三级各治一种病,顺序不能换。
+**Ask again as-is → split in half → record it and carry on.** Each rung treats a different illness, and the order cannot change.
 
-**为什么是事后重试,不是事前算尺寸。** 装进单次请求的是 thinking + 正文。正文可以估
-(一个成就约 150 字),thinking 估不了:它随游戏冷门程度、模型、端点变,而在兼容端点上
-连压它的参数都发不出去。任何开跑前算出来的段长都是在预测那个量;而**截断是量到的事实**,
-它直接说明这一段越了界。**报测到的,不报推出来的。**
+**Why retry afterwards rather than compute the size up front.** What fills a single request is thinking plus prose. Prose can be estimated (~150 characters per achievement); thinking cannot — it varies with how obscure the game is, with the model and with the endpoint, and on compatibility endpoints the parameter that would cap it cannot even be sent. Any shard size computed before the run is predicting that term, whereas **a truncation is a measured fact** that says outright this shard crossed the line. **Report what was measured, not what was inferred.**
 
-### 第一级:原样再问一次
+### Rung 1: ask again as-is
 
-「一个 `text` 块都没有」是这条路上唯一真正的**瞬时**失败:请求没问题、段长没问题、资料也
-搜到了,就是这一次没吐出正文。原样再问一遍很可能就有了,代价是一次请求;不重问的代价是
-整份作废、十几次联网搜索白花。
+"Not one `text` block" is the only genuinely **transient** failure on this path: the request was fine, the shard length was fine, the research happened, and this one response just carried no prose. Asking again identically is likely to work and costs one request; not asking costs the whole run and a dozen wasted web searches.
 
-`EMPTY_RETRIES` = 1,不是更多:第二次还空就不是抽风了,该换手法而不是继续撞。
+`EMPTY_RETRIES` = 1, not more: a second empty is not a hiccup, and the right move is to change technique rather than keep hitting the same wall.
 
-**第二次还空就当长度问题处理,切成两半。** 这一步是猜,但有依据:兼容端点上既发不出压
-thinking 的参数,**也不能假定它会把「额度被思考吃光」如实报成 `max_tokens`** ——
-`api.deepseek.com/anthropic` 是别人实现的 Messages API,停止原因的保真度不在我们手里。
-猜错多花一次请求。切不动时错误码会被改写成 `chunk-too-small`,`err.detail.was` 保留改写前
-那个码 —— 「被截断」和「什么都没输出」对「换个模型吧」这条建议的分量完全不同。
+**A second empty is treated as a length problem and split in half.** This step is a guess, but a reasoned one: on compatibility endpoints we can neither send the parameter that caps thinking **nor assume the endpoint honestly reports "the budget was eaten by thinking" as `max_tokens`** — `api.deepseek.com/anthropic` is somebody else's implementation of the Messages API, and stop-reason fidelity is not ours to rely on. Guessing wrong costs one request. At the floor the error code is rewritten to `chunk-too-small`, with `err.detail.was` preserving the pre-rewrite code — "was truncated" and "produced nothing" carry very different weight for the advice "try a different model".
 
-**「没有正文」这句话必须可诊断。** 带上原始停止原因、产出 token 数、以及回包里各类块的
-个数,因为这三样指向完全不同的处置:
+**"No prose" has to be diagnosable.** The message carries the raw stop reason, the output token count, and a per-type tally of the response blocks, because those three point at completely different responses:
 
-| 回包 | 说明 | 该怎么办 |
+| Response | What it means | What to do |
 |---|---|---|
-| `thinking×1`,三万 token | 额度被思考吃光了,和截断是一回事 | 切小 |
-| 一个块都没有,0 token | 这一次抽风 | 原样再问 |
-| `server_tool_use×2`,没有 text | 光搜没写 | 看提示词 / 搜索预算 |
+| `thinking×1`, 30k tokens | Thinking ate the budget — the same thing as truncation | Split smaller |
+| No blocks at all, 0 tokens | A one-off hiccup | Ask again as-is |
+| `server_tool_use×2`, no text | Searched but never wrote | Look at the prompt / search budget |
 
-只说「模型没有输出任何正文」的话,每次都只能靠猜,而每一次猜都要花掉用户几分钟和一笔
-token 才验得出来。
+Saying only "the model produced no prose" leaves every occurrence to guesswork, and each guess costs the user minutes and a pile of tokens to test.
 
-### 第二级:切成两半
+### Rung 2: split in half
 
-撞上截断就把**这一段**一分为二,只重问这两半,直到写得下或者切到 5 个成就(`MIN_CHUNK`)。
-每次至少减半,所以必然收敛。三处边界都有理由:
+On a truncation, split **this shard** in two and re-ask only the halves, until it fits or reaches 5 achievements (`MIN_CHUNK`). Each split at least halves, so it necessarily terminates. All three boundaries have reasons:
 
-- **重问前必须 `session.dropLastTurn()`。** `ask` 是先 push assistant 再判定结果,所以那半份
-  废稿已经躺在上下文里了,而分段提示词写着「不要重复前面已经写过的成就」—— 不摘掉,模型
-  会跳过它写了一半的那几个。**产出看着完全正常,只是少了条目。** 失败会报出来,缺条目不会。
-- **拒答、RECITATION、搜索报错一级都不给。** 都不是长度问题,切小了照样撞,而且各自的正确
-  处置完全不同。`checkResult` 为此多返回一个 `code`:调用方要分辨「这种失败能不能补救」,
-  而拿人话当接口,改个措辞就会悄悄失灵。
-- **只在第一轮切。** 之后几轮是按 `lint.findings` 定点重写,下标和那份发现是绑定的,中途改
-  段数会让对应关系失效。所以 `chunkFloorAdvice` 在非第一轮**不改错误码**。
+- **`session.dropLastTurn()` before re-asking is a precondition.** `ask` pushes the assistant turn before judging the result, so the unusable half-draft is already in the context, and the shard prompt says 「不要重复前面已经写过的成就」 — leave it there and the model skips the achievements it half-wrote. **The output looks completely normal, it just has entries missing.** A failure is reported; missing entries are not.
+- **Refusal, RECITATION and search errors get no rungs at all.** None is a length problem, splitting hits the same wall, and each has a completely different correct response. `checkResult` returns a `code` alongside the message for this: callers need to distinguish "is this failure recoverable", and using human-readable prose as an interface means a reworded sentence silently breaks it.
+- **Only round 1 splits.** Later rounds are targeted rewrites keyed to `lint.findings`, and the indices are bound to those findings, so changing the shard count mid-flight invalidates the mapping. `chunkFloorAdvice` therefore **does not rewrite the error code** outside round 1.
 
-切到下限还失败时,报错**不建议调大 `ai.maxTokens`**:正文都这么短了还超,说明吃掉额度的是
-思考,加大只会让它想得更久。那条消息里也不要打印 `r.usage.outputTokens` —— 那是 `addUsage`
-跨 pause_turn 累加出来的**整轮产出**,可以远大于单次请求的上限,读起来像在说「上限是 61445」。
+When it still fails at the floor, the message deliberately **does not suggest raising `ai.maxTokens`**: prose this short still overflowing means thinking is what ate the budget, and raising it only lets it think longer. That message must also not print `r.usage.outputTokens` — that is the **whole round's** output accumulated by `addUsage` across pause_turns, can be far larger than a single request's ceiling, and reads as though the ceiling were 61445.
 
-### 第三级:一段作废,整份不作废
+### Rung 3: one shard is voided, the whole guide is not
 
-招用完了就把这一段记进 `chunkFailures`,**第一轮接着写后面的段**。丢掉整份换不来任何东西,
-而少的那一段有现成的补救路径:它的成就全部会被校验器报成 `missing-checkbox`(带 `apiName`),
-`chunksNeedingRewrite` 于是精确挑出这一段,下一轮只重问它。补的时候用 `buildChunkMessage`
-(「写这一段」)而不是 `buildChunkFeedback` —— 一段从没写出来,缺的不是修正意见,是这一段本身。
+Once the options are exhausted, the shard is recorded in `chunkFailures` and **round 1 keeps writing the remaining shards**. Discarding the whole run buys nothing, and the missing shard has a ready-made recovery path: all its achievements are reported by the linter as `missing-checkbox` (carrying `apiName`), so `chunksNeedingRewrite` picks exactly that shard and the next round re-asks only it. The re-ask uses `buildChunkMessage` ("write this shard") rather than `buildChunkFeedback` — a shard that was never written is missing the shard itself, not corrections.
 
-宽容必须有边界,三道:
+Leniency needs boundaries, and there are three:
 
-- **先分级:`CHUNK_LOCAL`。** 只有 `checkResult` 判出来的那几种是**这一段自己**的问题
-  (全是 HTTP 200)。401、网络断了、`maxContinuations` 用光了是**整体**故障,原样抛出去 ——
-  当成「这一段没成」接着问,是拿同一堵墙按剩余段数再撞几次,而且真正的原因会被埋进一串
-  「第 N 段没写出来」里,它自己那条终端建议再也走不到 `tracker.js` 的顶层 catch。
-- **第一轮全军覆没就抛第一个真原因**,不要拿一份空草稿去校验、报出「197 个成就全缺
-  checkbox」、再花两轮重问。报病因不报症状。
-- **`ok` 要求 `chunkFailures` 为空。** 已经知道缺一段,就绝不落地 —— 哪怕将来校验器哪天放过了它。
+- **Grade the failure first: `CHUNK_LOCAL`.** Only the verdicts `checkResult` can return are about **this shard** (all HTTP 200). A 401, a dead network, or exhausted `maxContinuations` is a **global** fault and rethrows immediately — carrying on means hitting the same wall once per remaining shard, and the real cause gets buried under a list of "shard N didn't come back" while its own terminal hint never reaches `tracker.js`'s top-level catch.
+- **If every shard fails in round 1, throw the first real cause** rather than linting an empty draft into "all 197 achievements are missing a checkbox" and then paying for two more rounds of it. Report the cause, not the symptom.
+- **`ok` requires `chunkFailures` to be empty.** Once we know a shard is missing, it never lands — even if the linter were to wave it through some day.
 
-CLI 和 Dashboard 都把失败的段**排在 blocking 清单前面**。Dashboard 那侧还给生成状态加了一个
-`warnings` 数组:`note` 那一格是「现在在干什么」,三秒后就被下一个进度事件盖掉,而「第 3 段
-没回来」必须一直留到结果出来 —— 和 `syncState.bumped` 同一条设计。
+Both the CLI and the Dashboard print failed shards **above** the blocking list. The Dashboard side also gained a `warnings` array on the generation state: `note` is "what is happening now" and the next progress event overwrites it three seconds later, while "shard 3 didn't come back" has to persist until the result arrives — the same design as `syncState.bumped`.
 
-### 草稿每写完一段就落盘
+### The draft is written after every shard
 
-`writeFileSync(draftPath, …)` 必须在分段循环**里面**。放在循环之后,中途任何一次抛异常都会把
-已经写好的段落连同它们的联网研究一起丢掉 —— 而那正是「反正草稿留在 `.drafts/`」这句话
-在真正会发生的失败上失效的地方。
+`writeFileSync(draftPath, …)` must be **inside** the shard loop. Placed after it, any mid-loop throw discards the completed shards along with their web research — which is exactly where "the draft survives in `.drafts/` anyway" stops being true for the failure that actually happens.
 
-逐段写的成本相对一次两三分钟的网络调用可以忽略。写盘那一句放在 **`try` 外面**:写盘失败是
-我们这边的故障,不是「这一段模型没写出来」,不该被重试阶梯当成后者处理。
+Writing per shard is negligible next to a two-to-three-minute network call. The write sits **outside** the `try`: a disk error is our fault, not "the model didn't write this shard", and must not be fed into the retry ladder.
 
-注意轮末那次 `writeDraft()` 会盖掉大部分测试的观察点,所以**逐段落盘只在「整轮被中断」的路径
-上才观察得到** —— 要用一个供应商级的异常才钉得住。
+Note that the end-of-round `writeDraft()` overwrites what most tests observe, so **the per-shard write is only observable on a path that aborts the round** — it takes a provider-level exception to pin it.
 
-## 各段并发
+## Concurrent shards
 
-各段的内容互不相交 —— 每段的提示词点名了它要写的编号区间和首尾成就名。共用一个会话就是
-一条链,所以改成每段一条链,第一轮从「各段之和」变成「最慢那一段」。`ai.concurrency` 默认 3,
-设 1 退回顺序行为。
+The shards' contents are disjoint — each shard's prompt names its numbered range and its first and last achievement. Sharing one session made them one chain, so each shard now gets its own, turning round 1 from "the sum of the shards" into "the slowest shard". `ai.concurrency` defaults to 3; set it to 1 for the old sequential behaviour.
 
-共用会话原本买到的是两件事,拆开之后各自有交代:
+The shared session had been buying two things, and both are accounted for after the split:
 
-- **成就不会重复** —— 本来就不靠它。每段被点名了自己的区间,这是结构保证。
-- **小节标题会重复** —— 这个是真的,而且不止是「相邻两段都写了 `## 主线`」这么简单。
-  **两段各自定各自的分区,并起来就是一团乱麻**:同一件事被起两个名字(「社交与恋爱」/
-  「社交与好感」),同一个名字出现在两段的不同位置。**「别把小节标题再写一遍」在并发下是
-  有害的**:它让一个看不见前文的模型去省略一个只有它能写的标题,结果那几条就悬在上一段的
-  小节底下。所以走的是下面这套。
+- **Achievements don't repeat** — that was never down to the session. Each shard is given its own range; this is a structural guarantee.
+- **Section headings do repeat** — this one is real, and it is more than "two adjacent shards both wrote `## 主线`". **Two shards each inventing their own taxonomy produce a mess when merged**: the same thing gets two names (「社交与恋爱」 / 「社交与好感」), and the same name appears at different positions in two shards. **「别把小节标题再写一遍」 is actively harmful under concurrency**: it tells a model that cannot see the previous shard to omit a heading only it can write, leaving those entries dangling under the previous shard's section. Hence the pass described below.
 
-## 已解锁的成就只写一行
+## Already-unlocked achievements get a one-line entry
 
-新写一篇攻略时,他**已经解锁**的那些只要求 `- [ ] **名字** — 官方描述` 一行,不查资料、
-不写做法。攻略是拿来照着做的,而已经做完的那几条不需要做法:名字、官方描述、一个能勾的框,
-就是它们之后还会被用到的全部。
+On a **fresh** guide, achievements the player has already unlocked are asked for as `- [ ] **名字** — 官方描述` and nothing else — no research, no method. A guide is something you follow, and the ones already done don't need a method: the name, the official description and a tickable box are all of them that still gets used.
 
-省的不是字数,是那几条的**联网查资料和思考** —— 而那正是这个功能唯一花钱的地方
-(见 CLAUDE.md 里 Obra Dinn 那次 A/B:8 倍时间差里几乎没有一点在字数上)。一款解锁了
-八成的游戏,要真写的只剩两成。
+What this saves is not characters but **their web research and thinking** — which is the only place this feature actually costs money (see the Obra Dinn A/B in CLAUDE.md: almost none of the 8× time difference sat in length). On a game that is 80% done, only a fifth still has to be written in full.
 
-判据在 `briefApiNames`,提示词那句在 `briefInstruction`,两个都在 `lib/guidegen.js`。
-点名的是**少的那一半**:大部分游戏已经解锁了一大半,那时候列「要写完整的这几个」比列
-「要略写的那四十个」短得多,读起来也正好是模型这一段真正要干的活。
+The decision is in `briefApiNames`, the prompt line in `briefInstruction`, both in `lib/guidegen.js`. The prompt names **the smaller half**: most games are already mostly unlocked, so listing "write these few in full" is far shorter than listing forty to skip, and it reads as exactly the work the model has to do in this shard.
 
-三条护栏,各自有测试钉着:
+Three guards, each pinned by a test:
 
-- **全解锁的游戏一条都不省。** 那时候省下来的就是整篇攻略,剩下一串只有名字和官方描述的
-  行,而那份东西 Steam 页面上本来就有。会给一个 100% 的游戏生成攻略的人,要的恰恰是内容。
-- **覆盖重写一条都不省。** 那时候攻略里已经有花过钱写出来的正文,而"他后来把这条解锁了"
-  不是把那段字删掉的理由 —— 删掉之后没有任何地方找得回来。只有新写的那一篇会略写。
-- **一行也仍然是一个 checkbox。** SKILL.md 规则一禁止的是把一组已达成的成就并成一段
-  不带 checkbox 的说明文字;略写保留每条自己的 `- [ ]` 行,只是不写正文。少了那一行,
-  `checkbox-sync` 就再也勾不上它,而且 lint 会当场报 `missing-checkbox`。
+- **A fully-unlocked game skips nothing.** What you'd save there is the entire guide, leaving a list of names and official descriptions that the Steam page already has. Someone generating a guide for a 100% game wants precisely the content.
+- **An overwrite skips nothing.** The guide already holds prose that was paid for, and "they unlocked it since" is not a reason to delete that text — there is nowhere to get it back. Only a fresh guide writes brief entries.
+- **A one-line entry is still a checkbox.** SKILL.md rule-1 forbids merging a group of achieved entries into checkbox-less prose; brief entries keep each `- [ ]` line and simply omit the body. Without that line `checkbox-sync` can never tick it, and the linter reports `missing-checkbox` immediately.
 
-问某一段该写什么**只有一个出口**(`chunkMessage`)。两个调用点各写一次的话,漏传略写名单
-的那一处不会报错也不会少内容,只是那一段的名单静静地没了 —— 而它恰好在最难测到的那条路上
-(要先有一整段失败才走得到)。
+Asking a shard what to write has **exactly one exit** (`chunkMessage`). With the two call sites each passing it separately, the one that forgot the skip-list would not error and would not lose content — that shard's list would just quietly vanish, on the path that is hardest to reach (a whole shard has to fail first).
 
-## 分类:全篇写完之后再做一趟
+## Classification: one more pass, after the whole guide is written
 
-**只在真的分了段时跑**(`chunks.length > 1`)。一段写完的攻略没有跨段口径问题,
-而那一趟模型手上本来就有描述和稀有度,分得比任何事后一趟都准。
+**Runs only when the guide was actually sharded** (`chunks.length > 1`). A single-shard guide has no cross-shard consistency problem, and that shard already had the descriptions and rarity in hand, so it classifies better than any after-the-fact pass.
 
-1. **各段照旧自己开标题**,拼接时 `joinBodies` 先合掉接缝上的重复。
-2. **全篇写完、打完勾、过了闸门之后,再问一趟分类**(`buildRegroupPrompt`)。
-   这一趟拿得到名字、官方描述、**以及各段自己把每条放进了哪个小节** —— 那是查完资料
-   之后的判断。用**编号**而不是名字指认成就:名字要一字不差地对上才匹配得了
-   (重名、标点、全半角都能让它失手),编号不会。
-3. **按映射重排**(`regroupByAssignment`)。正文已经写完了,所以这一步能真的把条目
-   搬到该去的小节,而不只是合并同名标题。
+1. **Each shard opens its own headings as before**, and `joinBodies` merges duplicates at the seam during assembly.
+2. **After the whole guide is written, ticked and past the gate, ask for a classification** (`buildRegroupPrompt`). This pass has the names, the official descriptions, **and which section each shard put each entry in** — that being the judgement made after the research. It addresses achievements **by number, never by name**: a name has to match to the character (duplicates, punctuation, full/half-width all defeat it), an index does not.
+3. **Re-arrange by that mapping** (`regroupByAssignment`). The prose is already written, so this step can genuinely move entries into the right section rather than merely merging same-named headings.
 
-**为什么不在写之前分。** 写之前那一趟手上只有成就名,而成就名常常是梗:
-《马特的寻猫游戏》的「海拉鲁老流氓」其实是打碎 100 个罐子,「半条命4」是用撬棍撬容器。
-只看名字分出来的是「自然与美食」「囤积狂的自我修养」这种主题化标题;补上描述再跑一次,
-依然丢掉了「难度模式」这种真正要紧的结构。**信息不够,不是提示词不够** —— 分类要的是
-「查完资料之后知道这条到底要干什么」,那份信息只有正文写完才存在。
+**Why not classify before writing.** That pass only has the achievement *names*, and names are often jokes: in 《马特的寻猫游戏》 「海拉鲁老流氓」 is actually smashing 100 pots, and 「半条命4」 is prying a crate with a crowbar. A names-only pass returns themed labels like 「自然与美食」 or 「囤积狂的自我修养」; adding the descriptions and running it again still lost genuinely important structure like 「难度模式」. **The information was missing, not the prompt** — classification needs "having researched this, what does the player actually do", and that does not exist until the prose does.
 
-### 无损是硬要求,不是尽力而为
+### Losslessness is a hard requirement, not best-effort
 
-`regroupByAssignment` 出口处三条断言,不过就抛,整趟回滚:
+`regroupByAssignment` has three exit assertions; failing any of them throws and rolls the whole pass back:
 
-1. 成就的 `api_name` 多重集合前后完全相等;
-2. 每一行非标题文本前后出现次数相同;
-3. **折叠块没被掏空。**
+1. The multiset of achievement `api_name`s is exactly equal before and after;
+2. Every non-heading line of text occurs the same number of times before and after;
+3. **No toggle block was emptied.**
 
-第三条是跑出来的:前两条数的是文本,数不出结构。把一个折叠拆成「空壳 + 散落在外面的
-条目」,一个字都不少,断言 1、2 全绿 —— 《破晓传奇》那次就是这么溜过去的。
+The third came out of a real run: the first two count *text* and cannot see *structure*. Tearing a toggle into "an empty shell plus its former contents as loose siblings" loses not one character and passes assertions 1 and 2 — which is exactly how 《破晓传奇》 slipped through.
 
-映射没覆盖到的成就**留在它原来的小节**,不丢弃、也不塞杂项:模型漏掉一条时,
-「原地不动」是唯一不制造新错误的处置。
+An achievement the mapping didn't cover **stays in the section it was already in** — not dropped, not swept into a miscellaneous bucket: when the model omits one, "leave it alone" is the only response that cannot invent a new error.
 
-**分类名单没提到的小节,留在成就列表原来那一侧。** 那一趟只列装成就的小节,纯说明小节
-(规则 3.5 的「机制速查」)它一个字都不会提;没被提到的一律接在后面的话,一段本该在列表
-**前面**的速查就被搬到全篇末尾,吊在最后一条成就下面。判据取自原文:标题出现时还一条成就
-都没见过 ⇒ 它在列表前面,重排完还排前面。收尾的「备注」原来在后面,重排完还在后面。
+**A section the classification list never mentions stays on its original side of the achievement list.** That pass only lists sections holding achievements, so a pure-prose section (rule 3.5's 「机制速查」) is never mentioned at all; appending everything unmentioned would move a quick-reference meant to be read **before** the list to the very end of the guide, dangling under the last achievement. The test is taken from the original text: the heading appeared before any achievement had been seen ⇒ it goes in front, and stays in front after the re-arrangement. A trailing 「备注」 was at the end before and stays at the end.
 
-**这一趟失败一律降级成「不重排」,不中断。** 正文已经写好、打过勾、过了闸门,为一次
-锦上添花的归类把它丢掉不划算。降级要出声(`regroup-failed`,CLI 和 Dashboard 都报)。
+**A failure in this pass degrades to "don't re-arrange" and never aborts.** The prose is already written, ticked and past the gate; throwing that away for a cosmetic re-grouping is a bad trade. The degradation must be audible (`regroup-failed`, reported by both the CLI and the Dashboard).
 
-### 同类成就簇:封闭名单拦不住的那一半
+### Same-family clusters: the half a closed list cannot catch
 
-封闭的小节名单挡得住「自创标题」,挡不住**名单里有两个都说得通的去处时二选一**。
-实测《马特的寻猫游戏》四条「替换吉祥物」成就:两条进了「宝石与商店」(因为在商店买),
-两条进了「吉祥物替换」。模型不是搞错了,它真心认为这是两类事 —— 这是个**说得通但错**的
-编辑判断,提示词纠不过来,得有个程序判据。
+A closed list of section names stops *invented* headings. It does not stop **choosing between two defensible destinations that are both on the list.** Measured on 《马特的寻猫游戏》's four "replace the mascot" achievements: two landed in 「宝石与商店」 (because you buy them in the shop) and two in 「吉祥物替换」. The model was not confused — it genuinely holds that these are two kinds of thing. That is a **defensible but wrong** editorial judgement, a prompt cannot argue it out, and it needs a programmatic rule.
 
-判据是**官方描述的公共前缀**(`lib/guidecluster.js`)。描述不是梗,它是开发者按同一个
-模板批量写出来的:「将吉祥物替换为一只 X」「成为一名新手 X」。两道闸:
+The rule is **the common prefix of the official description** (`lib/guidecluster.js`). Descriptions are not jokes; developers batch-write them from one template: 「将吉祥物替换为一只 X」, 「成为一名新手 X」. Two gates:
 
-- **前缀要占到描述均长的一半以上。** 泰拉瑞亚有 22 条「Defeat …」,前期 boss 和肉后 boss
-  本来就该分开 —— `Defeat ` 占不到一半,「替换吉祥物」占得到。
-- **一簇 3–8 条,且不超过全部成就的 1/4。** 小游戏里 8 条可能是半份攻略,强并会把结构压塌。
+- **The prefix must be at least half the mean description length.** Terraria has 22 「Defeat …」 achievements whose early-game and hardmode bosses genuinely belong apart — `Defeat ` doesn't reach half, while 「将吉祥物替换」 does.
+- **A cluster is 3–8 entries and at most a quarter of the game.** In a small game 8 entries could be half the guide, and force-merging that flattens the structure.
 
-实测全库 151 款游戏共 251 簇,1.66/款,内容基本都是真同类(「狩猎5只鹿/狼/鸭」、
-「成为一名新手厨师/饮品师/铁匠」)。还有**一趟吸附**:长前缀先占位的贪心会让差一两个字的
-近亲落单,而那正是最需要它的时候 —— 马特那四条里三条写「替换**为**」、第四条写
-「替换**成**」,落单的正是被劈到别的小节去的那一条。
+Measured across the real library: **251 clusters over 151 games, 1.66 per game**, and they read as genuine families (「狩猎5只鹿/狼/鸭」, 「成为一名新手厨师/饮品师/铁匠」). There is also an **absorption pass**, which is not optional: the greedy longest-prefix-first claim orphans a near-miss, and the near-miss is exactly the case this exists for — three of 马特's four write 「替换**为**」 and the fourth writes 「替换**成**」, and the orphan was precisely the one that had been split into a different section.
 
-簇走两条路,**先告诉模型,再自己兜底**:写进提示词是因为它看得见正文,选得比「哪一边
-人多」准;`mergeSplitClusters` 在解析完之后把仍然被劈开的簇并到人数最多的那一节。
-**误并和误劈的代价不对等**:把「扩建房间/卧室/客厅/卫生间」凑到一起,至多是分得粗了
-一点;劈到两节,就是用户报的那个 bug。而它**只在簇已经被劈开时才动手**。
+Clusters go down two roads, **tell the model first, then back it up ourselves**: they go into the prompt because the model can see the prose and picks better than plurality would; and `mergeSplitClusters` merges any still-split cluster into whichever section holds most of it after parsing. **Merging wrongly and splitting wrongly do not cost the same** — putting 「扩建房间/卧室/客厅/卫生间」 together is at worst coarse, splitting them is the bug the user reported — and it only acts on a cluster that is **already** split.
 
-### 成就不能藏在折叠里
+### An achievement must never be hidden inside a collapse
 
-规则五只写了「内容到 10 行才折」,没写「成就本身永远不折」。实测马特整节 `## 世界全清`
-的 13 条成就被塞进一个叫「世界 1~12 全清与通关」的折叠,同步照样认得出(90/90),但那
-一节在 Notion 上点开是空的。
+Rule 五 only says "fold content once it reaches 10 lines"; it never said "but never the achievements themselves". Measured on 马特: the whole `## 世界全清` section's 13 achievements were packed into a toggle called 「世界 1~12 全清与通关」. Sync still recognised them (90/90), but that section opens empty in Notion.
 
-`unwrapAchievementToggles` 在重排**之前**把它们摊开(之后会被断言 3 当成「重排拆了折叠」
-而整趟回滚)。两条同时成立才拆,少一条都不动:**折叠在顶层(不缩进)**,且**里面有
-checkbox 能反查到真成就**。分组标签(前置/步骤/注意)那种折叠一定缩进在某条成就底下,
-两道闸都不占,不会被误伤。拆完重新过一遍校验器,不过就退回拆之前那一份。
+`unwrapAchievementToggles` flattens them **before** the re-arrangement (afterwards, assertion 3 would read it as "the regroup tore a toggle open" and roll the whole pass back). Two conditions must both hold, and either alone leaves it untouched: **the toggle is at top level (not indented)**, and **it contains a checkbox that resolves to a real achievement**. Group-label collapses (前置/步骤/注意) are always indented under an achievement, so they fail the first gate and can't be caught by accident. The unwrapped draft is re-linted, and rolled back if it no longer passes.
 
-## 结构性保证,不靠检查
+## Structural guarantees, not checks
 
-1. **勾选状态** —— 提示词明令只写 `- [ ]`,写完由 `computeCheckedKeys` 按数据库填。解锁状态
-   也不喂给模型。
-2. **`# 游戏名` 和 `appid:` 两行由程序写**,并且**主动削掉模型自己写的那两行**。这两行是纯数据,
-   库里就有;让模型转录一遍等于凭空多一次写错的机会,而 **appid 写错一位数,攻略就登记到
-   另一款游戏上** —— 两边都不会报错。提示词里也说了别写,但结构性保证不能靠模型听话。
-3. **草稿一律写进 `guides/.drafts/`**,见上面「草稿绝对不能放进 `guides/`」。
+1. **Checked state** — the prompt orders `- [ ]` only, and `computeCheckedKeys` fills them from the database afterwards. Unlock state is not fed to the model either.
+2. **The `# 游戏名` and `appid:` lines are written by the program**, and any model-written versions are **actively stripped**. Both lines are pure data already in the database; having the model transcribe them adds a chance to get them wrong for nothing, and **one wrong digit in the appid registers the guide against a different game** — with neither side erroring. The prompt says not to write them too, but a structural guarantee cannot rest on the model complying.
+3. **Drafts always go to `guides/.drafts/`** — see "Drafts must never go into `guides/`" above.
 
-## 同名成就:一个会让攻略永远过不了关的形状
+## Same-named achievements: a shape that makes a guide fail forever
 
-`computeCheckedKeys` 对名字撞车的成就一律跳过(分不清是哪一个,宁可漏勾不能勾错),于是那些
-成就**解锁了框也不会被勾上**,而 `checked-mismatch` 会照报不误 —— 三轮改写全部浪费在一条
-**模型根本改不动**的错上(它连 checkbox 都不许写)。
+`computeCheckedKeys` skips any achievement whose name collides (it cannot tell which is which, and a missed tick beats a wrong one), so those achievements **stay unticked even when unlocked**, while `checked-mismatch` keeps reporting — three rewrite rounds burned on an error **the model cannot possibly fix** (it isn't allowed to write checkboxes at all).
 
-`unnameableApiNames(defs)` 处理它:两个名字没有一个是本作独一份的成就,它们的
-`checked-mismatch` 算**预期内**,不拦。豁免必须**按名字**算 —— 中文名撞车、英文名唯一的照样
-勾得上(大多数同名都是 Steam 单语本地化 bug),错误豁免会把真问题藏起来。
+`unnameableApiNames(defs)` handles it: when neither of an achievement's names is unique in this game, its `checked-mismatch` counts as **expected** and does not block. The exemption must be computed **per name** — a colliding Chinese name with a unique English one still ticks fine (most collisions are Steam single-language localization bugs), and over-exempting hides real defects.
 
-**同一个形状有第二个出口。** `ambiguous-no-description` 要求同名成就必须抄描述原文,但
-**如果 Steam 上那个描述本身是空字符串,就没有可抄的东西** —— 谁都修不了。一份 197/197 全覆盖
-的攻略可以被 15 条这样的发现拦在门外,三轮全花在让模型去抄不存在的描述上。
+**The same shape has a second exit.** `ambiguous-no-description` requires same-named achievements to quote the description verbatim, but **if Steam's description is itself an empty string there is nothing to quote** — nobody can fix it. A guide with 197/197 coverage can be held at the door by 15 such findings, with all three rounds spent asking the model to copy a description that does not exist.
 
-**判据是:有没有任何人的任何操作能消掉这条?** 没有 ⇒ 它属于 `expected`,报出来但不拦。
-修法是**拆成两个 code**,不是加一个布尔字段:
+**The test is: is there any action, by anyone, that would clear this finding?** No ⇒ it belongs in `expected`, reported but not blocking. The fix is **splitting it into two codes**, not adding a boolean field:
 
-| code | 含义 | 拦不拦 | 回灌给模型 |
+| code | Meaning | Blocks? | Fed back to the model? |
 |---|---|---|---|
-| `ambiguous-no-description` | 描述存在,攻略没抄 | **拦** | **回灌**(重写就能修) |
-| `ambiguous-empty-description` | Steam 上描述是空的 | 不拦(进 `expected`) | 不回灌 |
+| `ambiguous-no-description` | A description exists, the guide didn't quote it | **Yes** | **Yes** (a rewrite genuinely fixes it) |
+| `ambiguous-empty-description` | Steam's description is empty | No (goes to `expected`) | No |
 
-为什么是 code 而不是布尔:这个项目里「这种失败能不能补救」一律按 `code` 分流
-(`MODEL_FIXABLE`、`splitFindings`、`CLI_HINTS` 全是),再加一个只有这条规则会设的布尔值,
-就是给同一个问题开第二套机制 —— 而**第二套机制没接线**正是那次故障本身:那个布尔字段没有
-任何生产代码读它,唯一提到它的是一条断言它被设上了的测试。
+Why a code rather than a boolean: in this project "is this failure recoverable" is dispatched on `code` everywhere (`MODEL_FIXABLE`, `splitFindings`, `CLI_HINTS`), and adding a boolean only this one rule sets means a second mechanism answering the same question — and **the second mechanism not being wired up** is precisely what the original fault was: no production code read that boolean, and the only thing referencing it was a test asserting it had been set.
 
-两个细节:
+Two details:
 
-- **这条豁免不看 `unnameable`**,和 `checked-mismatch` 那条不同。后者对任何成就都会报,所以
-  需要那道闸;这条的触发前提本身就含「名字撞车」,比 `unnameable` 更窄,加上去是个恒真判断。
-- **不拦 ≠ 不说。** 那几个框**永远**不会被自动勾上,所以 CLI 把名字列出来、Dashboard 的**成功**
-  那一条也带上(`unsyncable`)。不报的话,「有 15 个框几个月一直没动」会被当成同步坏了。
-  消息里的名字用 `d.name_cn || d.name_en` 而不是 `byName` 的键 —— 那个键过了 `normalizeText`,
-  显示出来是 `proud player`,而 Steam 上写的是 `Proud Player`。
+- **This exemption does not consult `unnameable`**, unlike the `checked-mismatch` one. That rule fires for any achievement so it needs the gate; this rule's own precondition already includes the name collision, making it strictly narrower — adding the gate would be a tautology.
+- **Not blocking ≠ not mentioning.** Those boxes will **never** be ticked automatically, so the CLI lists the names and the Dashboard's **success** line carries them too (`unsyncable`). Without that, "15 boxes haven't moved in months" reads as the sync being broken. The message uses `d.name_cn || d.name_en` rather than the `byName` key — that key has been through `normalizeText` and displays as `proud player` where Steam says `Proud Player`.
 
-### 回灌只回灌模型改得动的
+### Only feed back what the model can act on
 
-`checked-mismatch` **永远不进回灌清单**。把它发回去等于要求模型写 `- [x]`,而「模型只写
-`- [ ]`、程序按数据库打勾」是这套设计的地基。真出现一条豁免不掉的 `checked-mismatch`,说明是
-我们自己的打勾出了问题,当场停下来说清楚,别再问模型。
+`checked-mismatch` **never enters the feedback list**. Sending it back asks the model to write `- [x]`, and "the model only writes `- [ ]`, the program ticks from the database" is the foundation of this design. A genuinely non-exempt `checked-mismatch` means *our* ticking is broken — stop and say so, don't ask the model again.
 
-## 落盘闸门
+## Landing gates
 
-按可逆性分,不按后端分:
+Split by reversibility, not by backend:
 
-- **新建文件** + 机器闸门过了 ⇒ 自动写。写完**重新读一遍再验一次** ——「调用成功 ≠ 内容正确」
-  是这个项目栽过的跟头。然后调**真正的发现逻辑**(`syncGuidesFromMarkdown`)登记,不自己
-  upsert,省得两处对「标题怎么取」「后端冲突怎么办」的理解慢慢跑偏。
-- **覆盖已有攻略** ⇒ 默认**拒绝**,`--overwrite` 才放行。放行之后仍然是「先能回退,再动手」:
-  先读旧攻略 → 备份原文(本地拷 `.md`,Notion 存原样 block JSON)→ 把会失去的东西讲清楚 →
-  人工确认 → 才写。**备份失败就一个字都不写**,和 `guidemigrate` 里「归档失败不算失败」正好相反。
-- **Notion 那边删的就是备份里那一批 block**,不重新读一次页面,否则中间被人动过就会出现
-  「删掉的那块没在备份里」。
-- **覆盖写回攻略自己所在的后端**,不顺手换后端。
-- 所有拒绝理由都在 `planGuide()` 里**一次性给完**(没有成就详情、成就太多、已有 Notion 页、
-  文件已存在、Steam 给不出解锁状态),不能跑到一半、花了钱才发现。
+- **A new file** + the machine gates passed ⇒ written automatically. Afterwards it is **read back and verified again** — "the call succeeded ≠ the content is right" is a hole this project has fallen into. Registration then calls **the real discovery logic** (`syncGuidesFromMarkdown`) rather than upserting directly, so two places can't drift on "how is the title taken" and "what happens on a backend conflict".
+- **Overwriting an existing guide** ⇒ **refused** by default; `--overwrite` allows it. Even then the order is "be able to roll back before acting": read the old guide → back it up (copy the `.md` locally, store raw block JSON for Notion) → state clearly what will be lost → human confirmation → only then write. **If the backup fails, nothing is written** — the exact opposite of `guidemigrate`, where a failed archive is not a failed migration.
+- **On Notion it deletes exactly the blocks in the backup**, never re-reading the page, or something edited in between produces "a deleted block that isn't in the backup".
+- **An overwrite writes back to the guide's own backend**, never switching backend along the way.
+- **Every refusal reason is given at once in `planGuide()`** (no achievement detail, too many achievements, an existing Notion page, the file exists, Steam can't supply unlock state) — never halfway through, after money has been spent.
 
-**Steam 拿不到解锁状态就不生成。** 全部不勾的攻略是一份错的攻略,而且会被校验器报成一堆
-`checked-mismatch`,看着像模型写错了。
+**No generation if Steam can't supply unlock state.** A guide with nothing ticked is a wrong guide, and the linter reports it as a pile of `checked-mismatch` that looks like the model got it wrong.
 
-差异预览分两段:花钱前只能讲旧的那一半(其中包含唯一不可挽回的那件事 —— 手动勾上的子步骤
-框会变回未勾选),写完之后再给真正的新旧对照。
+The diff preview comes in two parts: before spending, only the old half can be described (including the one irreversible loss — hand-ticked sub-step boxes revert to unticked); the genuine old-vs-new comparison comes after writing.
 
-### 同名 Notion 页:不覆盖,直接拒绝
+### A same-titled Notion page: refuse, don't overwrite
 
-同名页有内容就拒绝,同名页是空的才当成「要填的那一页」,两个同名页也拒绝。**不可逆的操作里,
-不做比问一句更安全** —— 确认框只能保证用户点过头,保证不了他知道自己在同意毁掉什么。
-`--overwrite` 之所以可以存在,是因为它先备份原文、再把「会失去什么」算出来摆在确认框里:
-**「不做」升级成「可以做,但必须先能回退」,不是升级成「问一句」。**
+A same-titled page with content is refused; an empty one is treated as "the page to fill"; two same-titled pages are refused. **In an irreversible operation, not doing it is safer than asking** — a confirmation box only guarantees the user clicked, not that they understood what they were agreeing to destroy. `--overwrite` is allowed to exist precisely because it backs up the original first and computes "what will be lost" into the confirmation: **"don't" is upgraded to "you may, but only with a rollback in hand", not to "ask a question".**
 
-## 局部重写(`--only`)
+## Partial rewrite (`--only`)
 
-`lib/guidescope.js`(选择集 / 条目定位 / 错误归属)+ `lib/guidepatch.js`(编排)+ `markdown.js`
-的 `todoSpans` / `spliceLines`,入口是 `guide-gen <appid> --only <选择器> [--note "要求"]`。
+`lib/guidescope.js` (selection set / entry location / fault attribution) + `lib/guidepatch.js` (orchestration) + `markdown.js`'s `todoSpans` / `spliceLines`. The entry point is `guide-gen <appid> --only <selector> [--note "…"]`.
 
-**它不是 `generateGuide` 的一个分支,而是另一条路。** `generateGuide` 五百多行,绝大部分是分段
-并发的机器(每段一个会话、切小的三级梯子、失败段记账、摊平后的段号映射),局部重写一条都不
-需要;两条路真正共享的只有**提示词和闸门**,都是导入来的。
+**It is not a branch of `generateGuide`, it is a separate path.** `generateGuide` is 500+ lines, almost all of it sharded-concurrency machinery (a session per shard, the three-rung split ladder, failed-shard bookkeeping, the flattened shard-index mapping), and a partial rewrite needs none of it. What the two genuinely share is **the prompt and the gate**, and both are imported.
 
-四条不显然的取舍:
+Four non-obvious trade-offs:
 
-- **保证来自程序只贴它问的那几条**,不来自「叫模型别动别的」。模型多写的一律报出来并丢弃 ——
-  和机械打勾取代「检查模型有没有写对 `- [x]`」是同一个手法。这是整个设计里唯一真正重要的一条:
-  如果模型交回整篇、声称只改了三条,**没有任何办法验证它没动别的**。
-- **区间宁可少吃一行,绝不多吃一行**(`todoSpans`)。一条成就 = 它自己 + 紧跟的更深缩进行,
-  中间插了非 checkbox 的行就停 —— 折叠块、表格、小节说明都不属于它。多吃一行是静默删字,
-  少吃一行会被校验器报成重复条目,是看得见的失败。
-- **旧攻略本来就有的问题不算这次的账**(`classifyFindings`),这是局部重写唯一真正新增的失败
-  方式。整篇重写时所有错都归它;局部重写点名改 3 条而第 40 条早就缺描述,拿那条去拦等于用一个
-  用户没要求改、我们也没授权去改的问题把一次做对了的改动整个丢掉。判据两条:落在选择集里,
-  或者改之前没有。**但「不拦」绝不等于「不说」。**
-- **Notion 是逐块改,不是删整页重写**。后者会连转换器覆盖不到的东西一起销毁(图片、嵌入、
-  子页面、手做的表格),而 `unconverted` 的存在本身就是在承认那类东西有一批。一次「局部重写」
-  把整页重写了,正是这个功能要修的那个 bug。块 id 保住还顺带保住了指向单条成就的链接。
+- **The guarantee comes from the program splicing only the entries it asked for**, never from "telling the model not to touch the rest". Anything extra the model returns is reported and discarded — the same move as mechanical ticking replacing "check whether the model wrote `- [x]` correctly". This is the one genuinely important line in the whole design: if the model returns the whole document claiming it only changed three entries, **there is no way to verify it left the rest alone.**
+- **A range must eat one line too few rather than one too many** (`todoSpans`). An achievement = itself plus the immediately following, more-deeply-indented lines, stopping at the first non-checkbox line — toggles, tables and section notes are not part of it. Eating one line too many silently deletes text; eating one too few surfaces as a duplicate-entry lint error, which is visible.
+- **Problems the old guide already had are not charged to this run** (`classifyFindings`) — the one genuinely new failure mode partial rewrite introduces. In a full rewrite every finding belongs to it; in a partial rewrite, naming 3 entries while entry 40 has been missing its description for months means blocking a correct change over a problem the user did not ask to fix and we were not authorised to touch. Two criteria: the finding is in the selection set, or it was not there before. **But "not blocking" is never "not mentioning".**
+- **Notion is patched block by block, not by deleting the page and rewriting it.** The latter destroys everything the converter cannot represent (images, embeds, sub-pages, hand-made tables), and `unconverted`'s existence is an admission that there is a batch of those. A "partial rewrite" that rewrites the whole page is precisely the bug this feature exists to fix. Surviving block ids also preserve links pointing at individual achievements.
 
-预检**换了口径**:整篇重写的预检讲「你会失去什么」,局部重写的讲「什么会留下」(其余多少个框
-一字不动、多少个手动勾选保住了),所以是 `patchPreflight` 而不是给 `overwritePreflight` 加个参数
-—— 同一段措辞服务两种问法两边都会写歪。
+The preflight **asks the opposite question**: a full rewrite's preflight says "what you will lose", a partial rewrite's says "what stays" (how many boxes are untouched, how many hand-ticks are preserved). Hence `patchPreflight` rather than a parameter on `overwritePreflight` — one wording serving two questions comes out wrong on both sides.
 
-**机械打勾必须在校验之前,而且算好的集合要传给落地。** `applyPatchToTodos` 把每条被重写的成就
-标成 `checked: false`(那是对的,模型交回来的永远是 `- [ ]`),而 `lintGuide` 跑在落地之前,看到
-的是那份没勾的 —— 于是任何一条**已解锁**的成就都会报 `checked-mismatch`,那条不在 `MODEL_FIXABLE`
-里,当场 throw。**后果是这条路对任何已解锁的成就都不能用。** 反方向同样致命:不能让落地自己
-再算一次,因为 `computeCheckedKeys` 会跳过已经勾上的条目,对着勾好的那份再算一遍得到空集,
-Notion 那条路于是会拿 `checked: false` 把刚勾上的框**取消勾选**。
+**Mechanical ticking must run before validation, and the computed set must be passed to the landing.** `applyPatchToTodos` marks every rewritten achievement `checked: false` (correct — what the model returns is always `- [ ]`), while `lintGuide` runs before landing and sees that unticked version — so any **unlocked** achievement reports `checked-mismatch`, which is not in `MODEL_FIXABLE`, and it throws on the spot. **The consequence is that this path is unusable for any unlocked achievement.** The reverse is equally fatal: the landing must not recompute, because `computeCheckedKeys` skips entries that are already ticked, so recomputing over the ticked version yields an empty set and the Notion path would then **untick** the boxes it just ticked, using `checked: false`.
 
-### Dashboard 入口
+### The Dashboard entry point
 
-♻ 重写 的确认框里,范围是一个二选一 ——「整篇」或「自选」,自选展开一份按小节分组的成就清单
-(`pickableEntries` 经 `previewGuidePatch` 下发),清单顶上两片**筛选**(稀有 / 未解锁,两片都
-按下 = 且),计数旁边是「全选」——**收的是当前显示出来的那批**——和「清空」。筛选只改显示、
-不碰选择,所以按下态的含义就是「我按了它」。**发出去的永远是一串点名的 api_name**,走后端
-`resolveScope` 的显式列表那条分支 —— 界面不需要自己的选择器种类,而且同名成就按名字点不动。
+In the ♻ 重写 confirmation, the scope is an either/or — 「整篇」 or 「自选」. 自选 expands a list of the guide's achievements grouped by section (`pickableEntries`, delivered by `previewGuidePatch`), with two **filters** at the top (rare / locked, both pressed = intersection), a 「全选」 beside the count — **which takes whatever is currently displayed** — and a 「清空」. The filters only change what is shown and never touch the selection, so a pressed state means exactly "I pressed it". **What goes out is always a list of named `api_name`s**, taking the backend `resolveScope`'s explicit-list branch — the UI needs no selector kinds of its own, and same-named achievements can't be picked by name anyway.
 
-界面上不做的两件事,都是想清楚了不做的:
+Two things deliberately not built into the UI:
 
-- **算出来的选择器不做成范围档位。** `rare` / `locked` / `section` 在 CLI 上是选择器,在界面上是
-  **筛选** —— 因为属性之间**互相重叠**(那唯一一条未解锁的成就恰好也稀有):做成「选中一批」的
-  开关会出现「没人按过它,它自己亮了」;做成只加不减的动作则只能表达并集,交集要不到。
-  筛选两样都没有,而且「两片都按下 = 且」是白捡的。
-- **自然语言 → 选择集** —— 这是唯一一个「解析错了要花钱才发现」的环节,所以排在算出来的选择器
-  全部可用之后。现有这几种覆盖了绝大多数真实场景,而且不需要任何模型调用。
+- **The computed selectors are not offered as scope options.** `rare` / `locked` / `section` are selectors on the CLI and **filters** in the UI, because the properties **overlap** (the one locked achievement also happens to be rare): as "select a batch" toggles you get "nobody pressed it and it lit up by itself", and as add-only actions they can only express unions, never intersections. Filters have neither problem, and "both pressed = AND" comes for free.
+- **Natural language → selection set** — the one step where a misparse is only discovered after paying, so it comes after all the computed selectors work. The existing ones cover the overwhelming majority of real cases and need no model call at all.
 
-## 供应商层
+## The provider layer
 
-### 硬性准入:必须有服务端搜索
+### Hard admission requirement: server-side search
 
-一个有免费额度的选项比第二个付费选项有用得多 —— 目标是「让用这个应用的人用他们自己的 key」,
-而没有免费额度的供应商既挡住用户,也挡住我们自己的验证。Gemini 的 Google Search grounding
-就是服务端搜索,准入没有放宽。
+One option with a free tier is far more useful than a second paid one — the goal is "let the people using this app use their own key", and a provider with no free allowance blocks both the user and our own verification. Gemini's Google Search grounding *is* server-side search, so the requirement was not relaxed.
 
-### 把不确定的地方做成运行时能自己回答的
+### Make the uncertain parts runtime-answerable
 
-`lib/ai-gemini.js` 是在拿不到官方文档的情况下写的,应对办法不是赌记性:
+`lib/ai-gemini.js` was written without access to the official docs, and the response was not to bet on memory:
 
-- **模型名可配置**,而且 `node tracker.js ai-check --models` 直接问 API 要列表。猜错了不用改代码。
-- **工具声明可配置**(`ai.geminiTools`)。工具改名、或者免费层不给用,也是改配置。
-- **思考预算不配就完全不发那个字段** —— 发一个可能不被接受的字段比不发更容易出错。
-- **搜索到底有没有发生,看回包不看文档。** `groundingMetadata.webSearchQueries` 是模型实际发出去
-  的搜索词;声明了工具却一条都没有,`ai-check` 会专门警告一行。**这比读一份可能过期的定价页
-  可靠得多。**
+- **The model name is configurable**, and `node tracker.js ai-check --models` asks the API for the list directly. A wrong guess needs no code change.
+- **Tool declarations are configurable** (`ai.geminiTools`). A renamed tool, or one the free tier won't allow, is also a config change.
+- **The thinking budget isn't sent at all unless configured** — sending a field that might not be accepted is more error-prone than not sending it.
+- **Whether search actually happened is read off the response, not the docs.** `groundingMetadata.webSearchQueries` holds the queries the model really issued; declaring the tool and getting none produces a dedicated warning line from `ai-check`. **That is far more reliable than reading a pricing page that may be out of date.**
 
-错误信息也照这个思路写:404 指向 `--models`,工具相关的 400 指向 `ai.geminiTools`,429 说清楚
-免费层有每分钟和每天两道上限。
+Error messages follow the same idea: a 404 points at `--models`, a tool-related 400 points at `ai.geminiTools`, and a 429 spells out that the free tier has both a per-minute and a per-day ceiling.
 
-**429 有两种,而错误信息里唯一的区别是 `limit: 0` 那几个字。** `limit: 0` 不是「用完了」,是这个
-模型压根不在免费层里,等次日重置永远不会恢复 —— 当成可重试的 429 去退避是白等。默认模型用
-**别名**(`gemini-flash-latest`)而不是具体版本号:版本号必然会过期,别名由 Google 维护;代价是
-行为可能悄悄变,所以要可复现就 pin 一个具体版本。
+**There are two kinds of 429, and the only difference in the message is the words `limit: 0`.** `limit: 0` does not mean "used up", it means this model is not in the free tier at all and will never recover at the daily reset — backing off as though it were a retryable 429 is waiting for nothing. The default model uses an **alias** (`gemini-flash-latest`) rather than a pinned version: version numbers inevitably expire while Google maintains the alias; the cost is that behaviour can change quietly, so pin a specific version when you need reproducibility.
 
-### 一个 Anthropic 那边没有的失败模式
+### A failure mode Anthropic doesn't have
 
-`finishReason: 'RECITATION'` —— 模型因为大段复述受版权保护的内容被拦下。**写攻略正好是高危
-场景**:我们明确要求它原文照抄官方描述,还要它读 wiki。所以它单独成一类
-(`stopReason: 'recitation'`),给一条能照着做的信息,不和普通拒答混在一起。那条信息里专门写了
-一句:**不能为了绕开这条限制而改掉「官方描述原文照抄」** —— 那是整个匹配系统的地基。
+`finishReason: 'RECITATION'` — the model blocked for reproducing large amounts of copyrighted content. **Guide writing is exactly the high-risk case**: we explicitly require verbatim copying of official descriptions and ask it to read wikis. So it gets its own class (`stopReason: 'recitation'`) and an actionable message rather than being lumped in with ordinary refusals. That message says explicitly: **do not relax "copy the official description verbatim" in order to dodge this limit** — that rule is the foundation of the entire matching system.
 
-### 词汇在供应商边界上就统一
+### The vocabulary is unified at the provider boundary
 
-- **`stopReason` 翻译成同一套**(`end_turn` / `max_tokens` / `refusal` / `recitation` / `other`),
-  原值留在 `rawStopReason` 里备查。**认不出来的一律落到 `other` 并判为不可用** —— 默认当成功处理
-  的话,以后哪家加一个新的终止原因,失败的生成会看起来像成功。
-- **进度事件也归一化**(`text` / `tool` / `tool-result` / `search`)。CLI 的实时输出和 guidegen 的
-  进度条因此不认识任何一家的原始格式,加第三家不用改展示代码。
-- 联网工具的声明是供应商方法 `provider.webTools()`,不是模块级函数 —— 各家的形状完全不一样,
-  编排层不该知道。
+- **`stopReason` is translated into one set** (`end_turn` / `max_tokens` / `refusal` / `recitation` / `other`), with the original kept in `rawStopReason`. **Anything unrecognised falls to `other` and is judged unusable** — defaulting to success means that when a vendor adds a new terminal state, failed generations start looking like successes.
+- **Progress events are normalised too** (`text` / `tool` / `tool-result` / `search`). The CLI's live output and `guidegen`'s progress bar therefore know no vendor's raw format, and adding a third provider needs no display-code change.
+- Web tool declarations are a provider method, `provider.webTools()`, not a module-level function — the shapes differ completely per vendor and the orchestration layer should not know them.
 
-### 记账
+### Accounting
 
-**一条消息内覆盖,跨消息累加。** `message_start` 和 `message_delta` 报的都是「这条消息到目前为止
-的累计值」,相加会把输出 token 多算一遍;而 pause_turn 续跑、回灌重写的每一轮是各自独立的消息,
-那时才该加。两句话都对才叫账准,错一半没有任何地方会报错,只会让费用显示一直偏高。
+**Overwrite within a message, accumulate across messages.** Both `message_start` and `message_delta` report "the cumulative total for this message so far", so adding them double-counts output tokens; whereas a pause_turn continuation and each feedback rewrite round are separate messages, which *is* when to add. The accounting is only correct when both halves are right, and getting half of it wrong errors nowhere — it just keeps the reported cost permanently too high.
 
-**只报 token 和请求数,不报金额。** 那是 API 回的硬数字,也是唯一能拿去和账单对上的东西。
-`thoughtsTokenCount` 被合进 `outputTokens`(理由是思考在计费上算输出、和 Anthropic 口径一致),
-**这是推断,不是查证过的。**
+**Only tokens and request counts are reported, never an amount.** Those are hard numbers the API returned, and the only thing that reconciles against a bill. `thoughtsTokenCount` is folded into `outputTokens` (on the grounds that thinking bills as output, consistent with Anthropic) — **that is an inference, not something verified.**
 
-## 质量:量得到的和量不到的
+## Quality: what can be measured and what can't
 
-### 难度信号:Steam 的全球解锁率
+### The difficulty signal: Steam's global unlock rate
 
-`GetGlobalAchievementPercentagesForApp`,**不需要 API key**,返回每个成就的全球解锁率。同一款
-游戏里最难和最容易能差几十倍。
+`GetGlobalAchievementPercentagesForApp`, **no API key required**, returns each achievement's global unlock rate. Within one game the hardest and easiest can differ by tens of times.
 
-不给这个信号时,模型光看名字和描述分不出哪条难,只能把力气平摊。现在每条后面标
-`🔴 全球仅 1.1% —— 这类要写深` / `⚪ 64.5% —— 一两句带过`,并明说「力气按它分配」。
-**效果体现在「搜什么」上**:搜索词从一条泛泛的「全成就攻略」,变成对着难成就去的具体问题。
+Without that signal the model can't tell which entries are hard from the name and description alone and spreads its effort evenly. Each entry is now tagged `🔴 全球仅 1.1% —— 这类要写深` / `⚪ 64.5% —— 一两句带过`, with an explicit instruction to allocate effort accordingly. **The effect shows up in what gets searched**: the queries go from one generic "全成就攻略" to specific questions aimed at the hard achievements.
 
-### 加预算没用;`effort` 才是那根旋钮
+### Raising the budget does nothing; `effort` is the knob
 
-`maxSearches` 6 → 30、`maxTokens` 16000 → 32000:输出 token +79%,而**攻略实际字符 +7%**,
-最难那批的平均心得字数纹丝不动。多出来的 token 几乎全进了思考。**预算是个天花板,而思考根本
-没顶到它** —— 抬高它当然什么都不换。
+`maxSearches` 6 → 30 and `maxTokens` 16000 → 32000: output tokens +79%, while **the guide's actual character count went up 7%**, and the mean note length on the hardest entries did not move at all. Almost all the extra tokens went into thinking. **A budget is a ceiling, and the thinking was never hitting it** — raising it naturally buys nothing.
 
-真正决定它想多久的是 `output_config.effort`。同一段 10 个成就背靠背:
+What actually decides how long it thinks is `output_config.effort`. The same 10-achievement shard, back to back:
 
-| 发过去的 | 墙上 | 思考 | 搜索 | 正文/成就 |
+| Sent | Wall clock | Thinking | Searches | Prose/achievement |
 |---|---|---|---|---|
-| 什么都不发 | 337 s | 145955 字 | 8 | 255 字 |
-| `effort: medium` | 219 s | 94104 字 | 6 | 275 字 |
-| `effort: low` | **43 s** | 15523 字 | 2 | 211 字 |
-| `thinking: disabled` | 6 s | 0 | **0** | 117 字 |
+| Nothing | 337 s | 145,955 chars | 8 | 255 chars |
+| `effort: medium` | 219 s | 94,104 chars | 6 | 275 chars |
+| `effort: low` | **43 s** | 15,523 chars | 2 | 211 chars |
+| `thinking: disabled` | 6 s | 0 | **0** | 117 chars |
 
-**`thinking: disabled` 不是「更快的 high」。** 它把联网搜索一起关掉了,也就是模型凭记忆写攻略
-—— 正是 `canSearch` 那套准入设计要防的、用户看不出来的质量差别。留着能配,但它不该出现在任何
-推荐档位里。
+**`thinking: disabled` is not "a faster high".** It turns off web search along with it, i.e. the model writes the guide from memory — precisely the invisible quality gap the `canSearch` admission rule exists to prevent. It stays configurable, but it should never appear in any recommended tier.
 
-**为什么允许把 effort 调低。** 因为代价是看得见的:思考量、搜索次数、每成就字数三者同向移动,
-而 `searchQueries`(「能搜 ≠ 搜了」)本来就每次都打在 CLI 和 Dashboard 上。调低 effort 不是静默
-降级,是一个用户每次生成都能读到数字的取舍 —— 这和 `thinking: disabled` 把搜索归零、却什么都
-不说,是两回事。
+**Why lowering effort is allowed.** Because the cost is visible: thinking volume, search count and characters-per-achievement all move together, and `searchQueries` ("can search ≠ did search") is already printed on both the CLI and the Dashboard every run. Lowering effort is not a silent degradation, it is a trade-off the user reads numbers for on every generation — quite unlike `thinking: disabled`, which zeroes search and says nothing.
 
-### effort 换掉的是**广度**,不是深度
+### What effort trades away is **breadth**, not depth
 
-同一款游戏、同一套提示词,只改 effort 背靠背跑,两份正文都让**玩通过这游戏的人**读:
+The same game, the same prompt, only effort changed, run back to back, with both texts read by **someone who has finished the game**:
 
-| 档位 | 模板句 | 正文总量 | 最难 5 条 | 搜索 | 墙上 |
+| Tier | Template sentences | Total prose | Hardest 5 | Searches | Wall clock |
 |---|---|---|---|---|---|
 | `high` | 0 | 1643 | 856 | 5 | 280 s |
 | `medium` | 0 | 2393 | 1061 | 4 | 262 s |
 | `low` | **9 / 16** | 1633 | 1007 | 2 | **35 s** |
 
-**八倍速度,而正文总量几乎一样 —— 任何一个自动算出来的数字到这儿都会说「没有代价」。**
-按难度加权拆开之后,数字反而像是 `low` 更会分配力气。**两个读法都是错的。真正的差别要读正文
-才看得见:16 条里 `low` 有 9 条是套模板的,`high` 一条都没有。**
+**Eight times the speed at nearly identical total prose — every automatically computed number here says "there is no cost".** Weighted by difficulty, the numbers even suggest `low` allocates effort better. **Both readings are wrong. The real difference is only visible by reading the prose: 9 of `low`'s 16 entries are template sentences, and `high` has none.**
 
 ```
 low :  第 III 章(凶案)全体查证正确即解锁。
-       第 IV 章(召唤)全体查证正确即解锁。          ← 九条,一个句式填章号和名字
+       第 IV 章(召唤)全体查证正确即解锁。          ← nine of these, one pattern with the chapter number swapped
 
 high:  召唤    —— 叛变者劫走宝箱、乘救生艇离船的一章,死亡多发生在海上
        邪恶俘虏 —— 本章起海妖登场,死因列表里开始出现「被怪物」类选项
 ```
 
-那九条模板句**不查任何资料也写得出来** —— 素材全在我们自己发过去的成就清单里。而这直接对得上
-多出来的那几次搜索:`high` 多搜的正是「每一章讲什么」,那次搜索的产物正好就是 `low` 缺的那九条。
+Those nine template sentences **need no research at all** — the material is entirely in the achievement list we sent. And that maps directly onto the extra searches: what `high` additionally searched for was "what happens in each chapter", and the product of that search is exactly the nine entries `low` is missing.
 
-所以这根旋钮真正在调的是:**要不要花力气去了解这游戏本身。** 它换掉的是攻略的**广度**,不是最难
-那几条的**深度**。
+So what this knob really controls is: **whether to spend effort understanding the game itself.** It trades away the guide's **breadth**, not the **depth** on the hardest entries.
 
-**三档在效果上不等距,断崖只在 `medium` 和 `low` 之间。** `medium` 和 `high` 在两个轴上都分不开,
-差距远小于这条路的方差。这直接决定了控件形态:**用三个离散按钮,不用滑块** —— 滑块的形状本身
-在暗示均匀。(每档只有一个样本,不足以说 medium 比 high 好;能说的只有「低档以外的档位之间
-分不出来」。)
+**The three tiers are not evenly spaced in effect; the cliff is only between `medium` and `low`.** `medium` and `high` are indistinguishable on both axes, by far less than this path's variance. That directly determines the control shape: **three discrete buttons, not a slider** — a slider's shape itself implies even spacing. (With one sample per tier, this cannot say `medium` beats `high`; all it can say is that the non-low tiers are indistinguishable.)
 
-**默认留 `high`。** SKILL.md 3.1 把攻略定义成「怎么打过的」的记录,按那个定位,九条模板句是实打实
-的损失。`low` 是「这游戏我只想要难点提示」时的开关,不是一个更划算的默认。
+**The default stays `high`.** SKILL.md 3.1 defines a guide as a record of how the game was played, and by that definition nine template sentences are a real loss. `low` is the switch for "I just want the hard parts", not a cheaper default.
 
-### 「字数」是个错的度量,这件事栽过三次
+### "Character count" is the wrong metric, and this has cost three times
 
-字数、覆盖率、warn 数量,量的全是**格式和数据**。同一份改动可以让字数纹丝不动而作者(玩过这款
-游戏的人)判断显著变好 —— 搜索变准之后,**同样 100 字里装的东西不一样了**,而字数量不出这个。
-第三次更狠:**按难度加权之后的字数依然指向错误的结论**。
+Character count, coverage and warning counts all measure **format and data**. The same change can leave the character count untouched while the author (who has played the game) judges it clearly better — after search improved, **the same 100 characters carry different content**, and a character count cannot see that. The third time was worse: **even rarity-weighted character count still pointed at the wrong conclusion.**
 
-能把差别显出来的只有一件事:**把两份正文并排读完。** 下次再想用一个自动算得出的数字来判断
-「这个改动伤没伤质量」,先回来看这一段。
+Only one thing surfaces the difference: **read both texts end to end, side by side.** The next time an automatically computable number is tempting for judging "did this change hurt quality", come back and read this section first.
 
-### 绝对时间不可复现,比值才可信
+### Absolute timings are not reproducible; ratios are
 
-同一段 10 个成就、同一个提示词、同一个模型,什么都不发跑三次:**76 秒 / 174 秒 / 337 秒**,
-思考 18158 / 38196 / 145955 字。同样的输入,8 倍的差。
+The same 10-achievement shard, the same prompt, the same model, nothing sent, run three times: **76 s / 174 s / 337 s**, with 18,158 / 38,196 / 145,955 characters of thinking. Identical input, an 8× spread.
 
-所以任何单次数字都是从一个很宽的分布里抽的一个点,拿它线性外推会得出差着三倍的估计。
-**要比就同一批背靠背比,报比值,别报绝对值。** 这也顺带回答了「进度条为什么给不出剩余时间」:
-方差不在网络上,在模型每次决定想多久。
+So any single number is one draw from a very wide distribution, and extrapolating it linearly produces estimates that differ threefold. **Compare back to back within one batch and report the ratio, never the absolute.** This also answers "why can't the progress bar estimate a finish time": the variance is not in the network, it is in how long the model decides to think each time.
 
-### 分批解决的是「写不完」,不是「写不深」
+### Sharding solves "can't finish", not "can't go deep"
 
-模型是按**整份列表**分配注意力的,51 行里的一行天生写不长。分批本身是为了解决**装不下**:每段
-没有独立的搜索预算,也没有「先出分节方案再逐节生成」那一步。手上那个「小批写得更深」的对比
-**有混淆**(换了游戏,可查资料的多少也不一样),不能当结论。要验就得拿同一款游戏、同一套配置,
-只改每段大小,比每条心得的字数。**在跑出那个数字之前,不要声称分批提高了质量。**
+The model allocates attention across **the whole list**, so one line among 51 is inherently short. Sharding exists to solve **not fitting**: each shard has no independent search budget, and there is no "produce a section plan first, then generate section by section" step. The available "smaller batches write deeper" comparison is **confounded** (different game, different amount of researchable material) and cannot be taken as a conclusion. Verifying it needs the same game and the same configuration, varying only the shard size, comparing characters per note. **Do not claim sharding improved quality before that number exists.**
 
-### 验证脚本要走真实路径
+### Verification scripts have to take the real path
 
-两条都是量质量时踩到的:
+Both of these were hit while measuring quality:
 
-- **100% 的游戏库里没有 schema。** `syncAchievementSchema` 故意跳过打满的游戏,而「打满了、你最
-  有资格判断攻略对不对」恰好是同一批游戏 —— 直接读 `achievements` 表的 A/B 脚本会当场退出。
-  生产路径没这个问题,`planGuide` 会当场调 `fetchGameSchema` 补一次。
-- **裸的单次请求没有生产环境那套重试阶梯**,拿它评判档位就是在用一条比生产更脆的路径取数。
+- **100% games have no schema in the library.** `syncAchievementSchema` deliberately skips completed games, and "completed, so you're best placed to judge whether the guide is right" is the same set of games — so an A/B script reading the `achievements` table directly exits immediately. The production path doesn't have this problem: `planGuide` calls `fetchGameSchema` on the spot.
+- **A bare single request has none of production's retry ladder**, so judging tiers with one takes measurements on a path more fragile than production.
 
-## 明确不做
+## The guide's language
 
-- **截图**(SKILL.md 规则二)—— 模型给不出可靠的游戏内截图。
-- **费用预估** —— 等搜索计费有实测数据。
-- **强制来源引用** —— 已决定不做。
-- **续跑跨进程边界**(Ctrl+C、崩溃)—— 需要把分段边界连同正文一起持久化,不能复用会话上下文。
-  逐段落盘之后一次失败最多丢一段,剩下的价值不大。
+A generated guide is written in the interface language (`config.uiLanguage`). The language is resolved **once**, in `planGuide`, and travels on the plan alongside `target` — full generation, partial rewrite and `--dry-run`'s preview all have to send the same prompt, and a caller resolving it for itself is where the three first diverge. The preview exists precisely to show what will be sent.
+
+**There is one builder; the rule text is per-language.** A translation is a different string all the way down, so the two prompts cannot share sentences. What they share is the shape: `PROMPT_SECTIONS` in `lib/guidegen.js` pairs the `##` sections of the two languages in the order they appear, and `test/guidegen.test.js` requires each prompt to carry its own half, in that order, with no heading missing from the table on either side. A section added to one language and forgotten in the other is a failing test rather than an English guide quietly written to a shorter rule set.
+
+### The four rules that genuinely differ
+
+| | |
+|---|---|
+| The output language | Stated outright rather than left to the surrounding language to imply |
+| Which achievement name is preferred | The official English one, with the list putting it first. Where a game ships only a Chinese name, that name is kept rather than translated — a translated name matches nothing, and rule 3 requires the bold name to equal one in the list |
+| The two rules about a game having no Chinese name | Gone. In an English guide they have no subject, and a rule with no subject still costs the model attention |
+| Citations | Follow whatever source was actually read, rather than naming Bilibili by default |
+
+**The research sources are deliberately not one of them.** They were Chinese-*first*, never Chinese-only: `lib/guidegen.js` already tells the model to search Steam community guides, TrueAchievements and Fandom alongside 游民星空 / 3DM / NGA / B站. For a Chinese-developed game the best guide really is on NGA or Bilibili, and a model that can read it can write English from it. Dropping those sites would make English guides worst exactly where guides are hardest to find.
+
+### Changing an existing guide's language
+
+There is no separate action. One appid has one guide, so a second button beside 「重写」 doing the same work with a different output is two ways to spend the same money on the one thing a game is allowed. Switching the interface and pressing 「重写」 is the whole mechanism — which is why the rewrite dialog's **title** names the language when it differs from the guide being replaced. That dialog has no body, by four rounds of deliberate cutting, so the title is the only place the language can be said.
+
+### `guides.lang` is a display fact
+
+The column feeds exactly two surfaces: the marker in the achievement panel's header, and the wording of that rewrite title. **Nothing about matching reads it.** Stage 1 of `resolveTodoToAchievement` and the `paraphrased-description` lint rule both accept *either* language's description, which was chosen so that a wrong value here costs a marker and never a tick — and it has to be, because the rows that predate the column carry an assumed value rather than a recorded one.
+
+It is written after a **successful** landing only. A failed rewrite leaves the old guide in place, and stamping the new language on at that point would have the panel describe a guide in a language it is not written in.
+
+The marker appears in the achievement panel and nowhere else: that panel is the one place the guide's own text is on screen, so it is the one place the mismatch is about to matter. On the row button it would be a badge on most rows carrying the same word, which stops being information the second time it is seen.
+
+### The density guard is parameterised, not exempted
+
+`test/i18n-boundary.test.js` requires the Chinese prompt to be more than 40% Chinese **and** the English one to be almost free of it. Exempting the English variant instead would leave the one real hole open — a pass that translates both and reports itself fine — because the Chinese prompt would then be English with nothing looking at it. Two assertions pointing in opposite directions cannot both be satisfied by one sweeping translation.
+
+## Explicitly not doing
+
+- **Screenshots** (SKILL.md rule-2) — the model cannot produce reliable in-game screenshots.
+- **Cost estimation** — waiting on measured data for search billing.
+- **Mandatory source citations** — decided against.
+- **Resuming across a process boundary** (Ctrl+C, a crash) — would require persisting the shard boundaries along with the prose, and the session context cannot be reused. With per-shard draft writes, one failure loses at most one shard, so the remaining value is small.

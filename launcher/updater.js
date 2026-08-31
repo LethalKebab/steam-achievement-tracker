@@ -1,23 +1,30 @@
 /**
- * 自更新 —— 除「真正动磁盘」以外的全部逻辑
+ * Self-update — everything except actually touching the disk
  * ------------------------------------------------
- * 这个文件**不 import electron**,所以 `node --test` 能直接加载它。设计文档
- * (docs/self-update.md 第五节)列出的「可单测的」四件事全在这里:清单生成、
- * 版本比对、sha256 校验、跳过版本的记忆。main.js 只负责把它接上对话框和退出。
+ * This file **does not import electron**, so `node --test` can load it directly. All four of the
+ * "unit-testable" things the design doc lists (docs/self-update.md, section five) live here: manifest
+ * generation, version comparison, sha256 verification and remembering the skipped version. main.js
+ * only wires it up to the dialog and the exit.
  *
- * 三条硬约束(同文档第三节)在这里的落点:
+ * Where the three hard constraints (same doc, section three) land here:
  *
- * 1. **删除只按清单**(上一版装了哪些文件),绝不按「保留名单」。用户数据和
- *    程序文件同层(`resources/tracker/`),保留名单漏一项就是删掉用户的数据库,
- *    而清单漏一项只是留下一个多余文件 —— 两种写法的失败方向相反,这是全部理由。
- * 2. **清单缺失时退回覆盖**,绝不推断哪些文件是程序文件。
- * 3. **替换必须发生在进程真的退出之后**,由 helper 等 PID 完成。托盘之后
- *    「关掉窗口」不等于退出,exe 还锁着。
+ * 1. **Deletion goes strictly by the manifest** (which files the previous version installed), never
+ *    by a "keep list". User data sits at the same level as the program files
+ *    (`resources/tracker/`), so a keep list missing one entry deletes the user's database, while a
+ *    manifest missing one entry merely leaves a spare file behind — the two forms fail in opposite
+ *    directions, and that is the entire reason.
+ * 2. **A missing manifest falls back to overwriting**, never to inferring which files are program
+ *    files.
+ * 3. **The replacement has to happen after the process has genuinely exited**, which the helper
+ *    handles by waiting on the PID. Since the tray change, 「关掉窗口」 does not mean exiting and the
+ *    exe is still locked.
  *
- * 清单为什么是**单独的发布附件**而不是打进 zip:zip 由 electron-builder 生成,
- * postbuild 拿到它时已经封好了,清单又要描述这个 zip 的内容 —— 打进去是循环的。
- * 于是清单跟 zip 一起发布,由 helper 在解压后写进 app 目录。副作用正好是想要的:
- * 全新解压的用户手上没有清单,第一次更新自然走约束 2 的覆盖路径,不需要特例。
+ * Why the manifest is a **separate release asset** rather than something packed into the zip: the
+ * zip is produced by electron-builder and is already sealed by the time postbuild gets it, while the
+ * manifest has to describe that zip's contents — packing it in is circular. So the manifest is
+ * published alongside the zip and written into the app directory by the helper after extraction. The
+ * side effect is exactly the one wanted: a user with a fresh extraction has no manifest, so their
+ * first update naturally takes constraint 2's overwrite path with no special case needed.
  */
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -25,39 +32,42 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-/** 换成自己的仓库就改这一行。公开仓库,不需要 token(未认证 60 次/小时,一天查一次绰绰有余) */
+/** Change this one line for your own repository. A public repo needs no token (60 unauthenticated requests an hour is ample for one check a day) */
 export const REPO = 'LethalKebab/steam-achievement-tracker';
 
-/** 装在 app 目录里的那份清单 —— 描述「当前这一版装了什么」 */
+/** The manifest installed in the app directory — it describes "what the current version installed" */
 export const MANIFEST_NAME = 'update-manifest.json';
 
 /**
- * helper 起来之后**头一件事**写的标记文件。
+ * The marker file the helper writes as **the very first thing** it does.
  *
- * 存在的理由是一次真实事故:app 退了,helper 没接上,用户面对一个自己关掉、
- * 再也不回来的程序 —— 而 app 那边日志还写着「helper 已启动」,因为 `spawn()`
- * 返回从来就不代表进程真的起来了(启动失败走的是 `error` 事件)。
+ * It exists because of a real incident: the app exited, the helper never took over, and the user
+ * faced a program that closed itself and never came back — while the app's log said 「helper 已启动」,
+ * because `spawn()` returning has never meant the process actually started (a launch failure comes
+ * through the `error` event).
  *
- * 现在的顺序是:启动 helper → **等这个文件出现** → 才 app.quit()。等不到就
- * 不退,报错给用户看。最坏结果从「程序没了」降级成「更新没成,但程序还在」。
+ * The order now is: launch the helper → **wait for this file to appear** → only then app.quit().
+ * Failing to see it means not exiting and reporting the error to the user. The worst outcome degrades
+ * from "the program is gone" to "the update did not happen, but the program is still here".
  */
 export const ALIVE_MARKER_NAME = 'helper-alive.txt';
-/** 跳过的版本记在这里。不在任何清单里,所以更新永远不会删掉它 */
+/** The skipped version is recorded here. It is in no manifest, so an update can never delete it */
 export const STATE_NAME = 'update-state.json';
 
 export const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`;
 const API_ROOT = `https://api.github.com/repos/${REPO}/releases`;
 const FETCH_TIMEOUT_MS = 20_000;
 /**
- * 下载的上限,给得很宽(133MB / 30 分钟 ≈ 75 KB/s)。存在的意义不是"够不够快",
- * 而是**卡住的连接必须有个头**:没有上限的话 checkForUpdate 会永远停在 await 上,
- * 那个自己续自己的定时器也就再也不续了 —— 更新从此静默停止,直到重启程序。
+ * The download limit, set very generously (133MB / 30 minutes ≈ 75 KB/s). Its point is not "is that
+ * fast enough" but that **a stalled connection has to have an end**: without a limit checkForUpdate
+ * would sit on that await forever, and the self-renewing timer would then never renew — updates
+ * silently stop from that moment until the program is restarted.
  */
 const DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 
-// ---------------------------------------------------------------- 版本比对
+// ---------------------------------------------------------------- Version comparison
 
-/** `v1.1.3` / `1.1.3-beta.2` → `[1, 1, 3]`。预发布后缀直接丢掉 */
+/** `v1.1.3` / `1.1.3-beta.2` → `[1, 1, 3]`. The prerelease suffix is simply dropped */
 function versionParts(v) {
   return String(v ?? '')
     .replace(/^v/i, '')
@@ -66,7 +76,7 @@ function versionParts(v) {
     .map((s) => Number.parseInt(s, 10) || 0);
 }
 
-/** a 比 b 新返回正数,旧返回负数,一样返回 0 */
+/** Positive when a is newer than b, negative when older, 0 when equal */
 export function compareVersions(a, b) {
   const pa = versionParts(a);
   const pb = versionParts(b);
@@ -78,11 +88,12 @@ export function compareVersions(a, b) {
 }
 
 /**
- * 该不该弹这个版本。
+ * Whether to offer this version.
  *
- * 跳过是**按版本记**而不是「今天别烦我」:设计文档把「记住用户跳过的版本」
- * 列为三个死细节之一 —— 每次开都弹一遍,两天就被训练成无视了。跳过 1.2.0
- * 之后 1.2.1 出来照样弹,因为那是另一个版本。
+ * Skipping is recorded **per version** rather than as "leave me alone today": the design doc lists
+ * "remember the version the user skipped" as one of the three hard details — prompting on every open
+ * trains people to ignore it within two days. Having skipped 1.2.0, 1.2.1 is still offered when it
+ * appears, because that is a different version.
  */
 export function shouldOffer({ currentVersion, remoteVersion, skippedVersion = null }) {
   if (!remoteVersion) return false;
@@ -91,13 +102,14 @@ export function shouldOffer({ currentVersion, remoteVersion, skippedVersion = nu
   return true;
 }
 
-// ---------------------------------------------------------------- 发布附件
+// ---------------------------------------------------------------- Release assets
 
 /**
- * 从 release 的附件里挑出 zip 和清单。
+ * Picks the zip and the manifest out of a release's assets.
  *
- * 清单挑不到不是错 —— 1.1.3 及以前的发布本来就没有。那种情况下这次更新照常做,
- * 只是做完之后 app 目录里不留清单,下一次更新再走一遍覆盖。
+ * Not finding a manifest is not an error — releases up to and including 1.1.3 simply have none. In
+ * that case the update proceeds as usual, only leaving no manifest in the app directory afterwards,
+ * so the next update takes the overwrite path again.
  */
 export function pickAssets(assets = []) {
   const nameOf = (a) => String(a?.name ?? '');
@@ -108,9 +120,10 @@ export function pickAssets(assets = []) {
 }
 
 /**
- * GitHub 每个附件自带 `digest: "sha256:…"`。认不出来就返回 null,而**调用方必须
- * 因此拒绝更新** —— 校验不了就等于要用户执行一份没验过的 133MB 可执行文件。
- * 宁可更新不了,不要装一份来路不明的。
+ * Every GitHub asset carries its own `digest: "sha256:…"`. An unrecognised one returns null, and
+ * **the caller must refuse the update because of it** — not being able to verify means asking the
+ * user to run an unverified 133MB executable. Better not to update at all than to install something
+ * of unknown origin.
  */
 export function sha256FromDigest(digest) {
   const m = /^sha256:([0-9a-f]{64})$/i.exec(String(digest ?? ''));
@@ -123,25 +136,26 @@ export async function hashFile(path) {
   return h.digest('hex');
 }
 
-// ---------------------------------------------------------------- 清单
+// ---------------------------------------------------------------- Manifest
 
 /**
- * 清单里的路径必须是**规规矩矩的相对路径**。
+ * A path in the manifest has to be **a well-behaved relative path**.
  *
- * 清单是从网上下来的,而它唯一的用途是喂给一个删除循环。盘符、开头的斜杠、
- * `..` 任何一样都可能让删除跑到 app 目录外面去。helper 里还有一道边界检查,
- * 这里是第一道 —— 不合格的清单整份拒收,而不是逐条过滤:一份带越界路径的清单
- * 本身就说明它不是我们发的,剩下的部分同样不可信。
+ * The manifest comes off the internet, and its only use is feeding a deletion loop. A drive letter, a
+ * leading slash or a `..` could each let the deletion run outside the app directory. The helper has a
+ * boundary check of its own; this is the first one — and a non-conforming manifest is rejected in
+ * full rather than filtered entry by entry: a manifest carrying an out-of-bounds path is itself proof
+ * that we did not publish it, and the rest of it is equally untrustworthy.
  */
 export function isSafeManifestPath(p) {
   if (typeof p !== 'string' || p.length === 0) return false;
   if (p.includes('\0')) return false;
-  if (/^[a-zA-Z]:/.test(p)) return false; // 盘符
-  if (/^[/\\]/.test(p)) return false; // 绝对路径 / UNC
+  if (/^[a-zA-Z]:/.test(p)) return false; // a drive letter
+  if (/^[/\\]/.test(p)) return false; // absolute path / UNC
   return p.split(/[/\\]/).every((seg) => seg !== '' && seg !== '.' && seg !== '..');
 }
 
-/** 解析并校验一份清单文本。不合格直接抛 —— 调用方据此放弃更新 */
+/** Parses and validates a manifest's text. Throws outright when it does not conform — the caller abandons the update on that basis */
 export function parseManifest(text) {
   let raw;
   try {
@@ -157,16 +171,17 @@ export function parseManifest(text) {
 }
 
 /**
- * 本机专属、绝不属于程序本体的文件。
+ * Files that are specific to this machine and are never part of the program itself.
  *
- * 目前只有一个:`local.config.json`(把打包版指回一份已有 CLI 数据的指针)。
- * 它进了清单就等于下次更新会把它当程序文件删掉 —— 用户的数据目录会静默地
- * 跳回默认位置,表现是"我的数据全没了"。postbuild 生成清单时排在复制它之前,
- * 顺序是机制,这个检查是安全网 —— 顺序是人改的。
+ * There is only one today: `local.config.json` (the pointer that aims the packaged build at an
+ * existing CLI data set). Letting it into the manifest means the next update deletes it as a program
+ * file — the user's data directory silently reverts to the default location, presenting as "all my
+ * data is gone". postbuild generates the manifest before copying it in, so the ordering is the
+ * mechanism and this check is the safety net — orderings get changed by people.
  */
 export const MACHINE_LOCAL_FILES = ['local.config.json'];
 
-/** 清单里混进了哪些本机专属文件(空数组 = 干净) */
+/** Which machine-specific files slipped into the manifest (an empty array = clean) */
 export function machineLocalEntries(files = []) {
   return files.filter((f) => {
     const base = String(f).split(/[/\\]/).pop()?.toLowerCase();
@@ -175,12 +190,14 @@ export function machineLocalEntries(files = []) {
 }
 
 /**
- * 走一遍目录,列出所有文件的相对路径 —— 打包时用来生成清单。
+ * Walks a directory and lists every file's relative path — used at build time to generate the
+ * manifest.
  *
- * 读的是 electron-builder 解包出来的目录,而不是去解析 zip:那个目录**就是**
- * zip 的内容,而且正是用户解压之后磁盘上的样子。只收文件不收目录,因为删除
- * 阶段只删文件;目录靠「空了才删」清理,这样 `resources/tracker/data/` 这种
- * 装着数据库的目录永远不会被碰到。
+ * It reads the directory electron-builder unpacked rather than parsing the zip: that directory **is**
+ * the zip's contents, and it is exactly what ends up on disk after the user extracts it. Only files
+ * are collected, never directories, because the deletion stage only deletes files; directories are
+ * cleaned up by "delete it once it is empty", so a directory like `resources/tracker/data/` holding
+ * the database is never touched.
  */
 export function buildManifest(rootDir, version) {
   const files = [];
@@ -196,15 +213,16 @@ export function buildManifest(rootDir, version) {
   return { version: String(version), files };
 }
 
-// ---------------------------------------------------------------- 跳过的版本
+// ---------------------------------------------------------------- The skipped version
 
 /**
- * 状态文件放在 exe 旁边,不放 `app.getPath('userData')`。
- * 理由和 local.config.json 那条一样(launcher/README.md):userData 在
- * 沙箱/虚拟化进程里会被静默重定向,同一个绝对路径对不同进程指向不同内容。
+ * The state file sits next to the exe, not in `app.getPath('userData')`.
+ * The reason is the same as for local.config.json (launcher/README.md): userData is silently
+ * redirected in sandboxed/virtualised processes, so the same absolute path points at different
+ * content for different processes.
  *
- * 读写失败一律当作「没记住」—— app 目录只读(比如解压到 Program Files)时
- * 不该因此弹任何东西出来。
+ * A failed read or write always counts as "not remembered" — an app directory that is read-only (it
+ * was extracted into Program Files, say) must not cause anything to be raised.
  */
 export function readUpdateState(path) {
   try {
@@ -224,22 +242,22 @@ export function writeUpdateState(path, state) {
   }
 }
 
-// ---------------------------------------------------------------- 网络
+// ---------------------------------------------------------------- Network
 
 function ghHeaders(userAgent) {
   return {
     Accept: 'application/vnd.github+json',
-    'User-Agent': userAgent, // GitHub API 不带 UA 直接 403
+    'User-Agent': userAgent, // the GitHub API 403s outright without a UA
     'X-GitHub-Api-Version': '2022-11-28',
   };
 }
 
 /**
- * 取一个 release。`tag` 为空取 latest。
+ * Fetches one release. An empty `tag` fetches latest.
  *
- * 指定 tag 是**排练用的**:设计文档第五节的验证办法是让它指向 v1.1.2 做一次
- * 「降级」,不用发新版就能把「下载 → 校验 → 按清单删 → 解压 → 重启」整条路径
- * 跑一遍。main.js 从 `TRACKER_UPDATE_FORCE_TAG` 读这个值。
+ * Naming a tag is **for rehearsals**: the design doc's section five verifies this by pointing it at
+ * v1.1.2 to perform a "downgrade", running the whole 「下载 → 校验 → 按清单删 → 解压 → 重启」 path
+ * without cutting a release. main.js reads that value from `TRACKER_UPDATE_FORCE_TAG`.
  */
 export async function fetchRelease({ tag = null, userAgent = 'SteamAchievementTracker', fetchImpl = fetch } = {}) {
   const url = tag ? `${API_ROOT}/tags/${encodeURIComponent(tag)}` : `${API_ROOT}/latest`;
@@ -263,10 +281,12 @@ export async function downloadTo(url, dest, { userAgent = 'SteamAchievementTrack
 }
 
 /**
- * 下载并按 GitHub 给的 digest 校验。digest 认不出来就拒绝,理由见 sha256FromDigest。
+ * Downloads and verifies against the digest GitHub supplies. An unrecognised digest is refused; the
+ * reasoning is on sha256FromDigest.
  *
- * 失败时把半截文件删掉:这里下的是 133MB,反复失败会在 temp 里堆出好几百兆,
- * 而且一个校验不过的包留在磁盘上没有任何用处。
+ * On failure the partial file is deleted: this downloads 133MB, and repeated failures would pile up
+ * hundreds of megabytes in temp — while a package that fails verification is of no use on disk at
+ * all.
  */
 export async function downloadVerified(asset, dest, opts = {}) {
   const want = sha256FromDigest(asset?.digest);
@@ -284,28 +304,30 @@ export async function downloadVerified(asset, dest, opts = {}) {
   return dest;
 }
 
-// ---------------------------------------------------------------- 更新提示界面
+// ---------------------------------------------------------------- The update prompt UI
 
-/** 选择结果通过 document.title 回传,这是标题的前缀 */
+/** The choice comes back through document.title; this is that title's prefix */
 export const PROMPT_TITLE_PREFIX = 'choice:';
 
 /**
- * 更新提示是**一个真正的网页**,不是原生对话框。
+ * The update prompt is **a real web page**, not a native dialog.
  *
- * 这不是偏好问题,是实测:`dialog.showMessageBox` 在这个项目里根本立不住 ——
- * 框闪一下就消失,promise 立刻返回一个不在按钮范围里的 `response: 420`。
- * 把选项拆到只剩 `{ message }`、换成同步版 `showMessageBoxSync`、挂父窗口、
- * 不挂父窗口,十种组合全是 420;而同一台机器上纯 Win32 的 MessageBox 立得好好的。
- * 所以问题出在 Electron 这一层,不是系统。
+ * This is not a preference, it is measured: `dialog.showMessageBox` simply does not hold up in this
+ * project — the box flashes and disappears, and the promise immediately returns a
+ * `response: 420` that is outside the button range. Stripping the options down to `{ message }`,
+ * switching to the synchronous `showMessageBoxSync`, attaching a parent window, not attaching one —
+ * ten combinations, all 420; while a plain Win32 MessageBox on the same machine holds up perfectly.
+ * So the problem is at the Electron layer, not in the system.
  *
- * **这是这个仓库第二次撞上同一类事。** 第一次是渲染进程的 `window.confirm`,
- * 「生成攻略」在打包版里整个是死的(CLAUDE.md 有记录),当时的结论写成了
- * 「原生对话框归主进程所有」—— 那个结论太窄了,主进程的一样不能用。仓库当时
- * 给出的解法是 `askConfirm`,一个页面内的组件,「在浏览器和打包版里完全一致」。
- * 这里走的是同一条路。
+ * **This is the second time this repository has hit the same class of thing.** The first was the
+ * renderer's `window.confirm`, which made 「生成攻略」 entirely dead in the packaged build (recorded in
+ * CLAUDE.md), and the conclusion drawn then was 「原生对话框归主进程所有」 — that conclusion was too
+ * narrow, since the main process's are equally unusable. The solution the repository gave at the time
+ * was `askConfirm`, an in-page component that is 「在浏览器和打包版里完全一致」. This takes the same
+ * route.
  *
- * 结果靠 `document.title` 回传,不用 preload、不用 IPC:窗口里没有任何需要
- * 特权的东西,而 `page-title-updated` 是一定会触发的。
+ * The result comes back through `document.title` with no preload and no IPC: there is nothing in the
+ * window that needs privileges, and `page-title-updated` is guaranteed to fire.
  */
 export function renderUpdatePromptHtml({ version, sizeMb }) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -353,29 +375,31 @@ export function renderUpdatePromptHtml({ version, sizeMb }) {
 </body></html>`;
 }
 
-/** 解析上面那个页面回传的标题。认不出来返回 null(普通的标题变化会走到这儿) */
+/** Parses the title that page sends back. An unrecognised one returns null (ordinary title changes land here) */
 export function parsePromptChoice(title) {
   const m = new RegExp(`^${PROMPT_TITLE_PREFIX}(update|later):(0|1)$`).exec(String(title ?? ''));
   return m ? { update: m[1] === 'update', skip: m[2] === '1' } : null;
 }
 
-// ---------------------------------------------------------------- helper 脚本
+// ---------------------------------------------------------------- The helper script
 
-/** PowerShell 单引号字符串:内部的单引号写成两个。和 postbuild.js 里那个同源 */
+/** A PowerShell single-quoted string: an inner single quote is written twice. Same origin as the one in postbuild.js */
 const psQuote = (s) => `'${String(s ?? '').replace(/'/g, "''")}'`;
 
 /**
- * 生成那份接管替换的 PowerShell 脚本。
+ * Generates the PowerShell script that takes over the replacement.
  *
- * 依然零运行时依赖 —— `Expand-Archive` 是 PowerShell 自带的,`postbuild.js`
- * 早就在借 `WScript.Shell` 建快捷方式,有先例。
+ * Still zero runtime dependencies — `Expand-Archive` ships with PowerShell, and `postbuild.js` has
+ * long been borrowing `WScript.Shell` to create shortcuts, so there is precedent.
  *
- * **参数是烤进脚本里的,不走命令行。** 路径里可能有中文和空格,而命令行参数要
- * 再经过一层引号规则;烤进去只需要 psQuote 一种转义,少一整类 bug。脚本是
- * 一次性的,写在 temp 里,用完就没人再看。
+ * **The parameters are baked into the script rather than passed on the command line.** Paths may
+ * contain Chinese characters and spaces, and a command-line argument goes through another layer of
+ * quoting rules; baking them in needs only psQuote's one form of escaping, removing a whole class of
+ * bug. The script is single-use, written into temp, and nobody looks at it again.
  *
- * 脚本本身**必须带 BOM 存成 UTF-8**(见 writeHelperScript):PowerShell 5.1
- * 没有 BOM 时按 ANSI 代码页读 .ps1,中文路径和中文提示会全变成问号。
+ * The script itself **has to be saved as UTF-8 with a BOM** (see writeHelperScript): without a BOM,
+ * PowerShell 5.1 reads a .ps1 in the ANSI code page, and Chinese paths and Chinese messages all turn
+ * into question marks.
  */
 export function renderHelperScript({
   processId,
@@ -502,38 +526,40 @@ try {
 }
 
 /**
- * Windows 上 PowerShell 的绝对路径。
+ * PowerShell's absolute path on Windows.
  *
- * 不靠 PATH:PATH 里找不到时 `spawn` 报的是异步的 `error` 事件,而不是抛异常 ——
- * 正是那种"看起来启动了"的失败。
+ * PATH is not relied on: when it cannot be found there, `spawn` reports an asynchronous `error` event
+ * rather than throwing — precisely the "it looked like it started" kind of failure.
  */
 export function powershellPath(systemRoot = process.env.SystemRoot || 'C:\\Windows') {
   return `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
 }
 
 /**
- * **helper 必须活过 app.quit(),而这在 Electron 里不是默认行为。**
+ * **The helper has to outlive app.quit(), and in Electron that is not the default behaviour.**
  *
- * 实测(在真实会话里,四种方式各起一个假 helper 然后立刻 app.quit()):
+ * Measured (in a real session, starting a fake helper four different ways and immediately calling
+ * app.quit()):
  *
- * | 方式                          | 活下来了吗 |
- * |------------------------------|-----------|
- * | `detached: true` + unref      | **否**    |
- * | 普通 spawn + unref            | **否**    |
- * | `cmd /c start`                | 是        |
- * | WMI `Win32_Process.Create`    | 是        |
+ * | Method                        | Survived? |
+ * |-------------------------------|-----------|
+ * | `detached: true` + unref       | **no**    |
+ * | plain spawn + unref            | **no**    |
+ * | `cmd /c start`                 | yes       |
+ * | WMI `Win32_Process.Create`     | yes       |
  *
- * 这是**作业对象**(Job Object)的特征:Electron 把子进程放进一个带
- * kill-on-close 的 job,job 一关全家一起走。Windows 的 `DETACHED_PROCESS`
- * (也就是 Node 的 `detached`)**逃不出 job** —— 它管的是控制台,不是 job。
- * 能逃出来的只有"根本不是我们的子进程"这一类办法,上面两种都属于这类。
+ * This is the signature of a **job object**: Electron puts its child processes into a job with
+ * kill-on-close, and closing the job takes the whole family with it. Windows's `DETACHED_PROCESS`
+ * (which is Node's `detached`) **cannot escape a job** — it governs the console, not the job. The only
+ * ways out are the ones where the process is not our child at all, and both of the above are of that
+ * kind.
  *
- * 第一版就是用 `detached` 的,于是 app 退了、helper 没接上、程序再也没回来。
- * 别改回去。
+ * The first version used `detached`, so the app exited, the helper never took over and the program
+ * never came back. Do not change it back.
  */
 export function primaryLaunch({ scriptPath, psPath = powershellPath() }) {
-  // `""` 是 start 的窗口标题参数,必须给 —— 不给的话 start 会把后面第一个
-  // 带引号的路径当成标题,然后什么都不启动
+  // `""` is start's window-title argument and has to be given — without it, start takes the first
+  // quoted path after it as the title and then launches nothing
   return {
     file: 'cmd',
     args: [
@@ -544,15 +570,18 @@ export function primaryLaunch({ scriptPath, psPath = powershellPath() }) {
 }
 
 /**
- * 备用:让 WMI 去建这个进程,建出来的不是我们的子进程,同样逃出 job。
+ * The fallback: have WMI create the process, so what is created is not our child and likewise escapes
+ * the job.
  *
- * 为什么留一条备用而不是只用一种 —— 这个组件有个别处没有的性质:
- * **坏掉的那一版已经在用户机器上了,而修好的那一版要靠它送过去。** 主路一旦
- * 在某台机器上不灵,那台机器就再也收不到修复。所以这里的冗余是值得的。
+ * Why keep a fallback rather than a single route — this component has a property nothing else here
+ * does: **the version where it is broken is already on users' machines, and the fixed version has to
+ * be delivered by it.** Once the primary route fails on some machine, that machine can never receive
+ * the fix again. So the redundancy is worth it.
  *
- * 两条路的失败原因是正交的:主路怕的是 `start` 的引号规则和脚本执行策略
- * (GPO 下发的 Restricted 会挡掉 `-File`);备用路把整段脚本用
- * `-EncodedCommand` 传进去,执行策略管不着,但要求 WMI 可用。
+ * The two routes fail for orthogonal reasons: the primary is vulnerable to `start`'s quoting rules
+ * and to the script execution policy (a Restricted policy pushed by GPO blocks `-File`); the fallback
+ * passes the whole script through `-EncodedCommand`, which the execution policy does not govern, but
+ * it requires WMI to be available.
  */
 export function fallbackLaunch({ script, psPath = powershellPath() }) {
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
@@ -567,7 +596,7 @@ export function fallbackLaunch({ script, psPath = powershellPath() }) {
   };
 }
 
-/** 写 helper 脚本。**BOM 是必需的**,理由见 renderHelperScript 的注释 */
+/** Writes the helper script. **The BOM is required**; the reasoning is on renderHelperScript */
 export function writeHelperScript(path, source) {
   writeFileSync(path, `﻿${source}`, 'utf8');
   return path;

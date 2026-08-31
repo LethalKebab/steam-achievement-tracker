@@ -1,22 +1,26 @@
 /**
- * 网络边界:谁够得着这个端口,以及一次请求能不能把进程带走
+ * The network boundary: who can reach this port, and whether one request can take the
+ * process down
  * ------------------------------------------------------------------
- * 这个文件保的和别的测试都不一样:别处保的是「功能对不对」,这里保的是
- * **「只监听 127.0.0.1」这句话到底挡住了什么」**。答案是:几乎什么都没挡住。
- * 用户在浏览器里打开的任何一个网页都能往 `http://127.0.0.1:8777/` 发请求 ——
- * `Content-Type: text/plain` 是 CORS 的「简单请求」,没有预检;对方读不到回应,
- * 但**副作用照样发生**,而这里的副作用包括删游戏、覆盖 config.json、发起要花钱的
- * 生成,以及 `/restore` 那条把整个数据库换掉的路。
+ * What this file protects is unlike every other test: elsewhere it is "is the feature
+ * correct", while here it is **what "listens on 127.0.0.1 only" actually blocks**. The
+ * answer is: almost nothing. Any web page the user opens in their browser can send requests
+ * to `http://127.0.0.1:8777/` — `Content-Type: text/plain` is a CORS "simple request" with
+ * no preflight; they cannot read the response, but **every side effect still lands**, and
+ * the side effects here include deleting games, overwriting config.json, kicking off a
+ * generation that spends money, and `/restore`, which replaces the whole database.
  *
- * 三条,每条对应一个实测过的洞:
+ * Three of them, each matching a hole that was measured:
  *
- * 1. **跨站请求**  —— `POST /api/deleteGame` 从任意页面发出去会被执行
- * 2. **DNS 重绑定** —— 攻击者把域名解到 127.0.0.1 之后 Origin 变成同源,
- *                    这时他连**回应都读得到**,所以 GET 也必须挡
- * 3. **畸形转义**  —— `/fonts/%` 抛 URIError,async 处理器里没人接 = 进程退出
+ * 1. **A cross-site request** — `POST /api/deleteGame` sent from any page was executed
+ * 2. **DNS rebinding** — once the attacker resolves a domain to 127.0.0.1 the Origin
+ *                        becomes same-origin, and at that point they **can read the
+ *                        response**, so GET has to be blocked too
+ * 3. **A malformed escape** — `/fonts/%` throws a URIError, and unhandled inside an async
+ *                        handler that means the process exits
  *
- * 第 3 条不是理论:`<img src="http://127.0.0.1:8777/fonts/%">` 挂在任何一个网页上,
- * 打包版就显示「后台服务意外退出(代码 1)」。
+ * The third is not theoretical: `<img src="http://127.0.0.1:8777/fonts/%">` on any web page
+ * makes the packaged build display 「后台服务意外退出(代码 1)」.
  */
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -25,67 +29,69 @@ import { EventEmitter } from 'node:events';
 import { serve, isLocalCaller, readBody, readBinaryBody } from '../lib/server.js';
 
 // ---------------------------------------------------------------------------
-// isLocalCaller —— 纯函数,先把判据本身钉死
+// isLocalCaller — a pure function, so pin the predicate itself first
 // ---------------------------------------------------------------------------
 
-describe('isLocalCaller —— 谁算「本机这一页」', () => {
-  test('本机页面发来的:Host 和 Origin 都是回环,放行', () => {
+describe('isLocalCaller — who counts as "this page on this machine"', () => {
+  test('sent by a local page: Host and Origin are both loopback, so it is allowed', () => {
     assert.equal(isLocalCaller({ host: '127.0.0.1:8777', origin: 'http://127.0.0.1:8777' }), true);
     assert.equal(isLocalCaller({ host: 'localhost:8777', origin: 'http://localhost:8777' }), true);
   });
 
-  test('端口不参与判断 —— port 是可配的,写死就等于把配置项废掉', () => {
+  test('the port plays no part — port is configurable, and hardcoding it makes that option useless', () => {
     assert.equal(isLocalCaller({ host: '127.0.0.1:9999', origin: 'http://127.0.0.1:3000' }), true);
   });
 
-  test('IPv6 字面量认得 —— Host 里带方括号,URL.hostname 也带', () => {
+  test('an IPv6 literal is recognised — the Host carries brackets and so does URL.hostname', () => {
     assert.equal(isLocalCaller({ host: '[::1]:8777', origin: 'http://[::1]:8777' }), true);
   });
 
-  test('**根本没带 Origin 的放行** —— 那是启动器 / CLI / 测试,不是浏览器', () => {
+  test('**no Origin header at all is allowed** — that is the launcher / the CLI / the tests, not a browser', () => {
     assert.equal(isLocalCaller({ host: '127.0.0.1:8777' }), true);
   });
 
-  test('跨站的 Origin 拒掉,哪怕 Host 是对的 —— 这就是 CSRF 那条路', () => {
+  test('a cross-site Origin is refused even with a correct Host — that is the CSRF route', () => {
     assert.equal(isLocalCaller({ host: '127.0.0.1:8777', origin: 'https://evil.example' }), false);
   });
 
-  test('**字面量 null 要拒,不能当成「没带」** —— sandbox iframe 和 file:// 页面发的是它', () => {
+  test('**the literal null is refused and must not count as "absent"** — a sandboxed iframe and a file:// page send exactly that', () => {
     assert.equal(isLocalCaller({ host: '127.0.0.1:8777', origin: 'null' }), false);
     assert.equal(isLocalCaller({ host: '127.0.0.1:8777', origin: '' }), false);
   });
 
-  test('前缀像回环的域名不算 —— 127.0.0.1.evil.com 是别人的机器', () => {
+  test('a domain that merely starts like loopback does not count — 127.0.0.1.evil.com is somebody else\'s machine', () => {
     assert.equal(isLocalCaller({ host: '127.0.0.1.evil.com', origin: 'http://127.0.0.1.evil.com' }), false);
     assert.equal(isLocalCaller({ host: 'localhost.evil.com:8777' }), false);
   });
 
-  test('**Host 是攻击者的域名就拒 —— DNS 重绑定唯一挡得住的地方**', () => {
-    // 重绑定之后浏览器认为同源,于是 Origin 也是 rebind.evil.com,两个头自洽。
-    // 能把它和真的本机页面分开的只有「这个名字不是回环名字」
+  test('**a Host that is the attacker\'s domain is refused — the only place DNS rebinding can be blocked**', () => {
+    // After rebinding the browser considers it same-origin, so the Origin is rebind.evil.com
+    // too and the two headers are self-consistent.
+    // The only thing separating it from a genuine local page is "this name is not a loopback name"
     assert.equal(isLocalCaller({ host: 'rebind.evil.com:8777', origin: 'http://rebind.evil.com:8777' }), false);
   });
 
-  test('没有 Host 头就拒,不是默认放行', () => {
+  test('no Host header is refused rather than allowed by default', () => {
     assert.equal(isLocalCaller({}), false);
     assert.equal(isLocalCaller({ origin: 'http://127.0.0.1:8777' }), false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 真的起一个服务器
+// A real server
 // ---------------------------------------------------------------------------
 
-describe('跑起来的服务器', () => {
+describe('a running server', () => {
   let server;
   let port;
-  /** 被调到的 api 方法名 —— 「拒绝了」和「拒绝了但还是执行了」是两回事 */
+  /** The api methods that were called — "refused" and "refused but executed anyway" are two different things */
   let called;
 
   before(async () => {
     called = [];
-    // db 只需要够 /api/ 那条路把方法找出来并调一次。deleteGame 会在 db 上炸,
-    // 炸本身就说明**它被调用了** —— 这正是要观察的东西
+    // db only has to be enough for the /api/ path to find the method and call it once.
+    // deleteGame will blow up on db, and the blow-up itself proves **it was called** — which
+    // is exactly what is being observed
     const db = {
       prepare() {
         called.push('db.prepare');
@@ -98,7 +104,7 @@ describe('跑起来的服务器', () => {
 
   after(() => server?.close());
 
-  /** 原始请求,可以自己指定任意头 —— fetch 不让改 Host */
+  /** A raw request, so any header can be set — fetch will not let Host be changed */
   const raw = (method, path, headers = {}, body = null) =>
     new Promise((resolve, reject) => {
       const lines = [`${method} ${path} HTTP/1.1`];
@@ -117,78 +123,80 @@ describe('跑起来的服务器', () => {
       });
     });
 
-  test('本机页面的 POST 照常走', async () => {
+  test('a POST from a local page goes through as usual', async () => {
     const r = await raw('POST', '/api/getSettings',
       { Origin: `http://127.0.0.1:${port}`, 'Content-Type': 'application/json' }, '{"args":[]}');
     assert.equal(r.status, 200);
   });
 
-  test('不带 Origin 的 POST 照常走 —— 启动器就是这么调 maybeSync 的', async () => {
+  test('a POST with no Origin goes through as usual — that is exactly how the launcher calls maybeSync', async () => {
     const r = await raw('POST', '/api/getSettings', { 'Content-Type': 'application/json' }, '{"args":[]}');
     assert.equal(r.status, 200);
   });
 
-  test('**跨站 POST 被拒,而且那个方法一次都没被调到**', async () => {
+  test('**a cross-site POST is refused, and that method was never called once**', async () => {
     called.length = 0;
     const r = await raw('POST', '/api/deleteGame',
       { Origin: 'https://evil.example', 'Content-Type': 'text/plain' }, '{"args":["730"]}');
-    assert.equal(r.status, 403, '跨站的 POST 被执行了');
-    // 只看状态码不够:403 之后仍然把方法跑掉的话,数据已经没了
-    assert.deepEqual(called, [], '拒绝了状态码,却还是执行了 deleteGame');
+    assert.equal(r.status, 403, 'the cross-site POST was executed');
+    // The status code alone is not enough: running the method anyway after a 403 means the data is already gone
+    assert.deepEqual(called, [], 'the status code refused it while deleteGame ran regardless');
   });
 
-  test('**/restore 也在同一道闸门后面** —— 它是整库覆盖那条路', async () => {
+  test('**/restore is behind the same gate** — it is the whole-database overwrite route', async () => {
     const r = await raw('POST', '/restore', { Origin: 'https://evil.example' }, 'PK');
     assert.equal(r.status, 403);
   });
 
-  test('**GET 也要挡 Host** —— 重绑定进来的页面读得到回应', async () => {
+  test('**GET has to check Host too** — a page arriving through rebinding can read the response', async () => {
     const r = await raw('GET', '/', { Host: 'rebind.evil.com' });
-    assert.equal(r.status, 403, 'DNS 重绑定能读到 Dashboard');
+    assert.equal(r.status, 403, 'DNS rebinding can read the Dashboard');
   });
 
-  describe('畸形百分号转义 —— 一次请求打掉整个进程', () => {
-    // 这几条各自都能让旧代码里的 async 处理器抛 URIError。测试进程本身没有
-    // unhandledRejection 处理器,所以**回归一旦发生,是整个测试文件崩掉**,
-    // 不是一条红色断言 —— 这恰好就是线上的表现
+  describe('a malformed percent escape — one request takes the whole process down', () => {
+    // Each of these makes the old code's async handler throw a URIError. The test process
+    // itself has no unhandledRejection handler, so **a regression takes the whole test file
+    // down** rather than turning one assertion red — which is exactly how it behaves in
+    // production
     for (const path of ['/fonts/%', '/fonts/%zz', '/guide/%', '/guide/%E0%A4%A']) {
-      test(`${path} → 400,而且进程还活着`, async () => {
+      test(`${path} → 400, and the process is still alive`, async () => {
         const r = await raw('GET', path);
         assert.equal(r.status, 400);
       });
     }
 
-    test('挡下之后服务器照常应答下一条请求', async () => {
+    test('after blocking it, the server answers the next request as usual', async () => {
       await raw('GET', '/fonts/%');
       const r = await raw('POST', '/api/getSettings', { 'Content-Type': 'application/json' }, '{"args":[]}');
-      assert.equal(r.status, 200, '一条畸形 URL 之后服务器就不干活了');
+      assert.equal(r.status, 200, 'the server stopped working after one malformed URL');
     });
   });
 
-  test('合法的字体路径不受影响', async () => {
+  test('a legitimate font path is unaffected', async () => {
     const r = await raw('GET', '/fonts/noto-sans-sc.css');
     assert.equal(r.status, 200);
   });
 
-  test('**转义后仍然越界的,要走 403 而不是被扩展名那条先挡掉**', async () => {
+  test('**one that still escapes after decoding has to take the 403 rather than being caught by the extension check first**', async () => {
     const r = await raw('GET', '/fonts/%2e%2e%2fnope.css');
     assert.equal(r.status, 403);
   });
 
-  test('**前缀相同的兄弟目录也算越界** —— assets/fonts-evil/ 不在 assets/fonts/ 里', async () => {
-    // 上面那条 `../nope.css` 落在 assets/ 下,`startsWith(base)` 本来就为假,
-    // 所以它**验不到分隔符那一位**。这一条才验:`assets/fonts-evil` 是
-    // `assets/fonts` 的字符串前缀,漏掉 `+ sep` 就放行了。同 resolveGuidePath 的坑
+  test('**a sibling directory sharing the prefix escapes too** — assets/fonts-evil/ is not inside assets/fonts/', async () => {
+    // The `../nope.css` above lands under assets/, where `startsWith(base)` was false anyway,
+    // so it **cannot exercise the separator bit**. This one does: `assets/fonts-evil` is a
+    // string prefix of `assets/fonts`, and missing the `+ sep` lets it through. The same trap
+    // as resolveGuidePath
     const r = await raw('GET', '/fonts/%2e%2e%2ffonts-evil%2fx.css');
-    assert.equal(r.status, 403, '兄弟目录被当成了子目录');
+    assert.equal(r.status, 403, 'a sibling directory was treated as a subdirectory');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 请求体上限
+// Body limits
 // ---------------------------------------------------------------------------
 
-/** 一个够用的假 req:能发 data / end / error,并记下有没有被 destroy */
+/** A fake req that is enough: it can emit data / end / error and records whether it was destroyed */
 function fakeReq() {
   const req = new EventEmitter();
   req.destroyed = false;
@@ -196,8 +204,8 @@ function fakeReq() {
   return req;
 }
 
-describe('请求体上限 —— reject 不等于停下来', () => {
-  test('没超的原样收下', async () => {
+describe('body limits — rejecting is not the same as stopping', () => {
+  test('a body under the limit is taken verbatim', async () => {
     const req = fakeReq();
     const p = readBody(req, 100);
     req.emit('data', Buffer.from('hello'));
@@ -205,7 +213,7 @@ describe('请求体上限 —— reject 不等于停下来', () => {
     assert.equal(await p, 'hello');
   });
 
-  test('刚好到上限还算没超', async () => {
+  test('exactly at the limit still counts as not over', async () => {
     const req = fakeReq();
     const p = readBody(req, 5);
     req.emit('data', Buffer.from('hello'));
@@ -213,33 +221,33 @@ describe('请求体上限 —— reject 不等于停下来', () => {
     assert.equal(await p, 'hello');
   });
 
-  test('超了就 reject,而且话是说给人听的', async () => {
+  test('over the limit rejects, and the sentence is written for a person', async () => {
     const req = fakeReq();
     const p = readBody(req, 4);
     req.emit('data', Buffer.from('hello'));
     await assert.rejects(p, /请求体太大/);
   });
 
-  test('**超了要掐连接** —— 不掐的话监听器还挂着,对端继续发、字符串继续长', async () => {
+  test('**going over has to kill the connection** — without it the listener is still attached, the peer keeps sending and the string keeps growing', async () => {
     const req = fakeReq();
     const p = readBody(req, 4);
     req.emit('data', Buffer.from('hello'));
     await assert.rejects(p, /请求体太大/);
-    assert.equal(req.destroyed, true, 'reject 了却没 destroy —— 上限只是让处理器早点放弃');
+    assert.equal(req.destroyed, true, 'it rejected without destroying — the limit merely makes the handler give up early');
   });
 
-  test('掐完之后再来的块不会二次结算,也不会变成没人接的 rejection', async () => {
+  test('chunks arriving after the kill are neither settled twice nor turned into an unhandled rejection', async () => {
     const req = fakeReq();
     const p = readBody(req, 4);
     req.emit('data', Buffer.from('hello'));
     await assert.rejects(p, /请求体太大/);
-    // 真实的 socket 在 destroy 之后仍可能把已经在内核缓冲里的块交上来
+    // A real socket may still hand up chunks already in the kernel buffer after a destroy
     req.emit('data', Buffer.from('x'.repeat(1000)));
     req.emit('end');
     req.emit('error', new Error('ECONNRESET'));
   });
 
-  test('二进制那条同样掐连接 —— 它收的是 200 MB 级别的东西', async () => {
+  test('the binary path kills the connection too — it takes things on the order of 200 MB', async () => {
     const req = fakeReq();
     const p = readBinaryBody(req, 3);
     req.emit('data', Buffer.from([1, 2, 3, 4]));
@@ -247,7 +255,7 @@ describe('请求体上限 —— reject 不等于停下来', () => {
     assert.equal(req.destroyed, true);
   });
 
-  test('二进制没超的按字节原样拼回来', async () => {
+  test('a binary body under the limit is reassembled byte for byte', async () => {
     const req = fakeReq();
     const p = readBinaryBody(req, 10);
     req.emit('data', Buffer.from([0, 255]));

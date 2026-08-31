@@ -1,15 +1,21 @@
 /**
- * 第二阶段取样规则的回归测试
+ * Regression tests for the phase-two sampling rules
  * ------------------------------------------------
- * 跑法:node --test(零依赖,用 Node 内置的 node:test)
+ * Run with: node --test (zero dependencies, using Node's built-in node:test)
  *
- * 锁住的是"哪些游戏这次要跟 Steam 对账"。这里放宽或收紧都会**静默丢数据**——
- * 少查一行不会报错,只会让 Dashboard 上的数字悄悄停在旧值上,所以每条规则都钉住:
+ * What is pinned is "which games get reconciled against Steam this run". Loosening or
+ * tightening it here **loses data silently** — one row not checked raises no error, it
+ * merely leaves a number on the Dashboard quietly stuck at its old value. So every rule is
+ * pinned:
  *
- * - achieved 只有你玩了才会变 → rtime_last_played 没动就可以跳过
- * - total 是游戏的属性,开发者打补丁就能改 → 光看 rtime 会永远发现不了,
- *   必须靠轮换扫描兜底,完美游戏还要扫得更勤(掉出 100% 是最想早点知道的)
- * - 不在 owned 列表里的行拿不到 rtime → 只能每次都查,不许冻掉
+ * - achieved only changes if you played → rtime_last_played not moving means it can be
+ *   skipped
+ * - total is a property of the game and a developer patch can change it → looking at rtime
+ *   alone would never discover that, so the rotating sweep has to cover it, and perfect
+ *   games have to be swept more often (dropping below 100% is what one most wants to know
+ *   early)
+ * - a row not in the owned list has no rtime → it can only be checked every time and must
+ *   never be frozen out
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -19,10 +25,10 @@ import { selectStatsTargets } from '../lib/sync.js';
 const DAY_MS = 86400000;
 const agoIso = (days) => new Date(Date.now() - days * DAY_MS).toISOString();
 
-/** 每个用例一个独立的内存库,互不干扰,也不用收拾 */
+/** One independent in-memory database per case: no interference and nothing to clean up */
 const freshDb = () => ({ db: openDb(':memory:'), cleanup: () => {} });
 
-/** 建一行"已经对过账"的游戏:checkedDaysAgo 天前查的,当时的 rtime 是 lastPlayed */
+/** Builds a row that has "already been reconciled": checked checkedDaysAgo days ago, with rtime at lastPlayed then */
 function seedGame(db, { appid, name = 'G' + appid, lastPlayed = 1000, checkedDaysAgo = 0, rate = null }) {
   insertGame(db, { appid, name });
   if (rate !== null) updateGameStats(db, appid, { achieved: rate === 1 ? 10 : 5, total: 10 });
@@ -33,8 +39,8 @@ function seedGame(db, { appid, name = 'G' + appid, lastPlayed = 1000, checkedDay
 const names = (r) => r.targets.map((g) => g.appid).sort();
 const SELECTION = { sweepBudget: 40, maxStatsAgeDays: 7, perfectGameMaxAgeDays: 3 };
 
-describe('selectStatsTargets — 没有 playSnapshot 就是全量', () => {
-  test('不传 snapshot → 所有没锁的行都查(CLI `sync` 靠这个保证不漏)', () => {
+describe('selectStatsTargets — no playSnapshot means a full pass', () => {
+  test('no snapshot → every unlocked row is checked (what the CLI `sync` relies on to miss nothing)', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1' });
     seedGame(db, { appid: '2' });
@@ -44,7 +50,7 @@ describe('selectStatsTargets — 没有 playSnapshot 就是全量', () => {
     cleanup();
   });
 
-  test('sync_locked 的行任何情况下都不查', () => {
+  test('a sync_locked row is never checked under any circumstances', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1' });
     insertGame(db, { appid: '2', name: '手动维护的', syncLocked: 1 });
@@ -55,8 +61,8 @@ describe('selectStatsTargets — 没有 playSnapshot 就是全量', () => {
   });
 });
 
-describe('selectStatsTargets — rtime 闸门(achieved 的正确性)', () => {
-  test('rtime 没动、刚查过 → 跳过', () => {
+describe('selectStatsTargets — the rtime gate (achieved\'s correctness)', () => {
+  test('rtime unmoved and checked just now → skipped', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 0 });
     const r = selectStatsTargets(db, new Map([['1', 1000]]), SELECTION);
@@ -64,7 +70,7 @@ describe('selectStatsTargets — rtime 闸门(achieved 的正确性)', () => {
     cleanup();
   });
 
-  test('rtime 前进了 → 查(你玩过了,achieved 可能变了)', () => {
+  test('rtime moved forward → checked (you played, so achieved may have changed)', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 0 });
     const r = selectStatsTargets(db, new Map([['1', 2000]]), SELECTION);
@@ -73,73 +79,73 @@ describe('selectStatsTargets — rtime 闸门(achieved 的正确性)', () => {
     cleanup();
   });
 
-  test('还没建立基线的行必须查,而且不受扫描预算限制', () => {
+  test('a row with no baseline yet has to be checked, and is not subject to the sweep budget', () => {
     const { db, cleanup } = freshDb();
     const snap = new Map();
     for (let i = 0; i < 60; i++) {
-      insertGame(db, { appid: String(i), name: 'G' + i }); // last_played / stats_checked_at 都是 NULL
+      insertGame(db, { appid: String(i), name: 'G' + i }); // last_played / stats_checked_at are both NULL
       snap.set(String(i), 500);
     }
     const r = selectStatsTargets(db, snap, SELECTION);
-    assert.equal(r.targets.length, 60, '升级后第一次跑是一次全量,基线得先有');
+    assert.equal(r.targets.length, 60, 'the first run after upgrading is a full pass; the baseline has to exist first');
     assert.equal(r.played, 60);
     cleanup();
   });
 
-  test('查过但 last_played 是 NULL(比如当时不在 owned 里)→ 仍然查', () => {
+  test('checked but last_played is NULL (it was not in owned at the time) → still checked', () => {
     const { db, cleanup } = freshDb();
     insertGame(db, { appid: '1', name: 'G1' });
-    markStatsChecked(db, '1', null); // 有 stats_checked_at,没有 last_played
+    markStatsChecked(db, '1', null); // has a stats_checked_at, has no last_played
     const r = selectStatsTargets(db, new Map([['1', 800]]), SELECTION);
     assert.deepEqual(names(r), ['1']);
     cleanup();
   });
 });
 
-describe('selectStatsTargets — 不在 owned 列表里的行', () => {
-  test('拿不到 rtime → 每次都查,哪怕刚刚才查过', () => {
+describe('selectStatsTargets — rows not in the owned list', () => {
+  test('no rtime available → checked every time, even if just checked', () => {
     const { db, cleanup } = freshDb();
-    seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 0 }); // 在 owned 里
-    seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 0 }); // 家庭共享/已下架
+    seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 0 }); // in owned
+    seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 0 }); // family-shared / delisted
     const r = selectStatsTargets(db, new Map([['1', 1000]]), SELECTION);
-    assert.deepEqual(names(r), ['77'], '游戏能从 GetOwnedGames 消失但成就数据还在');
+    assert.deepEqual(names(r), ['77'], 'a game can disappear from GetOwnedGames while its achievement data remains');
     assert.equal(r.unowned, 1);
     cleanup();
   });
 
-  test('已经 100% 的 → 不再每次都查,交给轮换扫描', () => {
+  test('already at 100% → no longer checked every time, handed to the rotating sweep', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 0, rate: 1 });
     const r = selectStatsTargets(db, new Map(), SELECTION);
-    assert.deepEqual(names(r), [], 'achieved 已经到顶,玩得再多也涨不上去');
-    assert.equal(r.unowned, 0, '不该再算进「每次都查」那一组');
+    assert.deepEqual(names(r), [], 'achieved is at the ceiling and cannot rise however much more is played');
+    assert.equal(r.unowned, 0, 'it should no longer count in the "checked every time" group');
     cleanup();
   });
 
-  test('100% 的用的是 perfectGameMaxAgeDays(3 天),不是 7 天', () => {
+  test('a 100% game uses perfectGameMaxAgeDays (3 days), not 7', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 5, rate: 1 });
     const r = selectStatsTargets(db, new Map(), SELECTION);
-    assert.deepEqual(names(r), ['77'], '5 天 > 3 天,该扫了');
-    assert.equal(r.swept, 1, '走的是 sweep,不是 unowned');
+    assert.deepEqual(names(r), ['77'], '5 days > 3 days, so it is due');
+    assert.equal(r.swept, 1, 'it goes through sweep rather than unowned');
     assert.equal(r.unowned, 0);
-    // 反过来:2 天还不到期
+    // And the other way: 2 days is not yet due
     const { db: db2, cleanup: c2 } = freshDb();
     seedGame(db2, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 2, rate: 1 });
     assert.deepEqual(names(selectStatsTargets(db2, new Map(), SELECTION)), []);
     cleanup(); c2();
   });
 
-  test('100% 但没有 stats_checked_at → 照查,不会被这条规则漏掉', () => {
+  test('100% with no stats_checked_at → checked anyway, and not missed by this rule', () => {
     const { db, cleanup } = freshDb();
     insertGame(db, { appid: '77', name: '没基线的' });
     updateGameStats(db, '77', { achieved: 10, total: 10 });
     const r = selectStatsTargets(db, new Map(), SELECTION);
-    assert.deepEqual(names(r), ['77'], 'ageDays(null) 是 Infinity,进池且排最前');
+    assert.deepEqual(names(r), ['77'], 'ageDays(null) is Infinity, so it enters the pool and sorts first');
     cleanup();
   });
 
-  test('没满的照旧每次都查 —— achieved 还在动,rtime 又拿不到', () => {
+  test('an unfinished one is still checked every time — achieved is still moving and rtime is unavailable', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '77', lastPlayed: 1000, checkedDaysAgo: 0, rate: 0.5 });
     const r = selectStatsTargets(db, new Map(), SELECTION);
@@ -148,39 +154,39 @@ describe('selectStatsTargets — 不在 owned 列表里的行', () => {
     cleanup();
   });
 
-  // 跳过判断取两个条件里更严的那一侧:rate 万一是旧的,宁可白查几次,
-  // 也不能把一个还在动的 achieved 冻上三天
-  test('rate 说满了但 achieved !== total → 当作没满,留在每次都查里', () => {
+  // The skip decision takes the stricter of the two conditions: if rate happens to be
+  // stale, better a few wasted checks than freezing a still-moving achieved for three days
+  test('rate says complete but achieved !== total → treated as incomplete and left in the check-every-time group', () => {
     const { db, cleanup } = freshDb();
     insertGame(db, { appid: '77', name: 'rate 过时的' });
     updateGameStats(db, '77', { achieved: 5, total: 10 });
-    // 只把 rate 改成 1,计数保持 5/10 —— setGameField 不让写 rate(注入闸门),走原始 SQL
+    // Only rate is set to 1 while the counts stay 5/10 — setGameField refuses to write rate (the injection gate), so raw SQL is used
     db.prepare('UPDATE games SET rate = 1, stats_checked_at = ? WHERE appid = ?').run(agoIso(0), '77');
     const r = selectStatsTargets(db, new Map(), SELECTION);
-    assert.deepEqual(names(r), ['77'], '两个条件不一致时走安全的那一边');
+    assert.deepEqual(names(r), ['77'], 'when the two conditions disagree, take the safe side');
     assert.equal(r.unowned, 1);
     cleanup();
   });
 });
 
-describe('selectStatsTargets — 轮换扫描(total 的兜底)', () => {
-  test('超过 maxStatsAgeDays 没查过 → 排进扫描,哪怕根本没玩过', () => {
+describe('selectStatsTargets — the rotating sweep (total\'s safety net)', () => {
+  test('unchecked for longer than maxStatsAgeDays → queued for the sweep, even if never played', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 8 });
     const r = selectStatsTargets(db, new Map([['1', 1000]]), SELECTION);
-    assert.deepEqual(names(r), ['1'], '开发者加成就不需要你玩,只能靠定期复查发现');
+    assert.deepEqual(names(r), ['1'], 'a developer adding achievements does not require you to play, and only a periodic re-check finds it');
     assert.equal(r.swept, 1);
     cleanup();
   });
 
-  test('没到期就不扫', () => {
+  test('not yet due, so not swept', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 6 });
     assert.deepEqual(names(selectStatsTargets(db, new Map([['1', 1000]]), SELECTION)), []);
     cleanup();
   });
 
-  test('预算封顶,超期最多的先扫,剩下的记进 sweepPending 等下次', () => {
+  test('the budget caps it, the most overdue go first, and the rest are recorded in sweepPending for next time', () => {
     const { db, cleanup } = freshDb();
     const snap = new Map();
     for (let i = 0; i < 10; i++) {
@@ -190,15 +196,16 @@ describe('selectStatsTargets — 轮换扫描(total 的兜底)', () => {
     const r = selectStatsTargets(db, snap, { ...SELECTION, sweepBudget: 3 });
     assert.equal(r.swept, 3);
     assert.equal(r.sweepPending, 7);
-    // 期限都一样(都不是完美游戏)时,超期倍数排序就退化成按最旧排 → 9/8/7
+    // With identical deadlines (none of them perfect games), sorting by overdue ratio degenerates to oldest-first → 9/8/7
     assert.deepEqual(names(r), ['7', '8', '9']);
     cleanup();
   });
 
-  test('排序按"超期倍数"而不是绝对时间 —— 否则 3 天那条期限形同虚设', () => {
+  test('sorted by "overdue ratio" rather than absolute time — otherwise the 3-day deadline is decorative', () => {
     const { db, cleanup } = freshDb();
-    // 完美游戏超期 4/3 = 1.33 倍;普通游戏超期 8/7 = 1.14 倍。虽然后者绝对时间更久,
-    // 但前者更对不起自己的期限,应该先扫
+    // The perfect game is 4/3 = 1.33x overdue; the ordinary one is 8/7 = 1.14x. The latter
+    // is older in absolute terms, but the former has failed its own deadline by more and
+    // should be swept first
     seedGame(db, { appid: 'perfect', lastPlayed: 1000, checkedDaysAgo: 4, rate: 1 });
     seedGame(db, { appid: 'normal', lastPlayed: 1000, checkedDaysAgo: 8, rate: 0.5 });
     const snap = new Map([['perfect', 1000], ['normal', 1000]]);
@@ -207,37 +214,37 @@ describe('selectStatsTargets — 轮换扫描(total 的兜底)', () => {
     cleanup();
   });
 
-  test('sweepBudget=0 → 关掉轮换扫描,只剩 rtime 闸门', () => {
+  test('sweepBudget=0 → the rotating sweep is off and only the rtime gate remains', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 99 });
     const r = selectStatsTargets(db, new Map([['1', 1000]]), { ...SELECTION, sweepBudget: 0 });
     assert.deepEqual(names(r), []);
-    assert.equal(r.sweepPending, 1, '关掉了也要如实报还有多少排队');
+    assert.equal(r.sweepPending, 1, 'even switched off it has to report honestly how many are queued');
     cleanup();
   });
 
-  test('完美游戏用更短的过期时间(3 天),普通游戏还没到期', () => {
+  test('a perfect game uses the shorter expiry (3 days) while an ordinary one is not yet due', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000, checkedDaysAgo: 4, rate: 1 }); // 100%
     seedGame(db, { appid: '2', lastPlayed: 1000, checkedDaysAgo: 4, rate: 0.5 });
     const r = selectStatsTargets(db, new Map([['1', 1000], ['2', 1000]]), SELECTION);
-    assert.deepEqual(names(r), ['1'], '成就总数变多会让 100% 掉下来,要扫得更勤');
+    assert.deepEqual(names(r), ['1'], 'a higher achievement total drops a 100% game below it, so it has to be swept more often');
     cleanup();
   });
 });
 
 describe('markStatsChecked', () => {
-  test('拿不到 rtime 时传 null,不会抹掉已有的 last_played', () => {
+  test('passing null when rtime is unavailable does not erase an existing last_played', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 4242, checkedDaysAgo: 5 });
     markStatsChecked(db, '1', null);
     const row = db.prepare('SELECT * FROM games WHERE appid = ?').get('1');
     assert.equal(row.last_played, 4242);
-    assert.ok(row.stats_checked_at > agoIso(1), 'stats_checked_at 应该被刷新到现在');
+    assert.ok(row.stats_checked_at > agoIso(1), 'stats_checked_at should have been refreshed to now');
     cleanup();
   });
 
-  test('不碰 updated_at —— 查过发现没变不算数据变了', () => {
+  test('updated_at is not touched — checking and finding nothing changed is not a data change', () => {
     const { db, cleanup } = freshDb();
     seedGame(db, { appid: '1', lastPlayed: 1000 });
     setGameField(db, '1', 'favorite', 1);

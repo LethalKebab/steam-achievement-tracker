@@ -9,7 +9,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "steamApiKey": "…",         // from https://steamcommunity.com/dev/apikey
   "steamId": "…",             // your SteamID64, 17 digits
 
-  "language": "schinese",     // language for game + achievement names from Steam
+  "language": "schinese",     // language for game + achievement names fetched from Steam
+  "uiLanguage": "zh",         // language the interface is in — "zh" or "en"; set it from /setup
   "port": 8777,               // Dashboard port
   "syncStaleHours": 12,       // auto-sync when opening the Dashboard if data is older; 0 = never
   "syncGuidesOnServe": true,  // also look for new guide pages when opening the Dashboard
@@ -66,7 +67,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 
 **`ai.provider` and `ai.providers`** — `providers` holds one block per vendor and `provider` names which one is live. Switching between them is a one-word edit, and each vendor keeps its own `apiKey` and `model` across the switch.
 
-You do not have to edit the file by hand: the settings page (设置 → Step 2) writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· 已配置` in the dropdown, and the key field's 「已配置,留空则不改」 badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
+You do not have to edit the file by hand: the settings page (设置 → 第 2 步) writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· 已配置` in the dropdown, and the key field's 「已配置,留空就不改」 badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
 
 Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — and the reason is the same for all three: **more than one provider reads them, and the right value differs per vendor.** A model name is vendor-specific (`claude-*` / `gemini-*` / `deepseek-*`), so one shared `model` field has to be wiped every time you switch, which silently discards a version you pinned. `baseUrl` is read by both the Anthropic and DeepSeek paths, and one vendor's endpoint address is meaningless to the other. Everything else stays at the `ai.*` level: the budgets (`maxTokens`, `chunkSize`, `effort`, …) are correct at the same value for every vendor, and the single-vendor knobs (`geminiTools`, `webFetch`, `searchTool`, `anthropicExtras`, …) are only ever read by the one provider they belong to, so a leftover value is ignored rather than misapplied.
 
@@ -74,7 +75,19 @@ The older flat `ai.apiKey` / `ai.model` still work and need no edit. They are tr
 
 Environment variables win over both, and they are looked up **by the vendor being asked for** rather than by the one written in the file.
 
-**`language`** — passed to Steam as the `l=` parameter, so it changes the names you see for games and achievements. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
+**`language`** — passed to Steam as the `l=` parameter, so it changes the names that are **fetched and stored**. Steam's store API has a quirk where it sometimes ignores this for game *titles*, which is why the code falls back to scraping the store page for a localised name.
+
+**`uiLanguage`** — `"zh"` or `"en"`, the language the interface is in. Set it from the two buttons at the top of `/setup`; editing the file by hand works too, and an unrecognised value reads as `"zh"` rather than refusing to start.
+
+**These are two different questions and are deliberately two keys.** `language` decides what gets asked of Steam and written to the database, so changing it makes the stored data the wrong language — and since `insertGame` is `ON CONFLICT DO NOTHING`, existing rows would not even update. A toggle pointed at that key would either appear to do nothing or force a full re-sync.
+
+`uiLanguage` needs no network at all: both languages are already on disk (`games.name` / `name_en`, `achievements.name_cn` / `name_en` and `description` / `description_en`), so it only chooses between them. Where one is missing it falls back to the other silently, with no marker — a game with no English title shows the name that was stored.
+
+Everything written for a person follows it. Messages that can reach the Dashboard live in `lib/messages.js`; what only ever reaches a terminal — `serve`'s own log, and every line the CLI prints — lives in `lib/cli-messages.js` and `lib/tracker-messages.js`. All three are picked at composition time, so a message arrives in whichever language the interface is set to. `serve` sets it at startup, the toggle sets it again, and the CLI sets it once at dispatch before any command runs, so one error never reads in two languages depending on which entry point hit it.
+
+The split between those tables is by audience: only the terminal ones may name a command line, because the packaged app's user has no terminal to run one in.
+
+**A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing 「重写」 is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. Set it to `0` if you'd rather only ever sync manually.
 

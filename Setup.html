@@ -3,86 +3,102 @@
 <head>
 <meta charset="utf-8">
 <title>初始设置 · Steam 成就追踪器</title>
-<!-- 自托管字体,和 Dashboard 共用同一份;理由见那边的注释 -->
+<!-- Self-hosted fonts, shared with the Dashboard; the reasoning is in the comment there -->
 <link rel="stylesheet" href="/fonts/noto-sans-sc.css">
 <style>
   /* ========================================================================
-     设计令牌
+     Design tokens
      ------------------------------------------------------------------------
-     **这一整块和 Dashboard.html 的 :root 是同一份东西。** 零依赖不允许有共享
-     样式表(见 CLAUDE.md 的 Stack constraints),所以两页各存一份;
-     html-smoke.test.js 会逐条比对它们,改一页忘另一页会当场变红。
-     要改配色改间距,两个文件一起改。
+     **This entire block is the same thing as Dashboard.html's :root.** Zero
+     dependencies rules out a shared stylesheet (see Stack constraints in
+     CLAUDE.md), so each page keeps its own copy; html-smoke.test.js compares
+     them entry by entry, so changing one page and forgetting the other goes red
+     on the spot.
+     Changing the palette or the spacing means changing both files.
      ======================================================================== */
   :root {
-    /* ---- 表面:四级同色相阶梯 ------------------------------------------
-       原来只有 --panel(#1b2838)和 --panel-alt(#2a3f5a)两级,中间跨了一大步,
-       而且 **--border 和 --panel-alt 是同一个值** —— 于是画在 hover 面上的边框
-       直接消失。层级不够用时只能靠borders 硬分,那正是这一页看着「格子多」的根因。
-       四级之后,悬停、表头、浮层各有自己的面,分隔可以交给面差而不是线。 */
-    --bg:        #10151d;   /* 页面底 */
-    --surface:   #18212f;   /* 表格、卡片、输入框 */
-    --surface-2: #212c3d;   /* 表头、行悬停、次级按钮 */
-    --surface-3: #2a3749;   /* 菜单、浮层 */
+    /* ---- Surfaces: a four-step ladder in one hue -----------------------
+       There used to be only two levels, --panel (#1b2838) and --panel-alt
+       (#2a3f5a), with a large gap between them — and **--border and
+       --panel-alt were the same value**, so a border drawn on a hover surface
+       simply disappeared. With too few levels, separation has to come from
+       borders, which is exactly why this page read as "too many boxes".
+       With four, hover, table headers and overlays each have their own surface,
+       and separation can come from the surface difference rather than a line. */
+    --bg:        #10151d;   /* the page floor */
+    --surface:   #18212f;   /* tables, cards, inputs */
+    --surface-2: #212c3d;   /* table headers, row hover, secondary buttons */
+    --surface-3: #2a3749;   /* menus, overlays */
 
-    /* ---- 线:三级,一律半透明白 ----------------------------------------
-       **必须是 alpha,不能是定值 hex。** 定值只在某一个面上是对的,换个面
-       要么消失要么刺眼 —— 上面那个 border == panel-alt 的 bug 就是这么来的。
-       带一点蓝是为了留在 Steam 的色系里,纯白会读成灰。
+    /* ---- Lines: three levels, always translucent white -----------------
+       **They have to be alpha, never a fixed hex.** A fixed value is right on
+       exactly one surface and either disappears or glares on another — the
+       border == panel-alt bug above came from precisely that.
+       The slight blue keeps them inside Steam's palette; pure white reads as
+       grey.
 
-       三级各有各的活:
-         1 表内行分隔 —— 167 行叠起来,再重一点整页就变方格纸
-         2 控件外沿   —— 输入框、按钮、卡片
-         3 区块边界   —— 顶栏底边、浮层外沿,是「这里换了一块区域」 */
+       Each level has its own job:
+         1 in-table row separators — 167 rows stacked up, and any heavier the
+           whole page turns into graph paper
+         2 control outlines — inputs, buttons, cards
+         3 block boundaries — the topbar's bottom edge, overlay outlines; they
+           say "a different area starts here" */
     --line-1: rgba(150, 180, 216, 0.085);
     --line-2: rgba(150, 180, 216, 0.16);
     --line-3: rgba(150, 180, 216, 0.28);
 
-    /* ---- 文字:三级 ----------------------------------------------------
-       取值和理由见 Dashboard.html 的同一块 —— 三级都必须在四个表面上过 AA,
-       余量只有 0.223,所以是等距排的,不能只调三级。 */
-    --text:   #dce6f2;   /* 正文 —— 未变;它离表面最远,本来就够 */
-    --text-2: #b4c3d5;   /* 次要:标签、说明、表头。原 #98a9be */
-    --text-3: #8ea0b6;   /* 三级:占位、禁用、时间戳。原 #6d7f95,最低 4.51 */
-    --text-hi: #ffffff;  /* 标题和强调行 */
+    /* ---- Text: three levels -------------------------------------------
+       The values and the reasoning are in the matching block in Dashboard.html
+       — all three have to pass AA on all four surfaces, and the headroom is
+       only 0.223, so they are spaced evenly and level three cannot be adjusted
+       alone. */
+    --text:   #dce6f2;   /* body — unchanged; it is the furthest from the surface and was already fine */
+    --text-2: #b4c3d5;   /* secondary: labels, notes, table headers. Was #98a9be */
+    --text-3: #8ea0b6;   /* tertiary: placeholders, disabled, timestamps. Was #6d7f95, a floor of 4.51 */
+    --text-hi: #ffffff;  /* headings and emphasised rows */
 
-    /* ---- 强调色:Steam 蓝,保留 ---------------------------------------- */
+    /* ---- Accent: Steam blue, kept -------------------------------------- */
     --accent:     #66c0f4;
     --accent-hi:  #8ed4ff;
-    --accent-ink: #08111b;                    /* 蓝底上的字 */
-    --accent-soft: rgba(102, 192, 244, 0.14); /* 蓝底的淡版,用于选中态 */
+    --accent-ink: #08111b;                    /* text on the blue */
+    --accent-soft: rgba(102, 192, 244, 0.14); /* the pale version of the blue, for selected states */
 
-    /* ---- 进度色阶 ------------------------------------------------------
-       原来是 good/mid/low 三档红黄绿,读起来像红绿灯 —— 而「完成率 30%」
-       并不是一个警告。改成一条**递进**的四档,并且把「打满」交给强调蓝而不是绿:
-       100% 在这个工具里是成就本身,不是「安全」。 */
+    /* ---- Progress scale ------------------------------------------------
+       This used to be good/mid/low, three tiers of red/yellow/green, which
+       reads like a traffic light — and 「完成率 30%」 is not a warning. It is
+       now a **progressive** four-tier scale, with "complete" given to the
+       accent blue rather than green: 100% in this tool is the achievement
+       itself, not "safe". */
     --prog-low:  #d9695f;
     --prog-mid:  #e0a63f;
     --prog-high: #8cc63f;
     --prog-done: #66c0f4;
-    --prog-none: #3a4759;   /* 没有数据 */
+    --prog-none: #3a4759;   /* no data */
 
-    /* ---- 语义色 -------------------------------------------------------- */
+    /* ---- Semantic colours ---------------------------------------------- */
     --ok:     #8cc63f;
     --warn:   #e0a63f;
     --danger: #e0685e;
 
-    /* ---- 字体 ----------------------------------------------------------
-       自托管,理由和实测数据见 Dashboard.html 的同一块 —— 简短版:靠系统兜底时
-       中文落在哪个字体说不准,而且 600/650/700 在中文里渲染成同一档。 */
+    /* ---- Fonts ---------------------------------------------------------
+       Self-hosted; the reasoning and the measurements are in the matching block
+       in Dashboard.html — the short version: relying on system fallback leaves
+       which font Chinese lands in unpredictable, and 600/650/700 render as one
+       tier in Chinese. */
     --font-ui: "Noto Sans SC Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, "Noto Sans SC", sans-serif;
 
-    /* ---- 字号:六级 ----------------------------------------------------
-       原来有 11/12/13/15/17/18/22/28 八个值,彼此没有比例关系。 */
+    /* ---- Type scale: six levels ----------------------------------------
+       There used to be eight values, 11/12/13/15/17/18/22/28, with no
+       proportional relationship between them. */
     --fs-display: 26px;
     --fs-xl: 19px;
     --fs-lg: 15px;
-    --fs-md: 13px;   /* 正文和表格 */
+    --fs-md: 13px;   /* body text and tables */
     --fs-sm: 12px;
     --fs-xs: 11px;
 
-    /* ---- 间距:4px 一格 ------------------------------------------------
-       原来散落着 4/6/8/9/10/11/12/14/16/20/22/24/28/34 十四个值。 */
+    /* ---- Spacing: a 4px grid -------------------------------------------
+       There used to be fourteen values scattered around: 4/6/8/9/10/11/12/14/16/20/22/24/28/34. */
     --s1: 4px;
     --s2: 8px;
     --s3: 12px;
@@ -90,41 +106,47 @@
     --s5: 24px;
     --s6: 32px;
 
-    /* 页面内边距。**顶栏的负外边距要用它算**,见 .topbar —— 两个值必须永远相等,
-       所以它们现在出自同一个令牌,而不是两处各写一个 24px */
+    /* The page padding. **The topbar's negative margin has to be computed from
+       it**, see .topbar — the two values must always be equal, so they now come
+       from the same token instead of 24px being written out in two places */
     --page-pad: var(--s5);
 
-    /* ---- 圆角:四级(原来有 2/3/4/5/6/8 六个) -------------------------- */
+    /* ---- Corner radii: four levels (there used to be six: 2/3/4/5/6/8) -- */
     --r-sm: 4px;
     --r-md: 7px;
     --r-lg: 12px;
     --r-full: 999px;
 
-    /* ---- 投影:三级 ---------------------------------------------------- */
+    /* ---- Shadows: three levels ----------------------------------------- */
     --sh-1: 0 1px 2px rgba(0, 0, 0, 0.3);
     --sh-2: 0 8px 24px rgba(0, 0, 0, 0.45);
     --sh-3: 0 16px 48px rgba(0, 0, 0, 0.6);
 
-    /* ---- 动效 ---------------------------------------------------------- */
+    /* ---- Motion --------------------------------------------------------- */
     --dur-1: 120ms;
     --dur-2: 200ms;
     --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
-    /* 原生控件(checkbox 等)的勾选色。不设的话是操作系统的蓝,
-       和这一页的蓝不是一个 —— 同一类问题的另一个化身,见下面图标那段 */
+    /* The tick colour for native controls (checkboxes and the like). Unset, it
+       is the operating system's blue, which is not this page's blue — another
+       incarnation of the same class of problem, see the icon block below */
     accent-color: var(--accent);
     color-scheme: dark;
   }
 
   * { box-sizing: border-box; }
 
-  /* **`hidden` 属性必须真的隐藏。** 浏览器自带的 `[hidden] { display: none }` 来自
-     user-agent 样式表,而作者样式表里**任何**一条 `display:` 都比它优先 —— 所以
-     `.steps { display: flex }` 和 `.step-actions { display: flex }` 各自悄悄让自己
-     那个元素的 `hidden` 变成了装饰。三处中招(这里两处,Dashboard 的 #gallery 一处),
-     而且都不出声:JS 照常设 `.hidden = true`,元素照常显示。
-     逐个补 `.x[hidden]` 是打地鼠 —— 下一条带 display 的规则又会开一个新洞。
-     一条全局规则让这一类从构造上消失,`!important` 就是为了压住后来任何一条 display。 */
+  /* **The `hidden` attribute has to actually hide.** The browser's built-in
+     `[hidden] { display: none }` comes from the user-agent stylesheet, and
+     **any** `display:` in an author stylesheet outranks it — so
+     `.steps { display: flex }` and `.step-actions { display: flex }` each
+     quietly turned their own element's `hidden` into decoration. Three elements
+     were hit (two here, plus the Dashboard's #gallery), and all silently: JS
+     kept setting `.hidden = true` and the element kept showing.
+     Patching them one by one with `.x[hidden]` is whack-a-mole — the next rule
+     with a display opens a new hole.
+     One global rule makes the whole class structurally impossible, and the
+     `!important` is there to outrank any later display. */
   [hidden] { display: none !important; }
 
   body {
@@ -139,13 +161,14 @@
     color: var(--text);
     padding: var(--s5);
     -webkit-font-smoothing: antialiased;
-    /* 卡片浮在一片极淡的蓝光上,而不是一块纯色。设置页只有中间这一张卡,
-       纯色底会让它看着像贴在墙上;一点光晕给它一个"落点" */
+    /* The card floats on a very faint blue glow rather than a flat colour. The
+       setup page has only this one card in the middle, and a flat background
+       makes it look stuck to a wall; a little glow gives it somewhere to land */
     background-image: radial-gradient(ellipse 70% 50% at 50% 0%, rgba(102, 192, 244, 0.07), transparent 70%);
     background-repeat: no-repeat;
   }
 
-  /* 全局焦点环。原来只有 input/select/btn-outline 三处写了,其余键盘用户看不见落点 */
+  /* The global focus ring. Only input/select/btn-outline used to declare one, leaving keyboard users unable to see where they are elsewhere */
   :focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -170,9 +193,11 @@
   }
   .subtitle { font-size: var(--fs-md); color: var(--text-3); margin-bottom: var(--s5); }
   .hint { font-size: var(--fs-sm); color: var(--text-2); line-height: 1.65; margin-bottom: var(--s5); }
-  /* **作用域是整张卡片,不是 .hint。** 原来只给 .hint 里的链接上色,而说明列表里的
-     链接挂在 ol > li 上,拿到的是浏览器默认深蓝 —— 在这个深色底上几乎看不见。
-     :visited 必须一起写死,否则点过一次变紫,照样糊进背景 */
+  /* **The scope is the whole card, not .hint.** Only links inside .hint used to
+     be coloured, while the links in the instruction lists hang off ol > li and
+     got the browser's default dark blue — nearly invisible on this dark ground.
+     :visited has to be written alongside, or one click turns it purple and it
+     blends into the background again */
   .card a, .card a:visited {
     color: var(--accent);
     text-decoration-color: rgba(102, 192, 244, 0.4);
@@ -197,7 +222,7 @@
   input:focus, select:focus {
     outline: none;
     border-color: var(--accent);
-    /* 描边之外再加一圈很淡的光,让"这一格是活的"在深色底上看得清 */
+    /* A very faint glow outside the outline, so "this field is live" reads clearly on a dark ground */
     box-shadow: 0 0 0 3px rgba(102, 192, 244, 0.16);
   }
 
@@ -217,7 +242,7 @@
   }
   button:hover:not(:disabled) { background: var(--accent-hi); }
   button:disabled { opacity: 0.45; cursor: default; }
-  /* 次级按钮:主按钮是整行的「保存并验证」,这些嵌在小节里,不能跟着满宽 */
+  /* Secondary buttons: the primary one is the full-width 「保存并验证」, while these sit inside sections and must not follow it to full width */
   .btn-sub {
     width: auto;
     margin-top: 0;
@@ -229,8 +254,10 @@
   }
   .btn-sub:hover:not(:disabled) { background: var(--surface-3); border-color: var(--line-3); }
   .btn-wide { width: 100%; margin-top: var(--s3); }
-  /* 「新建数据库」是**填 ID 之外的另一条路**,不是一句补充说明。做成整行虚线框,
-     一眼看得出"没有就在这里造一个";挤在 hint 里的小按钮读起来像个脚注 */
+  /* 「新建数据库」 is **the other route besides entering an ID**, not a
+     footnote. Made a full-width dashed box, it reads at a glance as "no
+     database? make one here"; a small button squeezed into a hint reads like a
+     footnote */
   .btn-outline {
     width: 100%;
     margin-top: var(--s3);
@@ -246,11 +273,14 @@
   }
   .btn-outline:hover { border-color: var(--accent); background: var(--accent-soft); }
 
-  /* 「返回」是**出口,不是动作** —— 全局那条 `button` 规则会给它满宽实心蓝,而那是
-     「保存并验证」的形状。出口和主动作长得一样,人就得停下来分辨哪个是这一页该做的事。
-     所以剥回一行三级灰的面包屑:没有底、没有框、不占整行。
-     `:hover` 那一条必须把 `background` 也写上 —— `button:hover` 里的 `--accent-hi`
-     不压掉就会在悬停时冒出来,成一块突如其来的蓝底 */
+  /* 「返回」 is **an exit, not an action** — the global `button` rule would give
+     it a full-width solid blue, and that is 「保存并验证」's shape. An exit that
+     looks like the main action makes people stop and work out which one this
+     page is for.
+     So it is peeled back to a line of tertiary grey breadcrumb: no fill, no
+     box, not the full width.
+     The `:hover` rule has to set `background` too — without overriding
+     `--accent-hi` from `button:hover`, a sudden blue fill appears on hover */
   .back {
     width: auto;
     margin: 0 0 var(--s3);
@@ -263,17 +293,82 @@
     transition: color var(--dur-1);
   }
   .back:hover:not(:disabled) { background: none; color: var(--text); }
-  /* 拦下来那一下换的是文字,颜色跟着走 —— 和存档那边「危险动作转 --danger」同一个约定。
-     **`:hover` 那一条必须一起写上。** 点完第一下光标就停在按钮上,而
-     `.back:hover:not(:disabled)`(0,3,0)压得过单独的 `.back.armed`(0,2,0)——
-     红色会被悬停色盖掉,偏偏就在最需要看见它的那一瞬 */
+  /* The armed state changes the text, and the colour follows — the same
+     convention as "a dangerous action turns --danger" in the archive section.
+     **The `:hover` rule has to be written alongside.** After the first click the
+     cursor is resting on the button, and
+     `.back:hover:not(:disabled)` (0,3,0) outranks a bare `.back.armed` (0,2,0) —
+     the red would be covered by the hover colour at exactly the moment it most
+     needs to be seen */
   .back.armed,
   .back.armed:hover:not(:disabled) { color: var(--danger); }
 
-  /* ---- 首屏的岔路 ----------------------------------------------------
-     程序分不出「第一次用」和「老用户换了台电脑」—— 两种情况下都是没有 config、
-     没有数据。这是**唯一一件只能问的事**,所以它先于向导出现,而不是当作向导里
-     的一步。两个选择的副标题就是那个区分本身,不是对按钮的解释。 */
+  /* ---- Interface language --------------------------------------------
+     **It sits above everything it governs.** This is the one control on the page
+     that decides how every other line on it reads, so it belongs with the title
+     rather than inside a step — and it is present during first-run setup too,
+     not only in settings mode: somebody who cannot read the wizard needs this
+     before the wizard, not after finishing it.
+
+     Real radios rather than two buttons. Arrow-key navigation between the
+     options, the checked state and the focus ring are all then the browser's job,
+     and "pick exactly one of these" is precisely what a radio group is. The input
+     is moved out of sight rather than `display:none`, which would take it out of
+     the tab order along with it. */
+  /* **One segmented control, on the heading row.**
+     Two bordered buttons on a row of their own cost a full band of vertical space above the step
+     nav for a setting most people touch once, and sitting first under the heading they read as the
+     first thing to fill in. Opposite the heading the control costs no vertical space at all: the
+     row is as tall as the h1 either way.
+
+     **The shell is `.view-toggle` from Dashboard.html** (inset track, borderless halves, the
+     selected one lifting on --surface-3 + --sh-1). That page already has a segmented control, and
+     frontend.md's rule for this project is that an element matching nothing next to it gets
+     removed — so a second segmented style would be the thing that rule exists to stop. Radios
+     rather than buttons because "exactly one of these" is what a radiogroup is; only the skin is
+     shared.
+
+     **The track's fill is the one value that cannot be copied across.** On the Dashboard it is
+     --surface sitting on the page floor, so the track reads as a raised object. Here the control is
+     inside a --surface card, and --surface on --surface is a contrast ratio of exactly 1.00: the
+     track disappears into the card, only its border survives, and the group reads flat. --bg puts
+     the well *below* the card instead — the same relationship, expressed against a different
+     backdrop. **Copy the relationship, not the colour value.** */
+  .head-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+  .lang {
+    display: inline-flex;
+    flex: none;
+    gap: 2px;
+    padding: 2px;
+    background: var(--bg);
+    border: 1px solid var(--line-2);
+    border-radius: var(--r-md);
+  }
+  .lang-opt { position: relative; display: inline-flex; margin: 0; }
+  .lang-opt input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; border: none; opacity: 0; }
+  .lang-opt span {
+    display: block;
+    padding: 4px var(--s3);
+    border-radius: var(--r-sm);
+    color: var(--text-3);
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color var(--dur-1), background var(--dur-1);
+  }
+  .lang-opt span:hover { color: var(--text); }
+  .lang-opt input:checked + span { color: var(--text-hi); background: var(--surface-3); box-shadow: var(--sh-1); }
+  /* The global :focus-visible rule cannot reach a control that is out of sight, so the ring is
+     drawn on the label standing in for it — without this the group is keyboard-operable but
+     invisible while being operated */
+  .lang-opt input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---- The first-screen fork ----------------------------------------
+     The program cannot tell 「第一次用」 from 「老用户换了台电脑」 — in both cases
+     there is no config and no data. This is **the one thing that can only be
+     asked**, so it comes before the wizard rather than being a step inside it.
+     The two choices' subtitles are that distinction itself, not an explanation
+     of the buttons. */
   .gate { display: flex; flex-direction: column; gap: var(--s3); margin-top: var(--s5); }
   .gate-choice {
     width: 100%;
@@ -289,18 +384,22 @@
     transition: border-color var(--dur-1), background var(--dur-1);
   }
   .gate-choice:hover { border-color: var(--accent); background: var(--accent-soft); }
-  /* 主选择用实心:第一次用的人占多数,而点错的代价很低 —— 备份文件还在,
-     恢复在设置页里一直够得着 */
+  /* The primary choice is solid: first-time users are the majority, and the cost
+     of clicking the wrong one is low — the backup file is still there, and
+     restore stays reachable from the settings page */
   .gate-choice.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .gate-choice.primary:hover { background: var(--accent-hi); }
   .gate-choice b { display: block; font-size: var(--fs-lg); font-weight: 600; }
   .gate-choice span { display: block; margin-top: 2px; font-size: var(--fs-sm); opacity: 0.75; }
 
-  /* ---- 拖放区 --------------------------------------------------------
-     **拖放是主路径,点击选文件是次路径**,顺序不能反。原生对话框在打包版里是死的
-     (见 docs/self-update.md),而 <input type="file"> 走的是 Chromium 自己那条路 ——
-     大概率能用,但**没在打包版上验过**。拖放完全是页面里的事件,不碰任何原生 UI,
-     所以它必须是那个总能用的。真到了点击失灵的那天,这里也只是少一条捷径。 */
+  /* ---- The drop zone -------------------------------------------------
+     **Dropping is the primary path and clicking to pick a file is the secondary
+     one**, and that order cannot be reversed. Native dialogs are dead in the
+     packaged build (see docs/self-update.md), while `<input type="file">` goes
+     down Chromium's own path — very likely fine, but **never verified in the
+     packaged build**. Dropping happens entirely in page events and touches no
+     native UI, so it has to be the one that always works. If clicking ever does
+     stop working, all that is lost here is a shortcut. */
   .drop {
     border: 1px dashed var(--line-3);
     border-radius: var(--r-md);
@@ -314,7 +413,7 @@
   .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
   .drop b { display: block; color: var(--text); font-size: var(--fs-md); font-weight: 600; margin-bottom: 2px; }
 
-  /* 恢复前把备份里是什么摊开。**这一段不是说明,是待覆盖数据的清单** */
+  /* Laying out what is in the backup before restoring. **This block is not an explanation, it is the inventory of the data about to be overwritten** */
   .bk-info {
     margin-top: var(--s3);
     padding: var(--s3);
@@ -341,22 +440,28 @@
   }
   .bk-row { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s3); }
   .bk-row .btn-sub { margin-top: 0; }
-  /* 「备份」和「恢复」是这一节里的两件事,中间要断开。`.step-title` 的上边距是 0
-     (它平时是一节的第一个元素),所以「打开文件夹」按钮会直接贴到「从备份恢复」
-     标题上,读起来像那个按钮属于下面那半截 */
+  /* 「备份」 and 「恢复」 are the two things in this section and need a break
+     between them. `.step-title`'s top margin is 0 (it is normally a section's
+     first element), so the 「打开文件夹」 button would sit flush against the
+     「从备份恢复」 heading, reading as though that button belonged to the lower
+     half */
   #backup-restore { margin-top: var(--s5); }
 
-  /* 收起来的时候只剩这一行:标题 + 有几份多大。**那个数要留在收起态**,
-     否则"占了多少地方"得先展开才能回答,而那正是这一节存在的理由 */
+  /* Collapsed, only this line remains: the title plus how many and how large.
+     **That number has to survive the collapsed state**, or "how much space is
+     this taking" would require expanding first — which is the very reason this
+     section exists */
   .arc-head {
     cursor: pointer;
     font-size: var(--fs-lg);
     font-weight: 600;
     color: var(--text-hi);
-    /* **这里不能用 display:flex。** `<summary>` 默认是 `list-item`,那个展开三角
-       就是靠它画的;一改成 flex(或 block、grid)三角当场消失 —— 而三角正是
-       "展没展开"的前置标记,这一页又没有图标精灵可以顶上。实测过:改 flex 之后
-       computed display 是 flex,marker 一起没了 */
+    /* **display:flex cannot be used here.** `<summary>` defaults to `list-item`,
+       which is what draws the disclosure triangle; switching to flex (or block,
+       or grid) removes it on the spot — and the triangle is the leading marker
+       for "is this expanded", which this page has no icon sprite to replace.
+       Measured: after switching to flex the computed display is flex and the
+       marker is gone with it */
   }
   .arc-head::marker { color: var(--text-3); }
   .arc-head:hover { color: var(--accent); }
@@ -367,12 +472,15 @@
     color: var(--text-3);
   }
 
-  /* ---- 攻略备份 -------------------------------------------------------
-     **行不是卡片。** 三个归档目录混在一起,用久了就是几十行;一行一个框会把
-     这一节变成格子纸。分隔交给一条 --line-1,和 Dashboard 里那张表同一个做法。
+  /* ---- Guide backups -------------------------------------------------
+     **A row is not a card.** Three archive directories together become dozens of
+     rows with use, and a box per row would turn this section into graph paper.
+     Separation goes to one --line-1, the same approach as the Dashboard's table.
 
-     每行只摆三个字:游戏名、来路、时间大小。**不写"这是备份文件"之类的话** ——
-     整节的标题已经说了这里是什么,每行再说一遍就是把同一句话印二十遍 */
+     Each row carries three facts only: the game name, where it came from, and
+     the time and size. **Nothing like "this is a backup file"** — the section
+     heading already says what this is, and repeating it per row prints the same
+     sentence twenty times */
   #guide-archive { margin-top: var(--s5); }
   .arc-list { list-style: none; margin: var(--s3) 0 0; padding: 0; }
   .arc { border-top: 1px solid var(--line-1); }
@@ -385,11 +493,13 @@
   .arc-meta { font-size: var(--fs-xs); color: var(--text-3); }
   .arc-acts { display: flex; gap: var(--s2); flex-shrink: 0; }
   .arc-acts .btn-sub { margin-top: 0; padding: 4px 10px; font-size: var(--fs-xs); }
-  /* 待确认的那一下:**按钮自己变成后果那句话**,不弹框。弹框会把"删哪一个"
-     从眼前挪走,而这一页上下相邻的两行长得几乎一样 */
-  /* **`:hover` 那一条必须一起写上。** 点完第一下光标就停在按钮上,而
-     `.btn-sub:hover:not(:disabled)` 压得过单独的 `.armed` —— 红框会被
-     悬停的边框色盖掉,偏偏就在最需要看见它的那一瞬 */
+  /* The armed second click: **the button itself becomes the consequence**, with
+     no dialog. A dialog moves "which one" out of sight, and two adjacent rows on
+     this page look almost identical */
+  /* **The `:hover` rule has to be written alongside.** After the first click the
+     cursor is resting on the button, and `.btn-sub:hover:not(:disabled)`
+     outranks a bare `.armed` — the red border would be covered by the hover
+     border colour at exactly the moment it most needs to be seen */
   .arc-acts .armed,
   .arc-acts .armed:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
   .arc.armed { background: var(--surface-2); }
@@ -408,17 +518,19 @@
     max-height: 300px;
     overflow: auto;
   }
-  /* 「全部删除」在**列表下面**,不在标题那一行。收起态点得到的删除键等于
-     闭着眼睛删 —— `.arc-head` 上只有一个总数,没有一个字说得清删掉的是哪几份;
-     而且它是 `<summary>`,里面的按钮点下去连带整节折叠一起翻。放到列表尾巴,
-     “删掉上面这些”才是一句用位置就说完的话 */
+  /* 「全部删除」 goes **below the list**, not on the heading row. A delete button
+     reachable while collapsed is deleting with your eyes shut — `.arc-head`
+     carries only a total, with not one word about which entries would go; and it
+     is a `<summary>`, so clicking a button inside it also folds the whole section.
+     At the tail of the list, "delete the ones above" is a sentence position
+     alone finishes */
   .arc-foot {
     margin-top: var(--s3);
     padding-top: var(--s3);
     border-top: 1px solid var(--line-1);
   }
   .arc-foot .btn-sub { margin-top: 0; padding: 4px 10px; font-size: var(--fs-xs); }
-  /* 同上:悬停的边框色会盖掉红框,所以 `:hover` 那一条要一起写 */
+  /* As above: the hover border colour would cover the red border, so the `:hover` rule has to be written alongside */
   .arc-foot .armed,
   .arc-foot .armed:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 
@@ -428,17 +540,22 @@
   }
   .check input { width: auto; margin: 0; }
 
-  /* 空状态行不占位。`.msg` 的 min-height 是给页面底部那条留的(它要防止提交时
-     整页跳动),但这一条挂在按钮和「跳过」之间,空着就是一个 40px 的洞 */
+  /* An empty status row takes no space. `.msg`'s min-height is for the one at
+     the bottom of the page (it stops the page jumping on submit), but this one
+     sits between a button and 「跳过」, where empty means a 40px hole */
   #notion-msg:empty { display: none; }
   #arc-sum:empty { display: none; }
   .msg { font-size: var(--fs-sm); margin-top: var(--s4); min-height: 16px; line-height: 1.5; }
   .msg.error { color: var(--danger); }
+  /* A warning inside an otherwise-fine block: the container is already coloured for the worst
+     item, so this only has to say "this particular line is not that one" */
+  .msg li.warn { color: var(--warn); }
   .msg.ok { color: var(--ok); }
 
-  /* 各节里的操作说明。**选择器从 `details ol` 挪到 `.step ol`** —— 折叠面板换成
-     分步之后,原来那套还挂在 <details> 上,于是 Notion 和 AI 两段说明一夜之间
-     变回浏览器默认样式,而没有任何东西会报错 */
+  /* The instructions inside each section. **The selector moved from `details ol`
+     to `.step ol`** — after the collapsible panels became steps, the old rules
+     were still hanging off <details>, so the Notion and AI instructions reverted
+     to browser defaults overnight with nothing raising an error */
   .step .hint { margin: var(--s3) 0 0; }
   .step ol {
     margin: var(--s3) 0 0;
@@ -449,9 +566,10 @@
   }
   .step ol li { padding-left: 2px; }
   .step ol li::marker { color: var(--text-3); }
-  /* **`.step code`,不是 `.step ol code`** —— 说明文字不只出现在有序列表里,
-     也出现在 .hint 段落里。限定在 ol 下的话,段落里的 <code> 掉回浏览器默认:
-     等宽字、没底色,和周围的正文明显不是一套东西 */
+  /* **`.step code`, not `.step ol code`** — the instructions do not appear only
+     in ordered lists, they appear in .hint paragraphs too. Scoped under ol, the
+     <code> in a paragraph falls back to the browser default: a monospace face
+     with no background, visibly not the same kit as the text around it */
   .step code {
     background: var(--surface-2);
     border: 1px solid var(--line-1);
@@ -460,7 +578,7 @@
     font-size: var(--fs-xs);
   }
   .step strong { color: var(--text); font-weight: 600; }
-  /* 「已配置」是个状态标签,不是一句话 —— 给它徽章的形状,和 Dashboard 里那些一致 */
+  /* 「已配置」 is a status label rather than a sentence — give it a badge shape, consistent with the ones on the Dashboard */
   .configured {
     font-size: var(--fs-xs);
     font-weight: 400;
@@ -473,14 +591,18 @@
   }
 
   /* ======================================================================
-     步骤条
+     The step bar
      ----------------------------------------------------------------------
-     **两种身份共用一套「一次只显示一节」的机制**:步骤条两种模式下都能点着跳,
-     区别只在下面那个按钮是「下一步 / 跳过」还是「保存」。
-     四块全堆在一页上会让必填的和可选的挤在一起,看不出哪些是"现在必须处理的"。
+     **Both identities share one "show a single section at a time" mechanism**:
+     the step bar is clickable to jump in both modes, and the only difference is
+     whether the button underneath is 「下一步 / 跳过」 or 「保存」.
+     All four blocks piled onto one page crowds the required in with the optional
+     and hides which ones have to be dealt with now.
 
-     序号用 CSS counter 生成,**不写进标记** —— 标记里那四个 <li> 只有名字,
-     顺序本来就由它们的位置决定,再手写一遍数字就多了一处会对不上的地方。
+     The numbers are generated with a CSS counter and **are not written into the
+     markup** — the four <li> there carry only names, their order is already
+     determined by their position, and writing the digits out again would add one
+     more place that can disagree.
      ====================================================================== */
   .steps {
     display: flex;
@@ -554,13 +676,15 @@
     border-radius: var(--r-full);
     border: 1px solid transparent;
   }
-  /* 「必填」不用红字。红是报错的颜色,而这一步还没出错 —— 它只是不能跳过。
-     用强调色的淡底说"这一步是主线",把红留给真正的错误 */
+  /* 「必填」 does not use red text. Red is the colour of an error, and this step
+     has not gone wrong — it simply cannot be skipped. A pale accent fill says
+     "this step is the main line" and keeps red for genuine errors */
   .step-title .tag.req { color: var(--accent); background: var(--accent-soft); }
   .step-title .tag.opt { color: var(--text-3); border-color: var(--line-2); }
 
-  /* 一步一个按钮,所以谁出现谁就占满整行。「跳过」保持次级配色 —— 它是出口,
-     不是推荐动作,不该长得和「下一步」「完成设置」一样显眼 */
+  /* One button per step, so whichever appears takes the full width. 「跳过」 keeps
+     the secondary palette — it is an exit rather than a recommended action, and
+     should not look as prominent as 「下一步」 or 「完成设置」 */
   .step-actions { display: flex; margin-top: var(--s5); }
   .step-actions button { margin-top: 0; flex: 1; }
 
@@ -575,32 +699,57 @@
 </head>
 <body>
   <form class="card" id="setup-form">
-    <!-- **出口。** 打包版没有地址栏、没有后退键,托盘的「打开面板」也只是 show/focus
-         (launcher/main.js 的 showWindow 不 loadURL)—— 少了这个按钮,进了设置页就只能靠
-         「保存并验证」出去,改到一半想反悔的人得重启程序。
+    <!-- **The exit.** The packaged build has no address bar and no back key, and
+         the tray's 「打开面板」 is only show/focus (showWindow in
+         launcher/main.js does not loadURL) — without this button, the only way
+         out of the settings page is 「保存并验证」, so anyone changing their mind
+         midway has to restart the program.
 
-         **它不叫「取消」。** 这一页上有六个控件不等保存就生效(建 Notion 库当场存盘、
-         立即备份、恢复、删存档),「取消」等于承诺整页能回滚,而它收得回的只有下面
-         那几个输入框。名字说的是去哪,不是撤销什么。
+         **It is not called 「取消」.** Six controls on this page take effect
+         without waiting for a save (creating a Notion database saves on the
+         spot, backing up now, restoring, deleting an archive), and 「取消」
+         promises the whole page can be rolled back when all it can take back is
+         the input fields below. The name says where it goes, not what it undoes.
 
-         只在设置模式出现:首次设置时这一页是道关卡,凭据填好之前不该有出口。
-         `type="button"` 不能掉 —— 它就在 <form> 里,默认类型是 submit -->
-    <button type="button" class="back" id="back-btn" hidden>← 返回 Dashboard</button>
-    <!-- 岔路的回头路。和 `#back-btn` **不是**一个东西:那个去 Dashboard、只在设置模式
-         下上膛,这个只在首次设置里出现,回的是上面那两个选择。两种含义共用一个控件
-         正是筛选芯片那一轮的教训 -->
-    <button type="button" class="back" id="gate-back" hidden>← 重新选择</button>
-    <h1 id="page-title">初始设置</h1>
-    <div class="subtitle" id="page-subtitle">只填一次,密钥只存在这台电脑上</div>
-    <!-- 首次设置的岔路。**问的不是「你是不是新用户」** —— 那要人先猜到这个程序
-         管什么叫「新」。问的是有没有东西要带过来,这个人自己就知道答案。
-         设置页再进来时整块不出现:那时候 config 已经在了,岔路早就走过了 -->
+         It appears only in settings mode: during first-run setup this page is a
+         gate, and there should be no exit before the credentials are filled in.
+         `type="button"` must not be dropped — it is inside a <form>, where the
+         default type is submit -->
+    <button type="button" class="back" id="back-btn" data-t="back.dashboard" hidden>← 返回面板</button>
+    <!-- The way back from the fork. **Not the same thing** as `#back-btn`: that
+         one goes to the Dashboard and is armed only in settings mode, while this
+         one appears only during first-run setup and goes back to the two choices
+         above. Two meanings sharing one control is exactly the lesson from the
+         filter-chip round -->
+    <button type="button" class="back" id="gate-back" data-t="back.gate" hidden>← 重新选择</button>
+    <!-- The heading and the language control share one row. The control is placed here rather
+         than below the subtitle because it is a page-level setting, not a step: on its own row it
+         read as the first thing to fill in -->
+    <div class="head-row">
+      <h1 id="page-title" data-t="head.setup">初始设置</h1>
+      <!-- Each option is written in its own language, so neither needs the other to
+           be readable — the one label on this page that works before the setting
+           it changes has taken effect. `aria-label` carries both for the same
+           reason. **Not `config.language`**: that one decides what is fetched from
+           Steam and changing it would need a full re-sync, see lib/lang.js -->
+      <div class="lang" role="radiogroup" aria-label="界面语言 / Interface language">
+        <label class="lang-opt"><input type="radio" name="uiLang" value="zh"><span>中文</span></label>
+        <label class="lang-opt"><input type="radio" name="uiLang" value="en"><span>English</span></label>
+      </div>
+    </div>
+    <div class="subtitle" id="page-subtitle" data-t="sub.setup">只填一次,密钥只存在这台电脑上</div>
+    <!-- The first-run fork. **The question is not 「你是不是新用户」** — that
+         would require guessing what this program considers 「新」. The question is
+         whether there is anything to bring across, and that is something the
+         person already knows.
+         The whole block is absent when the settings page is re-entered: by then
+         the config exists and the fork was passed long ago -->
     <div class="gate" id="gate" hidden>
       <button type="button" class="gate-choice primary" id="gate-new">
-        <b>全新设置</b><span>第一次用</span>
+        <b data-t="gate.new">全新设置</b><span data-t="gate.new.sub">第一次用</span>
       </button>
       <button type="button" class="gate-choice" id="gate-restore">
-        <b>从备份恢复</b><span>手上有以前的备份文件</span>
+        <b data-t="gate.restore">从备份恢复</b><span data-t="gate.restore.sub">手上有以前的备份文件</span>
       </button>
     </div>
 
@@ -608,143 +757,171 @@
       <li data-goto="1">Steam</li>
       <li data-goto="2">AI</li>
       <li data-goto="3">Notion</li>
-      <!-- 第 4 步只在设置页出现(首次设置时没有东西可备份)。首屏那条岔路
-           把人直接送进这一节的下半截,不经过步骤条 -->
-      <li data-goto="4" id="nav-backup" hidden>备份</li>
+      <!-- Step 4 appears only on the settings page (during first-run setup there
+           is nothing to back up). The fork on the first screen sends people
+           straight into the lower half of this section, bypassing the step bar -->
+      <li data-goto="4" id="nav-backup" data-t="nav.backup" hidden>备份</li>
     </ol>
 
     <section class="step" data-step="1">
-      <h2 class="step-title">Step 1 · Steam<span class="tag req">必填</span></h2>
+      <h2 class="step-title"><span data-t="step1.title">第 1 步 · Steam</span><span class="tag req" data-t="tag.req">必填</span></h2>
       <div class="hint">
         ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
-        ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a>(把你的个人资料链接粘进去查)
+        ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a><span data-t="step1.id.hint">(把你的个人资料链接粘进去查)</span>
       </div>
-      <!-- 没有 required 属性是**故意的**:一次只显示一节,而浏览器拒绝校验一个
-           display:none 的必填控件 —— 它会静默阻止提交并报「not focusable」。
-           必填由下面提交处理里那段人工检查负责,不通过时会跳回这一步并说明原因 -->
-      <label for="key">① Steam Web API Key<span class="configured" id="key-set" hidden>已配置,留空就不改</span></label>
+      <!-- The absence of a required attribute is **deliberate**: only one section
+           is shown at a time, and the browser refuses to validate a required
+           control that is display:none — it silently blocks the submit and
+           reports "not focusable". The required check is handled by the manual
+           check in the submit handler below, which jumps back to this step and
+           explains why -->
+      <label for="key">① Steam Web API Key<span class="configured" id="key-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
       <input id="key" name="key" type="text" autocomplete="off">
       <label for="id">② SteamID64</label>
-      <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字">
+      <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字" data-t-placeholder="step1.id.ph">
     </section>
 
     <section class="step" data-step="2" hidden>
-      <h2 class="step-title">Step 2 · AI 攻略生成<span class="tag opt">可选</span><span class="configured" id="ai-set" hidden>已配置</span></h2>
-      <div class="hint">给没有攻略的游戏联网查资料、写一份。<strong>内容准不准没法自动检查,生成完自己读一遍。</strong></div>
-      <label for="ai-provider">供应商</label>
+      <h2 class="step-title"><span data-t="step2.title">第 2 步 · AI 攻略生成</span><span class="tag opt" data-t="tag.opt">可选</span><span class="configured" id="ai-set" data-t="tag.set" hidden>已配置</span></h2>
+      <div class="hint"><span data-t="step2.hint">给没有攻略的游戏联网查资料、写一份。</span><strong data-t="step2.hint.warn">内容准不准没法自动检查,生成完自己读一遍。</strong></div>
+      <label for="ai-provider" data-t="step2.provider">供应商</label>
       <select id="ai-provider" name="ai-provider">
-        <option value="">不启用</option>
+        <option value="" data-t="step2.off">不启用</option>
         <option value="deepseek">DeepSeek</option>
         <option value="anthropic">Anthropic (Claude)</option>
         <option value="gemini">Google Gemini</option>
       </select>
-      <label for="ai-key">API Key<span class="configured" id="ai-key-set" hidden>已配置,留空就不改</span></label>
-      <!-- 占位符是 paintAiProvider 按供应商填的(各家形状不一样)。这里不写死一个 ——
-           写死就有两家是错的,而 JS 起来之前那一瞬间宁可是空的,也不要是错的 -->
+      <label for="ai-key">API Key<span class="configured" id="ai-key-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
+      <!-- The placeholder is filled in per provider by paintAiProvider (they all
+           look different). No value is hardcoded here — a hardcoded one is wrong
+           for two of the three, and in the instant before JS starts it is better
+           to be empty than to be wrong -->
       <input id="ai-key" name="ai-key" type="password" autocomplete="off">
-      <label for="ai-model">模型(可选)</label>
-      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用这一家的默认模型">
+      <label for="ai-model" data-t="step2.model">模型(可选)</label>
+      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用默认模型" data-t-placeholder="step2.model.ph">
     </section>
 
     <section class="step" data-step="3" hidden>
-      <h2 class="step-title">Step 3 · Notion 攻略同步<span class="tag opt">可选</span><span class="configured" id="notion-set" hidden>已配置</span></h2>
-      <!-- **每个 <code> 里是 Notion 界面上的原字**,不是这件东西的叫法 —— 照着做的人
-           是在屏幕上按字面找的,概念名(「Internal Integration」这类)在界面上一个字
-           都搜不到。Notion 改过不止一轮(integration 改叫 connection、密钥改叫
-           access token、页面也换了地址),所以照抄之前先去看一眼当下那一版。
+      <h2 class="step-title"><span data-t="step3.title">第 3 步 · Notion 攻略同步</span><span class="tag opt" data-t="tag.opt">可选</span><span class="configured" id="notion-set" data-t="tag.set" hidden>已配置</span></h2>
+      <!-- **Every <code> holds the literal wording from Notion's UI**, not what
+           the thing is called — somebody following along is scanning the screen
+           for those exact characters, and a conceptual name (「Internal
+           Integration」 and the like) cannot be found anywhere in the UI. Notion
+           has renamed things more than once (integration became connection, the
+           secret became an access token, the page moved), so go and look at the
+           current one before copying.
 
-           **不要在这里加一行「老界面上叫 X」的对照。** 加过一次,当场被判定多余:
-           步骤统共两条,旁边再挂一行同义词,读的人得先分辨哪一组是给自己看的。
-           旧名字留在 docs/notion-setup.md 里 —— 会去翻走查的人才需要它 -->
+           **Do not add a 「老界面上叫 X」 line here.** It was added once and judged
+           redundant on the spot: there are only two steps, and hanging a row of
+           synonyms beside them makes the reader work out which set is for them.
+           The old names live in docs/notion-setup.md — the people who go and read
+           a walkthrough are the ones who need them -->
       <ol>
-        <li>在 <a href="https://app.notion.com/developers/connections" target="_blank" rel="noopener">Notion 开发者页面</a> 点 <code>New connection</code>,再从 <code>Configuration</code> 里复制 <code>Access token</code></li>
-        <li>在 Notion 打开要放攻略的页面 → <code>•••</code> → <code>Add connections</code> → 选中它</li>
+        <li><span data-t="step3.li1.a">在 </span><a href="https://app.notion.com/developers/connections" target="_blank" rel="noopener" data-t="step3.li1.link">Notion 开发者页面</a><span data-t="step3.li1.b"> 点 </span><code>New connection</code><span data-t="step3.li1.c">,再从 </span><code>Configuration</code><span data-t="step3.li1.d"> 里复制 </span><code>Access token</code></li>
+        <li><span data-t="step3.li2.a">在 Notion 打开要放攻略的页面 → </span><code>•••</code> → <code>Add connections</code><span data-t="step3.li2.b"> → 选中它</span></li>
       </ol>
-      <!-- 走查页面一直都在(docs/notion-setup.md),只是 UI 上没有入口 —— 用户报的
-           「能不能让我打开说明跟着走」缺的就是这一行。指向 GitHub 上渲染好的那份而不是
-           自己再抄一遍:重抄一份的下场就是上面那条注释 -->
-      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener">详细步骤 ↗</a></p>
-      <label for="notion-token">Access token<span class="configured" id="token-set" hidden>已配置,留空就不改</span></label>
-      <!-- 现在新建的密钥是 ntn_ 开头。老的 secret_ 仍然有效,所以这里只是换掉占位符
-           给出的样子,验证那一侧不认前缀(认前缀就会在 Notion 下次改名时把好 token 拒了) -->
+      <!-- The walkthrough page has always existed (docs/notion-setup.md), it just
+           had no entry point in the UI — this line is what the user's request to
+           "let me open the instructions and follow along" was missing. It points
+           at the rendered copy on GitHub rather than transcribing it again: the
+           consequence of a second transcription is the comment above -->
+      <p class="hint"><a href="https://github.com/LethalKebab/steam-achievement-tracker/blob/main/docs/notion-setup.md" target="_blank" rel="noopener" data-t="step3.docs">配置图解 ↗</a></p>
+      <label for="notion-token">Access token<span class="configured" id="token-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
+      <!-- Newly created secrets now begin with ntn_. The old secret_ ones still
+           work, so this only changes the shape the placeholder suggests; the
+           validation side does not recognise prefixes (recognising them would
+           reject a good token the next time Notion renames things) -->
       <input id="notion-token" name="notion-token" type="password" autocomplete="off" placeholder="ntn_...">
-      <label for="notion-db">攻略数据库 ID</label>
-      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制">
-      <button type="button" class="btn-outline" id="notion-make">＋ 新建一个攻略数据库</button>
+      <label for="notion-db" data-t="step3.db">攻略数据库 ID</label>
+      <input id="notion-db" name="notion-db" type="text" autocomplete="off" placeholder="32 位十六进制" data-t-placeholder="step3.db.ph">
+      <button type="button" class="btn-outline" id="notion-make" data-t="step3.make">＋ 新建一个攻略数据库</button>
       <div id="notion-create" hidden>
-        <label for="notion-parent">建在哪一页下面</label>
+        <label for="notion-parent" data-t="step3.parent">建在哪一页下面</label>
         <select id="notion-parent"></select>
-        <label for="notion-title">数据库名字</label>
-        <input id="notion-title" type="text" value="Steam 攻略">
-        <button type="button" class="btn-sub btn-wide" id="notion-make-go">建立</button>
+        <label for="notion-title" data-t="step3.dbname">数据库名字</label>
+        <input id="notion-title" type="text" value="Steam 攻略" data-t-value="step3.dbname.value">
+        <button type="button" class="btn-sub btn-wide" id="notion-make-go" data-t="step3.create">创建</button>
       </div>
       <div class="msg" id="notion-msg" role="status"></div>
     </section>
 
-    <!-- 备份与恢复。整节在设置页里是第 4 步;首次设置时只有下半截(恢复)会被
-         首屏的岔路调出来 —— 那时候库是空的,「立即备份」没有意义 -->
+    <!-- Backup and restore. The whole section is step 4 on the settings page;
+         during first-run setup only the lower half (restore) is brought up by
+         the first screen's fork — the library is empty then, and 「立即备份」
+         would be meaningless -->
     <section class="step" data-step="4" hidden>
-      <h2 class="step-title" id="backup-title">Step 4 · 备份与恢复<span class="tag opt">可选</span></h2>
+      <h2 class="step-title"><span id="backup-title" data-t="step4.title">第 4 步 · 备份与恢复</span><span class="tag opt" data-t="tag.opt">可选</span></h2>
 
-      <!-- 备完之后的三行是**有顺序的**:先说做出来的是什么(多少款游戏、多大),
-           再说它在哪,最后才是去那儿的按钮。一开始把结果那行摆在按钮下面,
-           它就和自己描述的那条路径隔开了 -->
+      <!-- The three lines after a backup **are in order**: first what was
+           produced (how many games, how large), then where it is, and only then
+           the button that goes there. With the result line placed below the
+           button at first, it was separated from the very path it describes -->
       <div id="backup-make">
-        <button type="button" class="btn-outline" id="bk-go">立即备份</button>
-        <!-- 标签直接点名是哪三个密钥。**光写「凭据」是不够的** —— 这个程序里
-             「Steam 凭据」是既有说法(指 API Key + SteamID),而这里一个词要同时
-             代表三家的密钥,不点名就没人知道勾的到底是什么 -->
+        <button type="button" class="btn-outline" id="bk-go" data-t="step4.now">立即备份</button>
+        <!-- The label names all three secrets outright. **「凭据」 alone is not
+             enough** — in this program 「Steam 凭据」 is an established term (the
+             API Key plus the SteamID), and here one word has to stand for three
+             vendors' secrets; without naming them nobody knows what the checkbox
+             covers -->
         <label class="check" style="margin-top: var(--s3)">
           <input type="checkbox" id="bk-config" checked>
-          包含 Steam / Notion / AI 密钥
+          <span data-t="step4.include">包含 Steam / Notion / AI 密钥</span>
         </label>
-        <!-- 这一句留着是因为它说的是**明文密钥会离开这台机器**,不是在解释功能怎么用 -->
-        <div class="hint" id="bk-warn">密钥会明文写进 zip。换电脑不用重填,但拿到这个文件的人能花你的 AI 额度。</div>
         <div class="msg" id="bk-msg" role="status"></div>
         <code class="bk-path" id="bk-path" hidden></code>
         <div class="bk-row" id="bk-done" hidden>
-          <button type="button" class="btn-sub" id="bk-reveal">打开文件夹</button>
+          <button type="button" class="btn-sub" id="bk-reveal" data-t="step4.reveal">打开文件夹</button>
         </div>
       </div>
 
       <div id="backup-restore">
-        <h2 class="step-title" id="restore-title">从备份恢复</h2>
+        <h2 class="step-title" id="restore-title" data-t="restore.title">从备份恢复</h2>
         <div class="drop" id="drop" role="button" tabindex="0">
-          <b>把备份 .zip 拖到这里</b>
-          或点一下选文件
+          <b data-t="restore.drop">把备份 .zip 拖到这里</b>
+          <span data-t="restore.click">或点击选择文件</span>
         </div>
         <input type="file" id="bk-file" accept=".zip" hidden>
         <div class="bk-info" id="bk-info" hidden></div>
-        <button type="button" class="btn-sub btn-wide" id="bk-restore" hidden>恢复</button>
+        <button type="button" class="btn-sub btn-wide" id="bk-restore" data-t="restore.go" hidden>恢复</button>
         <div class="msg" id="restore-msg" role="status"></div>
       </div>
 
-      <!-- 攻略备份 —— **这里只剩两件事:占多少地方,和够不着的那些。**
-           **默认收起来。** 这一节回答的是"占了多少地方",而那个数收起来也看得见
-           (就在标题旁边);列表本身是偶尔才要翻的东西,摊开来占掉整屏,把它下面
-           真正常用的东西挤没了。用原生 `<details>`:那个三角本身就是"展没展开"的
-           前置标记,而且键盘和读屏都不用我们操心 —— 这一页没有图标精灵,
-           自己画一个反而要多一套状态
-           日常的「把上一版拿回来」在 Dashboard 上每个游戏那一行的 ⋯ 菜单里,
-           因为要问的永远是「这个游戏的上一版哪去了」,而不是「所有游戏的所有版本」。
-           留在设置页的是那两件按游戏问不出来的:总体积(一份 Notion 备份是十几万
-           字节,攒久了会进备份 zip),和游戏已经从库里删掉、行上再也够不着的存档 -->
+      <!-- Guide backups — **only two things are left here: how much space they
+           take, and the ones that are out of reach.**
+           **Collapsed by default.** This section answers "how much space is this
+           taking", and that number is visible while collapsed (right beside the
+           heading); the list itself is something people look through
+           occasionally, and expanded it takes a whole screen and pushes the
+           genuinely common things below it off. It uses a native `<details>`:
+           the triangle is itself the leading marker for "is this expanded", and
+           the keyboard and screen readers are handled for us — this page has no
+           icon sprite, and drawing one would mean another set of states.
+           The everyday 「把上一版拿回来」 lives in the ⋯ menu on each game's row on
+           the Dashboard, because the question is always 「这个游戏的上一版哪去了」
+           rather than 「所有游戏的所有版本」.
+           What stays on the settings page are the two things that cannot be asked
+           per game: total size (one Notion backup is a hundred-odd thousand
+           bytes, and they accumulate into the backup zip), and archives whose
+           game has been deleted from the library and can no longer be reached
+           from a row -->
       <details id="guide-archive" hidden>
-        <summary class="arc-head">攻略备份<span class="arc-count" id="arc-count"></span></summary>
+        <summary class="arc-head"><span data-t="arc.head">攻略备份</span><span class="arc-count" id="arc-count"></span></summary>
         <div class="hint" id="arc-sum"></div>
         <ul class="arc-list" id="arc-list"></ul>
-        <div class="arc-foot"><button type="button" class="btn-sub" id="arc-wipe">全部删除</button></div>
+        <div class="arc-foot"><button type="button" class="btn-sub" id="arc-wipe" data-t="arc.wipe">全部删除</button></div>
         <div class="msg" id="arc-msg" role="status"></div>
       </details>
     </section>
 
-    <!-- **每一步只出一个按钮。** 上面的步骤条本身可以点着跳,所以「上一步」是多余的;
-         而在可选步骤上,「跳过」就是前进那个动作,再摆一个「下一步」是同一件事说两遍。
-         剩下的分工:第 1 步必填走「下一步」,可选步骤走「跳过」,最后一步走提交 -->
+    <!-- **One button per step.** The step bar above is itself clickable, which
+         makes 「上一步」 redundant; and on an optional step 「跳过」 *is* the
+         forward action, so putting a 「下一步」 beside it says the same thing
+         twice. The remaining division: step 1 is required and uses 「下一步」,
+         optional steps use 「跳过」, and the last step submits -->
     <div class="step-actions" id="step-actions" hidden>
-      <button type="button" class="btn-sub" id="step-skip">跳过</button>
-      <button type="button" id="step-next">下一步</button>
-      <button type="submit" id="submit-btn">保存并验证</button>
+      <button type="button" class="btn-sub" id="step-skip" data-t="act.skip">跳过</button>
+      <button type="button" id="step-next" data-t="act.next">下一步</button>
+      <button type="submit" id="submit-btn" data-t="act.submit">保存并验证</button>
     </div>
     <div class="msg" id="msg" role="status"></div>
   </form>
@@ -754,31 +931,48 @@
     const msg = document.getElementById('msg');
 
     /**
-     * 把体检结果就地摊开,**并且不跳转**。
+     * Lays the health-check results out in place, **without navigating away**.
      *
-     * 能自动补的只有「缺状态选项」一种,所以只有一个修复按钮 —— 摆一排看起来差不多的
-     * 控件,等于让人在不懂的事情上做选择。另一个按钮不是它的近义词:一个是修,
-     * 一个是"知道了,先用着"。
+     * The only thing that can be fixed automatically is a missing status option,
+     * so there is one repair button — a row of similar-looking controls amounts
+     * to asking somebody to choose about something they do not understand. The
+     * other button is not a synonym for it: one repairs, the other says "noted,
+     * carrying on for now".
      *
-     * 补完不直接显示成功,而是**重跑一遍体检**:这次修复到底有没有落地,只能由回读回答
-     * (Notion 对 status 属性有收下请求却一个字不动的先例),按钮自己说了不算。
+     * After repairing it does not report success directly but **re-runs the
+     * health check**: whether the repair actually landed can only be answered by
+     * a read-back (Notion has a precedent for accepting a request against a
+     * status property and changing nothing), and the button does not get to say
+     * so on its own.
      *
-     * 用 DOM 拼不用 innerHTML —— 这里的文字里混着 Notion 回来的错误内容和数据库标题。
+     * Built with DOM rather than innerHTML — the text here mixes in error content
+     * returned by Notion and the database title.
      */
     function showNotionProblems(problems, fixable, done) {
       const worst = problems.some((p) => p.severity === 'error') ? 'error' : 'ok';
       msg.className = 'msg ' + worst;
       msg.textContent = '';
 
+      // **「还有问题」 is for something that is actually wrong.** A grey board is not a problem —
+      // the database works — and calling it one tells somebody whose config just saved cleanly
+      // that something broke. On the screen *after* a repair it is worse: the sentence lands
+      // directly under two lines of 「已经做好」, so the page reads as contradicting itself.
       const head = document.createElement('div');
       head.textContent =
-        (done && done.length ? done.join(';') + '。' : '') + '配置已保存,但这个库还有问题:';
+        (done && done.length ? done.join(';') + '。' : '') +
+        (worst === 'error' ? t('msg.saved.problems') : t('msg.saved.oneleft'));
       msg.appendChild(head);
 
       const list = document.createElement('ul');
       for (const p of problems) {
+        // **No emoji.** They carry their own colour, render per OS and do not sit on the
+        // baseline. The rule holds across the whole interface and this line was its one
+        // survivor, because the warn branch was almost unreachable — and this change makes it
+        // the row every existing user sees. Severity is a colour instead: the container is
+        // already painted for the worst item, so a single line marks itself only when it differs.
         const li = document.createElement('li');
-        li.textContent = (p.severity === 'error' ? '❌ ' : '⚠️ ') + p.message;
+        li.textContent = p.message;
+        if (p.severity !== 'error') li.className = 'warn';
         for (const c of p.causes || []) {
           const sub = document.createElement('div');
           sub.textContent = '· ' + c;
@@ -803,28 +997,40 @@
 
       const bar = document.createElement('div');
       if (fixable) {
+        // **The label follows what this press will actually do.** 「帮我补上」 came from "add the
+        // missing options"; an older database is missing none, and what happens is regrouping,
+        // recolouring and a board view — so that label would not be telling the truth.
+        const reformat = problems.some((p) => p.code === 'outdated-format');
+        // The question is in the text above; the button carries only the verb
+        const label = reformat ? t('msg.apply') : t('msg.fill');
         const fix = document.createElement('button');
         fix.type = 'button';
-        fix.textContent = '帮我补上';
+        fix.textContent = label;
         fix.onclick = async () => {
           fix.disabled = true;
-          fix.textContent = '补…';
+          fix.textContent = reformat ? t('msg.apply.busy') : t('msg.fill.busy');
           const r = await call('repairNotionGuideDb', []);
           if (r.error) {
             fix.disabled = false;
-            fix.textContent = '帮我补上';
+            fix.textContent = label;
             const why = document.createElement('div');
-            why.textContent = '❌ ' + r.error;
+            why.className = 'warn';
+            why.textContent = r.error;
             bar.appendChild(why);
             return;
           }
-          // 重跑体检,让"补好了"这句话由回读来说
+          // Re-run the health check, so "it is fixed" is said by the read-back
           const again = await call('saveNotionConfig', ['', $('notion-db').value.trim()]);
           if ((again.problems || []).length) {
             showNotionProblems(again.problems, again.fixable, []);
           } else {
+            // **One sentence.** Itemising what was done is a log entry moved onto a screen that
+            // redirects a second and a half later, where the reader wants "it worked". The
+            // surface that lists them is the CLI, and it still does.
             msg.className = 'msg ok';
-            msg.textContent = '✅ 补上了 ' + (r.added || []).join(' / ') + ',这个库现在可用了。';
+            msg.textContent = (r.added || []).length
+              ? t('msg.fill.done', { list: r.added.join(' / ') })
+              : t('msg.applied');
             setTimeout(() => { window.location.href = '/'; }, 1500);
           }
         };
@@ -832,12 +1038,309 @@
       }
       const skip = document.createElement('button');
       skip.type = 'button';
-      skip.textContent = '先这样,进 Dashboard';
+      // This page already defines the full-width secondary variant, so use that — two solid
+      // primary buttons side by side is the same as having no hierarchy at all
+      skip.className = 'btn-sub btn-wide';
+      skip.textContent = t('msg.carryon');
       skip.onclick = () => { window.location.href = '/'; };
       bar.appendChild(skip);
       msg.appendChild(bar);
     }
     const $ = (id) => document.getElementById(id);
+
+    /**
+     * The string table, and the two ways a string reaches the screen
+     * ------------------------------------------------
+     * `[zh, en]` in that order, everywhere. **Chinese is the source and English is a translation of
+     * it** — where the two disagree the Chinese is right, because that is the one written against
+     * the interface rather than against another language.
+     *
+     * **A whole sentence is one entry.** Several of these used to be assembled from three or four
+     * pieces around an interpolated value, which works only for as long as one language is
+     * involved: word order moves, and a sentence spliced from fragments comes out in the order the
+     * *other* language needed. Slots are `{name}` and are filled by `t`.
+     *
+     * Two routes onto the screen, and they are not interchangeable:
+     * - **Static markup** carries `data-t` (or `data-t-placeholder` / `data-t-value` /
+     *   `data-t-aria-label`) and is repainted by `applyStrings`. Nothing is interpolated there.
+     * - **Anything composed at runtime** calls `t(key, values)`.
+     *
+     * A line of markup that mixes our own words with an `<a>` or a `<code>` keeps its elements and
+     * gives **each text run its own key** rather than storing markup in the table. That pins the
+     * word order to the Chinese one, so the English for those runs is written to fit the same
+     * slots — the price of never putting a table string through `innerHTML`.
+     */
+    const STRINGS = {
+      'title.setup':          ['初始设置 · Steam 成就追踪器', 'First-time setup · Steam Achievement Tracker'],
+      'title.settings':       ['设置 · Steam 成就追踪器', 'Settings · Steam Achievement Tracker'],
+      'back.dashboard':       ['← 返回面板', '← Back to dashboard'],
+      'back.gate':            ['← 重新选择', '← Choose again'],
+      'head.setup':           ['初始设置', 'First-time setup'],
+      'head.settings':        ['设置', 'Settings'],
+      'sub.setup':            ['只填一次,密钥只存在这台电脑上', 'Filled in once. The keys stay on this computer.'],
+      'sub.restore':          ['恢复后直接进入面板,不用重新设置', 'Restoring goes straight to the dashboard. Nothing needs setting up again.'],
+
+      'gate.new':             ['全新设置', 'Fresh setup'],
+      'gate.new.sub':         ['第一次用', 'First time using it'],
+      'gate.restore':         ['从备份恢复', 'Restore from a backup'],
+      'gate.restore.sub':     ['手上有以前的备份文件', 'I have a backup file'],
+
+      'nav.backup':           ['备份', 'Backup'],
+      'tag.req':              ['必填', 'Required'],
+      'tag.opt':              ['可选', 'Optional'],
+      'tag.set':              ['已配置', 'Configured'],
+      'tag.set.keep':         ['已配置,留空就不改', 'Configured — blank keeps it'],
+      'tag.set.suffix':       ['{label} · 已配置', '{label} · configured'],
+
+      'step1.title':          ['第 1 步 · Steam', 'Step 1 · Steam'],
+      // The English carries a leading space; the Chinese does not, because a fullwidth 「(」 already
+      // sets its own. Written without it the line reads `steamid.io(paste your…`
+      'step1.id.hint':        ['(把你的个人资料链接粘进去查)', ' (paste your profile link to look it up)'],
+      'step1.id.ph':          ['17 位数字', '17 digits'],
+      'step1.missing':        ['Steam Web API Key 和 SteamID64 都要填,这一步跳不过去。', 'Both the Steam Web API Key and the SteamID64 are needed. This step cannot be skipped.'],
+
+      'step2.title':          ['第 2 步 · AI 攻略生成', 'Step 2 · AI guide generation'],
+      'step2.hint':           ['给没有攻略的游戏联网查资料、写一份。', 'Researches and writes a guide for a game that has none.'],
+      'step2.hint.warn':      ['内容准不准没法自动检查,生成完自己读一遍。', 'Nothing can check whether it is right — read it once it is written.'],
+      'step2.provider':       ['供应商', 'Provider'],
+      'step2.off':            ['不启用', 'Off'],
+      'step2.model':          ['模型(可选)', 'Model (optional)'],
+      'step2.model.ph':       ['留空 = 用默认模型', 'Blank = the default model'],
+
+      'step3.title':          ['第 3 步 · Notion 攻略同步', 'Step 3 · Notion guide sync'],
+      'step3.li1.a':          ['在 ', 'On the '],
+      'step3.li1.link':       ['Notion 开发者页面', 'Notion developers page'],
+      'step3.li1.b':          [' 点 ', ' click '],
+      'step3.li1.c':          [',再从 ', ', then from '],
+      'step3.li1.d':          [' 里复制 ', ' copy the '],
+      'step3.li2.a':          ['在 Notion 打开要放攻略的页面 → ', 'In Notion open the page the guides go on → '],
+      'step3.li2.b':          [' → 选中它', ' → select it'],
+      // **Names the destination, not its form.** A label describing how the target page is laid
+      // out — 「step by step」 — is the one thing a reader does not need in order to decide whether
+      // to open it
+      'step3.docs':           ['配置图解 ↗', 'Setup guide ↗'],
+      'step3.db':             ['攻略数据库 ID', 'Guide database ID'],
+      'step3.db.ph':          ['32 位十六进制', '32 hex characters'],
+      'step3.make':           ['＋ 新建一个攻略数据库', '＋ Create a guide database'],
+      'step3.parent':         ['建在哪一页下面', 'Create it under'],
+      'step3.dbname':         ['数据库名字', 'Database name'],
+      'step3.dbname.value':   ['Steam 攻略', 'Steam guides'],
+      'step3.create':         ['创建', 'Create'],
+
+      'step4.title':          ['第 4 步 · 备份与恢复', 'Step 4 · Backup and restore'],
+      'step4.now':            ['立即备份', 'Back up now'],
+      // **The three vendors are named rather than collapsed into one word.** 「Steam 凭据」 is an
+      // established term in this program and would be read as the API key alone; here one label has
+      // to cover three different secrets, and without naming them nobody knows what the box covers.
+      // The plaintext disclosure lives on the terminal side (`backup.hasSecrets` in
+      // lib/tracker-messages.js), which is where the same backup is offered with room to say it
+      'step4.include':        ['包含 Steam / Notion / AI 密钥', 'Include the Steam / Notion / AI keys'],
+      'step4.reveal':         ['打开文件夹', 'Open folder'],
+
+      'restore.title':        ['从备份恢复', 'Restore from a backup'],
+      'restore.drop':         ['把备份 .zip 拖到这里', 'Drop a backup .zip here'],
+      'restore.click':        ['或点击选择文件', 'or click to choose a file'],
+      'restore.go':           ['恢复', 'Restore'],
+
+      'arc.head':             ['攻略备份', 'Guide backups'],
+      'arc.wipe':             ['全部删除', 'Delete all'],
+      'arc.view':             ['查看', 'View'],
+      'arc.collapse':         ['收起', 'Collapse'],
+      'arc.delete':           ['删除', 'Delete'],
+      'arc.delete.armed':     ['永久删除', 'Delete for good'],
+      'arc.empty':            ['(内容为空)', '(empty)'],
+      'arc.count':            ['{n} 份 · {size}', '{n} · {size}'],
+      'arc.wipe.armed':       ['永久删除 {n} 份 · {size}', 'Delete {n} for good · {size}'],
+      'arc.wiped':            ['删了 {n} 份,腾出 {size}', 'Deleted {n}, freed {size}'],
+      'arc.wiped.failed':     [';{n} 份删除失败', '; {n} could not be deleted'],
+      'arc.orphans':          ['最上面 {n} 份的游戏已从库里删除,面板上没有对应行 —— 想覆盖回去,先把游戏加回来。', 'The games for the top {n} have been removed from the library, so no row on the dashboard matches them. Add the game back first to restore one.'],
+      'arc.unknown.time':     ['时间未知', 'time unknown'],
+      // A **suffix**: the bold date is put first and this follows it. As a `{when}` template the
+      // English would need the date in the middle, and the bold would end up on the wrong words
+      'bk.of.suffix':         [' 的备份', ' backup'],
+      'arc.deleted.one':      ['删了 {name},腾出 {size}', 'Deleted {name}, freed {size}'],
+
+      'act.skip':             ['跳过', 'Skip'],
+      'act.next':             ['下一步', 'Next'],
+      'act.submit':           ['保存并验证', 'Save and verify'],
+      'act.finish':           ['完成设置', 'Finish setup'],
+      'act.discard':          ['放弃未保存的修改?', 'Discard unsaved changes?'],
+
+      'msg.unreachable':      ['连不上后台服务,刷新一下页面', 'Cannot reach the local service. Refresh the page.'],
+      'msg.failed':           ['请求失败', 'The request failed'],
+      'msg.verifying':        ['正在验证…', 'Verifying…'],
+      'msg.steam.ok':         ['Steam 凭据可用({n} 款游戏)', 'Steam credentials work ({n} games)'],
+      'msg.ai.ok':            ['AI 可用({provider} / {model}{note})', 'AI works ({provider} / {model}{note})'],
+      'msg.ai.nosearch':      [',注意:该供应商不支持联网搜索', ' — note: this provider cannot search the web'],
+      'msg.notion.token.ok':  ['Notion token 可用', 'The Notion token works'],
+      'msg.notion.db.ok':     ['Notion 可用(数据库里 {n} 个页面)', 'Notion works ({n} pages in the database)'],
+      // **Whole sentences.** These were assembled from a prefix, a joined list and a full stop,
+      // which only ever worked because one language was involved — the separator and the stop
+      // are both different in English, and the order can move
+      'msg.done.some':        ['已完成:{list}。', 'Done: {list}.'],
+      'msg.sep':              [';', '; '],
+      'msg.ok.opening':       ['✅ {list},正在打开面板…', '✅ {list} — opening the dashboard…'],
+      'msg.saved.problems':   ['配置已保存,但这个库还有问题:', 'Saved, but this database still has problems:'],
+      'msg.saved.oneleft':    ['配置已保存,还剩一处:', 'Saved. One thing left:'],
+      'msg.apply':            ['套用', 'Apply'],
+      'msg.apply.busy':       ['套用…', 'Applying…'],
+      'msg.fill':             ['帮我补上', 'Fill it in for me'],
+      'msg.fill.busy':        ['补…', 'Filling…'],
+      'msg.fill.done':        ['补上 {list}。', 'Added {list}.'],
+      'msg.applied':          ['已套用新模版。', 'The new template is in place.'],
+      'msg.carryon':          ['先这样,进入面板', 'Leave it, open the dashboard'],
+
+      'notion.looking':       ['正在查询这个 connection 能访问的页面…', 'Looking for pages this connection can reach…'],
+      'notion.nopages':       ['token 有效,但这个 connection 一个页面都看不到 —— 上面第 2 步还没做:', 'The token works, but this connection can see no pages — step 2 above has not been done:'],
+      'notion.nopages.how':   ['在 Notion 里打开要放攻略的页面 → ••• → Add connections → 加上它,然后再点一次。', 'In Notion open the page the guides go on → ••• → Add connections → add it, then click again.'],
+      'notion.found':         ['找到 {n} 个可用页面{more},选一个再点创建。', 'Found {n} usable pages{more}. Pick one and click Create.'],
+      'notion.more':          ['(还有更多没列完)', ' (more not listed)'],
+      'notion.creating':      ['正在创建…', 'Creating…'],
+      'notion.created':       ['创建成功:「{name}」,状态选项 {options}。ID 已填好并保存。', 'Created: {name}, status options {options}. The ID is filled in and saved.'],
+
+      'bk.packing':           ['正在打包…', 'Packing…'],
+      'bk.made':              ['{games} 款游戏 · {size}', '{games} games · {size}'],
+      'bk.upload.failed':     ['上传失败', 'Upload failed'],
+      'bk.reading':           ['正在读取…', 'Reading…'],
+      'bk.counts':            ['{games} 款游戏 · {achievements} 个成就 · {files} 个攻略文件', '{games} games · {achievements} achievements · {files} guide files'],
+      'bk.withkeys':          ['包含密钥,恢复后不用重新设置', 'Includes the keys — nothing to set up again'],
+      'bk.nokeys':            ['不含密钥,恢复后要重填 Steam API Key', 'No keys — the Steam API Key has to be entered again'],
+      'bk.replaces':          ['本机现有的 {n} 款游戏将被替换', 'The {n} games on this computer will be replaced'],
+      'bk.restoring':         ['正在恢复…', 'Restoring…'],
+    };
+
+    /**
+     * The language the page is drawn in. Set from getSettings before the first paint, and again
+     * whenever the toggle changes it — a table is what makes a live re-render possible, so a
+     * language change needs no reload and does not lose which step you were on.
+     */
+    let LANG = 'zh';
+    /** The key for <title>. Empty on a page that never renames itself; applyStrings leaves the tag alone then */
+    let docTitleKey = '';
+
+    /**
+     * One string, with `{slot}` filled from `values`.
+     *
+     * **An unknown key returns the key.** A blank label reads as a layout bug and sends the reader
+     * into the CSS; the key on screen names the entry that is missing. A missing translation falls
+     * back to the Chinese for the same reason the rest of the app does — the other language beats
+     * nothing at all.
+     */
+    function t(key, values) {
+      const pair = STRINGS[key];
+      if (!pair) return key;
+      let s = pair[LANG === 'en' ? 1 : 0] || pair[0];
+      if (values) for (const k in values) s = s.split('{' + k + '}').join(values[k]);
+      return s;
+    }
+
+    /** Attribute keys: `data-t-placeholder` reaches `dataset.tPlaceholder`, and so on */
+    const T_ATTRS = [['tPlaceholder', 'placeholder'], ['tValue', 'value'], ['tAriaLabel', 'aria-label'], ['tTitle', 'title']];
+
+    /**
+     * Repaint every string in the markup. Cheap enough to run again on each language change — this
+     * page is one screen, and the alternative is reloading it, which costs whichever step you were
+     * on.
+     */
+    function applyStrings() {
+      document.querySelectorAll('[data-t]').forEach((el) => { el.textContent = t(el.dataset.t); });
+      T_ATTRS.forEach(([prop, attr]) => {
+        document.querySelectorAll('[data-t-' + attr + ']').forEach((el) => {
+          const key = el.dataset[prop];
+          if (!key) return;
+          if (attr === 'value') el.value = t(key); else el.setAttribute(attr, t(key));
+        });
+      });
+      if (docTitleKey) document.title = t(docTitleKey);
+      // The document's own language, so a screen reader announces it correctly and the browser
+      // picks the right line-breaking rules
+      document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
+    }
+
+    /**
+     * Repainting an **interpolated** string is not applyStrings' job: there is no key on the element
+     * to read back, because the value was spliced in at the moment it was painted. Those painters
+     * register here and are re-run when the language changes.
+     *
+     * Leaving one out is invisible in Chinese and only shows after a switch — the guide-archive line
+     * went on reading 「0 份 · 0 B」 in an otherwise entirely English page, which is the failure this
+     * exists to prevent. A painter that throws must not stop the rest of the page changing language.
+     */
+    const REPAINT = [];
+    function repaintInterpolated() {
+      REPAINT.forEach((fn) => { try { fn(); } catch { /* one stale line beats a half-switched page */ } });
+    }
+
+    /**
+     * The page's own heading, subtitle and document title, set **as keys rather than as text**.
+     *
+     * This page renames itself four times — the first-run fork, the wizard, restore-from-backup and
+     * settings — and each of those used to assign the finished string. That is correct until the
+     * language changes, at which point applyStrings repaints the heading from whichever key the
+     * markup shipped with, and the page silently goes back to calling itself 「初始设置」.
+     *
+     * An empty `subKey` means the subtitle is deliberately blank, which is the fork's state: the two
+     * choices there explain themselves and the wizard's subtitle is not true of both.
+     */
+    function setPageCopy(titleKey, subKey, docKey) {
+      $('page-title').dataset.t = titleKey;
+      const sub = $('page-subtitle');
+      if (subKey) sub.dataset.t = subKey; else delete sub.dataset.t;
+      sub.textContent = subKey ? t(subKey) : '';
+      docTitleKey = docKey;
+      $('page-title').textContent = t(titleKey);
+      document.title = t(docKey);
+    }
+
+    const langInputs = () => document.querySelectorAll('.lang-opt input');
+
+    /** Reflect the stored setting. Nothing is checked in the markup, so a failed read shows neither option selected rather than the wrong one */
+    function paintLanguage(lang) {
+      langInputs().forEach((r) => { r.checked = r.value === lang; });
+    }
+
+    /**
+     * **Takes effect on the spot, and does not navigate.** It joins the several controls on this
+     * page that act immediately rather than waiting for 「保存并验证」 — there is nothing to
+     * validate here and no request to make of anyone, only a choice between two things already on
+     * disk.
+     *
+     * It deliberately does not reload either. Every string on this page comes from the table, so
+     * `applyStrings` repaints the whole of it in place — a reload would cost whichever step you
+     * were on and buy nothing.
+     *
+     * A refusal puts the selection back. The control **is** the state, so leaving it showing a
+     * language that was not saved would be the interface lying about what it did; the message says
+     * what happened, and the selection says what is true.
+     */
+    function initLanguage() {
+      langInputs().forEach((radio) => {
+        radio.addEventListener('change', async () => {
+          const chosen = radio.value;
+          let res;
+          try {
+            res = await call('saveUiLanguage', [chosen]);
+          } catch {
+            res = { error: t('msg.unreachable') };
+          }
+          if (res && res.error) {
+            msg.className = 'msg error';
+            msg.textContent = res.error;
+            const previous = await call('getSettings', []).catch(() => ({}));
+            paintLanguage(previous.uiLanguage);
+            return;
+          }
+          // Repaint rather than reload. The table is what makes this possible, and it is the
+          // reason the control does not navigate: a reload would send somebody on step 3 back to
+          // step 1 to change one setting
+          LANG = chosen;
+          applyStrings();
+          repaintInterpolated();
+          if (msg.classList.contains('error')) { msg.className = 'msg'; msg.textContent = ''; }
+        });
+      });
+    }
+    initLanguage();
 
     const call = async (method, args) => {
       const res = await fetch('/api/' + method, {
@@ -846,42 +1349,59 @@
         body: JSON.stringify({ args }),
       });
       const body = await res.json();
-      return body.ok ? body.result : { error: body.error || '请求失败' };
+      return body.ok ? body.result : { error: body.error || t('msg.failed') };
     };
 
-    // 这个页面有两种身份:首次设置(还没凭据,是进 Dashboard 前的关卡),
-    // 以及之后从 Dashboard 点进来改设置。区别只在文案和"密钥留空表示不改",
-    // 所以共用一份表单,靠 getSettings 的结果切换,不做两个页面。
+    // This page has two identities: first-run setup (no credentials yet, a gate
+    // in front of the Dashboard), and entering it later from the Dashboard to
+    // change settings. The only differences are the copy and "a blank secret
+    // means keep", so they share one form, switched by getSettings' result rather
+    // than being two pages.
     let isEditMode = false;
     let loadedAiProvider = '';
     let loadedAiModel = '';
-    // 每家各自的状态:`{ hasKey, model }`。**key 本身永远不到这儿** —— getSettings
-    // 只回答"配没配",页面上也没有任何地方需要显示它
+    // Each vendor's own state: `{ hasKey, model }`. **The key itself never
+    // reaches here** — getSettings answers only "is it configured", and nowhere
+    // on the page needs to display it
     let aiProviders = {};
     let loadedNotionDb = '';
 
     (async function load() {
-      // **`call` 会抛,不只是返回 `{error}`。** 下面那条 `if (s.error)` 只挡住"服务器
-      // 回了个错误";服务器还没起来时 `fetch` 是直接 reject 的,那条兜底根本轮不到。
-      // 而 `initSteps()` 没跑 = 一个按钮都没收起来,页面上同时摆着「下一步」和
-      // 「保存并验证」—— 打包版里 Electron 先开窗口再等子进程,正好撞这个窗口期。
+      // **`call` throws; it does not only return `{error}`.** The `if (s.error)`
+      // below only catches "the server returned an error"; when the server is not
+      // up yet `fetch` rejects outright and that fallback never gets its turn.
+      // And `initSteps()` not having run = not one button collapsed, so the page
+      // shows 「下一步」 and 「保存并验证」 at the same time — in the packaged build
+      // Electron opens the window before waiting for the child process, hitting
+      // exactly that window.
       let s;
       try {
         s = await call('getSettings', []);
       } catch {
         s = { error: 'unreachable' };
       }
-      // 读设置失败也要把分步装起来 —— 否则导航条不出现、四节里只有第一节可见,
-      // 页面看着像坏了。降级成"首次设置"那套是安全的默认
+      // The steps have to be assembled even when reading the settings fails —
+      // otherwise the nav bar never appears and only the first of the four
+      // sections is visible, and the page looks broken. Degrading to the
+      // first-run setup path is the safe default
       if (s.error) { initSteps(); return; }
       isEditMode = s.hasSteamKey && Boolean(s.steamId);
 
+      // **Before anything else touches the page.** The steps, the mode switches and the armed
+      // button labels all read through t(), so the language has to be settled first or each of
+      // them bakes in the wrong one and only fixes itself the next time it is redrawn
+      LANG = s.uiLanguage === 'en' ? 'en' : 'zh';
+      applyStrings();
+      paintLanguage(s.uiLanguage);
       $('id').value = s.steamId || '';
       $('notion-db').value = s.notionDbId || '';
       loadedNotionDb = s.notionDbId || '';
-      // 已经配了库就把「帮我建一个」收起来:服务端护栏一定会拒绝它(建新库会把配置
-      // 改指到空库),摆一个注定被拒的按钮和一个点了没反应的按钮是同一类毛病。
-      // 想换库的路子写在那条拒绝提示里 —— 清空这一栏、保存、再回来建
+      // With a database already configured, collapse 「新建一个攻略数据库」: the server-side
+      // guard will always refuse it (creating a new one would repoint the config
+      // at an empty database), and a button destined to be refused is the same
+      // class of problem as a button that does nothing when pressed.
+      // The route to changing database is stated in that refusal message — clear
+      // this field, save, and come back to create one
       if (s.notionDbId) $('notion-make').hidden = true;
       $('ai-provider').value = s.aiProvider || '';
       loadedAiProvider = s.aiProvider || '';
@@ -890,8 +1410,9 @@
       paintAiProvider();
 
       if (s.hasSteamKey) {
-        // required 属性已经不用了(分步之后隐藏的必填控件会让浏览器静默拒绝提交),
-        // 校验走 stepOneOk;这里只改提示文案
+        // The required attribute is no longer used (after the split into steps, a
+        // hidden required control makes the browser silently refuse the submit);
+        // validation goes through stepOneOk, and this only changes the hint copy
         $('key-set').hidden = false;
       }
       if (s.hasNotionToken) {
@@ -900,30 +1421,37 @@
       }
       if (isEditMode) {
         armBack();
-        $('page-title').textContent = '设置';
-        $('page-subtitle').textContent = '点上面的标签跳到要改的那一节;没动的项目留空即可';
-        document.title = '设置 · Steam 成就追踪器';
-        // 首次设置时不查:那会儿库是空的,归档目录必然也是空的,
-        // 而 startRestore() 那条路正忙着从 zip 里恢复,不该多一个空列表
+        // **The key, not the text.** Written as textContent it would be right until the language
+        // changed, at which point applyStrings would repaint it with the first-run copy.
+        // **No subtitle in settings mode**: the step nav sits directly below and is self-evident,
+        // so a sentence explaining how to use it narrates what the controls already show
+        setPageCopy('head.settings', '', 'title.settings');
+        // Not queried during first-run setup: the library is empty then, so the
+        // archive directories necessarily are too, and the startRestore() path is
+        // busy restoring from a zip and does not need an extra empty list
         loadArchives();
       }
       initSteps();
     })();
 
-    // ---- 出口 --------------------------------------------------------------
+    // ---- The exit ----------------------------------------------------------
     //
-    // **改过东西才拦一下。** 进来看一眼就走的人不该被问「要放弃吗」:那句话对他没有
-    // 意义,而每次都问会把它训练成一个下意识点掉的东西 —— 等到真有东西要丢的那次
-    // 也照点不误。
+    // **Only intercept when something was changed.** Somebody who came in for a
+    // look and is leaving should not be asked 「要放弃吗」: that sentence means
+    // nothing to them, and asking every time trains it into something clicked
+    // away reflexively — including the time there really is something to lose.
     //
-    // **脏值逐栏记,不是一个总快照。** 建 Notion 库会当场把 ID 存盘,那一栏于是变回
-    // 干净的;而同一时刻用户可能刚改过 SteamID。一个总快照只能一起重置,那会把那个
-    // 真的未保存修改静静抹掉。
+    // **Dirtiness is recorded per field, not as one overall snapshot.** Creating
+    // a Notion database saves the ID on the spot, so that field becomes clean
+    // again — while at the same moment the user may have just changed their
+    // SteamID. One overall snapshot could only be reset together, quietly wiping
+    // out that genuinely unsaved change.
     //
-    // 密钥那几栏在设置模式下**永远是空的**(只填占位符),所以空白就是「没动过」。
+    // The secret fields are **always empty** in settings mode (they only carry a
+    // placeholder), so blank means 「没动过」.
     const DIRTY_FIELDS =
       ['key', 'id', 'ai-provider', 'ai-key', 'ai-model', 'notion-token', 'notion-db'];
-    /** 每一栏「存过盘的那个值」。不传参就重新对一遍表 */
+    /** Each field's "value as saved". With no argument it re-syncs the whole set */
     const saved = {};
     const markSaved = (...ids) => {
       for (const k of (ids.length ? ids : DIRTY_FIELDS)) saved[k] = $(k).value;
@@ -932,13 +1460,15 @@
 
     function armBack() {
       const back = $('back-btn');
-      // 标签从标记里读 —— 再写一遍就多了一处会对不上的地方(disarm 靠它复位)
+      // The label is read from the markup — writing it out again would add one more place that can disagree (disarm restores from it)
       const label = back.textContent;
       markSaved();
       back.hidden = false;
-      // arm() 装的是雷打不动的两下点,而这里只有脏了才该拦,所以在它外面套一层。
-      // 条件不塞进 arm():另外三个调用点都是删除,它们任何时候都得拦
-      arm(back, label, '放弃未保存的修改?', () => { location.href = '/'; });
+      // arm() installs an unconditional two-click gesture, while here it should
+      // only intercept when dirty, so the condition wraps around it.
+      // The condition is not pushed into arm(): the other three call sites are
+      // deletions, and those have to intercept at all times
+      arm(back, label, t('act.discard'), () => { location.href = '/'; });
       const confirmClick = back.onclick;
       back.onclick = (e) => {
         if (isDirty()) return confirmClick(e);
@@ -946,79 +1476,98 @@
       };
     }
 
-    // ---- AI:每家记自己的 key 和模型 ---------------------------------------
+    // ---- AI: each vendor remembers its own key and model --------------------
     //
-    // **换一家不该要求把 key 重打一遍。** 三个控件共用一份配置的话,"试试另一家"
-    // 必然意味着重新粘一次密钥,切回来又要再粘一次。`ai.providers` 一家存一套
-    // (见 lib/config.js),这个函数只是把选中那一家的状态画出来。
+    // **Switching vendor should not require typing the key in again.** With the
+    // three controls sharing one config, "try another one" necessarily means
+    // pasting the secret again, and switching back means pasting again.
+    // `ai.providers` stores one set per vendor (see lib/config.js), and this
+    // function only paints the selected one's state.
     //
-    // 选项后面缀「· 已配置」而不是在前面加个记号:筛选芯片那一排的结论是"状态放在
-    // 最前面的记号里、标签文字不动",但那需要一个能画的元素,而 `<option>` 里
-    // 放不了 SVG,靠前导空格对齐又依赖各平台怎么渲染下拉列表。缀在后面对齐不出问题。
-    // **各家的 key 长得不一样,占位符就得跟着换。** 一个写死的 `sk-...` 对 Anthropic
-    // 和 Gemini 都是错的,而三家共用一个输入框之后,「把 Anthropic 的 key 粘进 Gemini
-    // 那一栏」正是这次改版新造出来的失误 —— 一个对得上的前缀当场就能拦住它。
+    // The option is suffixed with 「· 已配置」 rather than prefixed with a marker:
+    // the conclusion from the filter-chip round was "put the state in a leading
+    // marker and leave the label text alone", but that needs an element to draw,
+    // and an `<option>` cannot hold an SVG while aligning with a leading space
+    // depends on how each platform renders a dropdown. A suffix aligns without
+    // trouble.
+    // **Each vendor's key looks different, so the placeholder has to follow.** A
+    // hardcoded `sk-...` is wrong for both Anthropic and Gemini, and once the
+    // three share one input, "paste the Anthropic key into the Gemini field" is a
+    // mistake this redesign newly created — a matching prefix stops it on the
+    // spot.
     //
-    // **这是形状提示,永远不拿来校验。** 和 Notion 那一栏同一条规矩(见上面那段注释):
-    // 认前缀就意味着供应商下次改格式时,我们会把一把好 key 拒掉,而报出来的错会说
-    // 「key 无效」—— 指向一个完全正确的东西。厂商改了格式,这里改一行字就行。
+    // **This is a shape hint and is never used to validate.** The same rule as the
+    // Notion field (see the comment above): recognising prefixes means that the
+    // next time a vendor changes format we reject a perfectly good key, and the
+    // reported error says 「key 无效」 — pointing at something entirely correct. If
+    // a vendor changes format, one line here changes.
     const AI_KEY_HINT = {
       anthropic: 'sk-ant-...',
       gemini: 'AIza...',
       deepseek: 'sk-...',
     };
 
+    REPAINT.push(() => paintAiProvider());
     function paintAiProvider() {
       const sel = $('ai-provider');
       for (const opt of sel.options) {
         if (!opt.value) continue;
-        // 原始文案存进 dataset:直接改 textContent,重画第二次就会把标记叠上去
+        // The original copy is stored in dataset: changing textContent directly would stack the marker on a second repaint
         if (opt.dataset.label === undefined) opt.dataset.label = opt.textContent;
         const label = opt.dataset.label;
-        opt.textContent = aiProviders[opt.value]?.hasKey ? `${label} · 已配置` : label;
+        opt.textContent = aiProviders[opt.value]?.hasKey ? t('tag.set.suffix', { label }) : label;
       }
 
       const cur = aiProviders[sel.value];
       $('ai-key-set').hidden = !cur?.hasKey;
-      // 认不出的供应商(自建端点、代理)给空的,不猜一个形状出来
+      // An unrecognised provider (a self-hosted endpoint, a proxy) gets an empty one; no shape is guessed
       $('ai-key').placeholder = AI_KEY_HINT[sel.value] ?? '';
       $('ai-model').value = cur?.model ?? '';
-      // 步骤标题上那个「已配置」问的是"这一步办完了没有",而不是"当前这家配了没" ——
-      // 配好了 Anthropic 却停在 Gemini 上,这一步显然是办过的
+      // The 「已配置」 on the step title answers "is this step done", not "is the
+      // current vendor configured" — with Anthropic configured but the selection
+      // sitting on Gemini, this step has plainly been done
       $('ai-set').hidden = !Object.values(aiProviders).some((p) => p?.hasKey);
     }
 
     $('ai-provider').addEventListener('change', () => {
-      // **换一家先把打进去的 key 清掉。** 那串字符是给上一家的,留在框里提交就会被
-      // 当成新这一家的 key 存进去 —— 它一定是错的,而报出来的是一次验证失败,
-      // 指不到"你刚才换了供应商"这个真因上
+      // **Clear whatever key was typed in when switching vendor.** That string
+      // belongs to the previous vendor, and leaving it in the field means it gets
+      // saved as the new vendor's key on submit — it is necessarily wrong, and
+      // what gets reported is a validation failure that points nowhere near the
+      // real cause of "you just switched providers"
       $('ai-key').value = '';
       paintAiProvider();
     });
 
-    // ---- 分步 -------------------------------------------------------------
+    // ---- The steps ---------------------------------------------------------
     //
-    // **一套机制,两种身份。** 步骤条在两种模式下都能点着跳到任意一节 —— 一步步走
-    // 太慢,而首次设置的人也常常想先看看后面有什么。两者的区别只剩底下那个按钮:
-    // 首次设置给「下一步 / 跳过 / 完成设置」(一步只出一个),设置模式只给「保存并验证」。
+    // **One mechanism, two identities.** The step bar is clickable to jump to any
+    // section in both modes — going one step at a time is slow, and first-run
+    // users often want to see what is coming. The only remaining difference is
+    // the button underneath: first-run setup gets 「下一步 / 跳过 / 完成设置」 (one
+    // at a time), while settings mode gets only 「保存并验证」.
     //
-    // 各步的输入框**始终在同一个 <form> 里**,只是被 hidden 掉;提交时读的是
-    // `$(id).value`,隐藏节点照样读得到。于是"跳过"就等于"没填",
-    // 保存那一整套逻辑一个字都不用改。
-    // **这两个数字不是一回事,合成一个就会有一节点不开。**
-    // STEP_COUNT 是总共几节(用来夹住 showStep 的范围);WIZARD_LAST 是首次设置
-    // 的向导走到哪一节为止 —— 「完成设置」挂在那里。第 4 节「备份」只在设置页
-    // 出现,不属于首次设置,所以两者从 分了家。
+    // Every step's inputs **stay in the same <form> throughout**, merely hidden;
+    // the submit reads `$(id).value`, and a hidden node reads back fine. So
+    // "skipped" simply equals "not filled in", and the whole save path needs not
+    // one word changed.
+    // **These two numbers are not the same thing, and merging them leaves one section unreachable.**
+    // STEP_COUNT is how many sections there are (used to clamp showStep's range);
+    // WIZARD_LAST is where first-run setup's wizard ends — 「完成设置」 hangs there.
+    // Section 4, 「备份」, only appears on the settings page and is not part of
+    // first-run setup, which is why the two parted ways.
     const STEP_COUNT = 4;
     const WIZARD_LAST = 3;
     let currentStep = 1;
 
     /**
-     * 这一步填了东西没有 —— 决定按钮写「跳过」还是「下一步」。
+     * Whether this step has anything entered — decides whether the button reads
+     * 「跳过」 or 「下一步」.
      *
-     * **这个标签是在回答一个用户会有的疑问:「我填了东西,按跳过会不会丢?」**
-     * 不会 —— 所有输入始终在同一个 form 里,提交时照读隐藏节点。但一个一直写着
-     * 「跳过」的按钮传达的正好是相反的意思,所以让标签跟着内容变。
+     * **This label answers a question users actually have: 「我填了东西,按跳过会不
+     * 会丢?」** It will not — every input stays in the same form throughout and the
+     * submit reads hidden nodes. But a button permanently reading 「跳过」 conveys
+     * exactly the opposite, so the label follows the content.
      */
     const STEP_INPUTS = {
       2: ['ai-provider', 'ai-key', 'ai-model'],
@@ -1027,15 +1576,16 @@
     const stepHasInput = (n) => (STEP_INPUTS[n] ?? []).some((id) => $(id).value.trim() !== '');
 
     function refreshSkipLabel() {
-      $('step-skip').textContent = stepHasInput(currentStep) ? '下一步' : '跳过';
+      $('step-skip').dataset.t = stepHasInput(currentStep) ? 'act.next' : 'act.skip';
+      $('step-skip').textContent = t($('step-skip').dataset.t);
     }
 
-    /** 第 1 步的人工校验。见 HTML 里那段注释:为什么不用 required 属性 */
+    /** Step 1's manual validation. See the comment in the HTML: why the required attribute is not used */
     function stepOneOk() {
       const ok = ($('key').value.trim() || isEditMode) && $('id').value.trim();
       if (!ok) {
         msg.className = 'msg error';
-        msg.textContent = 'Steam Web API Key 和 SteamID64 都要填,这一步跳不过去。';
+        msg.textContent = t('step1.missing');
       }
       return Boolean(ok);
     }
@@ -1051,8 +1601,9 @@
         li.classList.toggle('done', i < currentStep);
       });
       if (!isEditMode) {
-        // 一步一个按钮:第 1 步必填走「下一步」,中间可选步骤走「跳过」,
-        // 最后一步走提交。回上一步交给步骤条,那边随便点
+        // One button per step: step 1 is required and uses 「下一步」, the optional
+        // middle steps use 「跳过」, and the last one submits. Going back is the
+        // step bar's job, where anything can be clicked
         $('step-next').hidden = currentStep !== 1;
         $('step-skip').hidden = currentStep === 1 || currentStep === WIZARD_LAST;
         btn.hidden = currentStep !== WIZARD_LAST;
@@ -1063,8 +1614,9 @@
     }
 
     function initSteps() {
-      // 首次设置先走岔路,向导等选了「全新设置」才出现。设置页没有这一步 ——
-      // config 已经在了,那个问题早就有答案了
+      // First-run setup goes through the fork first, and the wizard appears only
+      // once 「全新设置」 is chosen. The settings page has no such step — the config
+      // exists, so that question was answered long ago
       if (!isEditMode) {
         $('gate-new').addEventListener('click', startWizard);
         $('gate-restore').addEventListener('click', startRestore);
@@ -1077,42 +1629,46 @@
     }
 
     /**
-     * 一次性接线。**必须只跑一次。**
+     * One-time wiring. **It must run exactly once.**
      *
-     * 岔路能回头之后,`showWizard()` 就不再是「一个页面生命周期里只跑一次」了 ——
-     * 岔路 → 向导 → 岔路 → 向导会把下面每个监听都再挂一遍,于是「跳过」一下跳两步、
-     * 「下一步」校验两次。**这类重复绑定不报错**,只是行为翻倍,而且要走过回头路
-     * 才看得见。
+     * Once the fork can be returned to, `showWizard()` is no longer "runs once per
+     * page lifetime" — fork → wizard → fork → wizard attaches every listener below
+     * a second time, so 「跳过」 jumps two steps and 「下一步」 validates twice.
+     * **This kind of duplicate binding raises no error**, it merely doubles the
+     * behaviour, and it is only visible after taking the way back.
      */
     let wizardWired = false;
     function wireWizard() {
       if (wizardWired) return;
       wizardWired = true;
 
-      // **两种模式下步骤条都能点。** 一步步走太慢,而这几节本来就互相独立,
-      // 没有哪一节的内容依赖前一节填了什么。第 1 步的必填由提交时的校验兜底,
-      // 所以直接跳到最后一步也不会漏掉它
+      // **The step bar is clickable in both modes.** Going one step at a time is
+      // slow, and these sections are independent anyway — no section's content
+      // depends on what an earlier one contains. Step 1's required fields are
+      // covered by the validation at submit time, so jumping straight to the last
+      // step still cannot skip them
       document.querySelectorAll('#step-nav li').forEach((li) => {
         li.classList.add('clickable');
         li.addEventListener('click', () => showStep(Number(li.dataset.goto)));
       });
 
       if (isEditMode) return;
-      // 边填边换标签。`input` 覆盖打字,`change` 兜住 <select>(它的 input 事件
-      // 在旧浏览器上不保证)。绑在 form 上而不是逐个输入框,新增字段不用再来改这里
+      // The label changes as you type. `input` covers typing and `change` covers
+      // <select> (whose input event is not guaranteed on older browsers). Bound on
+      // the form rather than on each input, so adding a field needs no change here
       form.addEventListener('input', refreshSkipLabel);
       form.addEventListener('change', refreshSkipLabel);
       $('step-skip').addEventListener('click', () => showStep(currentStep + 1));
-      // 「下一步」只出现在第 1 步,所以这里无条件校验
+      // 「下一步」 only appears on step 1, so this validates unconditionally
       $('step-next').addEventListener('click', () => {
         if (stepOneOk()) showStep(2);
       });
     }
 
-    /** 步骤条 + 各步 + 按钮行,两种模式共用 */
+    /** The step bar, the sections and the button row, shared by both modes */
     function showWizard() {
       $('step-nav').hidden = false;
-      // 这一行始终显示 —— 提交按钮住在里面。收起的是里面那两个向导按钮,不是整行
+      // This row is always shown — the submit button lives inside it. What gets collapsed is the two wizard buttons within, not the row
       $('step-actions').hidden = false;
       wireWizard();
 
@@ -1121,54 +1677,63 @@
         $('step-next').hidden = true;
         btn.hidden = false;
       } else {
-        btn.textContent = '完成设置';
+        btn.dataset.t = 'act.finish';
+      btn.textContent = t('act.finish');
       }
       showStep(1);
     }
 
     /**
-     * 回到岔路。**两条分支都得回得来。**
+     * Back to the fork. **Both branches have to be able to come back.**
      *
-     * 「从备份恢复」本身没有出口:手上没有备份文件的人点进去之后,页面上没有任何
-     * 控件能退回来,而打包版没有地址栏、没有后退键,托盘的「打开面板」也只是把
-     * 现有窗口叫到前面 —— 唯一的办法是把整个程序退掉。这是用户报上来的那个。
+     * 「从备份恢复」 had no exit of its own: somebody who clicked into it without a
+     * backup file to hand found no control on the page that returns, and the
+     * packaged build has no address bar and no back key while the tray's 「打开
+     * 面板」 only brings the existing window forward — the only way out was
+     * quitting the whole program. This is the one users reported.
      *
-     * **这不违反「首次设置不给出口」那条规矩:** 回的是岔路,不是 Dashboard,人还在
-     * 闸里。去 Dashboard 的 `#back-btn` 仍然只在设置模式下上膛。
+     * **This does not violate the "first-run setup has no exit" rule:** what it
+     * returns to is the fork, not the Dashboard, so the person is still inside the
+     * gate. `#back-btn`, which goes to the Dashboard, is still armed only in
+     * settings mode.
      *
-     * 这个函数也是首次设置的**初始状态**(`initSteps` 直接调它),所以两条分支动过的
-     * 每一处都要在这里还原 —— 漏一个,第二次进那一节就缺半截,而且不会报错。
+     * This function is also first-run setup's **initial state** (`initSteps` calls
+     * it directly), so everything either branch touched has to be restored here —
+     * miss one and the second visit to that section is half missing, with no
+     * error.
      */
     function showGate() {
-      // **第 1 步在标记里是不带 hidden 的** —— 平时是 showStep() 把其余几节收起来,
-      // 而岔路这条分支不走 showStep,所以要自己收。少这一行,第 1 步就直接
-      // 摊在两个选择下面,岔路等于没岔
+      // **Step 1 carries no hidden in the markup** — normally showStep() collapses
+      // the other sections, and the fork branch does not go through showStep, so it
+      // has to collapse them itself. Without this line, step 1 sits spread out
+      // under the two choices and the fork is no fork at all
       document.querySelectorAll('.step').forEach((s) => { s.hidden = true; });
       $('step-nav').hidden = true;
       $('step-actions').hidden = true;
       $('gate-back').hidden = true;
-      // 这三个是 startRestore 藏起来的
+      // These three were hidden by startRestore
       $('backup-make').hidden = false;
       $('backup-title').hidden = false;
       $('restore-title').hidden = false;
-      $('page-title').textContent = '初始设置';
-      // 副标题("只需要填一次…")是给向导写的,对「从备份恢复」那条讲不通,
-      // 而岔路上那两个选择本来就不需要一句说明。选了「全新设置」再放回去
-      $('page-subtitle').textContent = '';
+      // The subtitle ("只需要填一次…") was written for the wizard and does not hold
+      // for 「从备份恢复」, while the two choices on the fork need no explanation at
+      // all. It is put back once 「全新设置」 is chosen
+      setPageCopy('head.setup', '', 'title.setup');
       $('gate').hidden = false;
     }
 
     function startWizard() {
       $('gate').hidden = true;
       $('gate-back').hidden = false;
-      $('page-subtitle').textContent = '只填一次,密钥只存在这台电脑上';
+      setPageCopy('head.setup', 'sub.setup', 'title.setup');
       showWizard();
     }
 
     /**
-     * 首次设置里的恢复:只露第 4 节的下半截。
-     * **「立即备份」在这里没有意义** —— 库是空的,备出来的是一个空备份,
-     * 而一个能点但什么都不该点的按钮比没有这个按钮更糟。
+     * Restore inside first-run setup: only the lower half of section 4 is exposed.
+     * **「立即备份」 is meaningless here** — the library is empty, so what it would
+     * produce is an empty backup, and a button that can be pressed but should not
+     * be is worse than no button at all.
      */
     function startRestore() {
       $('gate').hidden = true;
@@ -1176,17 +1741,18 @@
       $('backup-make').hidden = true;
       $('backup-title').hidden = true;
       $('restore-title').hidden = true;
-      $('page-title').textContent = '从备份恢复';
-      $('page-subtitle').textContent = '恢复后直接进 Dashboard,不用重新设置';
+      setPageCopy('gate.restore', 'sub.restore', 'title.setup');
       document.querySelector('.step[data-step="4"]').hidden = false;
     }
 
     /**
-     * 「帮我建一个」。两步:先列出这个 integration 能看到的页面,选一个,再建。
+     * 「新建一个攻略数据库」. Two steps: list the pages this connection can see, pick one,
+     * then create.
      *
-     * 分两步不只是流程需要 —— **列表为空本身是一个精确诊断**:token 有效却一个页面
-     * 都看不到,只可能是上面第 2 步(Connections)没做,而单靠一条和「数据库 ID 填错了」
-     * 共用的报错是猜不出来的。
+     * The two steps are not only a matter of flow — **an empty list is itself a
+     * precise diagnosis**: a valid token that can see not one page can only mean
+     * step 2 above (Connections) was not done, and that cannot be inferred from a
+     * single error message shared with 「数据库 ID 填错了」.
      */
     const setNotionMsg = (text, cls) => {
       const el = $('notion-msg');
@@ -1197,14 +1763,13 @@
     $('notion-make').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setNotionMsg('正在看这个 integration 能访问哪些页面…');
+      setNotionMsg(t('notion.looking'));
       const r = await call('listNotionParents', [$('notion-token').value.trim()]);
       b.disabled = false;
       if (r.error) return setNotionMsg(r.error, 'error');
       if (!r.pages.length) {
         return setNotionMsg(
-          'token 有效,但这个 integration 一个页面都看不到 —— 上面第 2 步还没做:'
-            + '在 Notion 里打开要放攻略的页面 → ••• → Connections → 加上它,然后再点一次。',
+          t('notion.nopages') + t('notion.nopages.how'),
           'error'
         );
       }
@@ -1213,41 +1778,44 @@
       for (const p of r.pages) {
         const o = document.createElement('option');
         o.value = p.id;
-        // textContent 不是 innerHTML:标题是 Notion 那边的数据,不是我们写的文案
+        // textContent rather than innerHTML: the title is Notion's data, not copy we wrote
         o.textContent = p.title;
         sel.appendChild(o);
       }
       $('notion-create').hidden = false;
-      setNotionMsg('找到 ' + r.pages.length + ' 个可用页面'
-        + (r.truncated ? '(还有更多没列完)' : '') + ',选一个再点建立。');
+      setNotionMsg(t('notion.found', { n: r.pages.length, more: r.truncated ? t('notion.more') : '' }));
     });
 
     $('notion-make-go').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setNotionMsg('正在建…');
+      setNotionMsg(t('notion.creating'));
       const r = await call('createNotionGuideDb', [
         $('notion-token').value.trim(), $('notion-parent').value, $('notion-title').value.trim(),
       ]);
       b.disabled = false;
       if (r.error) return setNotionMsg(r.error, 'error');
       $('notion-db').value = r.id;
-      // 服务端建完就存盘了。这里同步 loadedNotionDb,否则待会儿按「保存并验证」会为了
-      // 同一个值再往 Notion 跑一趟(submit 那边靠和它比对来决定要不要调 saveNotionConfig)
+      // The server saved it as soon as it was created. loadedNotionDb is synced
+      // here, or pressing 「保存并验证」 later would make another trip to Notion for
+      // the same value (the submit side compares against it to decide whether to
+      // call saveNotionConfig)
       loadedNotionDb = r.id;
-      // 这个 ID 已经在盘上了,所以它不算「未保存的修改」。**只对这一栏** —— 整体重置
-      // 会把同一时刻真的未保存修改(比如刚改一半的 SteamID)一并抹掉
+      // This ID is already on disk, so it does not count as 「未保存的修改」. **This
+      // field only** — an overall reset would also wipe out a genuinely unsaved
+      // change made at the same moment (a half-edited SteamID, say)
       markSaved('notion-db');
       $('notion-create').hidden = true;
-      setNotionMsg('建好了:「' + r.title + '」,状态选项 ' + r.options.join(' / ')
-        + '。ID 已填好并存盘。', 'ok');
+      setNotionMsg(t('notion.created', { name: r.title, options: r.options.join(' / ') }), 'ok');
     });
 
-    // ---- 备份 -------------------------------------------------------------
+    // ---- Backup ------------------------------------------------------------
     //
-    // 备份写到盘上,**这里只显示路径,不给下载链接**。打包版没挂 will-download,
-    // Electron 会退回原生保存对话框,而原生对话框在这个程序里是死的
-    // (见 docs/self-update.md)。一个点了没反应的下载按钮比一条路径糟得多。
+    // The backup is written to disk, and **only the path is shown here; no
+    // download link**. The packaged build does not hook will-download, so Electron
+    // falls back to the native save dialog, and native dialogs are dead in this
+    // program (see docs/self-update.md). A download button that does nothing when
+    // pressed is far worse than a path.
     let lastBackupPath = '';
 
     const setMsg = (id, text, cls) => {
@@ -1259,7 +1827,7 @@
     $('bk-go').addEventListener('click', async (e) => {
       const b = e.currentTarget;
       b.disabled = true;
-      setMsg('bk-msg', '正在打包…');
+      setMsg('bk-msg', t('bk.packing'));
       try {
         const r = await call('makeBackup', [{ includeConfig: $('bk-config').checked }]);
         if (r.error) throw new Error(r.error);
@@ -1267,12 +1835,14 @@
         $('bk-path').textContent = r.path;
         $('bk-path').hidden = false;
         $('bk-done').hidden = false;
-        // 成功本身由路径和数字说明,不用再写一句「备份成功」。
-        // 小库要用 KB:一个 2 KB 的备份显示成「0.0 MB」读起来像是失败了
+        // Success is conveyed by the path and the numbers; no 「备份成功」 sentence
+        // is needed.
+        // A small library needs KB: a 2 KB backup shown as 「0.0 MB」 reads like a
+        // failure
         const size = r.sizeBytes >= 1048576
           ? (r.sizeBytes / 1048576).toFixed(1) + ' MB'
           : Math.max(1, Math.round(r.sizeBytes / 1024)) + ' KB';
-        setMsg('bk-msg', `${r.manifest.counts.games} 款游戏 · ${size}`, 'ok');
+        setMsg('bk-msg', t('bk.made', { games: r.manifest.counts.games, size }), 'ok');
       } catch (err) {
         setMsg('bk-msg', err.message, 'error');
       } finally {
@@ -1285,40 +1855,43 @@
       if (r.error) setMsg('bk-msg', r.error, 'error');
     });
 
-    // 不勾就没有密钥进 zip,那句警告也就不适用了 —— 留着会让人以为还是有
-    $('bk-config').addEventListener('change', () => {
-      $('bk-warn').hidden = !$('bk-config').checked;
-    });
-
-    // ---- 恢复 -------------------------------------------------------------
+    // ---- Restore -----------------------------------------------------------
     //
-    // **拖放是主路径。** 它完全发生在页面里,不碰任何原生 UI,所以在打包版里
-    // 一定能用。点击走的是 <input type="file">,那是 Chromium 自己的对话框
-    // (和 dialog.showOpenDialog 不是一条路),**但没在打包版上验过** ——
-    // 真失灵了也只是少一条捷径,功能不会没。
+    // **Dropping is the primary path.** It happens entirely inside the page and
+    // touches no native UI, so it is guaranteed to work in the packaged build.
+    // Clicking goes through <input type="file">, which is Chromium's own dialog
+    // (a different path from dialog.showOpenDialog), **but has never been verified
+    // in the packaged build** — if it does fail, all that is lost is a shortcut,
+    // not the feature.
     let pendingFile = null;
 
     async function upload(file, query) {
       const res = await fetch('/restore' + query, { method: 'POST', body: file });
       const body = await res.json();
-      return body.ok ? body.result : { error: body.error || '上传失败' };
+      return body.ok ? body.result : { error: body.error || t('bk.upload.failed') };
     }
 
-    /** 先只看不写:恢复会清掉现有数据,得让人在动手之前看见里面是什么 */
+    /** Look before writing: restoring clears the existing data, so people have to see what is inside before acting */
     async function previewFile(file) {
       pendingFile = null;
       $('bk-info').hidden = true;
       $('bk-restore').hidden = true;
-      setMsg('restore-msg', '正在读取…');
+      setMsg('restore-msg', t('bk.reading'));
       try {
         const r = await upload(file, '?dry=1');
         if (r.error) throw new Error(r.error);
         const c = r.manifest?.counts ?? {};
-        const when = r.manifest ? new Date(r.manifest.createdAt).toLocaleString('zh-CN') : '时间未知';
-        // **这几个数字来自正被审查的那个 zip 里的 manifest.json** —— 也就是此刻还没被
-        // 信任的文件本身。这一屏存在的全部意义是"在覆盖数据之前先看看里面是什么",
-        // 拼进 innerHTML 就等于看一眼就把里面的东西执行了,关卡是反着的。而这一页
-        // 调得动全部 /api/*。所以:用 DOM 拼,数字过一遍 num()
+        // The date format follows the interface, not the machine: a page reading in English with a
+        // zh-CN timestamp in it is the one line that looks like a bug rather than a choice
+        const when = r.manifest
+          ? new Date(r.manifest.createdAt).toLocaleString(LANG === 'en' ? 'en-GB' : 'zh-CN')
+          : t('arc.unknown.time');
+        // **These numbers come from the manifest.json inside the very zip being
+        // inspected** — that is, the not-yet-trusted file itself. The entire point
+        // of this screen is "look at what is inside before overwriting the data",
+        // and splicing it into innerHTML means executing what is inside on the way
+        // to looking at it, which inverts the gate. And this page can call every
+        // /api/*. So: build with DOM, and put the numbers through num()
         const num = (v) => (v === null || v === '' || !Number.isFinite(Number(v)) ? '?' : String(Number(v)));
         const box = $('bk-info');
         box.textContent = '';
@@ -1329,15 +1902,17 @@
         };
         const br = () => box.appendChild(document.createElement('br'));
         put(when, true);
-        put(' 的备份');
+        put(t('bk.of.suffix'));
         br();
-        put(`${num(c.games)} 款游戏 · ${num(c.achievements)} 条成就 · ${num(r.guideFiles)} 个攻略文件`);
+        put(t('bk.counts', { games: num(c.games), achievements: num(c.achievements), files: num(r.guideFiles) }));
         br();
-        put(r.hasConfig ? '包含密钥,恢复后不用重新设置' : '不含密钥,恢复后要重填 Steam API Key');
-        // 库里已经有东西才需要说会被清掉。首次设置时是 0,说了反而像在吓人
+        put(r.hasConfig ? t('bk.withkeys') : t('bk.nokeys'));
+        // Only say things will be cleared when the library already holds
+        // something. During first-run setup it is 0, and saying it then just reads
+        // as scaremongering
         if (r.currentGames > 0) {
           br();
-          put(`本机现有的 ${num(r.currentGames)} 款游戏会被替换`, true);
+          put(t('bk.replaces', { n: num(r.currentGames) }), true);
         }
         box.hidden = false;
         $('bk-restore').hidden = false;
@@ -1358,8 +1933,9 @@
       if (f) previewFile(f);
     });
 
-    // dragover 必须 preventDefault,否则浏览器接管这次拖放 —— 在 Electron 里
-    // 那意味着**窗口直接导航到这个文件**,应用就这么没了
+    // dragover has to preventDefault, or the browser takes over the drop — which
+    // in Electron means **the window navigates straight to that file**, and the
+    // application is gone
     for (const type of ['dragenter', 'dragover']) {
       drop.addEventListener(type, (e) => {
         e.preventDefault();
@@ -1373,7 +1949,7 @@
       const f = e.dataTransfer?.files?.[0];
       if (f) previewFile(f);
     });
-    // 拖到窗口别处也不能让它导航走 —— 同一个坑,只是落点不同
+    // Dropping elsewhere in the window must not navigate away either — the same trap, a different landing spot
     for (const type of ['dragover', 'drop']) {
       window.addEventListener(type, (e) => { if (e.target !== drop) e.preventDefault(); });
     }
@@ -1382,12 +1958,14 @@
       if (!pendingFile) return;
       const b = e.currentTarget;
       b.disabled = true;
-      setMsg('restore-msg', '正在恢复…');
+      setMsg('restore-msg', t('bk.restoring'));
       try {
         const r = await upload(pendingFile, '');
         if (r.error) throw new Error(r.error);
-        // 恢复完密钥就位,服务端的 config/steam 也当场改过了 —— 首页这时候
-        // 已经不再往 /setup 跳,直接过去就是 Dashboard,不用重启子进程
+        // Once the restore is done the secrets are in place and the server's
+        // config/steam have been updated on the spot — the home page no longer
+        // redirects to /setup, so going straight there lands on the Dashboard with
+        // no child-process restart
         location.href = '/';
       } catch (err) {
         setMsg('restore-msg', err.message, 'error');
@@ -1395,17 +1973,20 @@
       }
     });
 
-    // ---- 攻略备份 ----------------------------------------------------------
+    // ---- Guide backups -----------------------------------------------------
     //
-    // 三个归档目录(`.backups/`、`.migrated/`、`.drafts/`)在这之前**只进不出**:
-    // 覆盖前的原文一直存着,但取回来的唯一办法是自己去文件管理器里拷。这一段就是
-    // 那条取回来的路。
+    // The three archive directories (`.backups/`, `.migrated/`, `.drafts/`) were
+    // **write-only** until this: the pre-overwrite original was always kept, but
+    // the only way to get it back was copying it out in a file manager. This
+    // section is that way back.
     //
-    // **恢复和删除都是两下点。** 不弹 confirm:弹框会把"到底是哪一行"从眼前挪走,
-    // 而这个列表里上下相邻的两行经常只差一个时间戳。第二下的按钮上写的是**后果**
-    // ——「覆盖本地文件」「整页重写」「永久删除」—— 不是「确定」。
+    // **Restore and delete are both two-click gestures.** No confirm dialog: a
+    // dialog moves "which row exactly" out of sight, and adjacent rows in this
+    // list often differ by nothing but a timestamp. The second click's button
+    // states the **consequence** — 「覆盖本地文件」, 「整页重写」, 「永久删除」 — not
+    // 「确定」.
 
-    /** 待确认的那个按钮。同一时刻只留一个,点别的地方就撤销 */
+    /** The button awaiting confirmation. Only one at a time, and clicking anywhere else cancels it */
     let armed = null;
 
     function disarm() {
@@ -1416,12 +1997,14 @@
       armed = null;
     }
 
-    // 点到这个列表以外的任何地方都撤销 —— 一个举着"永久删除"的按钮不该一直举着。
+    // A click anywhere outside this list cancels it — a button holding up 「永久删除」 should not hold it up indefinitely.
     //
-    // **不在 `.arc-acts` 内的那几个必须逐个列在这个选择器里。** `#arc-wipe` 是整个列表
-    // 的尾巴、`#back-btn` 在页面最上面,两个都不属于任何一行。漏了哪个,那个按钮第一下
-    // 点完会先跑 onclick 上好膛,再冒泡到这里当场拆掉 —— 表现是按钮看上去根本没反应、
-    // 永远点不出第二下,而一行错都不会报
+    // **The ones outside `.arc-acts` have to be listed individually in this
+    // selector.** `#arc-wipe` is the tail of the whole list and `#back-btn` is at
+    // the top of the page, and neither belongs to any row. Miss one and that
+    // button's first click runs its onclick to arm it, then bubbles here and
+    // disarms it on the spot — presenting as a button that appears not to respond
+    // at all and can never reach a second click, with not one error raised
     document.addEventListener('click', (e) => {
       if (armed && !e.target.closest('.arc-acts, #arc-wipe, #back-btn')) disarm();
     });
@@ -1430,20 +2013,26 @@
     const when = (iso) =>
       new Date(iso).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-    // 结果写在整节下面那一行,**不写在行里**:恢复会当场生成一份新备份,它比
-    // 刚恢复的那份还新、会排到列表最前面 —— 重画之后"哪一行是刚才那一行"已经
-    // 不成立了,硬把结果贴回去只会贴到别人身上
+    // The result is written on the line below the whole section, **not into the
+    // row**: restoring generates a fresh backup on the spot, which is newer than
+    // the one just restored and sorts to the top of the list — after the repaint
+    // "which row was that" no longer holds, and forcing the result back would
+    // attach it to somebody else
     const setArcMsg = (text, cls) => setMsg('arc-msg', text, cls);
 
     /**
-     * 一行。**用 DOM 拼不用 innerHTML** —— 游戏名和文件名都来自用户的文件,
-     * 这一页别处已经为同一个理由这么做过(见 showNotionProblems)。
+     * One row. **Built with DOM rather than innerHTML** — both the game name and
+     * the file name come from the user's files, and this page has already done the
+     * same for the same reason elsewhere (see showNotionProblems).
      *
-     * **这里没有「恢复」,而且那是个决定不是遗漏。** 恢复的入口在 Dashboard 上
-     * 每个游戏那一行的 ⋯ 菜单里 —— 在那儿你看得见是哪个游戏、现在那份长什么样。
-     * 孤儿存档(游戏已经从库里删了)在那边够不着,但对它们「恢复」也答不出话来:
-     * 写回去会登记一份指向不存在的游戏的攻略,表格上仍然看不到。所以它们的出路是
-     * 先把游戏加回库里,那句话写在下面的说明里。
+     * **There is no 「恢复」 here, and that is a decision rather than an omission.**
+     * The entry point for restoring is the ⋯ menu on each game's row on the
+     * Dashboard — there you can see which game it is and what the current version
+     * looks like. Orphaned archives (whose game was deleted from the library)
+     * cannot be reached there, but 「恢复」 has no answer for them either: writing
+     * one back would register a guide pointing at a game that does not exist, and
+     * it would still not appear in the table. So their way out is adding the game
+     * back to the library first, which is what the note below says.
      */
     function archiveRow(e) {
       const li = document.createElement('li');
@@ -1464,32 +2053,32 @@
       const acts = document.createElement('div');
       acts.className = 'arc-acts';
 
-      // 「看」是唯一不改任何东西的动作,所以它不需要第二下
+      // 「看」 is the one action that changes nothing, so it needs no second click
       const view = document.createElement('button');
       view.type = 'button';
       view.className = 'btn-sub';
-      view.textContent = '查看';
+      view.textContent = t('arc.view');
       view.onclick = async () => {
         const open = li.querySelector('.arc-body');
-        if (open) { open.remove(); view.textContent = '查看'; return; }
+        if (open) { open.remove(); view.textContent = t('arc.view'); return; }
         view.disabled = true;
         const r = await call('readGuideArchive', [e.id]);
         view.disabled = false;
         const body = document.createElement('pre');
         body.className = 'arc-body';
-        body.textContent = r.error ? r.error : r.text || '(空的)';
+        body.textContent = r.error ? r.error : r.text || t('arc.empty');
         li.appendChild(body);
-        view.textContent = '收起';
+        view.textContent = t('arc.collapse');
       };
 
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'btn-sub';
-      del.textContent = '删除';
-      arm(del, '删除', '永久删除', async () => {
+      del.textContent = t('arc.delete');
+      arm(del, t('arc.delete'), t('arc.delete.armed'), async () => {
         const r = await call('deleteGuideArchive', [e.id]);
         if (r.error) return setArcMsg(r.error, 'error');
-        setArcMsg(`删了 ${e.game || e.file},腾出 ${kb(r.bytes)}`, 'ok');
+        setArcMsg(t('arc.deleted.one', { name: e.game || e.file, size: kb(r.bytes) }), 'ok');
         loadArchives();
       });
 
@@ -1499,15 +2088,18 @@
       return li;
     }
 
-    /** 两下点:第一下把按钮换成后果那句话,第二下才真跑 */
+    /** The two-click gesture: the first click turns the button into the consequence, the second actually runs it */
     function arm(btn, label, confirmLabel, run) {
       btn.onclick = async () => {
         if (armed?.btn === btn) {
           disarm();
           btn.disabled = true;
-          // **finally,不是顺着往下写。** `call()` 里两个 await 都会抛(连接断了、
-          // 回应不是 JSON),而 `#arc-wipe` 是跨重画活着的那个按钮 —— 抛一次就永远
-          // 停在 disabled 上,只能刷新整页才回得来。偏偏最容易抛的时候正是想重试的时候
+          // **finally, not simply carrying on below.** Both awaits inside `call()`
+          // can throw (a dropped connection, a response that is not JSON), and
+          // `#arc-wipe` is the button that survives a repaint — one throw leaves it
+          // stuck disabled forever, recoverable only by refreshing the whole page.
+          // And the moment it is most likely to throw is exactly the moment
+          // somebody wants to retry
           try {
             await run();
           } finally {
@@ -1524,19 +2116,24 @@
     }
 
     /**
-     * 拉一次列表重画。**排序按体积,不按时间** —— 这一节要回答的是「什么占地方」,
-     * 而按时间排的那份在 Dashboard 上,那里问的是「上一版哪去了」。同一批数据,
-     * 两个问题,两种排法。
+     * Fetches the list and repaints. **Sorted by size, not by time** — this section
+     * answers 「什么占地方」, while the time-sorted view lives on the Dashboard,
+     * where the question is 「上一版哪去了」. The same data, two questions, two
+     * orderings.
      *
-     * 孤儿(游戏已经从库里删了)提到最前面,不管它多大:它们是这一节**唯一**
-     * 够得着的东西,别的行在 Dashboard 上都有主。
+     * Orphans (whose game was deleted from the library) are lifted to the top
+     * regardless of size: they are the **only** things this section can reach, as
+     * every other row has an owner on the Dashboard.
      */
+    // Only when the section is on screen: during first-run setup the library is empty, and
+    // loadArchives is deliberately not called there
+    REPAINT.push(() => { if (!$('guide-archive').hidden) loadArchives(); });
     async function loadArchives() {
       let list;
       try {
         list = await call('listGuideArchives', [null]);
       } catch {
-        return; // 服务端还没起来。备份面板不是这一页的主线,静默退出
+        return; // the server is not up yet. The backup panel is not this page's main line, so exit silently
       }
       if (!Array.isArray(list)) return;
 
@@ -1549,38 +2146,45 @@
       ul.textContent = '';
       for (const e of sorted) ul.appendChild(archiveRow(e));
 
-      // 一份都没有时整节收起来。**空列表不值得一个标题**
+      // With none at all the whole section collapses. **An empty list does not deserve a heading**
       $('guide-archive').hidden = list.length === 0;
       const bytes = list.reduce((n, e) => n + e.bytes, 0);
-      // 收起态看得见的那半句:有几份、多大
-      $('arc-count').textContent = `${list.length} 份 · ${kb(bytes)}`;
-      // **这一格只放孤儿那一句,不放机制说明。** 「备份会进 zip」「去哪儿覆盖回去」
-      // 都是 docs 的活,不是屏幕上的 —— 列表本身已经把"有什么、多大"说清楚了。
+      // The half-sentence visible while collapsed: how many, and how large
+      $('arc-count').textContent = t('arc.count', { n: list.length, size: kb(bytes) });
+      // **This slot holds only the orphan sentence, no explanation of the
+      // mechanism.** 「备份会进 zip」 and 「去哪儿覆盖回去」 are the docs' job, not the
+      // screen's — the list itself already states what there is and how large it
+      // is.
       //
-      // 孤儿那句不是解释:那几行在 Dashboard 上**够不着**,
-      // 这是个死路,而死路要说出口,还要给出路(把游戏加回来)。没有孤儿时
-      // 这一行是空的,靠 `:empty` 收掉,不留一条带边距的空档
+      // The orphan sentence is not an explanation: those rows are **unreachable**
+      // on the Dashboard, which is a dead end, and a dead end has to be said out
+      // loud along with the way out (add the game back). With no orphans this line
+      // is empty and collapsed by `:empty`, leaving no gap with margins
       $('arc-sum').textContent = orphans.length
-        ? `最上面 ${orphans.length} 份的游戏已经不在库里了,行上够不着 —— 想覆盖回去先把游戏加回来。`
+        ? t('arc.orphans', { n: orphans.length })
         : '';
 
-      // 「全部删除」删的是**刚画出来的这一批**,所以编号在这里就定死。
-      // 不传给服务端一个"把目录清了":列表画完到按钮点下去之间,后台跑完一次
-      // 重写就会多出一份从没上过屏的备份,清目录会把它一并吃掉。
+      // 「全部删除」 deletes **the batch that was just painted**, so the ids are
+      // fixed here.
+      // The server is not told to "clear the directory": between the list being
+      // painted and the button being pressed, a rewrite finishing in the background
+      // adds a backup that was never on screen, and clearing the directory would
+      // eat it too.
       //
-      // **按钮自己要手动复位。** 上面的 `armed = null` 只丢引用;行是重建的所以无所谓,
-      // 这一个按钮却跨重画活着 —— 不复位就会停在"永久删除 12 份"上,而那 12 份
-      // 已经不是屏幕上的这一批了
+      // **The button has to be reset by hand.** The `armed = null` above only drops
+      // the reference; the rows are rebuilt so it does not matter for them, but this
+      // button survives the repaint — without a reset it stays reading "永久删除 12
+      // 份" when those 12 are no longer the batch on screen
       const ids = sorted.map((e) => e.id);
       const wipe = $('arc-wipe');
-      wipe.textContent = '全部删除';
+      wipe.textContent = t('arc.wipe');
       wipe.classList.remove('armed');
-      arm(wipe, '全部删除', `永久删除 ${list.length} 份 · ${kb(bytes)}`, async () => {
+      arm(wipe, t('arc.wipe'), t('arc.wipe.armed', { n: list.length, size: kb(bytes) }), async () => {
         const r = await call('deleteGuideArchives', [ids]);
         if (r.error) return setArcMsg(r.error, 'error');
         const bad = r.failed?.length ?? 0;
         setArcMsg(
-          `删了 ${r.deleted} 份,腾出 ${kb(r.bytes)}` + (bad ? `;${bad} 份没删掉` : ''),
+          t('arc.wiped', { n: r.deleted, size: kb(r.bytes) }) + (bad ? t('arc.wiped.failed', { n: bad }) : ''),
           bad ? 'error' : 'ok');
         loadArchives();
       });
@@ -1596,9 +2200,11 @@
       const aiKey = $('ai-key').value.trim();
       const aiModel = $('ai-model').value.trim();
 
-      // 编辑模式下 key 可以留空(表示沿用),首次设置则必填。
-      // **这里不能是个静默 return** —— 分步之后必填项可能根本不在屏幕上,点保存
-      // 没反应会让人以为按钮坏了。跳回第 1 步并说明原因
+      // In edit mode the key may be left blank (meaning keep), while first-run
+      // setup requires it.
+      // **This cannot be a silent return** — after the split into steps a required
+      // field may not even be on screen, and pressing save with no response makes
+      // people think the button is broken. Jump back to step 1 and explain why
       if ((!key && !isEditMode) || !id) {
         showStep(1);
         stepOneOk();
@@ -1607,33 +2213,39 @@
 
       btn.disabled = true;
       msg.className = 'msg';
-      msg.textContent = '正在验证…';
+      msg.textContent = t('msg.verifying');
 
       const done = [];
       try {
-        // Steam 那部分:编辑模式下没填新 key 就不动它,免得为了改 Notion 还得
-        // 把 API Key 翻出来重打一遍
+        // The Steam part: in edit mode a blank key leaves it alone, so changing
+        // Notion does not require digging the API Key out and typing it again
         if (key || !isEditMode) {
           const r = await call('completeSetup', [key, id]);
           if (r.error) throw new Error(r.error);
-          done.push(`Steam 凭据可用(${r.gameCount} 款游戏)`);
+          done.push(t('msg.steam.ok', { n: r.gameCount }));
         }
 
-        // Notion 是独立的一步:它失败不该把已经存好的 Steam 配置也说成失败。
-        // **只在真的动过 Notion 时才调**——数据库 ID 是回填的,不比对一下的话,
-        // 进来只想改 SteamID 的人也会顺带触发一次 Notion 验证(白等几秒,
-        // 而且 Notion 那边一旦出问题就会把一次成功的保存报成失败)。
-        // AI 同理:只在真的动过的时候才验证。这一步会**发一次真请求**,
-        // 不比对一下的话,只想改 SteamID 的人也要白等几秒、还可能被 AI 那边的
-        // 临时故障把一次成功的保存报成失败
+        // Notion is an independent step: its failure must not make an
+        // already-saved Steam config be reported as a failure too.
+        // **Only called when Notion was genuinely touched** — the database ID is
+        // pre-filled, and without a comparison somebody who came in only to change
+        // their SteamID would also trigger a Notion validation (waiting several
+        // seconds for nothing, and any Notion trouble would report a successful
+        // save as a failure).
+        // The same for AI: only validate when something genuinely changed. That
+        // step **sends a real request**, and without a comparison somebody who came
+        // in only to change their SteamID would wait several seconds for nothing and
+        // could have a successful save reported as a failure by a transient AI-side
+        // fault
         const aiChanged =
           Boolean(aiKey) || aiProvider !== loadedAiProvider || aiModel !== loadedAiModel;
         if (aiChanged && aiProvider) {
           const r = await call('saveAiConfig', [aiProvider, aiKey, aiModel]);
           if (r.error) throw new Error('AI:' + r.error);
-          done.push(
-            `AI 可用(${r.provider} / ${r.model}${r.canSearch ? '' : ',注意这家没有联网搜索'})`
-          );
+          done.push(t('msg.ai.ok', {
+            provider: r.provider, model: r.model,
+            note: r.canSearch ? '' : t('msg.ai.nosearch'),
+          }));
         }
 
         const notionChanged = Boolean(notionToken) || notionDb !== loadedNotionDb;
@@ -1642,12 +2254,14 @@
           if (r.error) throw new Error(r.error);
           done.push(
             r.pageCount === null || r.pageCount === undefined
-              ? 'Notion token 可用'
-              : `Notion 可用(数据库里 ${r.pageCount} 个页面)`
+              ? t('msg.notion.token.ok')
+              : t('msg.notion.db.ok', { n: r.pageCount })
           );
-          // 体检有话说就**停在这一页**。配置已经存下来了(ID 本身是对的),但直接跳走
-          // 等于把「这个库还不能用」藏进一条 4 秒后消失的绿条,而那条毛病下一次露面
-          // 就是几天后 guide-gen 被拦的时候 —— 正是这次要消灭的那个时间差
+          // When the health check has something to say, **stay on this page**. The
+          // config has been saved (the ID itself is correct), but navigating away
+          // buries 「这个库还不能用」 in a green bar that disappears after 4 seconds,
+          // and that fault next surfaces days later when guide-gen is blocked —
+          // which is exactly the gap this was meant to eliminate
           if ((r.problems || []).length) {
             showNotionProblems(r.problems, r.fixable, done);
             return;
@@ -1655,16 +2269,18 @@
         }
 
         msg.className = 'msg ok';
-        msg.textContent = '✅ ' + done.join(';') + ',正在打开 Dashboard…';
-        // 有 Electron 在的话,它轮询 getSetupStatus 发现配置好了就会把窗口跳回去——
-        // completeSetup 已经就地改过 config/steam,不需要重启子进程。
-        // 这条延时跳转是没有 Electron 时(比如直接 `node tracker.js serve`)的兜底,
-        // 编辑模式下则是"改完就回 Dashboard"的正常出口。
+        msg.textContent = t('msg.ok.opening', { list: done.join(t('msg.sep')) });
+        // With Electron present, its getSetupStatus poll sees the configuration
+        // complete and navigates the window back — completeSetup has already
+        // updated config/steam in place, so no child-process restart is needed.
+        // This delayed redirect is the fallback for when there is no Electron (a
+        // plain `node tracker.js serve`, say), and in edit mode it is the normal
+        // "done editing, back to the Dashboard" exit.
         setTimeout(() => { window.location.href = '/'; }, isEditMode ? 1200 : 4000);
       } catch (err) {
         msg.className = 'msg error';
-        // 已经成功的步骤照实说出来,不然改 Notion 失败会让人以为 Steam 那步也白做了
-        msg.textContent = (done.length ? '已完成:' + done.join(';') + '。' : '') + err.message;
+        // State the steps that already succeeded, or a failed Notion change makes people think the Steam step was wasted too
+        msg.textContent = (done.length ? t('msg.done.some', { list: done.join(t('msg.sep')) }) : '') + err.message;
         btn.disabled = false;
       }
     });

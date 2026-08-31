@@ -1,27 +1,27 @@
 #!/usr/bin/env node
 /**
- * Steam 成就追踪器 —— 本地版命令行入口
+ * Steam achievement tracker — local CLI entry point
  * ------------------------------------------------
- * 零依赖:只用 Node 内置模块(node:sqlite 存数据,内置 fetch 调 Steam API,
- * node:http 起 Dashboard),不需要 npm install,不需要任何外部账号或部署。
+ * Zero dependencies: Node built-ins only (node:sqlite for storage, the built-in fetch for the Steam
+ * API, node:http for the Dashboard). No npm install, no external account, no deployment.
  *
- *   node tracker.js init            填 Steam 凭据(只跑一次;--notion 填 Notion token,--ai 填 AI 供应商)
- *   node tracker.js sync            全量同步(库 + 成就完成数 + 成就详情;--fast 只查该查的)
- *   node tracker.js serve           起本地 Dashboard,数据太旧会自动后台同步
- *   node tracker.js status          看一眼当前数据和 AGCR
- *   node tracker.js export [目录]   把三张表导出成 CSV
- *   node tracker.js backup [目录]   打一个备份 zip(换机/重装用)
- *   node tracker.js restore <文件>  从备份 zip 恢复
- *   node tracker.js guides          发现攻略页面(Notion 数据库 + 本地 guides/*.md)
- *   node tracker.js checkbox-sync   把已解锁成就同步成攻略里的 ✅(--dry-run 先预演)
- *   node tracker.js guide-status    攻略页状态对齐完成度:打满→Done,掉出100%→Staged
- *   node tracker.js notion-check    Notion 侧体检(token/库/属性/选项;--fix 补选项,--probe-write 试写)
- *   node tracker.js audit           反查:有没有勾上了但其实没解锁的 checkbox(只读)
- *   node tracker.js ai-check        AI 联网研究链路自检(--dry 只组装不发送)
- *   node tracker.js guide-gen <appid>  让 AI 写一份攻略(--dry-run 只打印提示词,--overwrite 整篇重写,
- *                                     --only <选择器> [--note "要求"] 只重写其中几条)
- *   node tracker.js guide-to-notion <appid>  把本地 markdown 攻略搬到 Notion(--dry-run 只预览)
- *   node tracker.js log [n]         看最近的同步日志
+ *   node tracker.js init            enter Steam credentials (run once; --notion for a Notion token, --ai for an AI provider)
+ *   node tracker.js sync            full sync (library + achievement counts + achievement detail; --fast checks only what needs checking)
+ *   node tracker.js serve           start the local Dashboard; syncs in the background when the data is stale
+ *   node tracker.js status          a quick look at the current data and AGCR
+ *   node tracker.js export [dir]    export the three tables as CSV
+ *   node tracker.js backup [dir]    write a backup zip (for a new machine or a reinstall)
+ *   node tracker.js restore <file>  restore from a backup zip
+ *   node tracker.js guides          discover guide pages (the Notion database + local guides/*.md)
+ *   node tracker.js checkbox-sync   tick unlocked achievements in the guides (--dry-run previews first)
+ *   node tracker.js guide-status    align guide page status with completion: 100% → Done, dropped below → Staged
+ *   node tracker.js notion-check    health check on the Notion side (token/database/properties/options; --fix adds options, --probe-write tries a write)
+ *   node tracker.js audit           reverse lookup: any ticked checkbox whose achievement is not actually unlocked (read-only)
+ *   node tracker.js ai-check        self-check of the AI online-research chain (--dry assembles without sending)
+ *   node tracker.js guide-gen <appid>  have the AI write a guide (--dry-run prints the prompt only, --overwrite rewrites the whole thing,
+ *                                     --only <selector> [--note "requirement"] rewrites just a few entries)
+ *   node tracker.js guide-to-notion <appid>  move a local markdown guide into Notion (--dry-run previews only)
+ *   node tracker.js log [n]         show the recent sync log
  */
 import { createInterface } from 'node:readline/promises';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -36,13 +36,17 @@ import {
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
+import { setMessageLanguage, messageLanguage, achName } from './lib/messages.js';
 import { serve } from './lib/server.js';
+import { clog } from './lib/cli-messages.js';
 import {
   NotionClient,
   pickGuideDbProperties,
   GUIDE_STATUS_OPTIONS,
   inspectGuideDb,
   repairGuideDb,
+  GUIDE_STATUS_STYLE,
+  COLOUR_ZH,
   DB_PROBLEM,
 } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
@@ -60,7 +64,7 @@ import { exportAll } from './lib/csv.js';
 import { createBackup, applyBackup, inspectBackup, backupName } from './lib/backup.js';
 
 // ---------------------------------------------------------------------------
-// 小工具
+// Small helpers
 // ---------------------------------------------------------------------------
 
 const argv = process.argv.slice(2);
@@ -74,32 +78,36 @@ function flagValue(name) {
 }
 
 /**
- * 取值型 flag —— 它们后面那个参数是值,不是位置参数(见 positionalArgs)。
+ * Value-taking flags — the argument after them is a value, not a positional (see positionalArgs).
  *
- * **这张表要和 `flagValue()` 读的那一套一一对应**,`test/cli-hints.test.js` 钉住了这一点。
- * 漏登记不会报错,只会让那个值被当成位置参数:`guide-gen --effort low 648800` 里
- * appid 变成 `low`,而报出来的是「找不到这个游戏」之类跟 `--effort` 毫无关系的话。
+ * **This table has to correspond one-for-one with what `flagValue()` reads**, and
+ * `test/cli-hints.test.js` pins that. A missing registration raises no error; it just makes the
+ * value be taken as a positional: in `guide-gen --effort low 648800` the appid becomes `low`, and
+ * what gets reported is something like "game not found", with nothing at all to do with `--effort`.
  *
- * `--key` / `--id` / `--older-than` 是补登记的:它们一直是取值型,
- * 只是所在的命令(`init` / `drafts`)不收位置参数,所以没撞上过。留在表外等于
- * 「哪天这两个命令加了位置参数就悄悄坏掉」,而那不是个该留着的赌注
+ * `--key` / `--id` / `--older-than` were added later: they have always been value-taking, and the
+ * commands they belong to (`init` / `drafts`) simply take no positionals, so they never collided.
+ * Leaving them out of the table amounts to "it breaks quietly the day those commands gain a
+ * positional", and that is not a bet worth keeping
  */
-// `--only` / `--note`(局部重写)漏登记的后果正是上面那段说的那种:
-// `guide-gen --only rare 1937500` 会把 `rare` 当成 appid,报出来是「这个游戏不在列表里」。
+// The consequence of `--only` / `--note` (partial rewrite) going unregistered is exactly the one
+// described above: `guide-gen --only rare 1937500` takes `rare` as the appid and reports
+// 「这个游戏不在列表里」.
 //
-// **注释必须留在这个 Set 外面。** `test/cli-hints.test.js` 是拿一条简单正则把这个字面量
-// 抠出来再按逗号切的,里面塞一句带逗号的中文注释,切出来的碎片会盖掉紧跟其后的那一项 ——
-// 于是 `'--only'` 明明写着,断言却报它没登记。踩过一次,记在这儿
+// **Comments must stay outside this Set.** `test/cli-hints.test.js` pulls this literal out with a
+// simple regex and splits it on commas, so a comment containing a comma produces a fragment that
+// covers the entry right after it — and then `'--only'` is plainly written there while the assertion
+// reports it unregistered. Stepped on once, recorded here
 const VALUE_FLAGS = new Set([
   '--rounds', '--file', '--model', '--provider', '--port', '--effort',
   '--key', '--id', '--older-than', '--only', '--note',
 ]);
 
 /**
- * 位置参数,排掉取值型 flag 的值。
+ * The positionals, with value-taking flags' values removed.
  *
- * 不这么做的话 `guide-gen --rounds 2 1937500` 会把 2 当成 appid。
- * 全局那个 `positional` 是简单切分的,只有需要的命令用这个。
+ * Without this, `guide-gen --rounds 2 1937500` takes 2 as the appid.
+ * The global `positional` is a naive split; only the commands that need this use it.
  */
 function positionalArgs() {
   const args = argv.slice(1);
@@ -107,74 +115,81 @@ function positionalArgs() {
 }
 
 /**
- * `--provider` / `--model` / `--effort` 覆盖配置。
+ * `--provider` / `--model` / `--effort` override the config.
  *
- * 有环境变量(AI_PROVIDER / AI_MODEL)还加 flag,是因为**环境变量的写法各 shell 不一样**:
- * `AI_MODEL=x node ...` 在 PowerShell 里直接报 CommandNotFound,得写成
- * `$env:AI_MODEL = "x"; node ...`,而且那样设了之后会在整个会话里赖着不走、
- * 悄悄盖掉 config.json。flag 没有这两个问题,哪个 shell 都一样。
+ * There are flags as well as env vars (AI_PROVIDER / AI_MODEL) because **the syntax for env vars
+ * differs per shell**: `AI_MODEL=x node ...` is an outright CommandNotFound in PowerShell, where it
+ * has to be `$env:AI_MODEL = "x"; node ...` — and set that way it lingers for the whole session,
+ * quietly overriding config.json. Flags have neither problem and work the same in every shell.
  */
 function applyAiFlags(config) {
   const provider = flagValue('provider');
   const model = flagValue('model');
   if (provider) {
-    // **provider / key / model 三个一起换。** 这里原来只换了前后两个:key 留在原地,
-    // 于是 `--provider anthropic` 把上一家的 key 发去 api.anthropic.com,换回一句
-    // 「检查 ANTHROPIC_API_KEY」—— 而那个变量往往正是设对了的。指向反方向的报错
-    // 比没有报错更费时间。换 key 的规则(环境变量 → keys 槽位 → legacy 只归本家)
-    // 归 lib/config.js 的 resolveAiKey 一处管,设置页走的也是它
+    // **provider / key / model are switched together.** This used to switch only the first and the
+    // last: the key stayed put, so `--provider anthropic` sent the previous vendor's key to
+    // api.anthropic.com and got back 「检查 ANTHROPIC_API_KEY」 — while that variable was very often
+    // the one thing that was correct. An error pointing the wrong way costs more time than no error.
+    // The key-switching rule (env var → keys slot → legacy only for its own vendor) lives in one
+    // place, resolveAiKey in lib/config.js, and the setup page goes through it too
     //
-    // model 不指定就清空:config.json 里那个是给上一家的(claude-* / gemini-* /
-    // deepseek-*),带过去必然撞上 assertModelMatchesProvider
+    // model is cleared when unspecified: the one in config.json belongs to the previous vendor
+    // (claude-* / gemini-* / deepseek-*), and carrying it across necessarily trips
+    // assertModelMatchesProvider
     config.ai = switchAiProvider(config.ai, provider, process.env, { model: model ?? '' });
   } else if (model) {
     config.ai.model = model;
   }
 
-  // **`--effort` 是"这一次要多深"的选择,所以它属于 flag,不属于设置。**
+  // **`--effort` is the choice of "how deep this one run goes", which makes it a flag rather than a setting.**
   //
-  // 这根旋钮换的是**广度**:实测(见 docs/ai-guide-writing.md)`low` 比 `high` 快
-  // 八倍,而省下来的地方是那一大批中等难度成就的内容 —— 最难那几条两边都写得透。
-  // 于是"这游戏我只想要难点提示"和"这是我要长期留着的笔记"是两次不同的决定,
-  // 而不是一个该写进 config.json 的长期偏好。
+  // What this knob changes is **breadth**: measured (see docs/ai-guide-writing.md), `low` is eight
+  // times faster than `high`, and what it saves on is the content for the large batch of
+  // medium-difficulty achievements — the hardest few are written thoroughly either way. So "for this
+  // game I only want difficulty hints" and "these are notes I intend to keep" are two different
+  // decisions, not one long-term preference that belongs in config.json.
   //
-  // 不校验取值:各家的档位名不一样(Anthropic 还有 xhigh/max,DeepSeek 上没实测过),
-  // 写死一张白名单就会在供应商加档位的那天把合法值拒掉。填错的后果是供应商回一个
-  // 400,而 errorFromResponse 对这个字段留了专门的提示
+  // The value is not validated: the tier names differ per vendor (Anthropic also has xhigh/max, and
+  // DeepSeek has not been measured), and a hardcoded whitelist would reject a legal value the day a
+  // vendor adds a tier. The consequence of a typo is a 400 from the vendor, and errorFromResponse
+  // has a dedicated hint for this field
   const effort = flagValue('effort');
   if (effort) config.ai.effort = effort;
   return config;
 }
 
 /**
- * 环境变量正在盖掉 config.json 的话,当场说出来。
+ * Says so on the spot when an env var is overriding config.json.
  *
- * 环境变量在 shell 会话里会一直赖着,而 config.json 是肉眼看得见的那份 —— 两者不一致时,
- * 人看着文件、程序用着变量,谁也不知道差在哪。踩过:config.json 写着 deepseek,
- * PowerShell 会话里 $env:AI_PROVIDER 还留着 gemini,结果拿 gemini 的端点去请求
- * deepseek-chat,报出来的是一个完全指错方向的 404。
+ * An env var lingers for the whole shell session, while config.json is the copy people can see — and
+ * when the two disagree, the person is reading the file while the program uses the variable and
+ * nobody can tell where the difference is. Stepped on: config.json said deepseek while the
+ * PowerShell session still had $env:AI_PROVIDER at gemini, so deepseek-chat was requested against
+ * Gemini's endpoint and what came back was a 404 pointing in entirely the wrong direction.
  */
 function warnEnvOverrides() {
   const notes = [];
-  for (const [name, label] of [['AI_PROVIDER', '供应商'], ['AI_MODEL', '模型']]) {
-    if (process.env[name]) notes.push(`${label}来自环境变量 ${name}=${process.env[name]}(盖掉了 config.json)`);
+  for (const [name, label] of [['AI_PROVIDER', 'env.provider'], ['AI_MODEL', 'env.model']]) {
+    if (process.env[name]) {
+      notes.push(clog('env.fromEnv', { label: clog(label), name, value: process.env[name] }));
+    }
   }
   for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'DEEPSEEK_API_KEY']) {
-    if (process.env[name]) notes.push(`API key 可能来自环境变量 ${name}(盖掉了 config.json)`);
+    if (process.env[name]) notes.push(clog('env.keyFromEnv', { name }));
   }
   for (const n of notes) console.log(`  ⚠️  ${n}`);
   if (notes.length) {
-    console.log('      清掉:Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue');
+    console.log(clog('env.clear'));
   }
 }
 
-/** 供应商实例。`--dry` / `--dry-run` 不发请求,所以没 key 也要能造出来 */
+/** A provider instance. `--dry` / `--dry-run` sends nothing, so it has to be constructible without a key */
 async function providerFor(config, { needKey = true } = {}) {
-  const ai = !needKey && !config.ai.apiKey ? { ...config.ai, apiKey: '(dry-run,不会发送)' } : config.ai;
+  const ai = !needKey && !config.ai.apiKey ? { ...config.ai, apiKey: clog('env.dryRunKey') } : config.ai;
   return createProvider({ ai });
 }
 
-/** 同一行原地刷新的进度输出(不是 TTY 就退化成什么都不打,避免刷屏日志) */
+/** Progress output that refreshes one line in place (degrades to printing nothing when not a TTY, to avoid flooding logs) */
 function progressPrinter() {
   const isTty = stdout.isTTY;
   let last = '';
@@ -193,11 +208,13 @@ function progressPrinter() {
   };
 }
 
-const PHASE_LABEL = { library: '检查新游戏', achievements: '刷新成就完成数', schema: '同步成就详情' };
+// The label is a key now; the text lives in `lib/tracker-messages.js` like everything else the
+// CLI prints. A phase with no entry still falls through to its own raw name below
+const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', achievements: 'phase.achievements', schema: 'phase.schema' };
 
 function makeProgressHandler(p) {
   return (ev) => {
-    const label = PHASE_LABEL[ev.phase] ?? ev.phase ?? '';
+    const label = PHASE_LABEL[ev.phase] ? clog(PHASE_LABEL[ev.phase]) : (ev.phase ?? '');
     const count = ev.total ? ` ${ev.done}/${ev.total}` : ev.added ? ` +${ev.added}` : '';
     p.update(`  ${label}${count} ${ev.name ?? ''}`);
   };
@@ -211,16 +228,18 @@ function withSteam({ requireSteam = true } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 命令
+// Commands
 // ---------------------------------------------------------------------------
 
 /**
- * 读一行但**不回显**——token 不该留在终端 scrollback 里,也不该进 shell history。
- * 提示语自己写到 stdout,readline 的输出走一个可静音的 Writable。
+ * Reads a line **without echoing** — a token should stay out of the terminal scrollback and out of
+ * the shell history. The prompt is written to stdout directly and readline's output goes through a
+ * mutable Writable.
  */
 function makeSecretReader() {
-  // stdin 不是终端(管道输入/CI)的时候不能开 terminal 模式,否则 readline 收不到行、
-  // question() 永远不 resolve,整个进程挂住。这种情况下也没有回显要遮,直接普通读。
+  // When stdin is not a terminal (piped input / CI) terminal mode must not be enabled, or readline
+  // receives no lines, question() never resolves and the whole process hangs. In that case there is
+  // no echo to hide either, so read normally.
   const isTty = Boolean(stdin.isTTY);
   let muted = false;
   const out = new Writable({
@@ -231,9 +250,10 @@ function makeSecretReader() {
   });
   const rl = createInterface({ input: stdin, output: isTty ? out : stdout, terminal: isTty });
 
-  // 用异步迭代器逐行取,不用 rl.question():管道输入时整块数据会一次到达,
-  // readline 会连着抛出所有 'line' 事件,后面那个 question() 还没注册就把行丢了、
-  // 于是永远不 resolve。迭代器带队列,不会漏行。
+  // Lines are taken through the async iterator rather than rl.question(): with piped input the whole
+  // block arrives at once and readline emits every 'line' event back to back, so the later
+  // question() has not registered yet and the lines are dropped — and it then never resolves. The
+  // iterator has a queue and drops nothing.
   const lines = rl[Symbol.asyncIterator]();
   const nextLine = async () => ((await lines.next()).value ?? '').trim();
 
@@ -255,150 +275,195 @@ function makeSecretReader() {
 }
 
 /**
- * `--create` 的交互部分:列页面 → 选一个 → 建库。
+ * The interactive part of `--create`: list the pages → pick one → create the database.
  *
- * **列表为空本身就是诊断**:token 有效却一个页面都看不到,只可能是 Connections
- * 那一步没做 —— 而单靠一条和「数据库 ID 填错了」共用的报错是猜不出来的。
+ * **An empty list is itself a diagnosis**: a valid token that can see not one page can only mean the
+ * Connections step was skipped — and that cannot be inferred from a single error message shared with
+ * 「数据库 ID 填错了」.
  */
 async function createGuideDbInteractively(io, probe) {
-  stdout.write('正在看这个 integration 能访问哪些页面…');
+  stdout.write(clog('nb.querying'));
   const { pages, truncated } = await probe.searchPages();
   if (!pages.length) {
-    console.log('\r⚠️  这个 integration 一个页面都看不到                    ');
-    console.log('   token 是好的,所以缺的是共享:在 Notion 里打开要放攻略的那一页');
-    console.log('   → 右上角 ••• → Connections → 加上这个 integration,然后重跑一次');
+    console.log(clog('nb.noPages'));
+    console.log(clog('nb.noPagesWhy'));
+    console.log(clog('nb.noPagesHow'));
     return '';
   }
-  console.log(`\r能访问 ${pages.length} 个页面${truncated ? '(还有更多没列完)' : ''}:                    \n`);
+  console.log(clog('nb.canSee', { n: pages.length, more: truncated ? clog('nb.andMore') : '' }));
   pages.forEach((p, i) => console.log(`  ${String(i + 1).padStart(2)}. ${p.title}`));
 
-  const pick = Number(await io.ask(`\n建在哪一页下面?(1-${pages.length}): `));
+  const pick = Number(await io.ask(clog('nb.pick', { n: pages.length })));
   if (!Number.isInteger(pick) || pick < 1 || pick > pages.length) {
-    throw new Error('没选一个有效的编号,什么都没建');
+    throw new Error(clog('nb.badPick'));
   }
-  const title = (await io.ask('数据库名字(回车用「Steam 攻略」): ')) || 'Steam 攻略';
+  const title = (await io.ask(clog('nb.nameAsk'))) || clog('nb.defaultName');
 
-  stdout.write('正在建…');
+  stdout.write(clog('nb.creating'));
   const db = await probe.createGuideDatabase({ parentPageId: pages[pick - 1].id, title });
-  console.log(`\r✅ 建好了:${db.url}        `);
-  console.log(`   状态选项:${db.options.join(' / ')}`);
-  console.log('   (四个选项都在 To-do 分组里 —— Notion 的 API 设不了分组,试过,静默无效。');
-  console.log('    不影响功能,想整理 board 视图的话自己在 Notion 里拖一下)');
+  console.log(clog('nb.created', { url: db.url }));
+  console.log(clog('nb.options', { options: db.options.join(' / ') }));
+  console.log(clog('nb.groupNote'));
+  console.log(clog('nb.groupNote2'));
   return db.id;
 }
 
 /**
- * `init --notion`:配置攻略同步用的 Notion token。
- * 输入不回显,而且**当场验证**——token 本身 + 那个数据库能不能访问,
- * 分开报错,因为这两件事的修法完全不同(换 token vs. 去 Notion 加 connection)。
+ * `init --notion`: configures the Notion token used for guide syncing.
+ * Input is not echoed, and it is **verified on the spot** — the token itself and whether that
+ * database is reachable, reported separately, because the fixes for those two are completely
+ * different (change the token vs. add a connection in Notion).
  *
- * `--create` 换一条路:不问数据库 ID,而是列出能看到的页面、选一个、在它下面
- * 建一个属性配好的库。**给没有现成数据库的人用** —— 手工那条路要先在 Notion 建库、
- * 配齐状态选项、再整页打开从 URL 里抠 ID,三步各有各的坑。
+ * `--create` takes a different route: instead of asking for a database ID it lists the visible
+ * pages, takes a pick, and creates a properly configured database under it. **For people who have no
+ * database yet** — the manual route means creating one in Notion, adding every status option, then
+ * opening it as a full page to dig the ID out of the URL, and each of those three steps has its own
+ * traps.
  */
 async function cmdInitNotion() {
   const create = flags.has('--create');
   const io = makeSecretReader();
   try {
     const cfg = loadConfig();
-    console.log('\n配置 Notion 攻略同步\n');
-    // 英文一律照抄 Notion 界面上的原字,不用「Internal Integration」这种概念名 ——
-    // 那五个字在 Notion 上一处都没有,照着找的人找不到。Notion 改过不止一轮
-    // (以前叫 New integration / Internal Integration Secret),所以照抄的是当下这一版
-    console.log('token 从哪来:打开 https://app.notion.com/developers/connections,点 New connection,');
-    console.log('在它的 Configuration 标签页里复制 Access token(ntn_ 开头)。然后把攻略页面(或它们');
-    console.log('共同的父页面)授权给它:Notion 页面右上角 ••• → Add connections → 选中它,');
-    console.log('否则 API 会返回 404。\n');
-    console.log('带图的完整步骤:docs/notion-setup.md\n');
+    console.log(clog('in.title'));
+    // The English terms are always copied verbatim from Notion's own UI, never conceptual names like
+    // "Internal Integration" — those five words appear nowhere in Notion, so somebody looking for
+    // them will not find them. Notion has renamed these more than once (it used to be New
+    // integration / Internal Integration Secret), so what is copied is the wording of the current one
+    console.log(clog('in.tokenWhere'));
+    console.log(clog('in.tokenWhere2'));
+    console.log(clog('in.tokenWhere3'));
+    console.log(clog('in.tokenWhere4'));
+    console.log(clog('in.tokenDocs'));
 
-    const token = await io.askSecret('Notion Integration Token(输入不会显示): ');
-    if (!token) throw new Error('没输入 token');
+    const token = await io.askSecret(clog('in.tokenAsk'));
+    if (!token) throw new Error(clog('in.tokenMissing'));
 
     const probe = new NotionClient({ notion: { token } });
 
-    stdout.write('\n正在验证 token…');
+    stdout.write(clog('in.verifying'));
     const me = await probe.request('get', '/users/me');
-    console.log(`\r✅ token 可用:integration「${me.name || me.bot?.workspace_name || '未命名'}」        `);
+    console.log(clog('in.tokenOk', { name: me.name || me.bot?.workspace_name || clog('in.unnamed') }));
 
     let dbId = '';
     let dbOk = false;
 
     if (create) {
-      // 建出来的 ID 会盖掉现有的那个,而那会把一个有上百篇攻略的库整个移出工具的视野。
-      // 不拦死(命令行是明示操作),但必须先问一句 —— GUI 那边直接拒绝,因为点一下太容易了
+      // The newly created ID would overwrite the existing one, and that would move a database holding
+      // hundreds of guides entirely out of the tool's view. It is not blocked outright (the command
+      // line is an explicit action), but it has to ask first — the GUI refuses it, because a click is
+      // far too easy
       const had = cfg.notion?.overviewDbId;
       if (had) {
-        console.log(`\n⚠️  已经配了攻略库:${had}`);
-        console.log('   新建一个会把配置改指到新库 —— 现有攻略一篇都不会丢,但工具会看不到它们。');
-        const yes = await io.ask('   确定还要建一个新的?(y/N) ');
-        if (!/^y/i.test(yes)) throw new Error('取消了,什么都没建');
+        console.log(clog('in.hasDb', { url: had }));
+        console.log(clog('in.hasDbWarn'));
+        const yes = await io.ask(clog('in.hasDbConfirm'));
+        if (!/^y/i.test(yes)) throw new Error(clog('in.cancelled'));
       }
       dbId = await createGuideDbInteractively(io, probe);
       dbOk = Boolean(dbId);
-      // 用户中途没选到页面(比如一个页面都看不到)时 dbId 是空的 —— 这时候绝不能
-      // 拿空值去覆盖已有配置,那等于因为一次失败的尝试把人的库配没了
+      // dbId is empty when the user never picked a page (because none were visible, say) — and an
+      // empty value must never overwrite an existing configuration, which would amount to losing
+      // somebody's database over one failed attempt
       if (!dbId && had) dbId = had;
     } else {
       const dbDefault = cfg.notion?.overviewDbId || '';
-      dbId = (await io.ask(`攻略数据库 ID${dbDefault ? `(回车用 ${dbDefault})` : ''}: `)) || dbDefault;
+      dbId = (await io.ask(clog('in.dbIdAsk', { default: dbDefault ? clog('in.dbIdDefault', { id: dbDefault }) : '' }))) || dbDefault;
       if (!dbId) {
-        console.log('   (没有现成的库?`node tracker.js init --notion --create` 让程序建一个)');
+        console.log(clog('in.noDbHint'));
       } else {
-        stdout.write('正在验证数据库访问…');
+        stdout.write(clog('in.dbChecking'));
         try {
           const pages = await probe.queryGuideDatabase(dbId);
-          console.log(`\r✅ 数据库可访问:里面有 ${pages.length} 个页面        `);
+          console.log(clog('in.dbOk', { n: pages.length }));
           dbOk = true;
         } catch (err) {
-          // **不能只提 Connections** —— 那样「填的是页面 ID」的人会被赶去反复检查权限。
-          // 三种毛病,三种修法,一次说完
-          console.log(`\r⚠️  数据库访问失败:${err.message}`);
-          console.log('   token 本身是好的,所以问题在 ID 或权限:');
-          console.log('   · 它不是数据库 —— 要整页打开,取 URL 里 ?v= 之前那 32 位十六进制');
-          console.log('     (页面 ID、视图 ID、整条链接都不行)');
-          console.log('   · 还没共享 —— 打开它(或父页面)→ ••• → Connections → 加上这个 integration');
-          console.log('   · 压根还没有库 —— 改用 `init --notion --create`');
+          // **Connections cannot be the only thing mentioned** — that sends somebody who entered a
+          // page ID off to check permissions over and over. Three faults, three fixes, said once
+          console.log(clog('in.dbFailed', { reason: err.message }));
+          console.log(clog('in.dbFailedWhy'));
+          console.log(clog('in.dbFailedA'));
+          console.log(clog('in.dbFailedA2'));
+          console.log(clog('in.dbFailedB'));
+          console.log(clog('in.dbFailedC'));
         }
       }
     }
 
     saveConfig({ notion: { token, overviewDbId: dbId } });
-    console.log(`\n✅ 已写入 ${CONFIG_PATH}(权限 600,已 gitignore,不会被提交)`);
-    console.log('\n接下来:');
-    console.log('  node tracker.js notion-check               ← 只读体检,确认这一侧全通了');
-    console.log('  node tracker.js guides --notion            ← 发现攻略页并登记');
-    console.log('  node tracker.js checkbox-sync --dry-run    ← 只算不写,先看会勾掉哪些');
-    if (!dbOk && dbId) console.log('\n(数据库那一步没通过的话,上面几条会失败,先按上面的提示修)');
+    console.log(clog('in.written', { path: CONFIG_PATH }));
+    console.log(clog('in.next'));
+    console.log(clog('in.nextCheck'));
+    console.log(clog('in.nextGuides'));
+    console.log(clog('in.nextCbs'));
+    if (!dbOk && dbId) console.log(clog('in.dbStepFailed'));
   } finally {
     io.close();
   }
 }
 
 /**
- * `notion-check`:Notion 这一侧的体检。和 `ai-check` 是一对 —— 都拿真接口问一遍,
- * 把「到底配好了没有」变成当场能看见答案的事,而不是等跑真流程时才炸。
+ * `notion-check`: the health check for the Notion side. A pair with `ai-check` — both ask the real
+ * API once, turning "is this actually configured" into something with a visible answer right now
+ * rather than something that blows up when the real flow runs.
  *
- * **一个字节都不写。** 存在的理由是这条链上的失败全都长得很像:token 不对、
- * ID 不是数据库、库没共享、状态选项缺一个 —— 前三个很容易被并成一句话,最后一个
- * 不查就要等到第一次 `guide-gen` 才暴露。
+ * **It writes not one byte.** It exists because the failures on this chain all look alike: a bad
+ * token, an ID that is not a database, an unshared database, a missing status option — the first
+ * three are easily merged into one sentence, and the last would not surface until the first
+ * `guide-gen` without a check.
  */
+/**
+ * The half of a repair that is not about missing options: board columns, the board view, and the
+ * colours only a human can change.
+ *
+ * **Silence here would be the bug.** Notion refuses to recolour an option that already exists, so
+ * the program can bring an older database most of the way and no further; saying nothing leaves
+ * somebody looking at a grey board wondering what the command did.
+ */
+function reportReformat(r) {
+  if (r.regrouped?.length) console.log(clog('fix.regrouped', { names: r.regrouped.join(' / ') }));
+  if (r.stillWrongGroup?.length) console.log(clog('fix.stillWrongGroup', { names: r.stillWrongGroup.join(' / ') }));
+  if (r.boardView?.created) console.log(clog('fix.boardCreated'));
+  else if (r.boardView && !r.boardView.ok) {
+    console.log(clog('fix.boardFailed', { reason: r.boardView.error }));
+    console.log(clog('fix.boardHarmless'));
+  }
+  if (r.colour?.recoloured?.length) {
+    const done = r.colour.recoloured.map((n) => `${n} ${clog(COLOUR_ZH[GUIDE_STATUS_STYLE[n].color])}`).join(',');
+    console.log(clog('fix.recoloured', { names: done }));
+    // Say it out loud. Pages that had to be written back are pages Notion did not bring back on its
+    // own, and that is the one number telling you the snapshot earned its keep
+    if (r.colour.restored?.length) {
+      console.log(clog('fix.restored', { n: r.colour.restored.length, names: r.colour.restored.slice(0, 5).join('、') }));
+    }
+  }
+  if (r.colour?.stillWrong?.length) {
+    const want = r.colour.stillWrong.map((n) => `${n} ${clog(COLOUR_ZH[GUIDE_STATUS_STYLE[n].color])}`).join(',');
+    console.log(clog('fix.colourFailed', { names: want }));
+    if (r.colour.error) console.log(`      ${r.colour.error}`);
+    console.log(clog('fix.colourByHand'));
+  }
+}
+
 async function cmdNotionCheck() {
   const { config, db } = withSteam({ requireSteam: false });
   const token = config.notion?.token;
   const dbId = config.notion?.overviewDbId;
 
   if (!token) {
-    console.log('❌ 没配 Notion token(config.json 的 notion.token)');
-    console.log('   跑 `node tracker.js init --notion` 配一下');
+    console.log(clog('nc.noToken'));
+    console.log(clog('nc.noTokenFix'));
     return;
   }
   const notion = new NotionClient(config);
 
-  // **判定来自 inspectGuideDb,和设置页共用一份。** 两条路查的东西不一样,正是那类
-  // "到上传时才现形"的 bug 的形状。这里只负责把判定讲成一份人读的报告 ——
-  // 共享的是计算,不是措辞。
+  // **The verdict comes from inspectGuideDb, shared with the setup page.** Two paths checking
+  // different things is exactly the shape of that "only shows up at upload time" class of bug. All
+  // this does is turn the verdict into a report a person reads — what is shared is the computation,
+  // not the wording.
   //
-  // `--probe-write` 要单独开:它会在库里建一页再立刻归档,而只读体检有权在默认路径上。
+  // `--probe-write` has to be opted into: it creates a page in the database and immediately archives
+  // it, whereas a read-only check has the right to be on the default path.
   const verdict = await inspectGuideDb(notion, dbId, { probeWrite: argv.includes('--probe-write') });
 
   const problem = (code) => verdict.problems.find((p) => p.code === code);
@@ -408,54 +473,60 @@ async function cmdNotionCheck() {
   console.log(`✅ token:integration「${verdict.workspace}」`);
 
   if (problem(DB_PROBLEM.NO_DB_ID)) {
-    console.log('❌ 没配攻略数据库 ID(config.json 的 notion.overviewDbId)');
-    console.log('   `node tracker.js init --notion --create` 可以直接建一个');
+    console.log(clog('nc.noDbId'));
+    console.log(clog('nc.noDbIdFix'));
     return;
   }
 
   const unreadable = problem(DB_PROBLEM.DB_UNREADABLE);
   if (unreadable) {
     console.log(`❌ ${unreadable.message}`);
-    console.log('   两种可能,修法不一样:');
+    console.log(clog('nc.twoCauses'));
     for (const c of unreadable.causes) console.log(`   · ${c}`);
     return;
   }
-  console.log(`✅ 数据库:「${verdict.database.title}」`);
+  console.log(clog('nc.database', { title: verdict.database.title }));
   if (problem(DB_PROBLEM.NO_TITLE_PROP)) say(problem(DB_PROBLEM.NO_TITLE_PROP));
-  else console.log(`✅ 标题属性:${verdict.schema.titleProperty}`);
+  else console.log(clog('nc.titleProp', { name: verdict.schema.titleProperty }));
 
   const noStatus = problem(DB_PROBLEM.NO_STATUS_PROP);
   const missingOpts = problem(DB_PROBLEM.MISSING_OPTIONS);
   if (noStatus) {
-    console.log('ℹ️  没有状态属性 —— 合法。攻略照样能建、能同步勾选,只是');
-    console.log('   guide-status 那套(打满→Done、掉出 100%→Staged)没东西可写。');
-    console.log(`   想要的话加一个 Status 属性,选项:${noStatus.wanted.join(' / ')}`);
+    console.log(clog('nc.noStatus'));
+    console.log(clog('nc.noStatus2'));
+    console.log(clog('nc.noStatus3', { options: noStatus.wanted.join(' / ') }));
   } else if (missingOpts) {
-    console.log(`⚠️  状态属性:${missingOpts.property}(${missingOpts.type})`);
-    console.log(`   现有选项:${missingOpts.have.join(' / ') || '无'}`);
-    console.log(`   缺:${missingOpts.missing.join(' / ')}`);
-    console.log('   缺的那个会在程序真要写它的时候把命令拦下来:');
+    console.log(clog('nc.statusProp', { property: missingOpts.property, type: missingOpts.type }));
+    console.log(clog('nc.statusHave', { have: missingOpts.have.join(' / ') || clog('nc.statusNone') }));
+    console.log(clog('nc.statusMissing', { missing: missingOpts.missing.join(' / ') }));
+    console.log(clog('nc.statusBlocks'));
     if (missingOpts.missing.some((o) => ['Not started', 'In progress', 'Done'].includes(o))) {
-      console.log('     · guide-gen / guide-to-notion 建新页时按完成度写这三档');
+      console.log(clog('nc.statusUsedNew'));
     }
     if (missingOpts.missing.includes('Staged')) {
-      console.log('     · guide-status 把掉出 100% 的页面退回 Staged 时写它(每次开 Dashboard 都跑)');
+      console.log(clog('nc.statusUsedStaged'));
     }
     if (argv.includes('--fix')) {
-      // 补选项是**写用户的数据库**,所以只在明确要求时做,而且成功与否看回读不看 200
+      // Adding options **writes to the user's database**, so it only happens when explicitly asked,
+      // and success is judged by the read-back rather than by the 200
       const r = await repairGuideDb(notion, dbId);
-      if (r.ok) console.log(`   🔧 已补上:${r.added.join(' / ')}(回读确认落地)`);
+      if (r.ok) console.log(clog('nc.fixed', { added: r.added.join(' / ') }));
       else if (r.reason === 'clobbered') {
-        console.log(`   ❌ 补的时候把已有选项冲掉了:${r.clobbered.join(' / ')} —— 请去 Notion 里加回来`);
+        console.log(clog('nc.clobbered', { names: r.clobbered.join(' / ') }));
       } else {
-        console.log(`   ❌ Notion 收下了请求但选项没落地,还缺:${r.stillMissing.join(' / ')}`);
-        console.log('      手动加:打开那个库 → 点这个属性 → 加选项,名字要一模一样(注意大小写)');
+        console.log(clog('nc.stillMissing', { names: r.stillMissing.join(' / ') }));
+        console.log(clog('nc.addByHand'));
       }
+      reportReformat(r);
     } else {
-      console.log('   加 --fix 让程序试着补上,或者自己去 Notion 里加(名字要一模一样,注意大小写)');
+      console.log(clog('nc.tryFix'));
     }
   } else {
-    console.log(`✅ 状态属性:${verdict.schema.status.property}(${verdict.schema.status.type}),四个选项齐全`);
+    console.log(clog('nc.statusOk', { property: verdict.schema.status.property, type: verdict.schema.status.type }));
+    // **A database built by an older version reaches this branch.** Its four options are all there,
+    // and it is still out of date: everything grey, everything in one board column, no board view.
+    // Gating --fix on a missing option would leave those users with a button that does nothing
+    if (argv.includes('--fix')) reportReformat(await repairGuideDb(notion, dbId));
   }
 
   const noWrite = problem(DB_PROBLEM.NO_WRITE);
@@ -463,91 +534,95 @@ async function cmdNotionCheck() {
     console.log(`❌ ${noWrite.message}`);
     console.log(`   ${noWrite.hint}`);
   } else if (argv.includes('--probe-write')) {
-    console.log('✅ 试写:建页 + 归档都通过(这个 integration 确实有写权限)');
+    console.log(clog('nc.probeOk'));
   }
   const stranded = problem(DB_PROBLEM.STRANDED_PROBE_PAGE);
   if (stranded) console.log(`⚠️  ${stranded.message}:${stranded.url}`);
 
   const pages = await notion.queryGuideDatabase(dbId);
   const registered = allGuides(db).filter((g) => g.kind === 'notion').length;
-  console.log(`✅ 库里 ${pages.length} 个页面,其中 ${registered} 个已登记进 guides 表`);
+  console.log(clog('nc.pages', { pages: pages.length, registered }));
   if (pages.length > registered) {
-    console.log(`   剩下 ${pages.length - registered} 个没有 \`appid: NNNNNN\` 行 —— 那是还没写的攻略,不是错误`);
+    console.log(clog('nc.unregistered', { n: pages.length - registered }));
   }
 }
 
 /**
- * 供应商选项。第一个是默认。
+ * The provider options. The first is the default.
  *
- * **note 里只写可核实的事:有没有联网搜索、key 在哪申请。** 不写贵不贵、好不好、
- * 推不推荐 —— 单价随时会变、质量我们没有可比的测量,写出来就是我们的臆断,
- * 而用户会当成事实照着选。
+ * **The notes state only verifiable things: whether it has web search, and where to get a key.**
+ * Nothing about price, quality or a recommendation — rates change at any time and we have no
+ * comparable measurement of quality, so writing those would be our own conjecture, and the user
+ * would take it as fact and choose accordingly.
  */
 const AI_PROVIDERS = [
   {
     key: 'deepseek',
     label: 'DeepSeek',
-    note: '有联网搜索。key 在 https://platform.deepseek.com/api_keys',
+    note: 'prov.deepseek',
     env: 'DEEPSEEK_API_KEY',
   },
   {
     key: 'anthropic',
     label: 'Anthropic (Claude)',
-    note: '有联网搜索。key 在 https://platform.claude.com/settings/keys',
+    note: 'prov.anthropic',
     env: 'ANTHROPIC_API_KEY',
   },
   {
     key: 'gemini',
     label: 'Google Gemini',
-    note: '有联网搜索。key 在 https://aistudio.google.com/apikey',
+    note: 'prov.gemini',
     env: 'GEMINI_API_KEY',
   },
 ];
 
 /**
- * `init --ai`:配置攻略生成用的 AI 供应商。
+ * `init --ai`: configures the AI provider used for guide generation.
  *
- * **当场用真请求验证**,而不是写完就完 —— 这个功能的失败模式(key 无效、模型名不对、
- * 这一档没额度、端点不认某个工具)全都长得不一样,而且全都要发一次请求才知道。
- * 让人在 `init` 的时候花几分钱撞上,好过在生成一份攻略跑到一半的时候撞上。
+ * **Verified with a real request on the spot** rather than merely written and forgotten — this
+ * feature's failure modes (an invalid key, a wrong model name, no quota on this tier, an endpoint
+ * that rejects some tool) all look different, and all of them require sending a request to find out.
+ * Having somebody spend a few cents hitting one during `init` beats hitting it halfway through
+ * generating a guide.
  */
 async function cmdInitAi() {
   const io = makeSecretReader();
   try {
-    console.log('\n配置 AI 攻略生成\n');
-    console.log('这个功能会调用 AI 联网查资料并写攻略。');
-    console.log('不用这个功能的话,整个项目的其他部分都不需要它。\n');
+    console.log(clog('ia.title'));
+    console.log(clog('ia.what'));
+    console.log(clog('ia.optional'));
 
     AI_PROVIDERS.forEach((p, i) => {
-      console.log(`  ${i + 1}) ${p.label.padEnd(20)} ${p.note}`);
+      console.log(`  ${i + 1}) ${p.label.padEnd(20)} ${clog(p.note)}`);
     });
-    const pick = (await io.ask(`\n选一个(1-${AI_PROVIDERS.length},回车用 1): `)) || '1';
+    const pick = (await io.ask(clog('ia.pick', { n: AI_PROVIDERS.length }))) || '1';
     const chosen = AI_PROVIDERS[Number(pick) - 1];
-    if (!chosen) throw new Error(`没有第 ${pick} 个选项`);
+    if (!chosen) throw new Error(clog('ia.badPick', { pick }));
 
-    const key = await io.askSecret(`${chosen.label} API Key(输入不会显示): `);
-    if (!key) throw new Error('没输入 key');
+    const key = await io.askSecret(clog('ia.keyAsk', { label: chosen.label }));
+    if (!key) throw new Error(clog('ia.keyMissing'));
 
-    const model = await io.ask('模型名(回车用这一家的默认值): ');
+    const model = await io.ask(clog('ia.modelAsk'));
 
     const ai = { provider: chosen.key, apiKey: key.trim(), model: model.trim() };
     const provider = await createProvider({ ai: { ...loadConfig().ai, ...ai } });
 
-    // 真发一次请求。问题最小化:不挂联网工具、只要一个字
-    stdout.write(`\n正在验证(模型 ${provider.model})…`);
-    const r = await provider.send({ messages: [{ role: 'user', content: '回复一个字:好' }] });
+    // Send one real request. Minimised: no web tools attached, one character wanted back
+    stdout.write(clog('ia.verifying', { model: provider.model }));
+    const r = await provider.send({ messages: [{ role: 'user', content: clog('ia.probe') }] });
     const verdict = checkResult(r);
-    if (!verdict.ok) throw new Error(`验证没通过:${verdict.reason}`);
-    console.log(`\r✅ 可用:${provider.name} / ${provider.model},回了「${r.text.trim().slice(0, 10)}」      `);
+    if (!verdict.ok) throw new Error(clog('ia.verifyFailed', { reason: verdict.reason }));
+    console.log(clog('ia.ok', { name: provider.name, model: provider.model, reply: r.text.trim().slice(0, 10) }));
     console.log(`   ${formatUsage(r.usage)}`);
 
-    // model 留空就不写进 config,让代码里的默认值继续生效(那个会跟着版本更新)
+    // An empty model is not written into the config, so the default in the code keeps applying (and
+    // that one follows the version)
     saveConfig({ ai: model.trim() ? ai : { provider: ai.provider, apiKey: ai.apiKey } });
-    console.log(`\n✅ 已写入 ${CONFIG_PATH}(已 gitignore,不会被提交)`);
-    console.log('\n接下来:');
-    console.log('  node tracker.js ai-check              ← 验证联网搜索真的能用(重点看有没有发出搜索)');
-    console.log('  node tracker.js guide-gen <appid>     ← 生成一份攻略(开始之前会先问你一句)');
-    console.log(`\n(不想把 key 写进文件的话,也可以用环境变量 ${chosen.env}=… 临时覆盖)`);
+    console.log(clog('ia.written', { path: CONFIG_PATH }));
+    console.log(clog('in.next'));
+    console.log(clog('ia.nextCheck'));
+    console.log(clog('ia.nextGen'));
+    console.log(clog('ia.envNote', { env: chosen.env }));
   } finally {
     io.close();
   }
@@ -559,45 +634,46 @@ async function cmdInit() {
   const rl = createInterface({ input: stdin, output: stdout });
   try {
     const current = loadConfig();
-    console.log('\nSteam 成就追踪器 —— 本地版初始化\n');
+    console.log(clog('init.title'));
 
     if (current.steamApiKey && current.steamId) {
-      console.log(`已有配置:${CONFIG_PATH}`);
+      console.log(clog('init.hasConfig', { path: CONFIG_PATH }));
       console.log(`  STEAM_ID = ${current.steamId}`);
-      const again = await rl.question('要重新填一遍吗?(y/N) ');
+      const again = await rl.question(clog('init.again'));
       if (!/^y/i.test(again)) return;
     }
 
-    console.log('需要两个东西(都是一次性的):');
+    console.log(clog('init.needTwo'));
     console.log('  ① Steam Web API Key → https://steamcommunity.com/dev/apikey');
-    console.log('  ② SteamID64        → https://steamid.io(把你的个人资料链接粘进去)\n');
+    console.log(clog('init.needSteamId'));
 
     const key = (flagValue('key') ?? (await rl.question('① Steam Web API Key: '))).trim();
     const id = (flagValue('id') ?? (await rl.question('② SteamID64: '))).trim();
-    if (!key || !id) throw new Error('两个都得填');
-    if (!/^\d{17}$/.test(id)) console.log('⚠️  SteamID64 一般是 17 位数字,你填的看起来不像,先存下了,同步失败的话回来检查这里');
+    if (!key || !id) throw new Error(clog('init.bothRequired'));
+    if (!/^\d{17}$/.test(id)) console.log(clog('init.oddId'));
 
     saveConfig({ steamApiKey: key, steamId: id });
     const config = loadConfig({ required: ['steam'] });
     openDb(config.dbPath);
-    console.log(`\n✅ 写入 ${CONFIG_PATH}(权限 600,已在 .gitignore 里)`);
-    console.log(`✅ 建好数据库 ${config.dbPath}`);
+    console.log(clog('init.written', { path: CONFIG_PATH }));
+    console.log(clog('init.dbMade', { path: config.dbPath }));
 
-    // 立刻拿真实请求验一次,省得后面同步到一半才发现凭据不对
-    process.stdout.write('\n正在验证凭据…');
+    // Verify with a real request immediately, so bad credentials are not discovered halfway through a
+    // sync later
+    process.stdout.write(clog('init.verifying'));
     try {
       const steam = new SteamClient(config);
       const games = await steam.fetchOwnedGames(false);
-      console.log(`\r✅ 凭据可用:Steam 返回了 ${games.length} 款游戏          `);
+      console.log(clog('init.credsOk', { n: games.length }));
     } catch (err) {
-      console.log(`\r❌ 凭据验证失败:${err.message}`);
-      console.log('   检查一下 API Key 和 SteamID64,改 config.json 或者重跑 init 都行。');
+      console.log(clog('init.credsFailed', { reason: err.message }));
+      console.log(clog('init.credsFix'));
       return;
     }
 
-    console.log('\n接下来:');
-    console.log('  node tracker.js sync               ← 首次全量同步(库大的话要几分钟)');
-    console.log('  node tracker.js serve              ← 打开 Dashboard');
+    console.log(clog('in.next'));
+    console.log(clog('init.nextSync'));
+    console.log(clog('init.nextServe'));
   } finally {
     rl.close();
   }
@@ -609,8 +685,10 @@ async function cmdSync() {
   const onProgress = makeProgressHandler(p);
   const only = ['library', 'achievements', 'schema'].filter((f) => flags.has('--' + f));
 
-  // 默认全量:命令行得留一个"跑完肯定什么都不漏"的入口。
-  // --fast 用和 Dashboard 自动同步一样的取样规则(见 lib/sync.js selectStatsTargets)
+  // Full by default: the command line has to keep one entrance that "definitely misses nothing when
+  // it finishes".
+  // --fast uses the same sampling rules as the Dashboard's automatic sync (see selectStatsTargets in
+  // lib/sync.js)
   const selection = flags.has('--fast')
     ? {
         sweepBudget: config.sweepBudget,
@@ -620,41 +698,56 @@ async function cmdSync() {
     : null;
 
   console.log(
-    selection
-      ? '开始同步(--fast:只查玩过的 + 轮换复查一批)\n'
-      : '开始同步(Ctrl+C 可以随时停,已经写进库的数据不会丢)\n'
+    clog(selection ? 'sync.startFast' : 'sync.start')
   );
   const t0 = Date.now();
 
   if (only.length === 0) {
     const r = await fullSync(db, steam, { onProgress, selection });
     p.done();
-    console.log(`  库:owned ${r.library.ownedCount} 款(Unvetted ${r.library.unvettedCount} 款),新增 ${r.library.added.length} 款,Unvetted 标记更新 ${r.library.restamped} 处`);
-    if (r.library.added.length) console.log(`     新增:${r.library.added.map((a) => a.name).join('、')}`);
-    console.log(`  成就完成数:更新 ${r.stats.updated} 款,无成就系统 ${r.stats.noSystem} 款,留待重试 ${r.stats.retried} 款`);
+    console.log(
+      clog('sync.library', {
+        owned: r.library.ownedCount, unvetted: r.library.unvettedCount,
+        added: r.library.added.length, restamped: r.library.restamped,
+      }) +
+        // Only when something moved: after the first run this is 0 on every sync, and a permanent
+        // 「补英文名 0 款」 is noise on the one line that has to stay readable
+        (r.library.namedEn ? clog('sync.namedEn', { n: r.library.namedEn }) : '')
+    );
+    if (r.library.added.length) console.log(clog('sync.added', { names: r.library.added.map((a) => a.name).join('、') }));
+    console.log(clog('sync.stats', { updated: r.stats.updated, noSystem: r.stats.noSystem, retried: r.stats.retried }));
     const s = r.stats.selection;
     if (s.gated) {
-      console.log(`     取样:查了 ${s.total} 款(玩过 ${s.played} / 不在 owned ${s.unowned} / 轮换复查 ${s.swept})` + (s.sweepPending ? `,${s.sweepPending} 款排队等下次` : ''));
+      console.log(
+        clog('sync.sample', { total: s.total, played: s.played, unowned: s.unowned, swept: s.swept })
+        + (s.sweepPending ? clog('sync.samplePending', { n: s.sweepPending }) : '')
+      );
     }
-    if (r.stats.bumped.length) console.log(`     🆕 成就总数变多了(游戏更新):${r.stats.bumped.join('、')}`);
-    console.log(`  成就详情:处理 ${r.schema.processed}/${r.schema.candidates} 款,查不到定义 ${r.schema.skippedNoSchema} 款`);
+    if (r.stats.bumped.length) console.log(clog('sync.bumped', { names: r.stats.bumped.join('、') }));
+    console.log(clog('sync.schema', { processed: r.schema.processed, candidates: r.schema.candidates, skipped: r.schema.skippedNoSchema }));
   } else {
     if (only.includes('library')) {
       const r = await syncLibrary(db, steam, { onProgress });
-      p.done(`  库:新增 ${r.added.length} 款,Unvetted 标记更新 ${r.restamped} 处`);
+      p.done(
+        clog('sync.libraryShort', { added: r.added.length, restamped: r.restamped })
+          + (r.namedEn ? clog('sync.namedEn', { n: r.namedEn }) : '')
+      );
     }
     if (only.includes('achievements')) {
       const r = await syncAchievementStats(db, steam, { onProgress });
-      p.done(`  成就完成数:更新 ${r.updated} 款,无成就系统 ${r.noSystem} 款,留待重试 ${r.retried} 款`);
+      p.done(clog('sync.stats', { updated: r.updated, noSystem: r.noSystem, retried: r.retried }));
     }
     if (only.includes('schema')) {
       const r = await syncAchievementSchema(db, steam, { onProgress });
-      p.done(`  成就详情:处理 ${r.processed}/${r.candidates} 款`);
+      p.done(clog('sync.schemaShort', { processed: r.processed, candidates: r.candidates }));
     }
   }
 
   const agcr = computeAgcrStats(db);
-  console.log(`\n✅ 用时 ${((Date.now() - t0) / 1000).toFixed(0)} 秒 — AGCR ${Math.floor(agcr.avg * 100)}%(精确 ${(agcr.avg * 100).toFixed(3)}%),完美游戏 ${agcr.perfectCount} 款`);
+  console.log(clog('sync.done', {
+    seconds: ((Date.now() - t0) / 1000).toFixed(0),
+    pct: Math.floor(agcr.avg * 100), exact: (agcr.avg * 100).toFixed(3), perfect: agcr.perfectCount,
+  }));
 }
 
 async function cmdServe() {
@@ -670,14 +763,30 @@ function cmdStatus() {
   const last = getMeta(db, 'last_sync');
   const count = (fn) => games.filter(fn).length;
 
-  console.log(`\n数据库:${countGames(db)} 款游戏`);
-  console.log(`  上次同步:${last ? new Date(last).toLocaleString('zh-CN') : '还没同步过'}`);
-  console.log(`  AGCR:${Math.floor(agcr.avg * 100)}%(精确 ${(agcr.avg * 100).toFixed(3)}%),计入 ${agcr.eligibleCount} 款`);
-  console.log(`  完美(100%):${agcr.perfectCount} 款`);
-  console.log(`  Unvetted:${count((g) => g.status === 'Unvetted')} 款 / Manual:${count((g) => g.status === 'Manual')} 款 / 家庭共享标记:${count((g) => g.family)} 款`);
-  console.log(`  ♥ 喜爱:${count((g) => g.favorite)} 款 / ★ 重点关注:${count((g) => g.priority)} 款`);
-  console.log(`  没有成就系统:${count((g) => g.has_achievements === 0)} 款 / 还没同步到数据:${count((g) => g.total === null && g.has_achievements !== 0)} 款`);
-  console.log(`  攻略:${allGuides(db).length} 条(Notion ${allGuides(db).filter((g) => g.kind === 'notion').length} / 本地 ${allGuides(db).filter((g) => g.kind === 'local').length})\n`);
+  // **The locale follows the interface language, not the machine.** `toLocaleString` with a
+  // hardcoded 'zh-CN' prints a Chinese-formatted timestamp under an English interface — the one
+  // thing in this block that no string table would have caught
+  const locale = messageLanguage() === 'en' ? 'en-GB' : 'zh-CN';
+  const guides = allGuides(db);
+  console.log(clog('status.db', { n: countGames(db) }));
+  console.log(clog('status.lastSync', { when: last ? new Date(last).toLocaleString(locale) : clog('status.never') }));
+  console.log(clog('status.agcr', { pct: Math.floor(agcr.avg * 100), exact: (agcr.avg * 100).toFixed(3), n: agcr.eligibleCount }));
+  console.log(clog('status.perfect', { n: agcr.perfectCount }));
+  console.log(clog('status.flags', {
+    unvetted: count((g) => g.status === 'Unvetted'),
+    manual: count((g) => g.status === 'Manual'),
+    family: count((g) => g.family),
+  }));
+  console.log(clog('status.marks', { fav: count((g) => g.favorite), pri: count((g) => g.priority) }));
+  console.log(clog('status.noAch', {
+    none: count((g) => g.has_achievements === 0),
+    unsynced: count((g) => g.total === null && g.has_achievements !== 0),
+  }));
+  console.log(clog('status.guides', {
+    n: guides.length,
+    notion: guides.filter((g) => g.kind === 'notion').length,
+    local: guides.filter((g) => g.kind === 'local').length,
+  }));
 }
 
 async function cmdGuides() {
@@ -687,50 +796,51 @@ async function cmdGuides() {
 
   if (wantLocal) {
     const r = syncGuidesFromMarkdown(db, config, { force: flags.has('--force') });
-    console.log(`本地 guides/:扫了 ${r.files} 个 .md,登记 ${r.added.length} 条`);
+    console.log(clog('guides.local', { files: r.files, added: r.added.length }));
     for (const a of r.added) console.log(`  ${a.action === 'appended' ? '+' : '~'} ${a.appid}  ${a.name}  (${a.file})`);
-    if (r.skipped.length) console.log(`  跳过(没有 "appid: NNNNNN" 行):${r.skipped.join('、')}`);
+    if (r.skipped.length) console.log(clog('guides.skipped', { names: r.skipped.join('、') }));
     for (const c of r.conflicts) {
-      console.log(`  ⚠️  ${c.appid} 已经登记了 Notion 攻略,没动 ${c.file}(想改成用本地 md 加 --force)`);
+      console.log(clog('guides.conflict', { appid: c.appid, file: c.file }));
     }
   }
 
   if (wantNotion) {
     const notion = new NotionClient(config);
     if (!notion.configured) {
-      console.log('Notion:没配 token,跳过(要用的话在 config.json 填 notion.token 和 notion.overviewDbId)');
+      console.log(clog('guides.noToken'));
     } else {
       const r = await syncGuidesFromNotion(db, notion);
-      console.log(`Notion:数据库里 ${r.dbPages} 个页面,新页面 ${r.newPagesChecked} 个,登记 ${r.added.length} 条`);
+      console.log(clog('guides.notion', { pages: r.dbPages, fresh: r.newPagesChecked, added: r.added.length }));
       for (const a of r.added) console.log(`  + ${a.appid}  ${a.name}`);
       for (const f of r.failed) console.log(`  ⚠️  ${f.title}:${f.error}`);
     }
   }
 
-  console.log(`\n当前 guides 表(${allGuides(db).length} 条):`);
+  console.log(clog('guides.table', { n: allGuides(db).length }));
   for (const g of allGuides(db)) console.log(`  ${g.appid.padEnd(8)} ${g.kind.padEnd(6)} ${g.name}`);
 }
 
 /**
- * 让 Notion 攻略页状态和完成度对齐:打满 → Done,掉出 100% → Staged。
- * 按当前状态收敛(不是抓"刚好这轮跨过 100%"的瞬间),所以重复跑是安全的 no-op。
+ * Aligns Notion guide page status with completion: 100% → Done, dropped below 100% → Staged.
+ * Converges on the current state (rather than catching the instant of crossing 100% this round), so
+ * running it repeatedly is a safe no-op.
  */
 async function cmdGuideStatus() {
   const { config, db } = withSteam({ requireSteam: false });
   const notion = new NotionClient(config);
   if (!notion.configured) {
-    return console.log('Notion:没配 token(config.json 的 notion.token / notion.overviewDbId)');
+    return console.log(clog('gs.noToken'));
   }
   const dryRun = flags.has('--dry-run');
-  if (dryRun) console.log('预演模式:只算不写\n');
+  if (dryRun) console.log(clog('gs.dryRun'));
 
   const r = await syncGuideStatuses(db, { notion, dryRun });
   const up = r.updates.filter((u) => u.reason === 'complete').length;
   const down = r.updates.filter((u) => u.reason === 'incomplete').length;
-  console.log(`攻略数据库 ${r.pages} 个页面:${up} 个该标 Done,${down} 个该退回 Staged`);
+  console.log(clog('gs.summary', { pages: r.pages, up, down }));
   for (const l of r.logs) console.log(`  ${l.gameName} — ${l.result}`);
-  if (!r.updates.length) console.log('  (没有要改的,状态和完成度已经一致)');
-  else if (dryRun) console.log('\n确认没问题就去掉 --dry-run 再跑一次。');
+  if (!r.updates.length) console.log(clog('gs.nothing'));
+  else if (dryRun) console.log(clog('gs.rerun'));
 }
 
 async function cmdCheckboxSync() {
@@ -741,8 +851,8 @@ async function cmdCheckboxSync() {
   const cascade = !flags.has('--no-cascade');
   const p = progressPrinter();
 
-  if (dryRun) console.log('预演模式:只读攻略页面算出会勾哪些,不写任何东西\n');
-  if (!cascade) console.log('已关闭子步骤联动:只按成就名/描述匹配勾选\n');
+  if (dryRun) console.log(clog('cbs.dryRun'));
+  if (!cascade) console.log(clog('cbs.noCascade'));
 
   const r = await checkboxSync(db, steam, {
     notion,
@@ -752,40 +862,40 @@ async function cmdCheckboxSync() {
     cascade,
     onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
   });
-  p.done(`检查了 ${r.checked} 款游戏,产生 ${r.logs.length} 条日志`);
+  p.done(clog('cbs.checked', { games: r.checked, logs: r.logs.length }));
 
-  // 按游戏分组打印,几百条的时候平铺看不清
+  // Printed grouped by game; a flat list of a few hundred entries is unreadable
   const byGame = new Map();
   for (const l of r.logs) {
     if (!byGame.has(l.gameName)) byGame.set(l.gameName, []);
     byGame.get(l.gameName).push(l);
   }
   for (const [game, logs] of byGame) {
-    console.log(`\n  ${game}(${logs.length} 条)`);
+    console.log(clog('cbs.game', { game, n: logs.length }));
     for (const l of logs) console.log(`    ${l.achievement || '—'} → ${l.result}`);
   }
 
   if (r.checked === 0) {
-    console.log('  (没有符合条件的游戏:需要有攻略登记、有成就系统、且还没 100% 完成)');
+    console.log(clog('cbs.noCandidates'));
   } else if (dryRun) {
-    const willCheck = r.logs.filter((l) => l.result.startsWith('【预演】')).length;
+    const willCheck = r.logs.filter((l) => l.code === 'would-tick').length;
     console.log(
-      `\n预演结束:会勾选 ${willCheck} 个 checkbox。确认没问题就去掉 --dry-run 再跑一次。` +
-        '\n(Notion 的勾选没法自动撤销,建议先只跑一款游戏:checkbox-sync <appid>)'
+      clog('cbs.dryRunEnd', { n: willCheck })
     );
   }
 }
 
 /**
- * 只读审计:找勾错的 checkbox(和 checkbox-sync 找漏勾正好相反)。
- * 不写任何东西,所以不需要 --dry-run。
+ * A read-only audit: finds wrongly ticked checkboxes (the exact opposite of checkbox-sync finding
+ * missed ticks).
+ * It writes nothing, so it needs no --dry-run.
  */
 async function cmdAudit() {
   const { config, db, steam } = withSteam();
   const notion = new NotionClient(config);
   const p = progressPrinter();
 
-  console.log('审计已勾选的 checkbox:找"勾上了但成就其实没解锁"的(只读,不会改任何东西)\n');
+  console.log(clog('audit.intro'));
   const { results, totals, candidates } = await auditGuideTicks(db, steam, {
     notion,
     config,
@@ -796,57 +906,63 @@ async function cmdAudit() {
 
   for (const r of results) {
     if (r.skipped) {
-      console.log(`  ⏭  ${r.name} —— 跳过:${r.skipped}`);
+      console.log(clog('audit.skipped', { name: r.name, reason: r.skipped }));
       continue;
     }
     if (r.wrong.length === 0) continue;
-    console.log(`\n  ❌ ${r.name}(已勾 ${r.ticked} 个,其中 ${r.wrong.length} 个对应的成就没解锁)`);
+    console.log(clog('audit.wrongGame', { name: r.name, ticked: r.ticked, wrong: r.wrong.length }));
     for (const w of r.wrong) {
-      console.log(`     ${w.name}(${w.apiName},按${w.via === 'description' ? '描述' : '名字'}对上的)`);
+      console.log(clog('audit.wrongEntry', { name: w.name, apiName: w.apiName, via: clog(w.via === 'description' ? 'audit.viaDesc' : 'audit.viaName') }));
       console.log(`       ${w.text.replace(/\s+/g, ' ').slice(0, 70)}`);
     }
   }
 
   console.log(
-    `\n审计完 ${totals.games}/${candidates} 款游戏,检查了 ${totals.ticked} 个已勾选的 checkbox`
+    clog('audit.total', { games: totals.games, candidates, ticked: totals.ticked })
   );
-  console.log(`  确认勾错:${totals.wrong} 个`);
-  // 覆盖范围要如实说:对不上的没结论,不能让"0 个勾错"看起来比实际覆盖更强
-  console.log(`  对不上具体成就、没下结论:${totals.unresolved} 个(攻略文字既没抄描述原文、名字也不唯一)`);
-  if (totals.skipped) console.log(`  跳过的游戏:${totals.skipped} 款(见上面)`);
+  console.log(clog('audit.wrongTotal', { n: totals.wrong }));
+  // The coverage has to be stated honestly: the ones that could not be resolved carry no verdict, and
+  // "0 wrong" must not look stronger than the audit's actual coverage
+  console.log(clog('audit.unresolved', { n: totals.unresolved }));
+  if (totals.skipped) console.log(clog('audit.skippedTotal', { n: totals.skipped }));
   if (totals.wrong > 0) {
-    console.log('\n勾错的框需要手动取消勾选——checkbox-sync 只会勾上、从不取消,修不了自己的错。');
-    console.log('取消之前先自己确认一遍:也可能是你自己有意勾的(比如标记"计划要做")。');
+    console.log(clog('audit.fixByHand'));
+    console.log(clog('audit.checkFirst'));
   }
 }
 
-/** guidelint 的 code → 人话。逐份汇总和总表共用一套,免得两处叫法对不上 */
+/** guidelint's code → a human sentence. The per-guide summary and the totals share one set, so the two cannot disagree on naming */
 const CODE_LABELS = {
-  'missing-checkbox': '成就没有 checkbox,永远勾不上',
-  'merged-line': '一行里写了多个 checkbox',
-  'ambiguous-no-description': '同名成就没抄描述,分不出是哪一个',
-  'checked-mismatch': '勾选状态和真实解锁不一致',
-  'missing-title': '本地攻略缺 `# 游戏名`',
-  'paraphrased-description': '描述不是原文照抄,audit 反查不了',
-  'stats-in-heading': '节标题里有会过期的统计数字',
-  'data-source-note': '写了勾选状态的数据来源',
+  'missing-checkbox': 'code.missingCheckbox',
+  'merged-line': 'code.mergedLine',
+  'ambiguous-no-description': 'code.ambiguousNoDesc',
+  'checked-mismatch': 'code.checkedMismatch',
+  'missing-title': 'code.missingTitle',
+  'paraphrased-description': 'code.paraphrased',
+  'stats-in-heading': 'code.statsInHeading',
+  'data-source-note': 'code.dataSourceNote',
 };
 
+/** A lint code as a sentence, falling back to the raw code so a new one is still legible */
+const codeLabel = (code) => (CODE_LABELS[code] ? clog(CODE_LABELS[code]) : code);
+
 /**
- * 只读校验:攻略本身写得对不对(和 audit 查"勾错了没"、checkbox-sync 查"漏勾没"是三件事)。
- * 不写数据库、不碰 Notion、不改本地 md,所以不需要 --dry-run。
+ * Read-only validation: whether the guide itself is written correctly (three different things from
+ * audit's "was anything ticked wrongly" and checkbox-sync's "was anything missed").
+ * It does not write the database, touch Notion or change local md, so it needs no --dry-run.
  */
 async function cmdGuideLint() {
-  // 默认不需要 Steam 凭据:只有 --checked 那条规则要真实解锁状态
+  // Steam credentials are not needed by default: only the --checked rule requires the real unlock
+  // state
   const checkTicks = flags.has('--checked');
   const { config, db, steam } = withSteam({ requireSteam: checkTicks });
   const notion = new NotionClient(config);
   const appid = positional[0] ?? null;
   const p = progressPrinter();
 
-  console.log('校验攻略写法(只读,不会改任何东西)');
-  if (checkTicks) console.log('已开启勾选状态校验:每款游戏都要单独问一次 Steam,会慢不少\n');
-  else console.log('(勾选状态默认不校验,要的话加 --checked)\n');
+  console.log(clog('lint.intro'));
+  if (checkTicks) console.log(clog('lint.withTicks'));
+  else console.log(clog('lint.withoutTicks'));
 
   const { results, totals } = await lintAllGuides(db, {
     notion,
@@ -857,12 +973,13 @@ async function cmdGuideLint() {
   });
   p.done();
 
-  // 指定了 appid 就把这一份的问题逐条列出来;否则每份只按类型报个数——
-  // 全量下光"缺 checkbox"和"描述没照抄"就有九百多条,平铺出来等于没有输出
+  // With an appid given, list that guide's problems one by one; otherwise report only a count per
+  // type for each guide — across everything, "missing checkbox" and "description not copied" alone
+  // come to over nine hundred findings, and printing them flat amounts to no output at all
   const detail = Boolean(appid);
   for (const r of results) {
     if (r.skipped) {
-      if (detail) console.log(`  ⏭  ${r.name} —— 跳过:${r.skipped}`);
+      if (detail) console.log(clog('lint.skipped', { name: r.name, reason: r.skipped }));
       continue;
     }
     const { findings, stats } = r.lint;
@@ -870,7 +987,7 @@ async function cmdGuideLint() {
 
     const mark = stats.errors ? '❌' : findings.length ? '⚠️ ' : '✅';
     console.log(
-      `\n  ${mark} ${r.name}(${r.appid})  ${stats.covered}/${stats.achievements} 覆盖,${stats.todos} 个框`
+      clog('lint.guide', { mark, name: r.name, appid: r.appid, covered: stats.covered, achievements: stats.achievements, todos: stats.todos })
     );
     if (detail) {
       for (const f of findings) console.log(`     ${f.level === 'error' ? '✖' : '·'} ${f.message}`);
@@ -879,41 +996,40 @@ async function cmdGuideLint() {
     const byCode = new Map();
     for (const f of findings) byCode.set(f.code, (byCode.get(f.code) ?? 0) + 1);
     for (const [code, n] of [...byCode].sort((a, b) => b[1] - a[1])) {
-      console.log(`     ${String(n).padStart(4)}  ${CODE_LABELS[code] ?? code}`);
+      console.log(`     ${String(n).padStart(4)}  ${codeLabel(code)}`);
     }
   }
   if (!detail && results.some((r) => !r.skipped && r.lint.findings.length)) {
-    console.log('\n  (逐条看某一份:guide-lint <appid>)');
+    console.log(clog('lint.perGuide'));
   }
 
   console.log(
-    `\n校验了 ${totals.guides} 份攻略:${totals.noErrors} 份没有 error` +
-      `(其中 ${totals.clean} 份连 warn 都没有)`
+    clog('lint.total', { guides: totals.guides, noErrors: totals.noErrors, clean: totals.clean })
   );
   if (totals.skipped) {
-    console.log(`  跳过 ${totals.skipped} 份(多半是 100% 通关的游戏,成就详情没同步,没有可比对的基准)`);
+    console.log(clog('lint.skippedTotal', { n: totals.skipped }));
   }
   if (totals.achievements) {
     const pct = ((totals.covered / totals.achievements) * 100).toFixed(1);
-    console.log(`  成就覆盖:${totals.covered}/${totals.achievements}(${pct}%)`);
+    console.log(clog('lint.coverage', { covered: totals.covered, achievements: totals.achievements, pct }));
   }
   const entries = Object.entries(totals.byCode).sort((a, b) => b[1] - a[1]);
   if (entries.length) {
-    console.log(`\n  按问题类型:`);
+    console.log(clog('lint.byKind'));
     for (const [code, n] of entries) {
-      console.log(`    ${String(n).padStart(4)}  ${CODE_LABELS[code] ?? code}`);
+      console.log(`    ${String(n).padStart(4)}  ${codeLabel(code)}`);
     }
   }
-  if (totals.errors === 0) console.log('\n没有 error。');
-  else console.log(`\n合计 ${totals.errors} 个 error、${totals.warnings} 个 warn。改的是攻略内容,不是代码。`);
+  if (totals.errors === 0) console.log(clog('lint.noErrors'));
+  else console.log(clog('lint.errorTotal', { errors: totals.errors, warnings: totals.warnings }));
 }
 
-/** 挑一个有成就详情的游戏来做冒烟测试。没指定 appid 就拿库里第一个能用的 */
+/** Picks a game that has achievement detail for the smoke test. With no appid given, takes the first usable one in the library */
 function pickSmokeTarget(db, appid) {
   if (appid) {
     const defs = achievementsFor(db, appid);
     if (!defs.length) {
-      throw new Error(`appid ${appid} 还没有成就详情。先跑 \`node tracker.js sync --schema\``);
+      throw new Error(clog('smoke.noDetail', { appid }));
     }
     return { appid: String(appid), name: getGame(db, appid)?.name || defs[0].game_name || String(appid), defs };
   }
@@ -923,84 +1039,90 @@ function pickSmokeTarget(db, appid) {
     const defs = achievementsFor(db, g.appid);
     if (defs.length) return { appid: String(g.appid), name: g.name || String(g.appid), defs };
   }
-  throw new Error('数据库里一条成就详情都没有。先跑 `node tracker.js sync --schema`');
+  throw new Error(clog('smoke.noneAtAll'));
 }
 
 /**
- * `ai-check`:把 lib/ai.js 整条链路真跑一遍——组装请求 → 服务端搜索 → 抓页 →
- * pause_turn 续跑 → token 用量。
+ * `ai-check`: runs lib/ai.js's whole chain for real — assembling the request → server-side search →
+ * page fetch → pause_turn continuation → token usage.
  *
- * 这是「动手顺序」第 3 步的验收命令,不是攻略生成本身:它只问一个成就,拿三句话回来。
- * 攻略怎么写是 guidegen(下一步)的事。**要花钱**,所以 `--dry` 只组装不发送,
- * 先看清楚会发出去什么、用哪个模型、带哪些工具。
+ * This is the acceptance command for step 3 of the "order of operations", not guide generation
+ * itself: it asks about one achievement and gets three sentences back. How a guide is written is
+ * guidegen's job (the next step). **It costs money**, so `--dry` assembles without sending, letting
+ * you see exactly what would go out, on which model and with which tools.
  */
 async function cmdAiCheck() {
   const dry = flags.has('--dry');
-  // --dry 不需要 key:它的用处正是"还没配 key 时先看清楚会发什么"
+  // --dry needs no key: its whole use is "see exactly what would be sent before a key is configured"
   const config = applyAiFlags(loadConfig({ required: dry ? [] : ['ai'] }));
 
-  // --models:直接问 API 有哪些模型可用。写 Gemini 那家的时候文档拿不到,模型名只能靠
-  // 记忆猜,所以留了这条路——猜错了不用改代码,问一句就知道
+  // --models: ask the API directly which models are available. When the Gemini side was written the
+  // docs were unreachable and model names could only be guessed from memory, so this route was left
+  // in — a wrong guess needs no code change, just one question
   if (flags.has('--models')) {
     const provider = await createProvider(config);
     if (typeof provider.listModels !== 'function') {
-      throw new Error(`${provider.name} 没有列模型的接口(目前只有 gemini 有)`);
+      throw new Error(clog('ac.noModelList', { name: provider.name }));
     }
     const models = await provider.listModels();
-    console.log(`\n${provider.name} 列出来的模型(${models.length} 个):\n`);
+    console.log(clog('ac.modelList', { name: provider.name, n: models.length }));
     for (const m of models) {
-      const limits = m.inputLimit ? `  输入上限 ${m.inputLimit} / 输出上限 ${m.outputLimit}` : '';
+      const limits = m.inputLimit ? clog('ac.modelLimits', { input: m.inputLimit, output: m.outputLimit }) : '';
       console.log(`  ${m.name.padEnd(34)}${m.display}${limits}`);
     }
-    // 实测:2.5 系列对新 key 已停售,但照样出现在这个列表里。这个接口只说"存在",
-    // 不说"你能不能用"——不写清楚会让人对着列表反复试
+    // Measured: the 2.5 series is no longer sold to new keys, yet it still appears in this list. This
+    // endpoint says only "it exists", never "you can use it" — not saying so makes people try items
+    // off the list over and over
     console.log(
-      `\n⚠️  列出来 ≠ 能用。这个接口只说模型存在,不反映你的 key 有没有权限或额度:\n` +
-        '    · 老版本可能已经"对新用户停止提供"(实测 2.5 系列)\n' +
-        '    · 有的在你这一档额度是 0(实测 Pro 系列在免费层)\n' +
-        '    真跑一次 `ai-check` 才知道。'
+      clog('ac.listedNotUsable')
     );
-    console.log(`\n当前用的是 ${provider.model}。临时换:--model <名字>;固定换:改 config.json 的 ai.model。`);
+    console.log(clog('ac.currentModel', { model: provider.model }));
     return;
   }
 
   const db = openDb(config.dbPath);
   const target = pickSmokeTarget(db, positionalArgs()[0] ?? null);
   const def = target.defs.find((d) => d.description) ?? target.defs[0];
-  const achName = def.name_cn || def.name_en || def.api_name;
+  const shownName = achName(def);
 
-  const system =
-    '你在帮一个 Steam 成就攻略作者做资料调研。回答用中文,只讲怎么达成,不要寒暄和总结段。';
+  // **The probe follows the interface language too.** It is a smoke test whose whole output the
+  // user reads, so a Chinese answer under an English interface is the same failure as a Chinese
+  // message would be — and it is the one place where the language reaches the model rather than the
+  // terminal
+  const system = clog('ac.probeSystem');
   const question =
-    `游戏《${target.name}》(appid ${target.appid})的成就「${achName}」` +
-    (def.description ? `,官方描述是「${def.description}」` : '') +
-    // 不点名具体工具:两家的工具叫法不一样,写死一家的名字会让另一家看不懂
-    '。请先上网搜一下这个成就的攻略,能抓到正文的话读一读,然后用三句话讲清楚怎么拿到它。';
+    clog('ac.probeQuestion', { game: target.name, appid: target.appid, achievement: shownName })
+    + (def.description ? clog('ac.probeDesc', { description: def.description }) : '')
+    +
+    // No specific tool is named: the two vendors call their tools different things, and hardcoding
+    // one vendor's name leaves the other unable to understand it
+    clog('ac.probeTask');
 
   const provider = await providerFor(config, { needKey: !dry });
   const tools = provider.webTools();
 
   if (dry) {
     const body = provider.buildBody({ system, messages: [{ role: 'user', content: question }], tools });
-    console.log(`\n只组装不发送(--dry)。供应商 ${provider.name},模型 ${provider.model}。`);
-    console.log(`API key:${config.ai.apiKey ? '已配置(不打印)' : '**没配置**'}\n`);
-    console.log('请求体:');
+    console.log(clog('ac.dryRun', { name: provider.name, model: provider.model }));
+    console.log(clog(config.ai.apiKey ? 'ac.keySet' : 'ac.keyUnset'));
+    console.log(clog('ac.requestBody'));
     console.log(JSON.stringify(body, null, 2));
-    console.log('\n真跑一次:去掉 --dry。');
+    console.log(clog('ac.dryRunEnd'));
     return;
   }
 
-  console.log(`\n供应商 ${provider.name} · 模型 ${provider.model} · 联网工具 ${tools.length} 个`);
+  console.log(clog('ac.header', { name: provider.name, model: provider.model, tools: tools.length }));
   warnEnvOverrides();
-  console.log(`题目:《${target.name}》的成就「${achName}」\n`);
+  console.log(clog('ac.subject', { game: target.name, achievement: shownName }));
 
   const session = createSession(provider, { system, tools });
   const t0 = Date.now();
   const r = await session.ask(question, {
     onEvent(ev) {
-      // 联网 + 深度思考,几分钟不出声是常态。把工具活动打出来,不然分不清"在干活"和"卡住了"
+      // With web access and deep thinking, several minutes of silence is normal. Printing the tool
+      // activity is what separates "working" from "stuck"
       if (ev.type === 'tool') stdout.write(`\n  → ${ev.name} …`);
-      else if (ev.type === 'tool-result') stdout.write(ev.ok ? ' ok' : ` 失败(${ev.errorCode})`);
+      else if (ev.type === 'tool-result') stdout.write(ev.ok ? ' ok' : clog('ac.toolFailed', { code: ev.errorCode }));
       else if (ev.type === 'search') stdout.write(`\n  🔎 ${ev.query}`);
       else if (ev.type === 'text') stdout.write(ev.text);
     },
@@ -1009,49 +1131,55 @@ async function cmdAiCheck() {
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   const verdict = checkResult(r);
   console.log('\n\n' + '─'.repeat(60));
-  console.log(verdict.ok ? '✅ 端到端跑通' : `❌ 这轮不能用:${verdict.reason}`);
+  console.log(verdict.ok ? clog('ac.endToEnd') : clog('ac.roundUnusable', { reason: verdict.reason }));
   console.log(
-    `  stop_reason: ${r.stopReason}${r.rawStopReason && r.rawStopReason !== r.stopReason ? `(原值 ${r.rawStopReason})` : ''}` +
-      ` · 续跑 ${r.continuations} 次 · 耗时 ${secs}s`
+    clog('ac.stopReason', {
+      stop: r.stopReason,
+      raw: r.rawStopReason && r.rawStopReason !== r.stopReason ? clog('ac.rawStop', { raw: r.rawStopReason }) : '',
+      continuations: r.continuations, secs,
+    })
   );
   console.log('  ' + formatUsage(session.usage));
 
-  // 这一行是这个命令最该看的:**声明了联网工具,模型到底搜没搜**。
-  // 免费层带不带联网是文档上查不准的事,回包比定价页可靠
+  // This line is the one most worth looking at in this command: **the web tools were declared, but
+  // did the model actually search**. Whether the free tier includes web access is not reliably
+  // answerable from the docs, and the response is more reliable than the pricing page
   if (r.searchQueries?.length) {
-    console.log(`  🔎 实际发出 ${r.searchQueries.length} 次搜索:${r.searchQueries.slice(0, 5).join(' / ')}`);
+    console.log(clog('ac.searches', { n: r.searchQueries.length, queries: r.searchQueries.slice(0, 5).join(' / ') }));
   } else if (tools.length) {
-    console.log('  ⚠️  声明了联网工具,但这一轮一次搜索都没发出去 —— 可能是这个层级/模型不支持,');
-    console.log('      也可能是模型觉得不用查。攻略生成如果一直这样,内容就是它凭记忆编的');
+    console.log(clog('ac.noSearch'));
+    console.log(clog('ac.noSearch2'));
   }
-  // 抓页失败是逐个 URL 的常态,标出来免得下一个看到这行的人又去查"联网是不是坏了"
+  // A failed page fetch is normal on a per-URL basis; flagging it stops the next person who sees this
+  // line from going off to investigate whether web access is broken
   for (const e of r.toolErrors ?? []) {
-    const tail = e.tool === 'fetch' ? '(逐个 URL 的常态,不影响这一轮)' : '';
-    console.log(`  ⚠️  ${e.tool === 'fetch' ? '抓页' : '搜索'}报错:${e.errorCode}${tail}`);
+    const tail = e.tool === 'fetch' ? clog('ac.toolFetchNote') : '';
+    console.log(clog('ac.toolError', { tool: clog(e.tool === 'fetch' ? 'ac.toolFetch' : 'ac.toolSearch'), code: e.errorCode, tail }));
   }
 }
 
 /**
- * `guide-gen <appid>`:让 AI 写一份本地 markdown 攻略。
+ * `guide-gen <appid>`: has the AI write a local markdown guide.
  *
- * **会花钱**,所以默认要人工确认一次(`--yes` 跳过),`--dry-run` 则只打印会发出去的
- * 提示词和落盘计划、一个请求都不发。
+ * **It costs money**, so it asks for confirmation once by default (`--yes` skips it), while
+ * `--dry-run` prints the prompt that would be sent and the landing plan without sending a single
+ * request.
  *
- * **不要在这里加金额上限。** 单价我们核实不过来、搜索工具怎么计费也没实测,任何
- * "上限"都会建立在一个连我们自己都不信的金额上。跑完只报 token 数 —— 那是 API
- * 回的硬数字。
+ * **Do not add a spend cap here.** We cannot verify the rates and have not measured how the search
+ * tool is billed, so any "cap" would rest on a figure we do not believe ourselves. What is reported
+ * at the end is the token count only — that is a hard number the API returns.
  */
 async function cmdGuideGen() {
   const appid = positionalArgs()[0];
   if (!appid) {
     throw new Error(
-      '用法:node tracker.js guide-gen <appid> [--dry-run] [--yes] [--local] [--overwrite]\n' +
-        '      只改其中几条:guide-gen <appid> --only <选择器> [--note "要求"]'
+      clog('gg.usage')
     );
   }
-  // **`--only` 是另一条流水线**(lib/guidepatch.js):只重写点名的那几条,别的字节不动。
-  // 在这里分流而不是在下面加分支,因为它要说的话和整篇重写正好相反 —— 那个预检讲
-  // 「你会失去什么」,这个讲「什么会留下」,一段措辞服务两种问法两边都会写歪
+  // **`--only` is a different pipeline** (lib/guidepatch.js): rewrite only the named entries and
+  // leave every other byte alone. Split here rather than branching below, because what it has to say
+  // is the exact opposite of a full rewrite — that preflight covers 「你会失去什么」 while this one
+  // covers 「什么会留下」, and one piece of copy serving both questions comes out wrong on both
   if (flagValue('only') !== undefined) return cmdGuidePatch(appid);
 
   const dryRun = flags.has('--dry-run');
@@ -1065,60 +1193,64 @@ async function cmdGuideGen() {
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
-  // **拒绝理由的措辞归界面自己管。** planGuide 只说发生了什么(外加一个 code),
-  // 具体"那你该改哪个配置项"是终端才给得出、也才有意义的建议 —— Dashboard 的用户
-  // (尤其打包版)根本没有终端,同一句话服务两个界面,两边都会写歪
-  // 拒绝理由的措辞归界面自己管:planGuide 只说发生了什么(外加一个 code),
-  // 「那你该改哪个配置项」由底部那张 CLI_HINTS 表在终端这一侧补
+  // **How a refusal is worded is each surface's own business.** planGuide says only what happened
+  // (plus a code); "and here is the config option you should change" is advice only a terminal can
+  // give and only there does it mean anything — a Dashboard user (especially in the packaged build)
+  // has no terminal at all, and one sentence serving both surfaces comes out wrong on both.
+  // planGuide says only what happened (plus a code), and 「那你该改哪个配置项」 is filled in on the
+  // terminal side by the CLI_HINTS table at the bottom
   const plan = await planGuide(db, { config, steam, appid, fileName, notion, local, overwrite });
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
-  // 解锁状态是拿来机械打勾的,不会喂给模型 —— 那是设计,不是他这一刻要读的东西
-  console.log(`  成就 ${plan.defs.length} 个,已解锁 ${plan.unlocked.size} 个`);
+  // The unlock state is for mechanical ticking and is never fed to the model — that is by design,
+  // not something they need to read at this moment
+  console.log(clog('gg.counts', { n: plan.defs.length, unlocked: plan.unlocked.size }));
   if (plan.unnameable.size) {
-    console.log(`  ${plan.unnameable.size} 个成就名在本作里撞车,它们的框会留空(已知)`);
+    console.log(clog('gg.unnameable', { n: plan.unnameable.size }));
   }
-  // 「有服务端搜索」是设计文档定的硬性准入,理由是"混进一家没有搜索的,会让质量取决于
-  // 用户选了谁,而用户看不出这个差别"。所以不能默认放行,得让人**明确知道自己在要什么**
+  // "Has server-side search" is a hard admission criterion set by the design doc, on the grounds that
+  // "letting one without search in makes quality depend on which vendor the user picked, and the user
+  // cannot see that difference". So it cannot be waived by default; the person has to **explicitly
+  // know what they are asking for**
   const probe = await providerFor(config, { needKey: !dryRun });
 
-  // 打供应商解析后的模型名,不是 config 里那个:换 provider 没指定 model 时
-  // config 里是空的,真正用的是这一家的默认值
-  console.log(`  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
+  // Prints the model name the provider resolved, not the one in the config: when switching provider
+  // without specifying a model, the config's is empty and what is really used is that vendor's default
+  console.log(clog('gg.provider', { name: probe.name, model: probe.model, rounds }));
   warnEnvOverrides();
   if (plan.existing) {
-    // 覆盖是这条命令里唯一不可逆的动作,所以它自己占一段,而且**在问"继续吗"之前**印出来
-    const where = plan.existing.kind === 'notion' ? 'Notion 页面' : '本地文件';
-    console.log(`\n  ⚠️  覆盖已有攻略(${where}:${plan.existing.url})`);
+    // Overwriting is the one irreversible action in this command, so it gets its own paragraph, and
+    // it is printed **before** the "continue?" question
+    const where = clog(plan.existing.kind === 'notion' ? 'gg.notionPage' : 'gg.localFile');
+    console.log(clog('gg.overwriting', { where, url: plan.existing.url }));
     console.log(formatPreflight(overwritePreflight(plan), { defsCount: plan.defs.length }));
-    // 备份失败就不写、Notion 删块其实是归档(30 天内可从回收站找回)—— 都是我们这边的
-    // 保底措施,不是他要决定的事,所以不印出来
-    console.log(`  原文备份到 ${join(config.guidesDir, BACKUPS_DIR)}`);
+    // A failed backup means nothing is written, and deleting a Notion block is really archiving
+    // (recoverable from the trash within 30 days) — both are safety nets on our side, not decisions
+    // for them, so neither is printed
+    console.log(clog('gg.backupTo', { dir: join(config.guidesDir, BACKUPS_DIR) }));
   } else if (plan.target === 'notion') {
     console.log(
       plan.notion.existingPage
-        ? `  写进 Notion 已有的空页:${plan.notion.existingPage.url}`
-        : '  在 Notion 攻略库里新建一页(要写本地文件就加 --local)'
+        ? clog('gg.intoExisting', { url: plan.notion.existingPage.url })
+        : clog('gg.intoNew')
     );
   } else {
-    console.log(`  落盘到 ${plan.finalPath}`);
+    console.log(clog('gg.toDisk', { path: plan.finalPath }));
   }
 
   if (probe.canSearch === false && !flags.has('--no-research')) {
     throw new Error(
-      `${probe.name} 没有服务端联网搜索,生成出来的攻略是模型**凭已有知识写的**,不是查来的。\n` +
-        '  这类攻略的步骤、数值、地点都无法核实,而格式校验一个字都验不出来。\n\n' +
-        '  真要这么跑(比如只是想验证流水线本身),加 --no-research 明说:\n' +
-        `    node tracker.js guide-gen ${appid} --no-research\n\n` +
-        '  想要经过调研的攻略,换一家有联网的:--provider anthropic 或 --provider gemini。'
+      clog('gg.noResearch', { name: probe.name })
+        + `    node tracker.js guide-gen ${appid} --no-research\n\n`
+        + clog('gg.noResearchAlt')
     );
   }
   if (probe.canSearch === false) {
-    console.log('  ⚠️  --no-research:这一份不会经过任何联网调研,内容全靠模型的已有知识');
+    console.log(clog('gg.noResearchOn'));
   }
 
   if (dryRun) {
-    console.log('\n--dry-run:不发任何请求。会发过去的 system 提示词:\n');
+    console.log(clog('gg.dryRun'));
     console.log('─'.repeat(70));
     console.log(systemPromptFor(plan, appid, { canSearch: probe.canSearch !== false }));
     console.log('─'.repeat(70));
@@ -1126,20 +1258,24 @@ async function cmdGuideGen() {
   }
 
   if (!flags.has('--yes')) {
-    // 默认问一句。这是唯一的闸门 —— 上限那一套删掉了(见上面的说明)。
-    // 覆盖的时候这句话还要多担一件事:它同时是那次不可逆写入的人工确认。
+    // Asks once by default. This is the only gate — the whole cap mechanism was removed (see the note
+    // above).
+    // On an overwrite this sentence carries one more job: it is simultaneously the manual
+    // confirmation of that irreversible write.
     //
-    // **措辞里不提钱。** 提示语该说的是"接下来会发生什么",不是替用户评估值不值 ——
-    // 他自己配的 key,自己知道单价,而我们连服务端搜索怎么计费都没测过(见 CLAUDE.md
-    // 那条"没有 spend caps")。用一个我们说不清的数去吓人,比不说更糟
+    // **The wording does not mention money.** What a prompt should say is "here is what will happen
+    // next", not an assessment of whether it is worth it on the user's behalf — it is their own key,
+    // they know the rate, and we have not even measured how server-side search is billed (see the "no
+    // spend caps" entry in CLAUDE.md). Frightening somebody with a figure we cannot explain is worse
+    // than saying nothing
     const io = makeSecretReader();
     const answer = await io.ask(
       plan.existing
-        ? `\n这一步会联网研究并重写,而且会**覆盖《${plan.game}》现在那份攻略**。继续?(y/N)`
-        : '\n这一步会联网研究并撰写,通常两到四分钟。继续?(y/N)'
+        ? clog('gg.confirmOverwrite', { game: plan.game })
+        : clog('gg.confirm')
     );
     io.close();
-    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+    if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
   }
 
   const provider = probe;
@@ -1150,47 +1286,51 @@ async function cmdGuideGen() {
     config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan,
     onProgress(ev) {
       if (ev.phase === 'plan' && ev.chunks > 1) {
-        p.done(`  ${ev.achievements} 个成就,一次写不完,分 ${ev.chunks} 段写`);
+        p.done(clog('gg.sharded', { achievements: ev.achievements, chunks: ev.chunks }));
       } else if (ev.phase === 'regroup') {
-        p.update('  正文写完了,再统一一遍分区…');
+        p.update(clog('gg.regrouping'));
       } else if (ev.phase === 'regroup-done') {
-        p.done(`  分区统一好了(${ev.sections} 个,归了 ${ev.assigned}/${ev.of} 条)`);
+        p.done(clog('gg.regrouped', { sections: ev.sections, assigned: ev.assigned, of: ev.of }));
       } else if (ev.phase === 'regroup-failed') {
-        // **降级要出声。** 各段是自己开的标题,不统一的话同类成就会散在几个小节里,
-        // 而那是成品上看得见的退化 —— 不说的话用户只会觉得"这次的分区怎么乱七八糟"
-        p.done(`  ⚠️  分区没统一成(${ev.reason}),保留各段自己分的结果`);
+        // **A degradation has to speak up.** Each shard opens its own headings, and without unifying
+        // them same-kind achievements end up scattered across several sections — a visible regression
+        // in the finished product. Unsaid, the user only concludes 「这次的分区怎么乱七八糟」
+        p.done(clog('gg.regroupFailed', { reason: ev.reason }));
       } else if (ev.phase === 'regroup-merged') {
-        // 这是程序**改掉了模型给的分类**,而成品上看不出是谁改的。说清楚改了几处
-        p.done(`  ${ev.clusters} 组同类成就散在几个小节里,已合到 ${ev.into.join('、')}(移了 ${ev.moved} 条)`);
+        // This is the program **overriding the classification the model gave**, and the finished
+        // product does not show who changed it. Say plainly how many places were changed
+        p.done(clog('gg.clustered', { clusters: ev.clusters, into: ev.into.join('、'), moved: ev.moved }));
       } else if (ev.phase === 'unwrapped-toggles') {
-        p.done(`  ${ev.titles.length} 处成就本来收在折叠里,已摊开:${ev.titles.join('、')}`);
+        p.done(clog('gg.unwrapped', { n: ev.titles.length, titles: ev.titles.join('、') }));
       } else if (ev.phase === 'unwrap-failed') {
-        p.done(`  ⚠️  ${ev.reason},折叠保持原样`);
+        p.done(clog('gg.unwrapFailed', { reason: ev.reason }));
       } else if (ev.phase === 'rewrite') {
-        p.done(`  校验没过,第 ${ev.round} 轮只重写其中 ${ev.chunks}/${ev.of} 段`);
+        p.done(clog('gg.partialRewrite', { round: ev.round, chunks: ev.chunks, of: ev.of }));
       } else if (ev.phase === 'ask') {
-        // **并发之后报「已写完几段」,不报「正在写第几段」。** 好几段同时在写,
-        // 而这个事件每段各发一次 —— 报当前段号会让这一行在 1/4、3/4、2/4 之间来回跳,
-        // 看着像进度在倒退。已写完的段数是单调的,顺序跑时同样成立
-        const prog = ev.chunks > 1 ? ` 已写完 ${ev.done ?? 0}/${ev.chunks} 段` : '';
-        p.update(`  第 ${ev.round}/${ev.rounds} 轮${prog}:联网研究 + 撰写…`);
-      } else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮${ev.label ? ` ${ev.label}` : ''}:${ev.name}…`);
-      else if (ev.phase === 'check') p.update(`  第 ${ev.round} 轮:机械打勾 + 校验…`);
+        // **Under concurrency, report "shards finished" rather than "writing shard N".** Several
+        // shards are written at once and this event fires once per shard — reporting the current
+        // shard number makes this line bounce between 1/4, 3/4 and 2/4, looking like progress going
+        // backwards. The count of finished shards is monotonic, and holds equally running in series
+        const prog = ev.chunks > 1 ? clog('gg.chunkProgress', { done: ev.done ?? 0, chunks: ev.chunks }) : '';
+        p.update(clog('gg.round', { round: ev.round, rounds: ev.rounds, progress: prog }));
+      } else if (ev.phase === 'tool') p.update(clog('gg.tool', { round: ev.round, label: ev.label ? ` ${ev.label}` : '', name: ev.name }));
+      else if (ev.phase === 'check') p.update(clog('gg.check', { round: ev.round }));
       else if (ev.phase === 'lint') {
-        p.done(`  第 ${ev.round} 轮:勾上 ${ev.ticked} 个框,还剩 ${ev.blocking} 条要改`);
+        p.done(clog('gg.checked', { round: ev.round, ticked: ev.ticked, blocking: ev.blocking }));
       } else if (ev.phase === 'notion-create' || ev.phase === 'notion-fill') {
-        p.update(`  写进 Notion(${ev.blocks} 个块)…`);
-      } else if (ev.phase === 'backup') p.update('  备份原文…');
-      else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
-      else if (ev.phase === 'notion-clear') p.update(`  清掉页面上原来的 ${ev.blocks} 个块…`);
+        p.update(clog('gg.toNotion', { blocks: ev.blocks }));
+      } else if (ev.phase === 'backup') p.update(clog('gg.backingUp'));
+      else if (ev.phase === 'backup-done') p.done(clog('gg.backedUp', { path: ev.path, bytes: ev.bytes }));
+      else if (ev.phase === 'notion-clear') p.update(clog('gg.notionClear', { blocks: ev.blocks }));
       else if (ev.phase === 'resplit') {
-        p.done(`  第 ${ev.chunk} 段没写出来(${ev.from} 个成就),切成两半重问(${ev.to} 个)`);
+        p.done(clog('gg.chunkSplit', { chunk: ev.chunk, from: ev.from, to: ev.to }));
       } else if (ev.phase === 'retry') {
-        p.done(`  第 ${ev.chunk} 段没拿到正文,原样再问一次(第 ${ev.attempt}/${ev.of} 次)`);
+        p.done(clog('gg.chunkRetry', { chunk: ev.chunk, attempt: ev.attempt, of: ev.of }));
       } else if (ev.phase === 'chunk-failed') {
-        // **这条一定要 done 不能 update。** 它是整份攻略里唯一"跳过了一块"的记录,
-        // 而 update 写的那一行会被下一段的进度当场覆盖掉 —— 跑完就没人知道漏了什么
-        p.done(`  ⚠️  第 ${ev.chunk} 段(${ev.count} 个成就)放弃了,先接着写后面的`);
+        // **This one must be done, never update.** It is the only record in the whole guide that a
+        // shard was skipped, and a line written with update is overwritten on the spot by the next
+        // shard's progress — leaving nobody knowing what was missed once the run ends
+        p.done(clog('gg.chunkGaveUp', { chunk: ev.chunk, count: ev.count }));
       }
     },
   });
@@ -1199,11 +1339,12 @@ async function cmdGuideGen() {
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   console.log('\n' + '─'.repeat(70));
   if (r.ok) {
-    console.log(`✅ 写完了,${r.rounds} 轮 · ${secs}s → ${r.url}`);
+    console.log(clog('gg.done', { rounds: r.rounds, secs, url: r.url }));
     if (r.overwrote) {
-      // 覆盖之后才算得出真正的新旧对照 —— 花钱前那份预检只能讲旧的那一半。
-      // 这一段是给"我到底换掉了什么"一个可以当场核对的答案,备份路径就在下面
-      console.log('\n  覆盖前后对照:');
+      // A genuine old-vs-new comparison can only be computed after the overwrite — the preflight
+      // before spending can only cover the old half. This section gives "what exactly did I replace"
+      // an answer that can be checked on the spot, with the backup path right below
+      console.log(clog('gg.diffHeader'));
       console.log(formatDiff(diffGuides({
         oldTodos: plan.oldTodos,
         newTodos: r.todos,
@@ -1211,77 +1352,85 @@ async function cmdGuideGen() {
         oldText: plan.oldText,
         newText: r.text,
       })));
-      if (r.backup) console.log(`  原文备份:${r.backup.path}`);
+      if (r.backup) console.log(clog('gg.backupPath', { path: r.backup.path }));
     }
-    if (r.registered) console.log(`  已登记(${r.registered.action ?? '新增'}),Dashboard 上能看到链接了`);
-    else console.log('  ⚠️  没登记上。跑一次 `node tracker.js guides` 看为什么');
-    // 转换器认不出来的行没丢,但排版降级成了普通段落。用户有权知道是哪几行
+    if (r.registered) console.log(clog('gg.registered', { action: r.registered.action ?? clog('gg.registeredNew') }));
+    else console.log(clog('gg.notRegistered'));
+    // Lines the converter did not recognise were not lost, but their formatting degraded to a plain
+    // paragraph. The user has a right to know which lines
     if (r.unconverted.length) {
-      console.log(`  ⚠️  ${r.unconverted.length} 行排版降级成普通段落,文字没丢:`);
+      console.log(clog('gg.unconverted', { n: r.unconverted.length }));
       for (const line of r.unconverted.slice(0, 5)) console.log(`       ${line}`);
     }
   } else {
-    console.log(`❌ ${r.rounds} 轮之后仍有 ${r.blocking.length} 条没过,草稿留在 ${r.draftPath}`);
-    console.log('  (草稿不会被发现逻辑扫到,不会拿去勾框)');
-    // **病因写在症状前面。** 少一段的症状是几十条"缺 checkbox",照着读会以为
-    // 模型忘了写;真相是那一段整个没回来。顺序反过来的话,真正的原因会被埋在
-    // 十五条同样的话下面
+    console.log(clog('gg.failed', { rounds: r.rounds, n: r.blocking.length, path: r.draftPath }));
+    console.log(clog('gg.draftInvisible'));
+    // **The cause goes before the symptom.** A missing shard presents as dozens of "missing
+    // checkbox" findings, and reading down the list one concludes the model forgot to write them;
+    // the truth is the whole shard never came back. The other order buries the real reason under
+    // fifteen identical sentences
     for (const c of r.chunkFailures ?? []) {
-      console.log(`\n  ⚠️  第 ${c.chunk}/${c.of} 段没写出来(${c.count} 个成就:${c.first} … ${c.last})`);
+      console.log(clog('gg.chunkMissing', { chunk: c.chunk, of: c.of, count: c.count, first: c.first, last: c.last }));
       console.log(`      ${c.reason.replace(/\n/g, '\n      ')}`);
-      console.log('      下面那些"缺 checkbox"里,这一段的部分是这个原因,不是模型漏写');
+      console.log(clog('gg.chunkMissingWhy'));
     }
     for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
-    if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
+    if (r.blocking.length > 15) console.log(clog('gg.andMore', { n: r.blocking.length - 15 }));
   }
-  // **`expected` 现在装着两种"够不着",各自的原因不一样,不能合起来报一句。**
-  // 原来这行写死了"已解锁但没勾" —— 那只对 checked-mismatch 成立。
-  // 描述为空那种是"这个框永远勾不上",和有没有解锁无关,混在一句里会把它说错
+  // **`expected` now holds two kinds of "out of reach" with different causes, and they cannot be
+  // reported as one sentence.** This line used to hardcode 「已解锁但没勾」, which is true only of
+  // checked-mismatch. The empty-description kind is "this box can never be ticked" and has nothing
+  // to do with unlock state; merging them into one sentence states it wrongly
   const emptyDesc = r.expected.filter((f) => f.code === 'ambiguous-empty-description');
   const mismatch = r.expected.filter((f) => f.code === 'checked-mismatch');
   if (mismatch.length) {
-    console.log(`  ${mismatch.length} 条"已解锁但没勾"是预期内的:成就名在本作里撞车,勾不上`);
+    console.log(clog('gg.expectedMismatch', { n: mismatch.length }));
   }
   if (emptyDesc.length) {
-    // 不拦路,但必须说出口:这几条**永远**不会被自动勾上,而用户有权在看到"写完了"
-    // 的同一屏里知道这件事,而不是过几个月发现有几个框一直没动
-    console.log(`  ⚠️  ${emptyDesc.length} 个成就同名、而 Steam 上的描述是空的,自动勾选永远认不出它们:`);
+    // Not blocking, but it has to be said: these will **never** be ticked automatically, and the user
+    // has a right to learn that on the same screen that says 「写完了」 rather than discovering months
+    // later that a few boxes have never moved
+    console.log(clog('gg.emptyDesc', { n: emptyDesc.length }));
     for (const f of emptyDesc.slice(0, 8)) console.log(`       ${f.name}`);
-    if (emptyDesc.length > 8) console.log(`       …… 另外 ${emptyDesc.length - 8} 个`);
-    console.log('     攻略本身没问题,这几个框要自己手动勾。');
+    if (emptyDesc.length > 8) console.log(clog('gg.andMoreItems', { n: emptyDesc.length - 8 }));
+    console.log(clog('gg.emptyDescFine'));
   }
   if (r.lint?.stats) {
-    console.log(`  覆盖 ${r.lint.stats.covered}/${r.lint.stats.achievements} 个成就,` +
-      `${r.lint.stats.warnings} 条 warn`);
+    console.log(clog('gg.coverage', {
+      covered: r.lint.stats.covered, achievements: r.lint.stats.achievements, warnings: r.lint.stats.warnings,
+    }));
   }
   console.log('  ' + formatUsage(r.usage));
-  // 机器验的是格式和数据(一个成就一行、名字对得上、描述原文、勾选等于真实解锁),
-  // 内容对不对一条都验不了。**这句提醒必须留着**,但它是一句话的事,不是一段
-  console.log('\n⚠️  只验了格式和数据,内容需要你自己读一遍。');
-  // **能搜 ≠ 搜了。** canSearch 只说供应商有这个能力,searchQueries 才是它真发出去的。
-  // 不报的话,"声明了工具但一次没搜"就变成一个看不出来的质量差别 —— 正是 canSearch
-  // 那套设计要防的东西
+  // The machine verifies format and data (one line per achievement, names that match, verbatim
+  // descriptions, ticks equal to the real unlock state) and can verify nothing about whether the
+  // content is right. **This reminder has to stay**, but it is one sentence, not a paragraph
+  console.log(clog('gg.readItYourself'));
+  // **Can search ≠ did search.** canSearch only says the provider has the capability; searchQueries
+  // is what it actually issued. Not reporting it turns "declared the tools and never searched" into
+  // an invisible quality difference — exactly what the canSearch design exists to prevent
   if (!r.researched) {
-    console.log('    这一份没联网,内容是模型凭已有知识写的。');
+    console.log(clog('gg.notResearched'));
   } else if (!r.searchQueries?.length) {
-    console.log('    ⚠️  一次搜索都没发出去,内容等同于凭记忆写的。');
+    console.log(clog('gg.noSearchIssued'));
   } else {
-    console.log(`\n🔎 搜了 ${r.searchQueries.length} 次:` + r.searchQueries.slice(0, 4).join(' / '));
+    console.log(clog('gg.searched', { n: r.searchQueries.length, queries: r.searchQueries.slice(0, 4).join(' / ') }));
   }
 }
 
 /**
- * 局部重写:`guide-gen <appid> --only <选择器> [--note "要求"]`。
+ * Partial rewrite: `guide-gen <appid> --only <selector> [--note "requirement"]`.
  *
- * 由 `cmdGuideGen` 在看到 `--only` 时分流过来 —— 一个命令名,两种报告形状。
+ * Routed here by `cmdGuideGen` when it sees `--only` — one command name, two report shapes.
  *
- * **报告的重点和整篇重写相反。** 那边讲「你会失去什么」(整篇替换、手动勾选全丢);
- * 这边讲「什么会留下」(其余多少个框一字不动、多少个手动勾选保住了),因为那正是
- * 用户选局部而不是整篇时唯一确凿、可量化的好处。
+ * **The report emphasises the opposite of a full rewrite.** That one covers 「你会失去什么」 (whole
+ * document replaced, every manual tick gone); this one covers 「什么会留下」 (how many other boxes
+ * stay untouched to the letter, how many manual ticks survive), because that is the only definite,
+ * quantifiable benefit of choosing partial over full.
  *
- * `--dry-run` 印**解析出来的选择集 + 完整的那条请求**,一个字节都不发。这是这条路上
- * 最该先跑的一步:选择器有没有选中你以为的那几条,只有印出来才知道 —— 而选错了
- * 再跑就是花钱改错东西。
+ * `--dry-run` prints **the resolved selection plus the complete request** and sends not one byte.
+ * This is the step most worth running first on this path: whether the selector picked the entries you
+ * thought it did is only knowable once printed — and running with the wrong selection means paying to
+ * change the wrong thing.
  */
 async function cmdGuidePatch(appid) {
   const selector = String(flagValue('only') ?? '').trim();
@@ -1297,72 +1446,71 @@ async function cmdGuidePatch(appid) {
   const pp = await planPatch(db, { config, steam, appid, notion, selector });
   const { plan, entries, unlocatable, baseline, kind } = pp;
 
-  console.log(`\n《${plan.game}》(appid ${appid})· ${kind === 'notion' ? 'Notion 页面' : '本地文件'}:${plan.existing.url}`);
-  console.log(`\n  按「${selector}」挑中 ${entries.length} 条成就:`);
+  console.log(clog('gp.header', { game: plan.game, appid, where: clog(kind === 'notion' ? 'gg.notionPage' : 'gg.localFile'), url: plan.existing.url }));
+  console.log(clog('gp.selected', { selector, n: entries.length }));
   for (const e of entries.slice(0, 12)) {
     const pct = plan.rarity?.get(e.apiName);
-    const rare = pct === undefined || pct === null ? '' : `  (全球 ${pct.toFixed(1)}%)`;
-    console.log(`       ${e.def.name_cn || e.def.name_en}${rare}`);
+    const rare = pct === undefined || pct === null ? '' : clog('gp.rarity', { pct: pct.toFixed(1) });
+    console.log(`       ${achName(e.def)}${rare}`);
   }
-  if (entries.length > 12) console.log(`       …… 还有 ${entries.length - 12} 条`);
+  if (entries.length > 12) console.log(clog('gp.andMore', { n: entries.length - 12 }));
 
   console.log('');
   console.log(formatPatchPreflight(pp.preflight, { defsCount: plan.defs.length }));
 
-  // 点了但攻略里定位不到的:**报出来,不当它不存在**。它们的症状是 missing-checkbox,
-  // 而那要整篇重写(或者手写一条)才补得上,不是这条命令能做的事
+  // Named but not locatable in the guide: **report them, do not pretend they do not exist**. Their
+  // symptom is missing-checkbox, and fixing that takes a full rewrite (or writing a line by hand),
+  // which is not something this command can do
   if (unlocatable.length) {
-    console.log(`\n  ⚠️  另有 ${unlocatable.length} 条点到了、但现有攻略里没有对应的 checkbox,这次改不到:`);
+    console.log(clog('gp.unlocatable', { n: unlocatable.length }));
     for (const a of unlocatable.slice(0, 8)) {
       const d = plan.defs.find((x) => x.api_name === a);
-      console.log(`       ${d?.name_cn || d?.name_en || a}`);
+      console.log(`       ${achName(d) || a}`);
     }
-    if (unlocatable.length > 8) console.log(`       …… 还有 ${unlocatable.length - 8} 条`);
-    console.log('       这几条是"攻略里压根没写",要整篇重写(--overwrite)或者自己补一行。');
+    if (unlocatable.length > 8) console.log(clog('gp.andMore', { n: unlocatable.length - 8 }));
+    console.log(clog('gp.unlocatableWhy'));
   }
 
-  // 旧攻略本来就没过的那些。**说清楚这次不会去修它们** —— 否则跑完看到报告里还有
-  // 这些错,会以为是这次改坏的
+  // The findings the old guide already failed on. **Say plainly that this run will not fix them** —
+  // otherwise seeing them still in the report afterwards reads as damage done by this change
   const oldBlocking = baseline.findings.filter((f) => f.level === 'error');
   const outside = oldBlocking.filter((f) => !f.apiName || !pp.scope.apiNames.includes(f.apiName));
   if (outside.length) {
-    console.log(`\n  ℹ️  这份攻略本来就有 ${outside.length} 条校验问题落在这次范围之外,不会被这次改动碰到,也不会拦路:`);
+    console.log(clog('gp.outside', { n: outside.length }));
     for (const f of outside.slice(0, 5)) console.log(`       ${f.message}`);
-    if (outside.length > 5) console.log(`       …… 还有 ${outside.length - 5} 条`);
+    if (outside.length > 5) console.log(clog('gp.andMoreFew', { n: outside.length - 5 }));
   }
 
   const probe = await providerFor(config, { needKey: !dryRun });
-  console.log(`\n  ${probe.name} · 模型 ${probe.model} · 最多改 ${rounds} 轮`);
+  console.log(clog('gp.provider', { name: probe.name, model: probe.model, rounds }));
   warnEnvOverrides();
-  console.log(`  原文备份到 ${join(config.guidesDir, BACKUPS_DIR)}`);
+  console.log(clog('gg.backupTo', { dir: join(config.guidesDir, BACKUPS_DIR) }));
 
   if (probe.canSearch === false && !flags.has('--no-research')) {
     throw new Error(
-      `${probe.name} 没有服务端联网搜索,重写出来的内容是模型**凭已有知识写的**,不是查来的。\n` +
-        '  真要这么跑,加 --no-research 明说;想要经过调研的,换一家有联网的' +
-        '(--provider anthropic 或 --provider gemini)。'
+      clog('gp.noResearch', { name: probe.name })
     );
   }
   if (probe.canSearch === false) {
-    console.log('  ⚠️  --no-research:这几条不会经过任何联网调研');
+    console.log(clog('gp.noResearchOn'));
   }
 
   if (dryRun) {
-    console.log('\n--dry-run:不发任何请求。会发过去的那条请求:\n');
+    console.log(clog('gp.dryRun'));
     console.log('─'.repeat(70));
     console.log(buildPatchMessage(entries, { instruction }));
     console.log('─'.repeat(70));
-    console.log('\n(system 提示词和整篇生成是同一份,看它请跑 guide-gen --dry-run)');
+    console.log(clog('gp.samePrompt'));
     return;
   }
 
   if (!flags.has('--yes')) {
     const io = makeSecretReader();
     const answer = await io.ask(
-      `\n这一步会联网研究并重写上面那 ${entries.length} 条,其余 ${pp.preflight.keeping} 个框一字不动。继续?(y/N)`
+      clog('gp.confirm', { n: entries.length, keeping: pp.preflight.keeping })
     );
     io.close();
-    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+    if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
   }
 
   const p = progressPrinter();
@@ -1372,23 +1520,24 @@ async function cmdGuidePatch(appid) {
     config, provider: probe, steam, appid, notion,
     selector, instruction, rounds, patchPlan: pp,
     onProgress(ev) {
-      if (ev.phase === 'write') p.update(`  第 ${ev.round}/${ev.of} 轮:联网研究 + 重写 ${ev.scope} 条…`);
-      else if (ev.phase === 'rewrite') p.update(`  第 ${ev.round}/${ev.of} 轮:按校验结果再改一次…`);
-      else if (ev.phase === 'tool') p.update(`  第 ${ev.round} 轮:${ev.name}…`);
-      else if (ev.phase === 'retry') p.done(`  第 ${ev.round} 轮没拿到正文,原样再问一次(${ev.reason})`);
+      if (ev.phase === 'write') p.update(clog('gp.write', { round: ev.round, of: ev.of, scope: ev.scope }));
+      else if (ev.phase === 'rewrite') p.update(clog('gp.rewrite', { round: ev.round, of: ev.of }));
+      else if (ev.phase === 'tool') p.update(clog('gp.tool', { round: ev.round, name: ev.name }));
+      else if (ev.phase === 'retry') p.done(clog('gp.retry', { round: ev.round, reason: ev.reason }));
       else if (ev.phase === 'check') {
-        // **交回来几条要 done 不能 update。** 「少写了两条」是这条路上唯一一种
-        // 闸门全绿而请求没被满足的情况,被下一行覆盖掉就没人知道了
-        const miss = ev.missing ? `,少了 ${ev.missing} 条` : '';
-        const extra = ev.extra ? `,多写了 ${ev.extra} 条(已忽略)` : '';
-        p.done(`  第 ${ev.round} 轮:交回 ${ev.wrote}/${ev.of} 条${miss}${extra}`);
+        // **How many came back must be done, not update.** 「少写了两条」 is the only case on this
+        // path where every gate is green and the request still was not met, and being overwritten by
+        // the next line leaves nobody knowing
+        const miss = ev.missing ? clog('gp.missingSome', { n: ev.missing }) : '';
+        const extra = ev.extra ? clog('gp.extraSome', { n: ev.extra }) : '';
+        p.done(clog('gp.returned', { round: ev.round, wrote: ev.wrote, of: ev.of, missing: miss, extra }));
       } else if (ev.phase === 'lint') {
-        p.done(`  第 ${ev.round} 轮:这次改动 ${ev.caused} 条要改,旧问题 ${ev.preExisting} 条(不拦)`);
+        p.done(clog('gp.findings', { round: ev.round, caused: ev.caused, preExisting: ev.preExisting }));
       } else if (ev.phase === 'warn') p.done(`  ⚠️  ${ev.note}`);
-      else if (ev.phase === 'backup') p.update('  备份原文…');
-      else if (ev.phase === 'backup-done') p.done(`  原文已备份:${ev.path}(${ev.bytes} 字节)`);
-      else if (ev.phase === 'notion-patch') p.update(`  改 Notion 上的「${ev.name}」…`);
-      else if (ev.phase === 'notion-verify') p.update('  回读整页重新校验…');
+      else if (ev.phase === 'backup') p.update(clog('gg.backingUp'));
+      else if (ev.phase === 'backup-done') p.done(clog('gg.backedUp', { path: ev.path, bytes: ev.bytes }));
+      else if (ev.phase === 'notion-patch') p.update(clog('gp.notionPatch', { name: ev.name }));
+      else if (ev.phase === 'notion-verify') p.update(clog('gp.notionVerify'));
     },
   });
   p.done();
@@ -1396,53 +1545,56 @@ async function cmdGuidePatch(appid) {
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   console.log('\n' + '─'.repeat(70));
   if (r.ok) {
-    console.log(`✅ 改完了 ${r.rewrote.length} 条,${r.rounds} 轮 · ${secs}s → ${r.url}`);
-    console.log(`  其余 ${pp.preflight.keeping} 个 checkbox 一字没动`);
-    if (r.backup) console.log(`  原文备份:${r.backup.path}`);
+    console.log(clog('gp.done', { n: r.rewrote.length, rounds: r.rounds, secs, url: r.url }));
+    console.log(clog('gp.keeping', { n: pp.preflight.keeping }));
+    if (r.backup) console.log(clog('gg.backupPath', { path: r.backup.path }));
   } else {
-    // 没过就一个字都没写 —— 这句必须说,否则用户会去翻攻略找哪里被改坏了
-    console.log(`❌ ${r.rounds} 轮之后仍没过,**原攻略一个字都没动**`);
+    // Not passing means not one byte was written — this has to be said, or the user goes looking
+    // through the guide for what got damaged
+    console.log(clog('gp.failed', { rounds: r.rounds }));
     if (r.missing.length) {
-      console.log(`  这 ${r.missing.length} 条模型没交回来:`);
+      console.log(clog('gp.missingList', { n: r.missing.length }));
       for (const a of r.missing.slice(0, 8)) {
         const d = plan.defs.find((x) => x.api_name === a);
-        console.log(`     ✖ ${d?.name_cn || d?.name_en || a}`);
+        console.log(`     ✖ ${achName(d) || a}`);
       }
     }
     for (const f of r.blocking.slice(0, 15)) console.log(`     ✖ ${f.message}`);
-    if (r.blocking.length > 15) console.log(`     …… 另外 ${r.blocking.length - 15} 条`);
+    if (r.blocking.length > 15) console.log(clog('gg.andMore', { n: r.blocking.length - 15 }));
   }
 
-  // **不拦不等于不说。** 旧攻略本来就有的问题这次没去碰,但它们还在那儿
+  // **Not blocking does not mean not mentioning.** The old guide's pre-existing problems were not
+  // touched this run, but they are still there
   if (r.preExisting.length) {
-    console.log(`\n  ℹ️  这份攻略还有 ${r.preExisting.length} 条本来就有的校验问题(这次没碰,也没拦路):`);
+    console.log(clog('gp.preExisting', { n: r.preExisting.length }));
     for (const f of r.preExisting.slice(0, 5)) console.log(`       ${f.message}`);
-    if (r.preExisting.length > 5) console.log(`       …… 还有 ${r.preExisting.length - 5} 条`);
+    if (r.preExisting.length > 5) console.log(clog('gp.andMoreFew', { n: r.preExisting.length - 5 }));
   }
   if (r.unapplied.extra.length) {
-    console.log(`\n  ⚠️  模型多写了 ${r.unapplied.extra.length} 条没点名的成就,**已忽略**(只贴回点名的那几条)`);
+    console.log(clog('gp.extraIgnored', { n: r.unapplied.extra.length }));
   }
   if (r.unapplied.unresolved.length) {
-    console.log(`  ⚠️  ${r.unapplied.unresolved.length} 条交回来的条目认不出是哪个成就,已忽略`);
+    console.log(clog('gp.unresolved', { n: r.unapplied.unresolved.length }));
   }
 
   console.log('  ' + formatUsage(r.usage));
-  console.log('\n⚠️  只验了格式和数据,内容需要你自己读一遍。');
-  if (!r.researched) console.log('    这几条没联网,内容是模型凭已有知识写的。');
-  else if (!r.searchQueries?.length) console.log('    ⚠️  一次搜索都没发出去,内容等同于凭记忆写的。');
-  else console.log(`\n🔎 搜了 ${r.searchQueries.length} 次:` + r.searchQueries.slice(0, 4).join(' / '));
+  console.log(clog('gg.readItYourself'));
+  if (!r.researched) console.log(clog('gp.notResearched'));
+  else if (!r.searchQueries?.length) console.log(clog('gg.noSearchIssued'));
+  else console.log(clog('gg.searched', { n: r.searchQueries.length, queries: r.searchQueries.slice(0, 4).join(' / ') }));
 }
 
 /**
- * 把一份本地 markdown 攻略搬到 Notion。
+ * Moves a local markdown guide into Notion.
  *
- * `--dry-run` 是推荐的第一步:转换会不会掉排版、Notion 那边接不接得住,
- * 预览里全看得见,而且一个字节都不写。
+ * `--dry-run` is the recommended first step: whether the conversion loses any formatting and whether
+ * Notion can hold it are both visible in the preview, and it writes not one byte.
  */
 async function cmdGuideToNotion() {
   const appid = positionalArgs()[0];
-  if (!appid) throw new Error('用法:node tracker.js guide-to-notion <appid> [--dry-run] [--yes]');
-  // steam 是给页面图标用的(建页时补一个 Steam 游戏图标,和 guide-gen 建的页一致)
+  if (!appid) throw new Error(clog('gtn.usage'));
+  // steam is for the page icon (a Steam game icon is added at creation time, matching the pages
+  // guide-gen creates)
   const { config, db, steam } = withSteam();
   const notion = new NotionClient(config);
 
@@ -1450,59 +1602,63 @@ async function cmdGuideToNotion() {
   const checked = plan.todos.filter((t) => t.checked).length;
 
   console.log(`\n《${plan.game}》(appid ${appid})`);
-  console.log(`  来源:${plan.path}`);
-  console.log(`  ${plan.todos.length} 个 checkbox,其中 ${checked} 个已勾选(勾选状态原样带过去)`);
-  console.log('  转换成 ' + Object.entries(plan.byType).map(([k, n]) => `${n} 个 ${k}`).join('、'));
+  console.log(clog('gtn.source', { path: plan.path }));
+  console.log(clog('gtn.boxes', { n: plan.todos.length, checked }));
+  console.log(clog('gtn.converts', { breakdown: Object.entries(plan.byType).map(([k, n]) => clog('gtn.typeCount', { n, type: k })).join('、') }));
   console.log(
     plan.target.existingPage
-      ? `  写进 Notion 上已有的空页:${plan.target.existingPage.url}`
-      : '  在 Notion 攻略库里新建一页'
+      ? clog('gtn.intoExisting', { url: plan.target.existingPage.url })
+      : clog('gtn.intoNew')
   );
   if (plan.unconverted.length) {
-    console.log(`  ⚠️  ${plan.unconverted.length} 行 Notion 放不下原来的排版,会降级成普通段落(文字不丢):`);
+    console.log(clog('gtn.unconverted', { n: plan.unconverted.length }));
     for (const line of plan.unconverted.slice(0, 8)) console.log(`       ${line}`);
   }
 
-  if (flags.has('--dry-run')) return console.log('\n--dry-run:什么都没写。');
+  if (flags.has('--dry-run')) return console.log(clog('gtn.dryRun'));
 
   if (!flags.has('--yes')) {
     const io = makeSecretReader();
-    const answer = await io.ask('\n搬过去?本地文件会挪进 guides/.migrated/(不删)(y/N)');
+    const answer = await io.ask(clog('gtn.confirm'));
     io.close();
-    if (!/^y(es)?$/i.test(answer)) return console.log('取消了。');
+    if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
   }
 
   const r = await migrateGuideToNotion(db, {
     notion, steam, config, appid, plan,
     onProgress(ev) {
-      if (ev.phase === 'create') console.log(`  建好页面,写 ${ev.blocks} 个块…`);
-      else if (ev.phase === 'fill') console.log(`  填进已有的空页,写 ${ev.blocks} 个块…`);
-      else if (ev.phase === 'verify') console.log('  回读逐条核对…');
+      if (ev.phase === 'create') console.log(clog('gtn.creating', { blocks: ev.blocks }));
+      else if (ev.phase === 'fill') console.log(clog('gtn.filling', { blocks: ev.blocks }));
+      else if (ev.phase === 'verify') console.log(clog('gtn.verifying'));
     },
   });
 
-  console.log(`\n✅ 搬完了,${r.count} 个 checkbox 逐条核对一致 → ${r.url}`);
+  console.log(clog('gtn.done', { n: r.count, url: r.url }));
   console.log(
     r.archivedTo
-      ? `  本地文件挪到 ${r.archivedTo}(没删)`
-      : '  ⚠️  本地文件没挪成,留在原地了 —— 不影响,发现逻辑不会把攻略抢回本地'
+      ? clog('gtn.archived', { path: r.archivedTo })
+      : clog('gtn.notArchived')
   );
 }
 
 /**
- * `drafts`:看看 `guides/.drafts/` 里堆了什么,`--clean` 清掉。
+ * `drafts`: shows what has piled up in `guides/.drafts/`, and `--clean` clears it.
  *
- * 草稿目录是**故意**会留东西的:三轮没过的攻略留在这儿,因为"丢弃等于烧掉钱和时间
- * 还什么都不留",而且"哪条没过"本身有信息量。但留下的东西没人清就会一直堆着 ——
- * 实测堆了三份几个月前做 A/B 对比用的文件,早就没人记得是干嘛的了。
+ * The drafts directory **deliberately** accumulates things: a guide that failed three rounds stays
+ * here, because "discarding it burns the money and the time and leaves nothing", and "which findings
+ * failed" is itself informative. But what is left will keep piling up if nobody clears it — measured,
+ * three files from an A/B comparison months earlier were sitting there with nobody remembering what
+ * they were for.
  *
- * **默认只列不删。** 这个目录里躺的是花钱生成出来的东西,删要说出口。
- * `--older-than N` 只动 N 天前的,今天刚失败的那份不会被顺手带走。
+ * **Lists only by default, never deletes.** What lies in this directory was generated with money, and
+ * deleting has to be said out loud.
+ * `--older-than N` touches only what is more than N days old, so today's failure is not carried off
+ * with it.
  */
 function cmdDrafts() {
   const config = loadConfig({ required: [] });
   const dir = join(config.guidesDir, DRAFTS_DIR);
-  if (!existsSync(dir)) return console.log('草稿目录还不存在,没什么可清的。');
+  if (!existsSync(dir)) return console.log(clog('drafts.noDir'));
 
   const days = Number(flagValue('older-than') ?? 0);
   const cutoff = Date.now() - days * 86400_000;
@@ -1515,35 +1671,35 @@ function cmdDrafts() {
     })
     .sort((a, b) => a.mtime - b.mtime);
 
-  if (!files.length) return console.log('草稿目录是空的。');
+  if (!files.length) return console.log(clog('drafts.empty'));
 
   const doomed = files.filter((x) => x.mtime.getTime() < cutoff);
-  console.log(`\n${join(config.guidesDir, DRAFTS_DIR)}:${files.length} 份草稿\n`);
+  console.log(clog('drafts.header', { dir: join(config.guidesDir, DRAFTS_DIR), n: files.length }));
   for (const x of files) {
-    const mark = flags.has('--clean') && doomed.includes(x) ? '删' : '  ';
-    console.log(`  ${mark} ${String(x.ageDays).padStart(4)} 天前  ${String(x.size).padStart(7)} B  ${x.f}`);
+    const mark = flags.has('--clean') && doomed.includes(x) ? clog('drafts.markDelete') : '  ';
+    console.log(clog('drafts.row', { mark, age: String(x.ageDays).padStart(4), size: String(x.size).padStart(7), file: x.f }));
   }
 
   if (!flags.has('--clean')) {
-    console.log('\n草稿不会被攻略发现逻辑扫到,留着不影响任何东西 —— 只是会一直堆着。');
-    console.log('要清:node tracker.js drafts --clean [--older-than N]');
+    console.log(clog('drafts.harmless'));
+    console.log(clog('drafts.howToClean'));
     return;
   }
-  if (!doomed.length) return console.log(`\n没有超过 ${days} 天的草稿,什么都没删。`);
+  if (!doomed.length) return console.log(clog('drafts.nothingOld', { days }));
 
   for (const x of doomed) rmSync(x.path, { force: true });
-  console.log(`\n✅ 删了 ${doomed.length} 份,还剩 ${files.length - doomed.length} 份。`);
+  console.log(clog('drafts.deleted', { n: doomed.length, left: files.length - doomed.length }));
 }
 
 function cmdExport() {
   const dir = positional[0] ?? join(ROOT, 'exports');
   mkdirSync(dir, { recursive: true });
   const { db } = withSteam({ requireSteam: false });
-  console.log('\n导出到 ' + dir + ':');
-  for (const f of exportAll(db, dir)) console.log(`  ${f.file}(${f.rows} 行)`);
+  console.log(clog('export.to', { dir }));
+  for (const f of exportAll(db, dir)) console.log(clog('export.file', { file: f.file, rows: f.rows }));
 }
 
-/** 备份清单里记一下这份数据是哪个版本写的 —— 恢复时用来判断格式能不能读 */
+/** Records which version wrote this data in the backup manifest — used at restore time to judge whether the format is readable */
 function pkgVersion() {
   try {
     return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version ?? '';
@@ -1553,16 +1709,17 @@ function pkgVersion() {
 }
 
 /**
- * 备份成一个 zip。**这个文件里有明文密钥**(config.json 整个进去),
- * 所以提示语必须说出来 —— 少了这句,把备份丢进网盘的人不会知道自己丢了什么。
- * --no-config 是不想带密钥时的出路。
+ * Backs up into a zip. **This file contains plaintext keys** (all of config.json goes in), so the
+ * message has to say so — without that sentence, somebody dropping the backup into cloud storage has
+ * no idea what they just dropped.
+ * --no-config is the way out for anyone who does not want the keys carried along.
  */
 function cmdBackup() {
   const withConfig = !flags.has('--no-config');
-  // **DATA_ROOT,不是 ROOT。** 备份是数据,得和它备的那份数据待在一起 ——
-  // 打包版用 TRACKER_DATA_DIR 把数据指到别处(见 lib/config.js),那时候 ROOT 是
-  // 代码所在的地方。写错的话 CLI 和设置页的「立即备份」会落在两个目录,
-  // 而用户问的是同一个问题:我的备份在哪
+  // **DATA_ROOT, not ROOT.** A backup is data and has to live with the data it backs up — the
+  // packaged build points its data elsewhere with TRACKER_DATA_DIR (see lib/config.js), and there
+  // ROOT is where the code lives. Getting it wrong puts the CLI's and the setup page's 「立即备份」
+  // in two different directories while the user is asking one question: where is my backup
   const dir = positional[0] ?? join(DATA_ROOT, 'backups');
   mkdirSync(dir, { recursive: true });
 
@@ -1577,25 +1734,25 @@ function cmdBackup() {
   const out = join(dir, backupName());
   writeFileSync(out, zip);
 
-  console.log('\n✅ 备份好了:' + out);
-  console.log(`   ${manifest.counts.games} 款游戏、${manifest.counts.achievements} 条成就、${manifest.counts.guides} 条攻略登记、${manifest.guideFiles} 个攻略文件`);
+  console.log(clog('backup.done', { path: out }));
+  console.log(clog('backup.counts', { games: manifest.counts.games, achievements: manifest.counts.achievements, guides: manifest.counts.guides, files: manifest.guideFiles }));
   console.log(`   ${(zip.length / 1048576).toFixed(1)} MB`);
   if (manifest.hasConfig) {
-    console.log('\n⚠️  里面有 config.json,也就是**明文的** Steam / Notion / AI 密钥。');
-    console.log('   拿到这个文件的人能花你的 AI 额度。不想带就加 --no-config。');
+    console.log(clog('backup.hasSecrets'));
+    console.log(clog('backup.secretsCost'));
   }
-  console.log('\n换到新机器:把这个 zip 拷过去,`node tracker.js restore <文件>`。');
+  console.log(clog('backup.moveMachine'));
 }
 
 /**
- * 从备份恢复。**先看清楚再动手**:恢复会清掉现有的表,所以默认要确认一次,
- * 而且确认之前先把备份里是什么、本机现在有什么都打出来 —— 一句
- * 「确定吗?」什么信息都没给。
+ * Restores from a backup. **Look before acting**: restoring clears the existing tables, so it asks
+ * for confirmation by default, and before asking it prints both what is in the backup and what this
+ * machine currently holds — a bare 「确定吗?」 conveys no information at all.
  */
 async function cmdRestore() {
   const file = positional[0];
-  if (!file) throw new Error('用法:node tracker.js restore <备份.zip>');
-  if (!existsSync(file)) throw new Error(`找不到 ${file}`);
+  if (!file) throw new Error(clog('restore.usage'));
+  if (!existsSync(file)) throw new Error(clog('restore.notFound', { file }));
 
   const buf = readFileSync(file);
   const { manifest, hasConfig, guideFiles } = inspectBackup(buf);
@@ -1603,26 +1760,31 @@ async function cmdRestore() {
   const { config, db } = withSteam({ requireSteam: false });
   const existing = countGames(db);
 
-  console.log('\n备份内容:');
+  console.log(clog('restore.contents'));
   if (manifest) {
-    console.log(`  备于 ${new Date(manifest.createdAt).toLocaleString('zh-CN')}` + (manifest.appVersion ? `(版本 ${manifest.appVersion})` : ''));
-    console.log(`  ${manifest.counts.games} 款游戏、${manifest.counts.achievements} 条成就、${manifest.counts.guides} 条攻略登记`);
+    console.log(clog('restore.madeAt', {
+      when: new Date(manifest.createdAt).toLocaleString(messageLanguage() === 'en' ? 'en-GB' : 'zh-CN'),
+      version: manifest.appVersion ? clog('restore.version', { version: manifest.appVersion }) : '',
+    }));
+    console.log(clog('restore.counts', {
+      games: manifest.counts.games, achievements: manifest.counts.achievements, guides: manifest.counts.guides,
+    }));
   } else {
-    console.log('  (没有清单,可能是手工改过的 zip —— 数据本身还是照读)');
+    console.log(clog('restore.noManifest'));
   }
-  console.log(`  ${guideFiles.length} 个攻略文件`);
-  console.log(`  ${hasConfig ? '含 config.json(本机密钥会被覆盖)' : '不含 config.json'}`);
+  console.log(clog('restore.guideFiles', { n: guideFiles.length }));
+  console.log('  ' + clog(hasConfig ? 'restore.hasConfig' : 'restore.noConfig'));
 
   const keepConfig = flags.has('--keep-config');
-  console.log('\n本机现在:');
-  console.log(`  ${existing} 款游戏 —— **会被替换成备份里的那些**`);
-  if (hasConfig && keepConfig) console.log('  --keep-config:本机密钥保留不动');
+  console.log(clog('restore.thisMachine'));
+  console.log(clog('restore.willReplace', { n: existing }));
+  if (hasConfig && keepConfig) console.log(clog('restore.keepConfig'));
 
   if (!flags.has('--yes')) {
     const rl = createInterface({ input: stdin, output: stdout });
     try {
-      const ans = (await rl.question('\n继续?(y/N) ')).trim().toLowerCase();
-      if (ans !== 'y' && ans !== 'yes') return console.log('没动任何东西。');
+      const ans = (await rl.question(clog('restore.confirm'))).trim().toLowerCase();
+      if (ans !== 'y' && ans !== 'yes') return console.log(clog('restore.aborted'));
     } finally {
       rl.close();
     }
@@ -1636,17 +1798,17 @@ async function cmdRestore() {
     restoreConfig: hasConfig && !keepConfig,
   });
 
-  console.log('\n✅ 恢复完成:');
-  for (const [t, n] of Object.entries(r.tables)) console.log(`  ${t} → ${n} 行`);
-  console.log(`  攻略文件 → ${r.guideFiles} 个`);
-  if (r.config) console.log('  config.json → 已覆盖(密钥来自备份)');
-  console.log('\n接着跑 `node tracker.js sync` 用 Steam 的最新数据刷一遍。');
+  console.log(clog('restore.done'));
+  for (const [t, n] of Object.entries(r.tables)) console.log(clog('restore.table', { table: t, n }));
+  console.log(clog('restore.guideFilesOut', { n: r.guideFiles }));
+  if (r.config) console.log(clog('restore.configOut'));
+  console.log(clog('restore.thenSync'));
 }
 
 function cmdLog() {
   const { db } = withSteam({ requireSteam: false });
   const rows = recentSyncLog(db, Number(positional[0] ?? 30));
-  if (!rows.length) return console.log('还没有同步日志');
+  if (!rows.length) return console.log(clog('log.empty'));
   for (const r of rows.reverse()) {
     const ts = new Date(r.ts).toLocaleString('zh-CN');
     console.log(`${ts}  ${r.game_name || '—'}  ${r.achievement || ''}  ${r.result}`);
@@ -1654,62 +1816,7 @@ function cmdLog() {
 }
 
 function cmdHelp() {
-  console.log(`
-Steam 成就追踪器(本地版)—— 零依赖,不需要 Google 账号
-
-  node tracker.js init                    填 Steam API Key 和 SteamID64(跑一次)
-              init --notion               填 Notion token(只有要用攻略同步才需要)
-              init --ai                   填 AI 供应商和 key(只有要用攻略生成才需要)
-  node tracker.js sync                    全量同步:库 + 成就完成数 + 成就详情
-              sync --fast                 只查玩过的 + 轮换复查一批(和 Dashboard 一样)
-              sync --library              只检查新游戏
-              sync --achievements         只刷成就完成数
-              sync --schema               只同步成就详情
-  node tracker.js serve [--port 8777]     起本地 Dashboard(数据超过 12 小时会自动后台同步)
-  node tracker.js status                  当前数据概览 + AGCR
-  node tracker.js export [目录]            三张表导出成 CSV,给表格软件看(默认 exports/,单向,不是备份)
-  node tracker.js backup [目录]            打包成一个 zip:数据库 + 攻略 + config.json(默认 backups/)
-              backup --no-config          不装 config.json(zip 里就没有明文密钥了)
-  node tracker.js restore <文件.zip>       从备份恢复。**会覆盖现有数据**,先问一次
-              restore --keep-config       只搬数据,本机的密钥不动
-              restore --yes               不问,直接恢复
-  node tracker.js guides [--notion|--local|--all]
-                                          发现攻略页面并登记进 guides 表
-  node tracker.js checkbox-sync [appid]   把 Steam 已解锁成就同步成攻略里的 ✅
-              checkbox-sync --dry-run     只算不写,先看会勾掉哪些(Notion 勾选不可撤销)
-              checkbox-sync --no-cascade  别联动勾选嵌套的子步骤 checkbox
-  node tracker.js guide-status            攻略页状态对齐完成度(打满→Done,掉出100%→Staged)
-              guide-status --dry-run      只算不写,先看会改哪些
-  node tracker.js audit [appid]           反查有没有勾上了但其实没解锁的 checkbox(只读)
-  node tracker.js guide-lint [appid]      校验攻略写法:成就有没有漏、格式对不对(只读)
-              guide-lint --checked        连勾选状态一起校验(每款游戏要单独问 Steam,慢)
-  node tracker.js guide-to-notion <appid> 把本地 markdown 攻略搬到 Notion(逐条核对后才动本地文件)
-              guide-to-notion --dry-run   只预览转换结果,一个字节都不写
-  node tracker.js notion-check            Notion 这一侧的体检:token、库、标题属性、状态选项
-                                          --fix         缺的状态选项试着补上(会写你的库,补完回读确认)
-                                          --probe-write 建一页再立刻归档,验证 integration 真有写权限
-  node tracker.js ai-check [appid]        AI 联网研究链路自检(token 用量会打出来)
-              ai-check --dry              只组装请求不发送,先看清楚会发什么(不用 key)
-              ai-check --models           问 API 这个 key 能用哪些模型(gemini)
-              --provider X --model Y      临时换供应商/模型,不改 config.json
-              --effort low|medium|high    这一次查多深(默认 high)。low 快得多,省掉的是
-                                          那批中等难度成就的内容,最难那几条两边都写得透
-                                          (以上三个 ai-check 和 guide-gen 都支持)
-  node tracker.js guide-gen <appid>       让 AI 写一份攻略(默认先问一句才开始)
-              guide-gen --dry-run         只打印提示词和落盘计划,一个请求都不发
-              guide-gen --overwrite       整篇重写(先备份原文,再告诉你会失去什么)
-              guide-gen --only <选择器>    **只重写点名的那几条**,其余一字不动。先备份。
-                                          rare[:%] 稀有成就(全球解锁率 <10%)· locked 还没打的
-                                          section:小节名 · 或者「成就名A,成就名B」直接点
-              guide-gen --note "要求"      配 --only 用,比如 --note "把互斥关系写清楚"
-              guide-gen --yes             跳过确认;--rounds N 改重写轮数;--file 换文件名
-  node tracker.js drafts                  列出 guides/.drafts/ 里堆的草稿(只列不删)
-              drafts --clean              清掉;--older-than N 只清 N 天前的
-  node tracker.js log [n]                 最近 n 条同步日志
-
-配置:${CONFIG_PATH}(gitignore 里,别提交)
-数据:data/steam.db(SQLite,直接 sqlite3 打开也能查)
-`);
+  console.log(clog('help.screen', { configPath: CONFIG_PATH }));
 }
 
 // ---------------------------------------------------------------------------
@@ -1738,86 +1845,71 @@ const COMMANDS = {
   '-h': cmdHelp,
 };
 
+/**
+ * **The interface language is set once, here, before any command runs.**
+ *
+ * It used to be set inside `withSteam`, which most commands go through — but not all: `drafts`,
+ * `ai-check`, `guide-gen`, `guide-gen --only` and `init` call `loadConfig` directly, and every one
+ * of them printed Chinese under an English interface. Nothing errored, because the tables default to
+ * Chinese and a missing `setMessageLanguage` simply leaves them there. One call at the single point
+ * every command passes through cannot be forgotten by the next command added.
+ *
+ * `required: []` so this cannot throw: a missing credential is the command's own error to raise,
+ * with its own wording, and failing here would replace it with a worse one.
+ */
+try {
+  setMessageLanguage(loadConfig({ required: [] }).uiLanguage);
+} catch {
+  // An unreadable or absent config.json is `init`'s whole reason for existing, and it is also the
+  // state a first-time user is in. Falling through on the default language is correct here
+}
+
 const fn = COMMANDS[command];
 if (!fn) {
-  console.error(`未知命令:${command}\n`);
+  console.error(clog('cli.unknown', { command }));
   cmdHelp();
   process.exit(1);
 }
 
 /**
- * 终端专属的补充说明,按错误的 `code` 挂。
+ * Terminal-only supplementary advice, keyed by the error's `code`.
  *
- * **这是"一句话服务两个界面"的替代方案。** 库里的错误消息只说发生了什么,因为
- * 同一句话会原样出现在 Dashboard 的浮窗上,而那边(尤其打包版)的用户没有终端、
- * 也不该被要求去编辑 config.json。反过来,"加 --provider X""改 ai.model"这类建议
- * 对终端用户是最有用的东西,不该为了迁就另一个界面而丢掉。
+ * **This is the alternative to "one sentence serving two surfaces".** Error messages in lib/ say only
+ * what happened, because the same sentence appears verbatim in the Dashboard's floater, where the
+ * user (especially in the packaged build) has no terminal and should not be asked to edit
+ * config.json. Conversely, advice like "add --provider X" or "change ai.model" is the most useful
+ * thing there is for a terminal user, and should not be dropped to accommodate the other surface.
  *
- * 挂在这里而不是各个命令里:所有命令的错误都从下面那个 catch 出去,一处就够。
+ * It hangs here rather than in each command: every command's errors leave through the catch below,
+ * so one place is enough.
  */
-const GEMINI_MODEL_HINT =
-  '  换模型:--model <名字>,或者改 config.json 的 ai.model。\n' +
-  '  有哪些可用跑 `node tracker.js ai-check --models` —— 但注意列出来 ≠ 能用,\n' +
-  '  停售的模型照样出现在那个列表里。';
-
 const CLI_HINTS = {
-  'provider-model-mismatch': (d) =>
-    `  要用这个模型:加 --provider ${d.belongsTo}\n` +
-    `  要用 ${d.provider}:换成它自己的模型(--model <名字>,或改 config.json 的 ai.model)\n` +
-    '  注意环境变量会盖掉 config.json,清掉:\n' +
-    '    Remove-Item Env:AI_PROVIDER, Env:AI_MODEL -ErrorAction SilentlyContinue',
-  'too-many-achievements': (d) =>
-    `  真要写就调大 config.json 的 ai.maxAchievements(当前 ${d.max},这款要 ${d.count})。`,
-  // Gemini 的模型名问题都归到同一条建议上:先问 API 要列表,再改 model
-  'gemini-model-retired': () => GEMINI_MODEL_HINT,
-  'gemini-model-unknown': () => GEMINI_MODEL_HINT,
-  'gemini-no-allowance': () => GEMINI_MODEL_HINT,
-  'gemini-429-no-detail': () =>
-    '  换个具体模型试:AI_MODEL=gemini-2.5-flash —— 别用 -latest 别名,\n' +
-    '  别名可能解析到一个不在免费层的新模型。',
-  'gemini-tool-rejected': () =>
-    '  改 config.json 的 ai.geminiTools,默认值是 ["google_search"];去掉 url_context 再试。',
-  'bad-api-key': (d) =>
-    `  注意环境变量 ${d.envVar} 会盖掉 config.json,清掉再试:\n` +
-    `    Remove-Item Env:${d.envVar} -ErrorAction SilentlyContinue`,
-  'deepseek-length': () =>
-    '  也可以把 config.json 的 ai.maxTokens 调小(DeepSeek 的上限比另外两家小)。',
-  'guide-exists': () =>
-    '  要整篇重写加 --overwrite(会先备份,并给出新旧对照)。\n' +
-    '  只想改其中几条:--only <选择器>(rare / locked /\n' +
-    '  section:小节名 / 成就名或 api_name 的逗号列表),配 --note "要求"。',
-  'file-exists': () => '  覆盖它加 --overwrite,或者用 --file 换个文件名。',
-  // ---- 局部重写(--only)----
-  'no-guide-to-patch': () =>
-    '  --only 是改已有攻略里的几条。这一款还没有攻略,先生成一份:\n' +
-    '  去掉 --only 直接跑 guide-gen。',
-  'unknown-achievements': () =>
-    '  名字要和 Steam 上一字不差(中文名或英文名都行)。同名的成就按名字点不动 ——\n' +
-    '  用 api_name 点它,`node tracker.js guide-lint <appid>` 里能看到。',
-  'empty-scope-result': (d) =>
-    `  「${d.selector}」一条都没选中。放宽阈值试试:--only rare:30,\n` +
-    '  或者直接点名:--only "成就名A,成就名B"。',
-  'nothing-locatable': () =>
-    '  点名的成就在攻略里都没有对应的 checkbox —— 那是"压根没写",不是"写得不好"。\n' +
-    '  这种要整篇重写(--overwrite),局部重写没有可以替换的位置。',
-  'no-rarity': () =>
-    '  Steam 这次没给出全球解锁率(限流或临时故障),等会儿再试,\n' +
-    '  或者换个不依赖它的选择器:--only thin / --only locked。',
-  'section-needs-local': () =>
-    '  命令行这条路按小节挑需要本地攻略全文。\n' +
-    '  Notion 上的攻略要按小节挑,去 Dashboard 点 ♻ 重写 →「自选…」——\n' +
-    '  那边读的是整页的块,小节结构在(点小节标题就是整节选中)。',
-  'bad-scope': () => '  选择器的写法:rare[:百分比] / locked / section:小节名。',
-  // `--only` 后面什么都没跟。**和 bad-scope 分开**:那个是写错了,这个是没写 ——
-  // 前者要纠正写法,后者要先知道有哪些写法可选
-  'empty-scope': () =>
-    '  --only 后面要跟选择器:rare[:百分比] 稀有成就(全球解锁率 <10%)/\n' +
-    '  locked 还没打的 / section:小节名,或者「成就名A,成就名B」直接点名。\n' +
-    '  想整篇重写的话用 --overwrite,不要 --only。',
-  'chunk-too-small': (d) =>
-    `  别急着调大 ai.maxTokens —— 它是 thinking + 正文的总额,而一段只剩 ${d.size} 个成就\n` +
-    '  还写不完,说明吃掉额度的是思考,调大只会让它想得更久(CLAUDE.md 有实测)。\n' +
-    '  能压住思考的只有官方端点(ai.anthropicExtras 那几个参数兼容端点不收)。',
+  'provider-model-mismatch': 'hint.providerModelMismatch',
+  'too-many-achievements': 'hint.tooManyAchievements',
+  // Every Gemini model-name problem funnels to the same advice: ask the API for the list, then
+  // change the model. Three codes, one entry — three copies of one sentence drift
+  'gemini-model-retired': 'hint.geminiModel',
+  'gemini-model-unknown': 'hint.geminiModel',
+  'gemini-no-allowance': 'hint.geminiModel',
+  'gemini-429-no-detail': 'hint.gemini429NoDetail',
+  'gemini-tool-rejected': 'hint.geminiToolRejected',
+  'bad-api-key': 'hint.badApiKey',
+  'deepseek-length': 'hint.deepseekLength',
+  'guide-exists': 'hint.guideExists',
+  'file-exists': 'hint.fileExists',
+  // ---- Partial rewrite (--only) ----
+  'no-guide-to-patch': 'hint.noGuideToPatch',
+  'unknown-achievements': 'hint.unknownAchievements',
+  'empty-scope-result': 'hint.emptyScopeResult',
+  'nothing-locatable': 'hint.nothingLocatable',
+  'no-rarity': 'hint.noRarity',
+  'section-needs-local': 'hint.sectionNeedsLocal',
+  'bad-scope': 'hint.badScope',
+  // Nothing at all after `--only`. **Kept separate from bad-scope**: that one is a wrong spelling,
+  // this one is nothing written — the former needs the spelling corrected, the latter needs to know
+  // which spellings exist in the first place
+  'empty-scope': 'hint.emptyScope',
+  'chunk-too-small': 'hint.chunkTooSmall',
 };
 
 try {
@@ -1825,11 +1917,12 @@ try {
 } catch (err) {
   console.error('\n❌ ' + (err.message ?? err));
   const hint = CLI_HINTS[err.code];
-  if (hint) console.error(hint(err.detail ?? {}));
+  if (hint) console.error(clog(hint, err.detail ?? {}));
   if (process.env.DEBUG) console.error(err.stack);
-  // **不要用 process.exit()。** 强行退出会在 socket / 定时器还在拆除的时候打断 libuv,
-  // Windows 上表现为 "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" ——
-  // 而且是在错误信息打完之后才崩,看起来像两件不相干的事。
-  // 设 exitCode 让 Node 自然退出,退出码一样是 1
+  // **Do not use process.exit().** Forcing an exit interrupts libuv while sockets and timers are
+  // still being torn down, which on Windows shows up as
+  // "Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)" — and it happens after the error message
+  // has printed, so it looks like two unrelated things.
+  // Setting exitCode lets Node exit naturally, with the same exit code of 1
   process.exitCode = 1;
 }

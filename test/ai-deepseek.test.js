@@ -1,25 +1,30 @@
 /**
- * DeepSeek 供应商的测试
+ * Tests for the DeepSeek provider
  * ------------------------------------------------
- * 跑法:node --test
+ * Run with: node --test
  *
- * 这一家最要紧的性质不是协议细节,是**它没有服务端联网搜索**——而设计文档把
- * "有服务端搜索"定成硬性准入,理由是"混进一家没有搜索的,会让质量取决于用户选了谁,
- * 而用户看不出这个差别"。
+ * This vendor's most important property is not a protocol detail but that **it has no
+ * server-side web search** — and the design doc makes "has server-side search" a hard
+ * admission criterion, on the grounds that "letting one without search in makes quality
+ * depend on which vendor the user picked, and the user cannot see that difference".
  *
- * 所以这个文件钉的第一件事就是 `canSearch === false` 一路传得下去:提示词会换成
- * "你没有联网能力"那一版,结果里带着 `researched` 标记。这条链断在任何一环,
- * 都会变成"用户拿到一份看起来正常、其实没查过任何资料的攻略"——正是那条准入要防的事。
+ * So the first thing this file pins is `canSearch === false` propagating all the way
+ * through: the prompt switches to the "you have no network access" version, and the result
+ * carries a `researched` flag. Breaking that chain anywhere turns into "the user receives a
+ * guide that looks normal and in fact researched nothing" — precisely what that admission
+ * criterion exists to prevent.
  *
- * 其余钉的还是"记错了会悄悄错"的那类:
+ * The rest is still the "get it wrong and it goes wrong silently" class:
  *
- *  - **`reasoning_content` 混进正文**。deepseek-reasoner 把思维链和正文放在同一个 delta
- *    的两个字段上,漏判一次就把思考过程写进用户的攻略文件(和 Gemini 的 thought 同类)
- *  - **usage 字段映射**,以及缓存命中的 token 不能和输入重复计一遍
- *  - **认不出的 finish_reason 落到 other**,不当成功
- *  - **402 余额不足不可重试** —— 和限流完全不是一回事,重试永远不会好
+ *  - **`reasoning_content` mixed into the prose**. deepseek-reasoner puts the chain of
+ *    thought and the prose in two fields of the same delta, and missing it once writes the
+ *    reasoning into the user's guide file (the same kind as Gemini's thought)
+ *  - **usage field mapping**, and cache-hit tokens not being counted twice with the input
+ *  - **an unrecognised finish_reason falling to other** rather than counting as success
+ *  - **a 402 insufficient balance is not retryable** — an entirely different thing from a
+ *    rate limit, and retrying never helps
  *
- * 全部离线。
+ * All offline.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,7 +34,7 @@ import { DeepseekProvider, createDeepseekAccumulator, mergeDeepseekUsage } from 
 import { buildSystemPrompt } from '../lib/guidegen.js';
 
 // ---------------------------------------------------------------------------
-// 脚手架
+// Scaffolding
 // ---------------------------------------------------------------------------
 
 function sseBody(chunks) {
@@ -68,23 +73,23 @@ const reply = (text, finish = 'stop') => [
 ];
 
 // ---------------------------------------------------------------------------
-// 没有联网:这是这一家最要紧的性质
+// No web access: this vendor's most important property
 // ---------------------------------------------------------------------------
 
-describe('canSearch = false 要一路传得下去', () => {
-  test('供应商自己声明没有联网,工具列表是空的', () => {
+describe('canSearch = false has to propagate all the way through', () => {
+  test('the provider declares it has no web access itself, and the tool list is empty', () => {
     const p = new DeepseekProvider(AI, { fetchImpl: fakeFetch([]) });
     assert.equal(p.canSearch, false);
     assert.deepEqual(p.webTools(), []);
   });
 
-  test('searchQueries 永远是空的,而且是结构性的空', async () => {
+  test('searchQueries is always empty, and structurally so', async () => {
     const p = new DeepseekProvider(AI, { fetchImpl: fakeFetch([okResponse(reply('好'))]) });
     const r = await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] });
     assert.deepEqual(r.searchQueries, []);
   });
 
-  test('提示词换成"你没有联网能力"那一版,而且要求宁可留空也别编', () => {
+  test('the prompt switches to the "you have no network access" version and asks it to leave things blank rather than invent', () => {
     const defs = [{ api_name: 'A', name_cn: '第一步', name_en: '', description: '完成第一关。' }];
     const online = buildSystemPrompt('测试游戏', '1', defs, { canSearch: true });
     const offline = buildSystemPrompt('测试游戏', '1', defs, { canSearch: false });
@@ -93,11 +98,11 @@ describe('canSearch = false 要一路传得下去', () => {
     assert.doesNotMatch(online, /没有联网能力/);
 
     assert.match(offline, /没有搜索和抓取网页的工具/);
-    assert.match(offline, /留空是合格的结果/, '不这么说的话,模型会为了显得完整而每条都编一段');
-    assert.doesNotMatch(offline, /先上网搜/, '没有工具还叫它上网搜,只会让它假装查过');
+    assert.match(offline, /留空是合格的结果/, 'without saying so, the model invents a passage for every entry to look complete');
+    assert.doesNotMatch(offline, /先上网搜/, 'telling it to search the web with no tools only makes it pretend it did');
   });
 
-  test('两版提示词的硬规则部分完全一样(格式要求不因为没联网而放宽)', () => {
+  test('the hard-rules part of both prompts is identical (the format requirements are not relaxed just because there is no web access)', () => {
     const defs = [{ api_name: 'A', name_cn: '第一步', name_en: '', description: 'x' }];
     const head = (s) => s.slice(0, s.indexOf('## 怎么查资料') >= 0 ? s.indexOf('## 怎么查资料') : s.indexOf('## 你这次没有联网能力'));
     assert.equal(
@@ -108,10 +113,10 @@ describe('canSearch = false 要一路传得下去', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 思维链
+// The chain of thought
 // ---------------------------------------------------------------------------
 
-test('reasoning_content 不能混进正文(否则思维链会被写进攻略文件)', () => {
+test('reasoning_content must not mix into the prose (or the chain of thought gets written into the guide file)', () => {
   const acc = createDeepseekAccumulator();
   acc.push({ choices: [{ delta: { reasoning_content: '让我想想这个成就……' } }] });
   acc.push({ choices: [{ delta: { content: '- [ ] **第一步**' } }] });
@@ -119,7 +124,7 @@ test('reasoning_content 不能混进正文(否则思维链会被写进攻略文�
   acc.push({ choices: [{ delta: { content: '<br>完成第一关。' } }] });
   const r = acc.result();
   assert.equal(r.text, '- [ ] **第一步**<br>完成第一关。');
-  assert.match(r.thinking, /让我想想/, '思维链本身留着,只是不进正文');
+  assert.match(r.thinking, /让我想想/, 'the chain of thought itself is kept, it simply does not enter the prose');
 });
 
 // ---------------------------------------------------------------------------
@@ -127,22 +132,22 @@ test('reasoning_content 不能混进正文(否则思维链会被写进攻略文�
 // ---------------------------------------------------------------------------
 
 describe('usage', () => {
-  test('字段映射对得上', () => {
+  test('the field mapping lines up', () => {
     const u = emptyUsage();
     mergeDeepseekUsage(u, { prompt_tokens: 1200, completion_tokens: 800 });
     assert.equal(u.inputTokens, 1200);
     assert.equal(u.outputTokens, 800);
   });
 
-  test('缓存命中的 token 不重复计进输入', () => {
-    // prompt_tokens 已经含了命中部分,直接两边都记会让同一批 token 算两遍
+  test('cache-hit tokens are not counted into the input twice', () => {
+    // prompt_tokens already includes the hit portion, so recording both sides directly counts the same tokens twice
     const u = emptyUsage();
     mergeDeepseekUsage(u, { prompt_tokens: 1000, prompt_cache_hit_tokens: 700, completion_tokens: 50 });
     assert.equal(u.cacheReadTokens, 700);
     assert.equal(u.inputTokens, 300);
   });
 
-  test('每个 chunk 报累计值,所以是覆盖不是累加', () => {
+  test('each chunk reports a running total, so it overwrites rather than accumulates', () => {
     const u = emptyUsage();
     mergeDeepseekUsage(u, { completion_tokens: 10 });
     mergeDeepseekUsage(u, { completion_tokens: 900 });
@@ -151,10 +156,10 @@ describe('usage', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 终止原因
+// Stop reasons
 // ---------------------------------------------------------------------------
 
-describe('finish_reason 归一化', () => {
+describe('finish_reason normalisation', () => {
   const run = async (chunks) => {
     const p = new DeepseekProvider(AI, { fetchImpl: fakeFetch([okResponse(chunks)]) });
     return p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] });
@@ -167,7 +172,7 @@ describe('finish_reason 归一化', () => {
     assert.equal(checkResult(r).ok, true);
   });
 
-  test('length → max_tokens,有正文也不算写完', async () => {
+  test('length → max_tokens, and prose present still does not count as finished', async () => {
     const r = await run(reply('写到一半', 'length'));
     assert.equal(r.stopReason, 'max_tokens');
     assert.match(checkResult(r).reason, /截断/);
@@ -179,7 +184,7 @@ describe('finish_reason 归一化', () => {
     assert.equal(checkResult(r).ok, false);
   });
 
-  test('认不出的终止原因落到 other,不当成功', async () => {
+  test('an unrecognised stop reason falls to other rather than counting as success', async () => {
     const r = await run(reply('半截', 'some_future_reason'));
     assert.equal(r.stopReason, 'other');
     assert.equal(r.rawStopReason, 'some_future_reason');
@@ -188,11 +193,11 @@ describe('finish_reason 归一化', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 请求组装
+// Request assembly
 // ---------------------------------------------------------------------------
 
-describe('请求组装', () => {
-  test('system 是 messages 里的一条,不是单独字段', () => {
+describe('request assembly', () => {
+  test('system is an entry in messages rather than a separate field', () => {
     const p = new DeepseekProvider(AI, { fetchImpl: fakeFetch([]) });
     const body = p.buildBody({
       system: '规则',
@@ -205,10 +210,10 @@ describe('请求组装', () => {
     assert.deepEqual(body.messages.map((m) => m.role), ['system', 'user', 'assistant', 'user']);
     assert.equal(body.messages[0].content, '规则');
     assert.equal(body.stream, true);
-    assert.deepEqual(body.stream_options, { include_usage: true }, '不加这个流式模式下拿不到 usage');
+    assert.deepEqual(body.stream_options, { include_usage: true }, 'without this, usage is unavailable in streaming mode');
   });
 
-  test('key 走 Authorization 头', async () => {
+  test('the key goes in the Authorization header', async () => {
     const fetchImpl = fakeFetch([okResponse(reply('好'))]);
     const p = new DeepseekProvider(AI, { fetchImpl });
     await p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] });
@@ -216,29 +221,29 @@ describe('请求组装', () => {
     assert.match(fetchImpl.calls[0].url, /\/chat\/completions$/);
   });
 
-  test('baseUrl 可配置(兼容自建/代理端点)', () => {
+  test('baseUrl is configurable (for self-hosted and proxy endpoints)', () => {
     const p = new DeepseekProvider({ ...AI, baseUrl: 'https://proxy.example.com/v1/' }, { fetchImpl: fakeFetch([]) });
     assert.equal(p.baseUrl, 'https://proxy.example.com/v1');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 错误
+// Errors
 // ---------------------------------------------------------------------------
 
-describe('错误', () => {
-  test('402 余额不足不可重试 —— 和限流完全不是一回事', async () => {
+describe('errors', () => {
+  test('a 402 insufficient balance is not retryable — an entirely different thing from a rate limit', async () => {
     const p = new DeepseekProvider({ ...AI, maxRetries: 3 }, {
       fetchImpl: fakeFetch([errResponse(402, { error: { message: 'Insufficient Balance', type: 'insufficient_balance' } })]),
     });
     await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
-      assert.equal(e.retryable, false, '余额问题重试永远不会好');
+      assert.equal(e.retryable, false, 'retrying a balance problem never helps');
       assert.match(e.message, /余额不足/);
       return true;
     });
   });
 
-  test('错误信息里不会带上 API key', async () => {
+  test('the error message never carries the API key', async () => {
     const p = new DeepseekProvider(AI, { fetchImpl: fakeFetch([errResponse(401, { error: { message: 'bad key' } })]) });
     await assert.rejects(
       p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }),
@@ -246,16 +251,16 @@ describe('错误', () => {
     );
   });
 
-  test('没有 key 就直接拒绝构造', () => {
+  test('with no key, construction is refused outright', () => {
     assert.throws(() => new DeepseekProvider({ model: 'deepseek-chat' }), /DEEPSEEK_API_KEY/);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 和公共层接得上
+// It fits the shared layer
 // ---------------------------------------------------------------------------
 
-test('多轮会话:历史留着,用量跨轮累加', async () => {
+test('a multi-turn session: the history is kept and usage accumulates across turns', async () => {
   const fetchImpl = fakeFetch([okResponse(reply('第一版')), okResponse(reply('改好了'))]);
   const p = new DeepseekProvider(AI, { fetchImpl });
   const s = createSession(p, { system: '规则', tools: p.webTools() });

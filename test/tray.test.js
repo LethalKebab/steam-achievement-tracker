@@ -1,18 +1,21 @@
 /**
- * 托盘常驻 + 窗口显示时的新鲜度同步
+ * Living in the tray, plus the freshness sync when the window is shown
  * ------------------------------------------------
- * 这个文件保的是四件**坏掉不出声**的事:
+ * This file guards four things that **break without a sound**:
  *
- * 1. 关窗口又变回退出 —— 功能整个白做,而且看起来"正常"(以前就是这个行为)。
- * 2. 退不掉 —— close 里 preventDefault 没给退出让路,托盘的「退出」按了没反应,
- *    用户只能去任务管理器。
- * 3. 每次切回窗口都全量同步一遍 —— `maybeSync` 要是退化成 `startSync` 的别名,
- *    新鲜度闸门就没了。这个不会报错,只会让 Steam 请求量悄悄翻几十倍。
- * 4. 双击第二次 exe 弹一个假的「后台服务意外退出」—— 这一条是前三条的直接后果:
- *    程序常驻在托盘里,所以"再点一次图标"从稀有事件变成了日常动作。
+ * 1. Closing the window quits again — the whole feature is undone, and it looks "normal"
+ *    (that was the behaviour before).
+ * 2. It cannot be quit — the preventDefault in close leaves no way out, the tray's 「退出」
+ *    does nothing when pressed, and the user is left with Task Manager.
+ * 3. Every switch back to the window runs a full sync — if `maybeSync` degrades into an alias
+ *    for `startSync`, the freshness gate is gone. This raises no error; it merely multiplies
+ *    Steam requests by dozens, quietly.
+ * 4. Double-clicking the exe a second time pops a bogus 「后台服务意外退出」 — this one is a
+ *    direct consequence of the first three: the program lives in the tray, so "click the icon
+ *    again" goes from a rare event to a daily action.
  *
- * `launcher/main.js` 要 Electron 才能加载,单测够不着,所以那部分是**源码断言**,
- * 和 `guidequeue.test.js` 里 drainNext 那条同源。
+ * `launcher/main.js` needs Electron to load and a unit test cannot reach it, so that part is a
+ * **source assertion**, the same family as the drainNext one in `guidequeue.test.js`.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -21,15 +24,17 @@ import { readFileSync } from 'node:fs';
 import { createApi } from '../lib/api.js';
 
 /**
- * 匹配之前先去掉注释。
+ * Strip comments before matching.
  *
- * **不这样做的话断言会被自己的注释满足。** 这不是假设:第一版里
- * 「server.js 有没有注入 maybeAutoSync」那条是空跑的 —— 注入行旁边的注释里
- * 出现了 `maybeAutoSync` 这个词,把真正的代码删掉,断言照样通过。变异验证
- * 抓到的,读代码读不出来。这个仓库注释密度很高,所以这是通例不是特例。
+ * **Without this the assertion gets satisfied by its own comment.** That is not hypothetical:
+ * in the first version the "does server.js inject maybeAutoSync" check ran empty — the word
+ * `maybeAutoSync` appeared in the comment beside the injection line, so deleting the real code
+ * left the assertion passing. Mutation testing caught it; reading the code did not. This
+ * repository has a high comment density, so that is the rule rather than the exception.
  *
- * `[^:]` 那一段是为了不误伤 `http://` —— 协议里的双斜杠不是注释,而且那些行上
- * 常带 `${...}`,连着删掉会把大括号配平也搞坏。
+ * The `[^:]` part is there to avoid hitting `http://` — the double slash in a protocol is not
+ * a comment, and those lines often carry `${...}`, so deleting through them would break brace
+ * balancing too.
  */
 const stripComments = (src) =>
   src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
@@ -38,133 +43,140 @@ const mainSrc = stripComments(readFileSync(new URL('../launcher/main.js', import
 const serverSrc = stripComments(readFileSync(new URL('../lib/server.js', import.meta.url), 'utf8'));
 
 /**
- * 从 `needle` 起按大括号配平截出整块。
+ * Slice out a whole block from `needle` by brace balancing.
  *
- * 固定长度切片(`slice(start, start + 2600)`)会随着上下文增删而错位,而错位的
- * 后果是断言变成对着半截代码做匹配 —— 可能恒真,也可能恒假,两种都不是在测东西。
+ * A fixed-length slice (`slice(start, start + 2600)`) drifts as the surrounding code grows and
+ * shrinks, and the consequence of drifting is that the assertion ends up matching against half
+ * a piece of code — possibly always true, possibly always false, and neither is testing
+ * anything.
  */
 function blockFrom(src, needle, label = needle) {
   const start = src.indexOf(needle);
-  assert.ok(start > 0, `找不到 ${label} —— 这条检查失去了目标,不是通过了`);
+  assert.ok(start > 0, `cannot find ${label} — this check has lost its target rather than passed`);
   const open = src.indexOf('{', start);
-  assert.ok(open > start, `${label} 后面没有代码块`);
+  assert.ok(open > start, `there is no code block after ${label}`);
   let depth = 0;
   for (let i = open; i < src.length; i++) {
     if (src[i] === '{') depth++;
     else if (src[i] === '}' && --depth === 0) return src.slice(start, i + 1);
   }
-  assert.fail(`${label} 的代码块没有闭合`);
+  assert.fail(`the code block for ${label} does not close`);
 }
 
-describe('窗口生命周期 —— 关掉不等于退出', () => {
-  test('window-all-closed 不能再退出程序', () => {
-    // 这是整个功能的开关。这里恢复成 app.quit(),后台常驻就没了,
-    // 而表现是"一切正常"——因为那正是改动之前的行为
+describe('window lifecycle — closing is not quitting', () => {
+  test('window-all-closed must not quit the program again', () => {
+    // This is the switch for the whole feature. Restore app.quit() here and living in the
+    // background is gone, while the appearance is "everything is fine" — because that is
+    // exactly the behaviour before the change
     const body = blockFrom(mainSrc, "app.on('window-all-closed'");
     assert.doesNotMatch(body, /app\.quit\(\)/,
-      'window-all-closed 又去退出了 —— 托盘常驻被撤销,且不会有任何报错');
+      'window-all-closed quits again — living in the tray is undone, and nothing will report it');
   });
 
-  test('close 必须给真正的退出让路', () => {
+  test('close has to make way for a real quit', () => {
     const body = blockFrom(mainSrc, "mainWindow.on('close'");
     assert.match(body, /isQuitting/,
-      'close 里没有 isQuitting 的放行分支 —— preventDefault 会让程序永远退不掉');
-    assert.match(body, /preventDefault/, '没有拦下关闭,窗口会真的被销毁');
-    assert.match(body, /hide\(\)/, '拦下了却没有隐藏,窗口会卡在原地关不掉');
+      'close has no isQuitting branch letting the quit through — preventDefault makes the program impossible to quit');
+    assert.match(body, /preventDefault/, 'without intercepting the close, the window really is destroyed');
+    assert.match(body, /hide\(\)/, 'intercepted but not hidden, the window sits there refusing to close');
   });
 
-  test('before-quit 必须先置 isQuitting,再 kill 子进程', () => {
-    // 顺序反过来:子进程的 exit 监听看到 isQuitting 还是 false,
-    // 于是每一次正常退出都先弹一个「后台服务意外退出」的错误框
+  test('before-quit has to set isQuitting first, then kill the child process', () => {
+    // The other order: the child's exit listener sees isQuitting still false, so every normal
+    // quit first pops a 「后台服务意外退出」 error box
     const body = blockFrom(mainSrc, "app.on('before-quit'");
     const flag = body.indexOf('isQuitting');
     const kill = body.indexOf('.kill()');
-    assert.ok(flag > 0, 'before-quit 没有置 isQuitting');
-    assert.ok(kill > 0, 'before-quit 没有关掉子进程 —— 服务器会变成孤儿进程留在后台');
+    assert.ok(flag > 0, 'before-quit does not set isQuitting');
+    assert.ok(kill > 0, 'before-quit does not shut down the child process — the server is left orphaned in the background');
     assert.ok(flag < kill,
-      '顺序反了:kill 在置位之前,每次正常退出都会弹一个假的「意外退出」错误框');
+      'the order is reversed: kill comes before the flag is set, so every normal quit pops a bogus crash box');
   });
 });
 
-describe('托盘 —— 关窗口之后唯一的出口', () => {
+describe('the tray — the only way out once the window is closed', () => {
   const trayBlock = () => blockFrom(mainSrc, 'function createTray');
 
-  test('菜单里必须有「退出」,且真的调 app.quit', () => {
+  test('the menu has to carry 「退出」, and it has to really call app.quit', () => {
     const body = trayBlock();
-    assert.match(body, /label: '退出'/, '托盘菜单没有退出项 —— 用户只剩任务管理器');
-    assert.match(body, /app\.quit\(\)/, '有退出项但没接上 app.quit');
+    assert.match(body, /label: '退出'/, 'the tray menu has no quit item — the user is left with Task Manager');
+    assert.match(body, /app\.quit\(\)/, 'there is a quit item but it is not wired to app.quit');
   });
 
-  test('图标为空必须说出来,不能静默', () => {
-    // 空 nativeImage 在托盘里是**看不见的图标**。配合"关窗口不退出",
-    // 结果是一个既看不见又关不掉的程序
+  test('an empty icon has to be reported rather than passing silently', () => {
+    // An empty nativeImage is an **invisible** icon in the tray. Combined with "closing does
+    // not quit", the result is a program you can neither see nor close
     assert.match(trayBlock(), /isEmpty\(\)/,
-      '没检查空图标 —— 图标加载失败会得到一个看不见也退不掉的程序');
+      'no empty-icon check — a failed icon load yields a program that is invisible and cannot be quit');
   });
 
-  test('托盘要在窗口之前建好', () => {
-    // 关窗口时要用 tray 发气泡提示;顺序反了,第一次关窗口那条提示就丢了
+  test('the tray has to be built before the window', () => {
+    // Closing the window uses the tray to show a balloon; in the other order that first
+    // close-the-window notice is lost
     const ready = blockFrom(mainSrc, 'app.whenReady()');
     const tray = ready.indexOf('createTray');
     const win = ready.indexOf('createWindow');
-    assert.ok(tray > 0 && win > 0, 'whenReady 里少了 createTray 或 createWindow');
-    assert.ok(tray < win, 'createTray 必须排在 createWindow 前面');
+    assert.ok(tray > 0 && win > 0, 'whenReady is missing createTray or createWindow');
+    assert.ok(tray < win, 'createTray has to come before createWindow');
   });
 });
 
-describe('单实例 —— 第二次双击 exe 不能变成一个错误框', () => {
-  test('拿不到锁的那一支只许退出,不许起任何东西', () => {
-    // 起了就白防了:那份子进程照样撞 EADDRINUSE 秒退,假的「意外退出」框原样回来
+describe('single instance — a second double-click on the exe must not become an error box', () => {
+  test('the branch that fails to take the lock may only quit, never start anything', () => {
+    // Start anything and the guard was for nothing: that child process hits EADDRINUSE and
+    // exits at once, and the bogus crash box is back exactly as before
     const body = blockFrom(mainSrc, 'if (!app.requestSingleInstanceLock())');
-    assert.match(body, /app\.quit\(\)/, '第二个实例没有退出 —— 它会一直挂在那儿');
+    assert.match(body, /app\.quit\(\)/, 'the second instance does not quit — it just hangs around');
     for (const forbidden of ['startServer', 'createTray', 'createWindow']) {
       assert.doesNotMatch(body, new RegExp(forbidden),
-        `第二个实例还在调 ${forbidden} —— 单实例锁形同虚设`);
+        `the second instance still calls ${forbidden} — the single-instance lock is decorative`);
     }
   });
 
-  test('锁必须挡在 whenReady 的注册之前', () => {
-    // ready 之前调 app.quit() 只是排了个队,ready 回调照样会先跑一遍 startServer。
-    // 所以判断要包住**注册**,不能挪进回调里
+  test('the lock has to sit in front of the whenReady registration', () => {
+    // app.quit() before ready only queues, and the ready callback still runs startServer once.
+    // So the check has to wrap the **registration**; it cannot move inside the callback
     const lock = mainSrc.indexOf('requestSingleInstanceLock');
     const ready = mainSrc.indexOf('app.whenReady()');
-    assert.ok(lock > 0, '没有单实例锁 —— 第二次双击 exe 会弹「后台服务意外退出(代码 1)」');
-    assert.ok(ready > 0, 'whenReady 没了');
-    assert.ok(lock < ready, 'whenReady 注册在锁之前 —— 第二个实例仍然会先起一遍子进程');
+    assert.ok(lock > 0, 'no single-instance lock — a second double-click on the exe pops 「后台服务意外退出(代码 1)」');
+    assert.ok(ready > 0, 'whenReady is gone');
+    assert.ok(lock < ready, 'whenReady is registered before the lock — the second instance still starts a child process first');
   });
 
-  test('第一个实例要把面板拿出来,不能装作没看见', () => {
+  test('the first instance has to bring the window out rather than pretend it saw nothing', () => {
     assert.match(mainSrc, /app\.on\('second-instance',\s*showWindow\)/,
-      'second-instance 没接 showWindow —— 双击 exe 变成「什么都没发生」,比报错更让人以为程序坏了');
+      'second-instance is not wired to showWindow — double-clicking the exe becomes "nothing happened", which reads as more broken than an error');
   });
 
-  test('子进程的 stderr 要留着,错误框才说得出原因', () => {
-    // 回到 stdio: 'inherit' 只在**打包版**出问题:那里没有控制台,子进程死前说的
-    // 那句话直接蒸发,错误框退化成一个连搜都没得搜的「代码 1」。dev 模式一切正常
+  test('the child process stderr has to be kept, or the error box cannot state a cause', () => {
+    // Going back to stdio: 'inherit' only breaks in the **packaged** build: there is no console
+    // there, so the sentence the child says before dying evaporates and the error box degrades
+    // into a 「代码 1」 with nothing to search for. Dev mode is fine throughout
     const body = blockFrom(mainSrc, 'function startServer');
     assert.match(body, /stdio:\s*\['inherit',\s*'inherit',\s*'pipe'\]/,
-      'stderr 不再走管子 —— 打包版里子进程的错误信息会丢掉');
-    assert.match(body, /lastErrorLine\(/, '错误框没有复述子进程说的原因');
+      'stderr no longer goes through a pipe — the child process error message is lost in the packaged build');
+    assert.match(body, /lastErrorLine\(/, 'the error box does not repeat the reason the child process gave');
   });
 
-  test('启动期的 error 监听要在 listen 成功之后摘掉', () => {
-    // 留着的话,listen 之后真出的 error 会 reject 到一个已经 settle 的 promise 上 ——
-    // 既不崩也不报,一个错误就这么没了
-    // 针对的是 listen 回调本身 —— `new Promise((resolve, reject)` 这个写法在
-    // 这个文件里不止一处(readBody 也是),拿它当锚会截到别人的代码块上
+  test('the startup error listener has to be removed once listen succeeds', () => {
+    // Left attached, a real error after listen rejects an already-settled promise — no crash,
+    // no report, an error simply gone
+    // This targets the listen callback itself — `new Promise((resolve, reject)` appears more
+    // than once in this file (readBody too), so using that as an anchor slices into somebody
+    // else's block
     const block = blockFrom(serverSrc, 'server.listen(config.port');
     assert.match(block, /removeListener\('error'/,
-      'listen 成功后没摘掉启动期监听 —— 之后的服务器错误会被静默吞掉');
+      'the startup listener is not removed after listen succeeds — later server errors are swallowed silently');
   });
 });
 
-describe('maybeSync —— 新鲜度闸门不能被绕开', () => {
+describe('maybeSync — the freshness gate must not be bypassed', () => {
   const nulls = {
     db: null, steam: null, config: {}, syncState: null,
     guideGenState: null, startGuideGen: null, planGuidePreflight: null,
   };
 
-  test('走的是 maybeAutoSync,不是 startBackgroundSync', () => {
+  test('it goes through maybeAutoSync, not startBackgroundSync', () => {
     let stale = 0;
     let forced = 0;
     const api = createApi({
@@ -174,55 +186,56 @@ describe('maybeSync —— 新鲜度闸门不能被绕开', () => {
     });
 
     const r = api.maybeSync();
-    assert.equal(stale, 1, 'maybeSync 没有调 maybeAutoSync');
+    assert.equal(stale, 1, 'maybeSync did not call maybeAutoSync');
     assert.equal(forced, 0,
-      'maybeSync 走了 startBackgroundSync —— 那个故意绕开 syncStaleHours,' +
-      '于是每次切回窗口都会全量同步一遍');
+      'maybeSync went through startBackgroundSync — that one deliberately bypasses syncStaleHours, ' +
+      'so every switch back to the window runs a full sync');
     assert.deepEqual(r, { started: true });
   });
 
-  test('闸门说不用同步时,如实返回 false', () => {
+  test('when the gate says no sync is needed, false is returned honestly', () => {
     const api = createApi({ ...nulls, startBackgroundSync: null, maybeAutoSync: () => false });
     assert.deepEqual(api.maybeSync(), { started: false });
   });
 
-  test('没注入也不抛 —— CLI 起的 serve 不该因为这个 500', () => {
+  test('not injected does not throw — a serve started from the CLI should not 500 over this', () => {
     const api = createApi({ ...nulls, startBackgroundSync: null });
     assert.doesNotThrow(() => api.maybeSync());
     assert.equal(api.maybeSync().started, false);
   });
 
-  test('server.js 真的把 maybeAutoSync 接进了 createApi', () => {
-    // 源码断言:注入点在 serve() 的闭包里,单测够不着。漏接的话 maybeSync
-    // 永远返回 unavailable,窗口显示再也不触发同步——而且完全不报错
+  test('server.js really does wire maybeAutoSync into createApi', () => {
+    // Source assertion: the injection point is inside serve()'s closure, out of a unit test's
+    // reach. Miss it and maybeSync always returns unavailable, showing the window never
+    // triggers a sync again — and nothing reports it at all
     const block = blockFrom(serverSrc, 'const api = createApi(');
     assert.match(block, /maybeAutoSync\s*:/,
-      'server.js 没把 maybeAutoSync 注进去 —— maybeSync 会静默变成空操作');
+      'server.js does not inject maybeAutoSync — maybeSync silently becomes a no-op');
   });
 });
 
-describe('图标资产', () => {
-  test('icon.ico 存在,且是含 256 档的合法 ICO', () => {
+describe('icon assets', () => {
+  test('icon.ico exists and is a valid ICO containing a 256 entry', () => {
     const buf = readFileSync(new URL('../launcher/icon.ico', import.meta.url));
-    assert.equal(buf.readUInt16LE(0), 0, 'ICO 头的 reserved 必须是 0');
-    assert.equal(buf.readUInt16LE(2), 1, 'type 必须是 1(图标,不是光标)');
+    assert.equal(buf.readUInt16LE(0), 0, 'the reserved field of an ICO header has to be 0');
+    assert.equal(buf.readUInt16LE(2), 1, 'type has to be 1 (icon, not cursor)');
 
     const count = buf.readUInt16LE(4);
-    assert.ok(count > 0, 'ICO 里一张图都没有');
+    assert.ok(count > 0, 'the ICO contains no images at all');
 
     const sizes = [];
     for (let i = 0; i < count; i++) sizes.push(buf[6 + i * 16] || 256);
-    assert.ok(sizes.includes(16), '缺 16×16 —— 那是托盘实际用的尺寸');
-    assert.ok(sizes.includes(256), '缺 256×256 —— electron-builder 对应用图标的硬性下限');
+    assert.ok(sizes.includes(16), 'no 16x16 — that is the size the tray actually uses');
+    assert.ok(sizes.includes(256), 'no 256x256 — electron-builder requires it for the app icon');
   });
 
-  test('打包配置必须带上 icon.ico', () => {
-    // 漏掉只有**打包版**没图标,dev 模式(npm start)一切正常 ——
-    // 正是那种要等发出去才发现的问题
+  test('the packaging config has to carry icon.ico', () => {
+    // Miss it and only the **packaged** build has no icon; dev mode (npm start) is fine
+    // throughout — precisely the kind of problem that waits until release to appear
     const pkg = JSON.parse(readFileSync(new URL('../launcher/package.json', import.meta.url), 'utf8'));
-    assert.ok(pkg.build.files.includes('icon.ico'), 'build.files 里没有,asar 里就没有这个文件');
+    assert.ok(pkg.build.files.includes('icon.ico'), 'not in build.files means the file is not in the asar');
     assert.ok(pkg.build.asarUnpack?.includes('icon.ico'),
-      '没有 asarUnpack —— 托盘要从真实路径读这个文件,压在 asar 里读不到');
-    assert.equal(pkg.build.win.icon, 'icon.ico', 'win.icon 没设,exe 还是默认的 Electron 图标');
+      'no asarUnpack — the tray reads this file from a real path and cannot read it from inside the asar');
+    assert.equal(pkg.build.win.icon, 'icon.ico', 'win.icon is unset, so the exe keeps the default Electron icon');
   });
 });

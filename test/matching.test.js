@@ -1,11 +1,13 @@
 /**
- * 成就名 ↔ checkbox 匹配规则的回归测试
+ * Regression tests for the achievement-name ↔ checkbox matching rules
  * ------------------------------------------------
- * 跑法:node --test(零依赖,用 Node 内置的 node:test)
+ * Run with: node --test (zero dependencies, using Node's built-in node:test)
  *
- * 这里锁住的是整个项目最容易被"顺手放宽一下"改坏的地方:匹配必须**精确**。
- * 踩过的坑:用前缀匹配的时候,一个短成就名可能是另一个更难的、
- * 实际还没解锁的成就名的前缀,结果勾错了 checkbox。
+ * What is locked down here is the spot in the whole project most easily broken by "loosening it
+ * a little while we are here": matching has to be **exact**.
+ * The pit already fallen into: with prefix matching, a short achievement name can be the prefix
+ * of another, harder achievement that is not actually unlocked, and the wrong checkbox gets
+ * ticked.
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,7 +25,7 @@ const ach = (nameCn, nameEn = '') => ({ nameCn, nameEn, apiname: nameCn });
 const todo = (key, text, checked = false) => ({ key, text, checked });
 
 describe('normalizeText', () => {
-  test('去掉加粗、转小写、<br> 变换行,但保留冒号/破折号这些分隔符', () => {
+  test('strips bold, lowercases and turns <br> into a newline, while keeping separators like the colon and the dash', () => {
     assert.equal(normalizeText('**Taste**<br>描述在这里'), 'taste\n描述在这里');
     assert.equal(normalizeText('  位置:秘密  '), '位置:秘密');
     assert.equal(normalizeText('A  —  B'), 'a — b');
@@ -31,111 +33,115 @@ describe('normalizeText', () => {
 });
 
 describe('extractTitleCandidates', () => {
-  test('按换行拆(Notion "标题<br>描述" 的写法)', () => {
+  test('splits by newline (the Notion "title<br>description" form)', () => {
     assert.ok(extractTitleCandidates('taste\n游戏才刚刚开始').includes('taste'));
   });
 
-  test('按冒号拆', () => {
+  test('splits by colon', () => {
     assert.ok(extractTitleCandidates('位置:这个位置的秘密').includes('位置'));
   });
 
-  test('按半角/全角破折号拆', () => {
+  test('splits by halfwidth and fullwidth dashes', () => {
     assert.ok(extractTitleCandidates('freedom - 逃跑成功').includes('freedom'));
     assert.ok(extractTitleCandidates('体验(taste) — 描述').includes('体验(taste)'));
   });
 
-  test('破折号前面没有空格也要能拆(`成就名- 描述`)', () => {
-    // 2026-08-10 guidelint 跑全量攻略时发现的:文明 6 这类攻略写成 `胜利！- 使用...`,
-    // 破折号前不留空格。以前只按 ' - ' 拆,整行成了唯一候选,成就名提取不出来,
-    // 于是这些框永远勾不上——而且不报错:audit 靠描述反查蒙混过去,
-    // checkbox-sync 则表现为"没有要勾的",和"已经勾完了"分不出来。
+  test('splits even with no space before the dash (`成就名- 描述`)', () => {
+    // Found on 2026-08-10 while running guidelint over every guide: guides for games like
+    // Civilization VI write `胜利！- 使用...`, with no space before the dash. Splitting only on
+    // ' - ' made the whole line the sole candidate, so the achievement name could not be
+    // extracted and those boxes could never be ticked — with no error: audit slipped past via the
+    // description, while checkbox-sync presented as "nothing to tick", indistinguishable from
+    // "everything is already ticked".
     assert.ok(extractTitleCandidates('胜利！- 使用北条时宗获得一场常规赛胜利').includes('胜利！'));
     assert.ok(extractTitleCandidates('《物种起源》- 在加拉帕戈斯群岛附近激活达尔文').includes('《物种起源》'));
   });
 
-  test('名字自带连字符、后面没空格的不拆(Half-Life 不能变成 Half-)', () => {
-    // 拆的条件是破折号**后面跟空白**,所以复合词不会被腰斩
+  test('a name with its own hyphen and no space after it is not split (Half-Life must not become Half-)', () => {
+    // The split condition is a dash **followed by whitespace**, so a compound word is not cut in half
     const c = extractTitleCandidates('half-life 描述');
     assert.equal(c.includes('half'), false);
     assert.equal(c.includes('half-'), false);
   });
 
-  test('"中文名(English)" 的中英文各自都算候选', () => {
+  test('in "中文名(English)" both the Chinese and the English name are candidates', () => {
     const c = extractTitleCandidates('体验(taste) — "游戏才刚刚开始……"');
-    assert.ok(c.includes('体验'), '中文名应该是候选');
-    assert.ok(c.includes('taste'), '英文名应该是候选');
+    assert.ok(c.includes('体验'), 'the Chinese name should be a candidate');
+    assert.ok(c.includes('taste'), 'the English name should be a candidate');
   });
 
-  test('攻略给成就名多写了句号,去掉句号后也算候选', () => {
-    // 2026-08-10 抽查 guidelint 的残留报错时发现的:攻略写「秘密食材。」,
-    // Steam 上叫「秘密食材」,精确相等因此不成立。
+  test('a guide adding a full stop to the name still yields a candidate with it removed', () => {
+    // Found on 2026-08-10 while spot-checking guidelint's residual findings: the guide writes
+    // 「秘密食材。」 while Steam calls it 「秘密食材」, so exact equality does not hold.
     const c = extractTitleCandidates('秘密食材。\n在所有隐藏关卡获得三星。');
-    assert.ok(c.includes('秘密食材'), '去掉尾部句号后应该成为候选');
+    assert.ok(c.includes('秘密食材'), 'with the trailing full stop removed it should become a candidate');
   });
 
-  test('原样(带标点)仍然是候选 —— 成就名本身就带标点的不能被拆掉', () => {
-    // Card Shark 的「白手起家。」、文明 6 的「胜利！」名字里本来就有标点。
-    // 去标点的候选是**追加**的,原样那个必须还在,否则等于把能匹配的改成匹配不上。
+  test('the verbatim form (with punctuation) is still a candidate — a name that genuinely carries punctuation must not be broken', () => {
+    // Names like 「白手起家。」 and 「胜利！」 really do carry punctuation.
+    // The stripped candidate is **appended**, and the verbatim one has to remain, or working
+    // matches are turned into misses.
     const c = extractTitleCandidates('白手起家。');
-    assert.ok(c.includes('白手起家。'), '带标点的原样候选必须保留');
-    assert.ok(c.includes('白手起家'), '去标点的候选也要有');
+    assert.ok(c.includes('白手起家。'), 'the verbatim candidate with punctuation has to be kept');
+    assert.ok(c.includes('白手起家'), 'the stripped candidate has to be there too');
   });
 
-  test('去标点的候选排在原样后面(优先命中精确的那个)', () => {
+  test('the stripped candidate comes after the verbatim one (so the exact one wins first)', () => {
     const c = extractTitleCandidates('胜利！');
-    assert.ok(c.indexOf('胜利！') < c.indexOf('胜利'), '原样候选必须排在前面');
+    assert.ok(c.indexOf('胜利！') < c.indexOf('胜利'), 'the verbatim candidate has to come first');
   });
 
-  test('全是标点的行不会产出空候选', () => {
+  test('a line of nothing but punctuation does not produce an empty candidate', () => {
     assert.equal(extractTitleCandidates('。。。').includes(''), false);
   });
 
-  test('句中的标点不受影响(只去尾部)', () => {
+  test('punctuation inside the sentence is unaffected (only the tail is stripped)', () => {
     const c = extractTitleCandidates('说到底,还是要氪。');
-    assert.ok(c.includes('说到底,还是要氪'), '尾部句号该去掉');
-    assert.equal(c.includes('说到底还是要氪'), false, '句中逗号不该动');
+    assert.ok(c.includes('说到底,还是要氪'), 'the trailing full stop should be removed');
+    assert.equal(c.includes('说到底还是要氪'), false, 'the comma inside must not be touched');
   });
 });
 
-describe('matchAchievements —— 精确匹配', () => {
-  test('本地 markdown 常见写法能匹配上(中文名和英文名都行)', () => {
+describe('matchAchievements — exact matching', () => {
+  test('the common local markdown forms match (both the Chinese and the English name)', () => {
     const todos = [todo(1, '**体验**(Taste) — "游戏才刚刚开始……"')];
     assert.equal(matchAchievements([ach('体验', 'Taste')], todos).length, 1);
     assert.equal(matchAchievements([ach('', 'Taste')], todos).length, 1);
   });
 
-  test('短成就名不会错误匹配到"以它为前缀"的另一个成就(踩过的坑)', () => {
-    // "明日" 是 "明日之星" 的严格前缀:前缀匹配会勾错,精确匹配必须拒绝
+  test('a short name does not wrongly match another achievement that has it as a prefix (a pit already fallen into)', () => {
+    // 「明日」 is a strict prefix of 「明日之星」: prefix matching ticks the wrong one, and exact
+    // matching has to refuse
     const todos = [todo(1, '**明日之星**(Rising Star) — 完成第1章')];
     assert.equal(matchAchievements([ach('明日', 'Rising')], todos).length, 0);
   });
 
-  test('描述里出现成就名也不算匹配', () => {
+  test('an achievement name appearing in a description is not a match', () => {
     const todos = [todo(1, '**其他成就**(Other) — 解锁后可以看到体验的说明')];
     assert.equal(matchAchievements([ach('体验', 'Taste')], todos).length, 0);
   });
 
-  test('已经勾上的 checkbox 不参与匹配', () => {
+  test('an already-ticked checkbox does not take part in matching', () => {
     const todos = [todo(1, '**体验**(Taste) — 描述', true)];
     assert.equal(matchAchievements([ach('体验', 'Taste')], todos).length, 0);
   });
 
-  test('一个 checkbox 只会被一个成就认领', () => {
+  test('one checkbox is claimed by only one achievement', () => {
     const todos = [todo(1, '体验(Taste)')];
     const matches = matchAchievements([ach('体验', 'Taste'), ach('体验', 'Taste')], todos);
     assert.equal(matches.length, 1);
   });
 
-  test('没有名字的成就(ACHIEVEMENTS 表里还没同步到)直接跳过,不会乱匹配', () => {
+  test('an achievement with no name (not yet synced into the ACHIEVEMENTS table) is skipped rather than matched at random', () => {
     assert.equal(matchAchievements([ach('', '')], [todo(1, '任何文字')]).length, 0);
   });
 });
 
-describe('本地 markdown 后端', () => {
+describe('the local markdown backend', () => {
   const dir = join(tmpdir(), 'sat-md-test');
   const file = join(dir, 'g.md');
 
-  test('读出 checkbox、只勾指定的行、其他内容一个字不动', () => {
+  test('reads the checkboxes, ticks only the named lines, and leaves everything else untouched', () => {
     mkdirSync(dir, { recursive: true });
     const original = [
       '# 标题',
@@ -162,16 +168,16 @@ describe('本地 markdown 后端', () => {
     assert.equal(applyChecks(file, matches.map((m) => m.key)), 1);
 
     const after = readFileSync(file, 'utf8').split('\n');
-    assert.equal(after[4], '- [x] **体验**(Taste) — 描述一', '匹配的那行应该被勾上,文字保持原样');
-    assert.equal(after[5], '- [ ] **自由**(Freedom) — 描述二', '没匹配的行不能动');
+    assert.equal(after[4], '- [x] **体验**(Taste) — 描述一', 'the matched line should be ticked with its text unchanged');
+    assert.equal(after[5], '- [ ] **自由**(Freedom) — 描述二', 'an unmatched line must not be touched');
     assert.equal(after[8], '普通段落,不是 checkbox');
 
-    // 幂等:再跑一次不该有任何变化
+    // Idempotent: a second run should change nothing
     assert.equal(applyChecks(file, [4]), 0);
     rmSync(dir, { recursive: true, force: true });
   });
 
-  test('缩进的 checkbox 挂到上一层(parent 指向父行,和 Notion 的嵌套 to_do 对齐)', () => {
+  test('an indented checkbox hangs off the level above (parent points at the parent line, aligning with Notion nested to_do)', () => {
     const dir2 = join(tmpdir(), 'sat-md-nested');
     const f = join(dir2, 'n.md');
     mkdirSync(dir2, { recursive: true });
@@ -187,27 +193,28 @@ describe('本地 markdown 后端', () => {
     );
     const t = loadTodos(f);
     assert.equal(t.length, 5);
-    assert.equal(t[0].parent, null, '顶层没有父');
-    assert.equal(t[1].parent, t[0].key, '一层缩进挂到父成就');
-    assert.equal(t[2].parent, t[1].key, '两层缩进挂到上一层子步骤');
-    assert.equal(t[3].parent, t[0].key, '回到一层缩进,重新挂回父成就');
-    assert.equal(t[4].parent, null, '下一个顶层成就不该继承前面的父');
+    assert.equal(t[0].parent, null, 'top level has no parent');
+    assert.equal(t[1].parent, t[0].key, 'one level of indent hangs off the parent achievement');
+    assert.equal(t[2].parent, t[1].key, 'two levels of indent hang off the sub-step above');
+    assert.equal(t[3].parent, t[0].key, 'back to one level of indent, hanging off the parent achievement again');
+    assert.equal(t[4].parent, null, 'the next top-level achievement should not inherit the previous parent');
     rmSync(dir2, { recursive: true, force: true });
   });
 });
 
 /**
- * 子步骤联动是本项目唯一"宁可多勾"的地方(见 collectSubStepTicks 的注释),
- * 所以边界必须钉死:没有"父成就确实解锁"的证据时,一个子步骤都不能勾。
+ * Sub-step cascading is the one place in this project that prefers over-ticking (see the comment
+ * on collectSubStepTicks), so the boundary has to be nailed down: with no evidence that the
+ * parent achievement really is unlocked, not one sub-step may be ticked.
  */
-describe('子步骤联动勾选', () => {
+describe('sub-step cascade ticking', () => {
   const defs = [
     { api_name: 'allTech', name_cn: '笨手笨脚', name_en: 'Butterfingers', description: '每种技术都至少失败过一次' },
   ];
   const parentText = '**笨手笨脚**\n每种技术都至少失败过一次';
   const unlocked = new Set(['allTech']);
 
-  test('父成就这次被匹配上 → 它下面没勾的子步骤一起勾,已勾的不重复', () => {
+  test('the parent was matched this round → its unticked sub-steps are ticked along with it, and the ticked ones are not repeated', () => {
     const todos = [
       { key: 1, text: parentText, checked: false, parent: null },
       { key: 2, text: '技巧 A', checked: false, parent: 1 },
@@ -218,7 +225,7 @@ describe('子步骤联动勾选', () => {
     assert.deepEqual(subs.map((s) => s.key), [2]);
   });
 
-  test('父成就早就勾上了、这次没有新 match → 仍然联动(否则功能对历史攻略等于没用)', () => {
+  test('the parent was ticked long ago with no new match this round → it still cascades (otherwise the feature does nothing for existing guides)', () => {
     const todos = [
       { key: 1, text: parentText, checked: true, parent: null },
       { key: 2, text: '技巧 A', checked: false, parent: 1 },
@@ -227,7 +234,7 @@ describe('子步骤联动勾选', () => {
     assert.deepEqual(subs.map((s) => s.key), [2]);
   });
 
-  test('父成就其实没解锁(框却勾着)→ 一个子步骤都不勾', () => {
+  test('the parent is not actually unlocked (though the box is ticked) → not one sub-step is ticked', () => {
     const todos = [
       { key: 1, text: parentText, checked: true, parent: null },
       { key: 2, text: '技巧 A', checked: false, parent: 1 },
@@ -236,7 +243,7 @@ describe('子步骤联动勾选', () => {
     assert.equal(subs.length, 0);
   });
 
-  test('父框没勾、也不在这次 matches 里 → 没有证据,不联动', () => {
+  test('the parent box is unticked and not in this round matches → no evidence, no cascade', () => {
     const todos = [
       { key: 1, text: parentText, checked: false, parent: null },
       { key: 2, text: '技巧 A', checked: false, parent: 1 },
@@ -245,7 +252,7 @@ describe('子步骤联动勾选', () => {
     assert.equal(subs.length, 0);
   });
 
-  test('父框反查不到唯一成就(攻略没抄描述、名字也对不上)→ 不联动', () => {
+  test('the parent box resolves to no unique achievement (the guide copied no description and the name does not match) → no cascade', () => {
     const todos = [
       { key: 1, text: '随手写的一行说明', checked: true, parent: null },
       { key: 2, text: '技巧 A', checked: false, parent: 1 },
@@ -254,7 +261,7 @@ describe('子步骤联动勾选', () => {
     assert.equal(subs.length, 0);
   });
 
-  test('子步骤自己还有子步骤,一路往下勾', () => {
+  test('a sub-step with its own sub-steps ticks all the way down', () => {
     const todos = [
       { key: 1, text: parentText, checked: true, parent: null },
       { key: 2, text: '子步骤 1', checked: false, parent: 1 },
@@ -264,35 +271,37 @@ describe('子步骤联动勾选', () => {
     assert.deepEqual(subs.map((s) => s.key).sort(), [2, 3]);
   });
 
-  test('完全没有嵌套的老攻略:不产生任何联动勾选', () => {
+  test('an older guide with no nesting at all: no cascade tick is produced', () => {
     const todos = [todo(1, parentText, true), todo(2, '**另一个成就**')];
     const subs = collectSubStepTicks(todos, [], { defs, unlockedApiNames: unlocked });
-    assert.equal(subs.length, 0, 'parent 全是 undefined,行为必须和以前一模一样');
+    assert.equal(subs.length, 0, 'parent is undefined throughout, so the behaviour has to be exactly what it was before');
   });
 });
 
-describe('Notion ID 处理', () => {
-  test('从各种形状的 URL 里提取页面 ID', () => {
+describe('Notion ID handling', () => {
+  test('the page ID is extracted from URLs of every shape', () => {
     const want = '1d31fee6-ab8c-4f0b-9e2a-3c4d5e6f7a8b';
     assert.equal(extractNotionPageId('https://notion.so/Title-1d31fee6ab8c4f0b9e2a3c4d5e6f7a8b'), want);
     assert.equal(extractNotionPageId('https://notion.so/1d31fee6ab8c4f0b9e2a3c4d5e6f7a8b?v=x'), want);
   });
 
-  test('去重要用规范化 ID,不能比 URL 原文(slug 会变)', () => {
+  test('deduplication has to use the normalised ID, never the raw URL text (the slug changes)', () => {
     const a = 'https://notion.so/Palworld-Guide-1d31fee6ab8c4f0b9e2a3c4d5e6f7a8b';
     const b = 'https://notion.so/1d31fee6ab8c4f0b9e2a3c4d5e6f7a8b';
     assert.equal(normalizeNotionId(a), normalizeNotionId(b));
-    // slug 里的十六进制字符(Palworld 的 a/d)不能污染提取结果
+    // Hex characters inside the slug (the a and d of Palworld) must not contaminate the extraction
     assert.equal(normalizeNotionId(a), '1d31fee6ab8c4f0b9e2a3c4d5e6f7a8b');
   });
 });
 
-describe('CSV 导出', () => {
-  // 导入删掉之后(2026-08-19),这里剩的是导出侧唯一的静默失效:一个名字里带逗号
-  // 或引号的游戏,转义写错不会报错,只会让那一行在表格软件里错位。
-  // 原来这条是靠 parseCsv(toCsv(x)) === x 的往返测的,而 parseCsv 是导入的一部分,
-  // 跟着一起没了 —— 所以改成直接钉输出的字面量,比自洽往返更硬。
-  test('逗号、引号、换行都要被引号包起来,引号还要翻倍', () => {
+describe('CSV export', () => {
+  // After import was deleted (2026-08-19), what remains here is the one silent failure on the
+  // export side: for a game whose name carries a comma or a quote, wrong escaping raises no
+  // error, it merely misaligns that row in a spreadsheet.
+  // This used to be tested by the round trip parseCsv(toCsv(x)) === x, and parseCsv was part of
+  // import, so it went away with it — hence pinning the literal output directly, which is harder
+  // than a self-consistent round trip.
+  test('commas, quotes and newlines are wrapped in quotes, with quotes doubled', () => {
     assert.equal(
       toCsv([['名字', '备注'], ['苏丹的游戏', '有,逗号和"引号"']]),
       '名字,备注\n苏丹的游戏,"有,逗号和""引号"""\n'
@@ -301,9 +310,10 @@ describe('CSV 导出', () => {
     assert.equal(toCsv([['干净', '']]), '干净,\n');
   });
 
-  test("没有成就系统的游戏导出成 'N/A',不是 0 —— 空成就数和 0 个成就是两回事", () => {
-    // 这条以前只从导入那一侧被钉住('N/A' → has_achievements=0)。导入没了,
-    // 而写 'N/A' 的代码还在 exportAll 里,所以补一条从导出这一侧钉它的。
+  test("a game with no achievement system exports as 'N/A', not 0 — an empty achievement count and zero achievements are two different things", () => {
+    // This used to be pinned only from the import side ('N/A' → has_achievements=0). Import is
+    // gone while the code writing 'N/A' is still in exportAll, so here is one pinning it from the
+    // export side.
     const db = openDb(':memory:');
     insertGame(db, { appid: '294100', name: 'RimWorld' });
     markNoAchievements(db, '294100');
@@ -318,16 +328,16 @@ describe('CSV 导出', () => {
     const byApp = Object.fromEntries(rows.slice(1).map((r) => [r.split(',')[1], r.split(',')]));
     assert.equal(byApp['294100'][4], 'N/A');
     assert.equal(byApp['294100'][3], '');
-    assert.equal(byApp['4164310'][4], '1000', '四位数不能带千位分隔符');
+    assert.equal(byApp['4164310'][4], '1000', 'a four-digit number must not carry a thousands separator');
     assert.equal(byApp['4164310'][5], '100.00%');
   });
 });
 
-describe('checkbox 同步的预演模式', () => {
+describe('the dry-run mode of checkbox syncing', () => {
   const dir = join(tmpdir(), 'sat-dry-test');
   const file = 'g.md';
 
-  test('--dry-run 报告会勾哪些,但一个字节都不写', async () => {
+  test('--dry-run reports what would be ticked and writes not one byte', async () => {
     mkdirSync(dir, { recursive: true });
     const full = join(dir, file);
     const before = '# t\n\nappid: 123\n\n- [ ] **体验**(Taste) — 描述\n- [ ] **自由**(Freedom) — 描述\n';
@@ -342,9 +352,9 @@ describe('checkbox 同步的预演模式', () => {
     const dry = await syncGameCheckboxes(db, steam, guide, 'G', { notion: null, config, dryRun: true });
     assert.equal(dry.length, 1);
     assert.match(dry[0].result, /^【预演】/);
-    assert.equal(readFileSync(full, 'utf8'), before, '预演不能改文件');
+    assert.equal(readFileSync(full, 'utf8'), before, 'a dry run must not modify the file');
 
-    // 去掉 dryRun 之后才真的写
+    // Only without dryRun does it really write
     const real = await syncGameCheckboxes(db, steam, guide, 'G', { notion: null, config });
     assert.match(real[0].result, /^已勾选/);
     assert.match(readFileSync(full, 'utf8'), /- \[x\] \*\*体验\*\*/);
@@ -352,12 +362,13 @@ describe('checkbox 同步的预演模式', () => {
   });
 });
 
-describe('同名成就(真实数据里踩到的:鬼谷八荒)', () => {
-  // 《鬼谷八荒》有两个成就中英文名完全一样:妙手空空 / Skilled Thief
-  //   ACHIEVEMENT_160101 = 隐秘偷窃10次   → 已解锁
-  //   ACHIEVEMENT_300020 = 通关且偷窃100次 → 没解锁
-  // 已解锁那个的 checkbox 早就被勾上、退出了待匹配池,于是同一个名字会去匹配
-  // 另一个**还没解锁**的 checkbox —— 勾错。精确匹配挡不住完全同名。
+describe('identically named achievements (hit in real data)', () => {
+  // One game has two achievements with exactly the same Chinese and English names:
+  //   ACHIEVEMENT_160101 = steal 10 times unseen  → unlocked
+  //   ACHIEVEMENT_300020 = finish and steal 100   → not unlocked
+  // The unlocked one's checkbox was ticked long ago and has left the candidate pool, so the same
+  // name goes on to match the other, **still locked** checkbox — the wrong tick. Exact matching
+  // cannot stop two genuinely identical names.
   const seed = () => {
     const db = openDb(':memory:');
     const ins = db.prepare('INSERT INTO achievements (appid, api_name, name_cn, name_en) VALUES (?,?,?,?)');
@@ -372,28 +383,29 @@ describe('同名成就(真实数据里踩到的:鬼谷八荒)', () => {
   ];
   const unlockedOne = [{ apiname: 'ACHIEVEMENT_160101', nameCn: '妙手空空', nameEn: 'Skilled Thief' }];
 
-  test('只解锁了同名成就中的一个 → 整个名字放弃,绝不勾另一个', () => {
+  test('only one of the identically named achievements is unlocked → the whole name is abandoned, and the other is never ticked', () => {
     const db = seed();
     const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_160101']));
-    assert.ok(unsafe.has('妙手空空'), '中文名应该被判为不安全');
-    assert.ok(unsafe.has('skilled thief'), '英文名也应该被判为不安全');
+    assert.ok(unsafe.has('妙手空空'), 'the Chinese name should be judged unsafe');
+    assert.ok(unsafe.has('skilled thief'), 'the English name should be judged unsafe too');
     const m = matchAchievements(unlockedOne, todos, { unsafeNames: unsafe });
-    assert.equal(m.length, 0, '不能勾任何 checkbox');
-    // 已解锁那个的框(隐秘10次版)本来就勾着 → 该勾的已经勾够了,不用提醒。
-    // 每次跑都报一条"需人工核对"而其实无事可做,只会让人以后不看日志。
-    assert.equal(m.skippedAmbiguous.length, 0, '这一组已经满足了,应该静默');
+    assert.equal(m.length, 0, 'not one checkbox may be ticked');
+    // The unlocked one's box was already ticked → everything that should be ticked is, and there
+    // is nothing to warn about. Reporting "needs manual review" on every run while there is
+    // nothing to do only trains people to stop reading the log.
+    assert.equal(m.skippedAmbiguous.length, 0, 'this group is already satisfied and should stay silent');
   });
 
-  test('同名成就一个都还没勾 → 要报告,不能静默', () => {
+  test('none of the identically named boxes is ticked → it has to be reported rather than staying silent', () => {
     const db = seed();
     const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_160101']));
     const noneTicked = todos.map((t) => ({ ...t, checked: false }));
     const m = matchAchievements(unlockedOne, noneTicked, { unsafeNames: unsafe });
-    assert.equal(m.length, 0, '还是不能瞎勾');
-    assert.equal(m.skippedAmbiguous.length, 1, '解锁了却一个框都没勾 → 该提醒');
+    assert.equal(m.length, 0, 'it still must not tick blindly');
+    assert.equal(m.skippedAmbiguous.length, 1, 'unlocked with not one box ticked → worth a warning');
   });
 
-  test('同名成就全部解锁 → 怎么配都对,照常匹配', () => {
+  test('all the identically named achievements are unlocked → any pairing is correct, so match as usual', () => {
     const db = seed();
     const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_160101', 'ACHIEVEMENT_300020']));
     assert.equal(unsafe.size, 0);
@@ -401,31 +413,33 @@ describe('同名成就(真实数据里踩到的:鬼谷八荒)', () => {
     assert.equal(matchAchievements(both, todos, { unsafeNames: unsafe }).length, 1);
   });
 
-  test('名字唯一的成就不受影响', () => {
+  test('an achievement with a unique name is unaffected', () => {
     const db = seed();
     const unsafe = findAmbiguousNames(db, '1468810', new Set(['ACHIEVEMENT_OTHER']));
     assert.ok(!unsafe.has('一鸣惊人'));
   });
 });
 
-describe('审计:把 checkbox 反查到具体成就', () => {
+describe('audit: resolving a checkbox back to a specific achievement', () => {
   const def = (api, cn, en, desc) => ({ api_name: api, name_cn: cn, name_en: en, description: desc });
 
-  // 系列成就:描述开头完全一样,只有数字不同。这是"按前缀匹配"翻车的地方
+  // A tiered family: the descriptions start identically and differ only in the number. This is
+  // where "match by prefix" goes off the rails
   const TIERED = [
     def('DMG_1', '牛刀小试', 'Damage1', '不触发天命特效，单发攻击造成100点伤害'),
     def('DMG_2', '威力一击', 'Damage2', '不触发天命特效，单发攻击造成500点伤害'),
     def('DMG_3', '致命一击', 'Damage3', '不触发天命特效，单发攻击造成1000点伤害'),
   ];
 
-  test('系列成就:低档位的框要对到低档位,不能对到还没解锁的高档位', () => {
-    // 真实事故:审计用"描述前 14 字"匹配,把这个正确勾上的 100 点档
-    // 算到了 500 点档头上,凭空报出一个假的"勾错"
+  test('a tiered family: the low tier box has to resolve to the low tier, not to a still-locked high one', () => {
+    // A real incident: the audit matched on "the first 14 characters of the description" and
+    // attributed this correctly ticked 100-damage tier to the 500-damage tier, inventing a
+    // false "wrongly ticked" finding
     const hit = resolveTodoToAchievement('牛刀小试 不触发天命特效，单发攻击造成100点伤害', TIERED);
     assert.equal(hit?.def.api_name, 'DMG_1');
   });
 
-  test('系列成就:每一档都能各自对上', () => {
+  test('a tiered family: every tier resolves to its own', () => {
     for (const [text, want] of [
       ['威力一击 不触发天命特效，单发攻击造成500点伤害', 'DMG_2'],
       ['致命一击 不触发天命特效，单发攻击造成1000点伤害', 'DMG_3'],
@@ -434,7 +448,7 @@ describe('审计:把 checkbox 反查到具体成就', () => {
     }
   });
 
-  test('描述抄了原文 → 按描述对上(最可信的那一层)', () => {
+  test('the description was copied verbatim → resolved by description (the most trustworthy layer)', () => {
     const hit = resolveTodoToAchievement('新年快乐：在打特定怪物的战斗中，投掷爆竹作为最后一击。补充说明若干', [
       def('ach_241', '新年快乐', 'Happy New Year', '在打特定怪物的战斗中，投掷爆竹作为最后一击。'),
     ]);
@@ -442,14 +456,14 @@ describe('审计:把 checkbox 反查到具体成就', () => {
     assert.equal(hit?.via, 'description');
   });
 
-  test('攻略把描述改写过 → 退回按名字对,名字唯一才算', () => {
+  test('the guide paraphrased the description → fall back to the name, and only if the name is unique', () => {
     const defs = [def('A', '隐秘大师', 'Sneaky', '在不被发现的情况下完成整个章节')];
     const hit = resolveTodoToAchievement('隐秘大师(Sneaky) — 全程别被看见', defs);
     assert.equal(hit?.def.api_name, 'A');
     assert.equal(hit?.via, 'name');
   });
 
-  test('同名成就 → 不下结论(返回 null),不能猜', () => {
+  test('identically named achievements → no conclusion (returns null), never a guess', () => {
     const defs = [
       def('A', '妙手空空', 'Skilled Thief', '偷窃10次'),
       def('B', '妙手空空', 'Skilled Thief', '通关且偷窃100次'),
@@ -457,24 +471,27 @@ describe('审计:把 checkbox 反查到具体成就', () => {
     assert.equal(resolveTodoToAchievement('妙手空空·通关100次版(Skilled Thief)', defs), null);
   });
 
-  test('两个成就描述一模一样 → 也不下结论', () => {
+  test('two achievements with identical descriptions → no conclusion either', () => {
     const defs = [def('A', '甲', 'A', '做同一件事'), def('B', '乙', 'B', '做同一件事')];
     assert.equal(resolveTodoToAchievement('随便什么 做同一件事', defs), null);
   });
 
-  test('完全对不上的文字 → null', () => {
+  test('text that matches nothing at all → null', () => {
     assert.equal(resolveTodoToAchievement('这一行只是章节标题', TIERED), null);
   });
 });
 
 /**
- * Dashboard 展开一行时,每条还没解锁的成就下面要显示"你自己攻略里是怎么写的"。
+ * When the Dashboard expands a row, every still-locked achievement has to show "what your own
+ * guide says about it".
  *
- * 这些用例守的都是**不会报错的**失败:贴错成就的打法、同一段文字在两张卡片上重复
- * 出现、以及为了让卡片别空着而把匹配放松掉。最后一条尤其要钉住 —— 这里"只是显示",
- * 松匹配的诱惑比写勾那条路径大得多,而两边共用同一个 resolveTodoToAchievement。
+ * These cases all guard failures that **raise no error**: attaching the wrong achievement's
+ * solution, the same passage appearing on two cards, and loosening the matching so a card is not
+ * left blank. The last one especially needs pinning — this is "only display", so the temptation
+ * to loosen is far stronger than on the ticking path, and both sides share the same
+ * resolveTodoToAchievement.
  */
-describe('攻略反查:成就 → 攻略里那一条', () => {
+describe('guide reverse lookup: achievement → the entry in the guide', () => {
   const def = (api, cn, en, desc) => ({ api_name: api, name_cn: cn, name_en: en, description: desc });
   const todo = (key, text, { checked = false, parent = null } = {}) => ({ key, text, checked, parent });
 
@@ -483,7 +500,7 @@ describe('攻略反查:成就 → 攻略里那一条', () => {
     def('B', '收藏家', 'Collector', '集齐全部藏品'),
   ];
 
-  test('匹配上的框:正文原样带出来,那就是卡片上要显示的解法', () => {
+  test('a matched box: the body comes through verbatim, and that is the solution the card shows', () => {
     const map = mapAchievementGuides(
       [todo('k1', '隐秘大师\n在不被发现的情况下完成整个章节\n走右边水道，别开灯')],
       DEFS
@@ -492,7 +509,7 @@ describe('攻略反查:成就 → 攻略里那一条', () => {
     assert.equal(map.get('A').key, 'k1');
   });
 
-  test('挂在成就下面的子步骤跟着一起走,嵌套深度保留下来', () => {
+  test('sub-steps hanging under the achievement travel with it, keeping their nesting depth', () => {
     const map = mapAchievementGuides([
       todo('k1', '收藏家 集齐全部藏品'),
       todo('k2', '藏品一:钟楼顶', { parent: 'k1', checked: true }),
@@ -506,8 +523,9 @@ describe('攻略反查:成就 → 攻略里那一条', () => {
     ]);
   });
 
-  test('子步骤自己就是另一个成就的框 → 不算上一条的子步骤', () => {
-    // 不排掉的话,同一段文字会在两张卡片上各出现一次,而且其中一次归错了成就
+  test('a sub-step that is itself another achievement box → it is not a sub-step of the one above', () => {
+    // Without excluding it, the same passage appears once on each of two cards, and one of those
+    // times it is attributed to the wrong achievement
     const map = mapAchievementGuides([
       todo('k1', '收藏家 集齐全部藏品'),
       todo('k2', '隐秘大师 在不被发现的情况下完成整个章节', { parent: 'k1' }),
@@ -516,7 +534,7 @@ describe('攻略反查:成就 → 攻略里那一条', () => {
     assert.equal(map.get('A').key, 'k2');
   });
 
-  test('同名成就 → 这条成就没有条目,卡片留白,绝不挑一个贴上去', () => {
+  test('identically named achievements → this achievement gets no entry, the card stays blank, and one is never picked at random', () => {
     const dup = [
       def('X', '妙手空空', 'Skilled Thief', '偷窃10次'),
       def('Y', '妙手空空', 'Skilled Thief', '通关且偷窃100次'),
@@ -525,93 +543,100 @@ describe('攻略反查:成就 → 攻略里那一条', () => {
     assert.equal(map.size, 0);
   });
 
-  test('一个成就在攻略里被提到两次 → 只认第一条', () => {
+  test('one achievement mentioned twice in the guide → only the first entry counts', () => {
     const first = todo('k1', '隐秘大师 在不被发现的情况下完成整个章节');
     const again = todo('k9', '隐秘大师 — 另一处顺带提了一句');
-    // 先确认两条**都真的**反查得到 A —— 否则这个用例会在"第二条压根没匹配上"
-    // 的情况下自动通过,那就什么都没钉住(变异测试抓到过这个空转版本)
+    // First confirm **both** really do resolve to A — otherwise this case passes automatically
+    // when the second one never matched at all, pinning nothing (mutation testing caught that
+    // empty-running version)
     assert.equal(resolveTodoToAchievement(again.text, DEFS)?.def.api_name, 'A');
     const map = mapAchievementGuides([first, again], DEFS);
     assert.equal(map.get('A').key, 'k1');
   });
 
-  test('整份攻略一个框都对不上 → 空 Map,不是抛错', () => {
+  test('a whole guide where not one box matches → an empty Map, not a throw', () => {
     const map = mapAchievementGuides([todo('k1', '第一章:开场'), todo('k2', '第二章:结局')], DEFS);
     assert.equal(map.size, 0);
   });
 });
 
 /**
- * 卡片上方已经有成就名和描述,攻略正文开头的复述要削掉。
+ * The card already carries the achievement name and description above, so the restatement at the
+ * start of the guide body has to be trimmed.
  *
- * 这一组里**大半是"必须不删"**:删掉一行用户自己写的东西是拿不回来的,而留一行
- * 只是啰嗦。松紧的不对称就是这个判据的全部理由,所以反例比正例更值得钉住。
+ * **Most of this group is "must not delete"**: deleting a line the user wrote is unrecoverable,
+ * while keeping one is merely verbose. That asymmetry is the entire reason for this criterion,
+ * so the negative cases are worth pinning more than the positive ones.
  */
-describe('削掉攻略开头对成就名/描述的复述', () => {
+describe('trimming the guide opening restatement of the name and description', () => {
   const NAMES = ['隐秘大师', 'Sneaky'];
   const DESC = '在不被发现的情况下完成整个章节';
 
-  test('名字 + 逐字描述 + 打法 → 只留打法', () => {
+  test('name + verbatim description + solution → only the solution is kept', () => {
     const out = stripGuideEcho('隐秘大师\n在不被发现的情况下完成整个章节\n走右边水道，别开灯',
       { names: NAMES, description: DESC });
     assert.equal(out, '走右边水道，别开灯');
   });
 
-  test('`中文名(English)` 那种写法也认', () => {
+  test('the `中文名(English)` form is recognised too', () => {
     const out = stripGuideEcho('隐秘大师(Sneaky)\n走右边水道', { names: NAMES, description: DESC });
     assert.equal(out, '走右边水道');
   });
 
-  test('`**加粗**` 的名字照样认(markdown 后端)', () => {
+  test('a `**bold**` name is recognised as well (the markdown backend)', () => {
     const out = stripGuideEcho('**隐秘大师**\n走右边水道', { names: NAMES, description: DESC });
     assert.equal(out, '走右边水道');
   });
 
-  test('描述被改写过 → 留着,那是用户自己的话', () => {
+  test('a rewritten description → kept, those are the user own words', () => {
     const text = '隐秘大师\n全程不能被任何人看到\n走右边水道';
     assert.equal(stripGuideEcho(text, { names: NAMES, description: DESC }),
       '全程不能被任何人看到\n走右边水道');
   });
 
-  test('隐藏成就:Steam 没有描述 → 一行都不能多删', () => {
-    // 这行"处理酸奶丢失的情况"是全卡片唯一写着达成条件的地方,Steam 那边是空的
+  test('a hidden achievement: Steam has no description → not one line may be over-deleted', () => {
+    // This line is the only place on the whole card stating the unlock condition, because the
+    // Steam side is empty
     const out = stripGuideEcho('夏洛克家\n处理酸奶丢失的情况。',
       { names: ['夏洛克家'], description: '' });
     assert.equal(out, '处理酸奶丢失的情况。');
   });
 
-  test('名字只是开头、后面还有正文 → 整行不动', () => {
-    // extractTitleCandidates 会从这行切出「知识」,照那个删就把整条打法删没了。
-    // **必须再挂一行正文**:只有这一行的话,删过头会让 rest 变空、兜底原样返回,
-    // 这条用例就永远是绿的——变异测试抓到过它的空转版本
+  test('the name is only the start of the line with body text after it → the whole line is left alone', () => {
+    // extractTitleCandidates would cut 「知识」 out of this line, and deleting by that would delete
+    // the whole solution.
+    // **A second body line has to be attached**: with only this one line, over-deleting empties
+    // rest and the fallback returns it verbatim, making this case permanently green — mutation
+    // testing caught that empty-running version
     const head = '知识(Rationality) — "知识让我们知道自己依旧不知道。" 集齐全部百科全书条目';
     const text = head + '\n先去图书馆把三轮问答刷完';
     assert.equal(stripGuideEcho(text, { names: ['知识', 'Rationality'], description: '知识让我们知道自己依旧不知道。' }),
       text);
   });
 
-  test('复述夹在中间而不是开头 → 不碰', () => {
+  test('a restatement in the middle rather than at the start → untouched', () => {
     const text = '先做支线\n隐秘大师\n再回主线';
     assert.equal(stripGuideEcho(text, { names: NAMES, description: DESC }), text);
   });
 
-  test('整条攻略只有名字和描述 → 空串,让调用方别画窗口', () => {
-    // 原样吐回来的话,这种"只抄了官方文案"的条目反而是重复得最彻底的一张卡片
+  test('a whole guide entry of nothing but the name and description → empty string, telling the caller not to draw a panel', () => {
+    // Returned verbatim, an entry that "only copied the official text" would be the most
+    // thoroughly duplicated card of all
     const text = '隐秘大师\n在不被发现的情况下完成整个章节';
     assert.equal(stripGuideEcho(text, { names: NAMES, description: DESC }), '');
   });
 
-  test('结尾句读的差别不该挡住描述的匹配', () => {
+  test('a difference in trailing punctuation should not block the description match', () => {
     const out = stripGuideEcho('隐秘大师\n在不被发现的情况下完成整个章节。\n走右边水道',
       { names: NAMES, description: DESC });
     assert.equal(out, '走右边水道');
   });
 });
 
-describe('同名成就:攻略抄了描述原文就能救回来', () => {
-  // 同一个游戏两个成就名字完全一样,只有描述不同。
-  // 只靠名字永远分不出来(见上面的 findAmbiguousNames),但如果 checkbox 里抄了
-  // 完整的官方描述,框指的是哪个成就就没有二义性了。
+describe('identically named achievements: copying the description verbatim rescues them', () => {
+  // Two achievements in the same game with exactly the same name, differing only in description.
+  // The name alone can never separate them (see findAmbiguousNames above), but if the checkbox
+  // copied the full official description, which achievement the box refers to is unambiguous.
   const DEFS = [
     { api_name: 'A', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '偷窃10次且未被察觉' },
     { api_name: 'B', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '通关且成功偷窃100次' },
@@ -619,19 +644,19 @@ describe('同名成就:攻略抄了描述原文就能救回来', () => {
   const unsafe = new Set(['妙手空空', 'skilled thief']);
   const unlockedA = [{ apiname: 'A', nameCn: '妙手空空', nameEn: 'Skilled Thief' }];
 
-  test('抄了描述原文 → 勾中正确的那个框,不碰另一个', () => {
+  test('the description was copied verbatim → the correct box is ticked and the other is untouched', () => {
     const todos = [
       { key: 1, text: '**妙手空空**<br>偷窃10次且未被察觉<br>提示:开局就能做', checked: false },
       { key: 2, text: '**妙手空空**<br>通关且成功偷窃100次<br>提示:要二周目', checked: false },
     ];
     const m = matchAchievements(unlockedA, todos, { unsafeNames: unsafe, defs: DEFS });
     assert.equal(m.length, 1);
-    assert.equal(m[0].key, 1, '应该勾解锁了的那个(A=偷窃10次),不是还没解锁的 B');
+    assert.equal(m[0].key, 1, 'it should tick the unlocked one (A), not the still-locked B');
     assert.equal(m[0].via, 'description');
     assert.equal(m.skippedAmbiguous.length, 0);
   });
 
-  test('只改写、没抄描述原文 → 仍然放弃,不猜', () => {
+  test('only paraphrased, with no verbatim description → still abandoned, never guessed', () => {
     const todos = [
       { key: 1, text: '**妙手空空·隐秘10次版**(偷偷摸摸拿十次东西)', checked: false },
       { key: 2, text: '**妙手空空·通关100次版**(打完再拿一百次)', checked: false },
@@ -641,16 +666,16 @@ describe('同名成就:攻略抄了描述原文就能救回来', () => {
     assert.equal(m.skippedAmbiguous.length, 1);
   });
 
-  test('已解锁那个的框早就勾上了 → 不会去勾另一个还没解锁的', () => {
+  test('the unlocked one box was ticked long ago → the other, still-locked one is not ticked', () => {
     const todos = [
       { key: 1, text: '**妙手空空**<br>偷窃10次且未被察觉', checked: true },
       { key: 2, text: '**妙手空空**<br>通关且成功偷窃100次', checked: false },
     ];
     const m = matchAchievements(unlockedA, todos, { unsafeNames: unsafe, defs: DEFS });
-    assert.equal(m.length, 0, '这才是最初那个 bug 的核心场景,必须一个都不勾');
+    assert.equal(m.length, 0, 'this is the core scenario of the original bug, and not one may be ticked');
   });
 
-  test('名字唯一的成就不受第一遍影响,照旧按名字匹配', () => {
+  test('an achievement with a unique name is unaffected by the first pass and still matches by name', () => {
     const defs = [...DEFS, { api_name: 'C', name_cn: '一鸣惊人', name_en: 'Debut', description: '首次出场' }];
     const todos = [{ key: 9, text: '**一鸣惊人**(Debut) — 首次出场', checked: false }];
     const m = matchAchievements([{ apiname: 'C', nameCn: '一鸣惊人', nameEn: 'Debut' }], todos, {
@@ -661,45 +686,48 @@ describe('同名成就:攻略抄了描述原文就能救回来', () => {
   });
 });
 
-describe('撞名闸门按名字关,不按成就关', () => {
-  // 全库 12 款撞名游戏里有 9 款**只撞一种语言** —— 是 Steam 本地化写错了,原名分得开。
-  // 以前只要有一种语言撞车,整个成就就被赶进"只能靠描述"那一趟,另一种语言里那个
-  // 完全唯一的名字白白浪费掉。分不出双胞胎的是**名字**,不是成就。
+describe('the collision gate closes per name, not per achievement', () => {
+  // Of the 12 games in the library with colliding names, 9 collide in **only one language** —
+  // a Steam localisation mistake, with the original names perfectly separable. Previously, a
+  // collision in one language sent the whole achievement down the description-only path, wasting
+  // a completely unique name in the other language. What cannot tell the twins apart is the
+  // **name**, not the achievement.
   //
-  // 放宽的只有"别把唯一的名字一起扔掉"这一点;等值匹配本身一个字没动:
-  // 仍然要求完全相等,仍然不许子串、不许前缀,撞车的那个名字仍然一个都不许用。
+  // The only loosening is "do not throw away the unique name too"; equality matching itself is
+  // unchanged: full equality is still required, substrings and prefixes are still forbidden, and
+  // the colliding name itself is still never usable.
   const DEFS = [
     { api_name: 'NANO', name_cn: '生化武器大师', name_en: 'Nano-Virus Master', description: '在终极困难模式下打败纳米病毒大师!' },
     { api_name: 'BIO', name_cn: '生化武器大师', name_en: 'Bioweapon Master', description: '在终极困难模式下打败生化武器大师!' },
   ];
-  const unsafe = new Set(['生化武器大师']); // 只有中文撞车
+  const unsafe = new Set(['生化武器大师']); // only the Chinese collides
   const nano = [{ apiname: 'NANO', nameCn: '生化武器大师', nameEn: 'Nano-Virus Master' }];
 
-  test('中文撞车、英文唯一 → 靠英文名勾上,而且不碰双胞胎的框', () => {
+  test('the Chinese collides while the English is unique → ticked via the English name, without touching the twin box', () => {
     const todos = [
       { key: 1, text: '生化武器大师(Nano-Virus Master)', checked: false },
       { key: 2, text: '生化武器大师(Bioweapon Master)', checked: false },
     ];
     const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
     assert.equal(m.length, 1);
-    assert.equal(m[0].key, 1, '只能勾英文名对得上的那个');
+    assert.equal(m[0].key, 1, 'only the one whose English name matches may be ticked');
     assert.equal(m[0].via, 'name');
   });
 
-  test('撞车的那个名字仍然一个都不许用', () => {
+  test('the colliding name itself is still never usable', () => {
     const todos = [{ key: 1, text: '生化武器大师', checked: false }];
     const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
-    assert.equal(m.length, 0, '框里只有撞名的那个名字 → 分不出是哪个,必须放弃');
+    assert.equal(m.length, 0, 'the box carries only the colliding name → which one it is cannot be told, so abandon it');
   });
 
-  test('靠没撞车的名字救回来的,不算"跳过" —— 不能报假警', () => {
+  test('one rescued by the non-colliding name does not count as "skipped" — no false alarm', () => {
     const todos = [{ key: 1, text: '生化武器大师(Nano-Virus Master)', checked: false }];
     const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
     assert.equal(m.length, 1);
-    assert.equal(m.skippedAmbiguous.length, 0, '配上了就不该再报"需人工核对"');
+    assert.equal(m.skippedAmbiguous.length, 0, 'once matched it should not report "needs manual review" again');
   });
 
-  test('反过来一样:英文撞车、中文唯一(犹格索托斯的庭院的 "Text" 占位符)', () => {
+  test('and the reverse: the English collides while the Chinese is unique (a "Text" placeholder)', () => {
     const defs = [
       { api_name: 'X', name_cn: '寻至世界两端', name_en: 'Text', description: 'd1' },
       { api_name: 'Y', name_cn: '献给死神塔的花束', name_en: 'Text', description: 'd2' },
@@ -716,7 +744,7 @@ describe('撞名闸门按名字关,不按成就关', () => {
     assert.equal(m[0].via, 'name');
   });
 
-  test('两种语言都撞 → 照旧只能靠描述,真同名一点都不放宽', () => {
+  test('both languages collide → still description-only, with genuinely identical names loosened not one bit', () => {
     const defs = [
       { api_name: 'A', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '偷窃10次且未被察觉' },
       { api_name: 'B', name_cn: '妙手空空', name_en: 'Skilled Thief', description: '通关且成功偷窃100次' },
@@ -729,88 +757,93 @@ describe('撞名闸门按名字关,不按成就关', () => {
     assert.equal(m.skippedAmbiguous.length, 1);
   });
 
-  test('描述仍然优先于名字:两条路都通时走描述', () => {
+  test('the description still wins over the name: when both paths work, take the description', () => {
     const todos = [
       { key: 1, text: '生化武器大师(Nano-Virus Master)\n在终极困难模式下打败纳米病毒大师!', checked: false },
     ];
     const m = matchAchievements(nano, todos, { unsafeNames: unsafe, defs: DEFS });
     assert.equal(m.length, 1);
-    assert.equal(m[0].via, 'description', '第一遍先跑 —— 描述比名字精确');
+    assert.equal(m[0].via, 'description', 'the first pass runs first — the description is more precise than the name');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 换行风格
+// Line-ending style
 // ---------------------------------------------------------------------------
 
-describe('CRLF 的本地攻略必须照常工作', () => {
+describe('a CRLF local guide has to work as usual', () => {
 
-  test('CRLF 文件读得出 checkbox —— 这是个静默失败,两个工具都不报错', () => {
-    // 踩过(2026-08-10):Windows 上的编辑器默认写 CRLF。原来是 split('\n'),
-    // 行尾剩一个 \r,而 JS 正则里 `.` **不匹配 \r**(它算行终止符),
-    // 于是 `(.*)$` 匹配不上,整份攻略读出 0 个 checkbox。
-    // 表现是 checkbox-sync 一个框都不勾、guide-lint 报"所有成就都缺 checkbox",
-    // **两边都不报错**,看起来就像攻略写错了
+  test('a CRLF file yields its checkboxes — a silent failure where neither tool reports anything', () => {
+    // Hit on 2026-08-10: editors on Windows write CRLF by default. The code used split('\n'),
+    // leaving a \r at the end of the line, and `.` in a JS regex **does not match \r** (it counts
+    // as a line terminator), so `(.*)$` failed to match and the whole guide read as 0 checkboxes.
+    // It presented as checkbox-sync ticking nothing and guide-lint reporting "every achievement is
+    // missing a checkbox", **with neither side raising an error**, which looks like the guide was
+    // written wrong
     const dir = mkdtempSync(join(tmpdir(), 'crlf-'));
     const p = join(dir, 'g.md');
     writeFileSync(p, '# 游戏\r\n\r\nappid: 1\r\n\r\n- [ ] **第一步**<br>描述\r\n  - [ ] 子步骤\r\n');
     const todos = loadTodos(p);
     assert.equal(todos.length, 2);
     assert.equal(todos[0].text, '**第一步**<br>描述');
-    assert.equal(todos[1].parent, todos[0].key, '缩进层级也要认得出来');
+    assert.equal(todos[1].parent, todos[0].key, 'the indent level has to be recognised too');
   });
 
-  test('打勾之后保持原来的换行风格(不要把整个文件改成 LF)', () => {
-    // 顺手全文改成 LF 会让 git diff 变成"每一行都改了",真正的改动淹没在里面
+  test('ticking preserves the original line-ending style (do not convert the whole file to LF)', () => {
+    // Converting the whole file to LF while there makes git diff show every line as changed,
+    // burying the real change inside it
     const dir = mkdtempSync(join(tmpdir(), 'crlf-'));
     const p = join(dir, 'g.md');
     writeFileSync(p, '- [ ] **甲**\r\n- [ ] **乙**\r\n');
     applyChecks(p, [0]);
     const after = readFileSync(p, 'utf8');
-    assert.match(after, /^- \[x\] \*\*甲\*\*\r\n/, '该勾的勾上了');
-    assert.ok(!/[^\r]\n/.test(after), '不能混进裸 LF');
+    assert.match(after, /^- \[x\] \*\*甲\*\*\r\n/, 'the one to tick was ticked');
+    assert.ok(!/[^\r]\n/.test(after), 'no bare LF may be mixed in');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 比较用的归一化(flatCompare)
+// Normalisation for comparison (flatCompare)
 // ---------------------------------------------------------------------------
-// 波西亚时光「好家长」:Steam 写的是弯引号「与孩子的关系达到“幸福的孩子”。」,
-// 攻略里抄成了直引号。同一句话,我们判成「改写过」,于是 audit 反查不动那个框。
-// 实测全库 791 条不匹配里 14 条是这一种,其余 777 条是作者真的改写了。
-describe('flatCompare:只折叠写法,不折叠内容', () => {
-  test('印刷体引号和直引号视为同一个字符', () => {
+// One game's 「好家长」: Steam writes curly quotes 「与孩子的关系达到“幸福的孩子”。」 while the
+// guide copied straight quotes. The same sentence, judged as "paraphrased", so audit cannot
+// resolve that box.
+// Measured across the library, 14 of 791 mismatches are this kind and the other 777 are genuine
+// rewrites by the author.
+describe('flatCompare: fold the spelling, never the content', () => {
+  test('typographic and straight quotes count as the same character', () => {
     assert.equal(flatCompare('达到“幸福的孩子”。'), flatCompare('达到"幸福的孩子"。'));
     assert.equal(flatCompare('it\u2019s'), flatCompare("it's"));
   });
 
-  test('空格照旧折叠', () => {
+  test('whitespace is still folded', () => {
     assert.equal(flatCompare('a b\nc'), 'abc');
   });
 
-  test('破折号和省略号故意不折 —— 没有证据说需要,而它们含义确实不同', () => {
+  test('dashes and the ellipsis are deliberately not folded — there is no evidence it is needed, and their meanings really do differ', () => {
     assert.notEqual(flatCompare('1-2'), flatCompare('1\u20142'));
     assert.notEqual(flatCompare('...'), flatCompare('\u2026'));
   });
 
-  test('两段不同的描述不会被折成一样', () => {
+  test('two different descriptions are not folded into one', () => {
     assert.notEqual(flatCompare('杀死100只怪'), flatCompare('杀死200只怪'));
     assert.notEqual(flatCompare('“甲”'), flatCompare('“乙”'));
   });
 
-  test('audit 现在反查得动只差引号字形的框', () => {
+  test('audit can now resolve a box that differs only in quote glyphs', () => {
     const defs = [
       { api_name: 'A', name_cn: '好家长', name_en: '', description: '与孩子的关系达到“幸福的孩子”。' },
       { api_name: 'B', name_cn: '别的', name_en: '', description: '完全不同的描述。' },
     ];
     const hit = resolveTodoToAchievement('好家长<br>与孩子的关系达到"幸福的孩子"。<br>心得', defs);
     assert.equal(hit?.def?.api_name, 'A');
-    assert.equal(hit?.via, 'description', '走的应该是描述那条路,不是撞上名字');
+    assert.equal(hit?.via, 'description', 'it should go via the description path rather than hitting the name');
   });
 
-  test('只差引号的两个成就,两个都不匹配 —— 安全的那一侧', () => {
-    // 折叠之后描述唯一性判定变成 2,于是描述那条路整个不走。
-    // 这个项目一贯选「宁可勾不上,不可勾错」
+  test('two achievements differing only in quotes: neither matches — the safe side', () => {
+    // After folding, the description uniqueness count becomes 2, so the description path is not
+    // taken at all.
+    // This project consistently chooses "rather fail to tick than tick wrongly"
     const defs = [
       { api_name: 'A', name_cn: '甲', name_en: '', description: '拿到“钥匙”。' },
       { api_name: 'B', name_cn: '乙', name_en: '', description: '拿到"钥匙"。' },
@@ -818,13 +851,15 @@ describe('flatCompare:只折叠写法,不折叠内容', () => {
     assert.equal(resolveTodoToAchievement('随便写点<br>拿到"钥匙"。', defs), null);
   });
 
-  test('两个提问方都走同一个函数,不许各写一份', () => {
-    // 原来 resolveTodoToAchievement 和 guidelint 各有一份一模一样的私有 flat。
-    // 改一份漏一份的表现是:linter 说「audit 反查不了这个框」,而 audit 其实反查得动。
+  test('both askers go through the same function, with no second copy allowed', () => {
+    // resolveTodoToAchievement and guidelint used to hold one identical private flat each.
+    // Changing one and missing the other presents as: the linter says "audit cannot resolve this
+    // box" while audit resolves it perfectly well.
     //
-    // **guides.js 里还有第三份,那一份是故意不一样的**:`nameGroupAlreadySatisfied`
-    // 用的是宽松的包含匹配 + lowercase,而它只决定要不要打一行日志、从不决定写什么
-    // (见它自己的注释和 CLAUDE.md)。合并它等于抹掉那条边界,所以这里只钉写入侧的两处。
+    // **There is a third copy in guides.js, and that one is deliberately different**:
+    // `nameGroupAlreadySatisfied` uses loose containment plus lowercase, and it only decides
+    // whether to print a log line, never what to write (see its own comment and CLAUDE.md).
+    // Merging it would erase that boundary, so only the two on the write side are pinned here.
     const strip = (src) => src
       .replace(/(^|[^:])\/\/[^\n]*/gm, '$1')
       .replace(/\/\*[\s\S]*?\*\//g, '');
@@ -832,18 +867,90 @@ describe('flatCompare:只折叠写法,不折叠内容', () => {
     const lint = strip(readFileSync(new URL('../lib/guidelint.js', import.meta.url), 'utf8'));
 
     const at = guides.indexOf('export function resolveTodoToAchievement');
-    assert.ok(at > 0, '找不到 resolveTodoToAchievement —— 这条检查失去了目标');
+    assert.ok(at > 0, 'cannot find resolveTodoToAchievement — this check has lost its target');
     const rta = guides.slice(at, guides.indexOf('\n}', at));
-    assert.ok(rta.length > 200, '切到的应该是整个函数');
-    // `\\s` 才是「一个反斜杠接一个 s」。写成 `\s` 是空白字符类,永远匹配不到源码里的
-    // `replace(/\s+/g` —— 这两条断言第一版就是那么写的,于是恒真,变异测试才抓出来
+    assert.ok(rta.length > 200, 'what was sliced should be the whole function');
+    // `\\s` is what means "a backslash followed by an s". Written as `\s` it is the whitespace
+    // class, which can never match the `replace(/\s+/g` in the source — these two assertions were
+    // written that way at first, making them constantly true, and mutation testing is what caught it
     const INLINED = /replace\(\/\\s\+\/g/;
-    assert.doesNotMatch(rta, INLINED, 'audit 的判据必须走 flatCompare,不能自己再折一份');
+    assert.doesNotMatch(rta, INLINED, 'the audit criterion has to go through flatCompare rather than folding its own copy');
     assert.match(rta, /flatCompare/);
 
     assert.doesNotMatch(lint, INLINED,
-      'linter 的判据必须走 flatCompare —— 它的措辞是「audit 反查不了」,就得拿 audit 的函数判');
-    // 只查 flatCompare 出现过是不够的:import 那一行就有它,把 flat 换成内联版照样绿
-    assert.match(lint, /const flat = flatCompare/, 'linter 的 flat 必须就是 flatCompare 本身');
+      'the linter criterion has to go through flatCompare — its wording is 「audit 反查不了」, so it has to judge with the audit function');
+    // Checking that flatCompare appears is not enough: the import line contains it, so replacing
+    // flat with an inlined version would still be green
+    assert.match(lint, /const flat = flatCompare/, 'the linter flat has to be flatCompare itself');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Stage 1 matches a description in either language
+// ---------------------------------------------------------------------------
+
+/**
+ * The description stage is the precise one — it claims a checkbox before name matching could, and
+ * it is the **only** way to tell apart two achievements that share a name. Matching one language
+ * only means it silently never fires on a guide written in the other, and every one of those falls
+ * through to the name stage, where a shared name resolves to nothing at all.
+ *
+ * It is not fixed by consulting the guide's recorded language: that value would have to be right,
+ * and rows written before it existed carry an assumed one. Comparing against both needs no answer.
+ */
+describe('resolveTodoToAchievement stage 1 — either language', () => {
+  const A = {
+    api_name: 'A', name_cn: '第一个', name_en: 'The First',
+    description: '解锁第一个成就。', description_en: 'Unlock the first achievement.',
+  };
+  const B = {
+    api_name: 'B', name_cn: '第二个', name_en: 'The Second',
+    description: '再来一次。', description_en: 'Do it again.',
+  };
+
+  test('a Chinese guide quoting the Chinese description still resolves', () => {
+    const hit = resolveTodoToAchievement('**第一个**<br>解锁第一个成就。<br>随手就有', [A, B]);
+    assert.equal(hit?.def.api_name, 'A');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('an English guide quoting the English description resolves the same way', () => {
+    const hit = resolveTodoToAchievement('**The First**<br>Unlock the first achievement.<br>trivial', [A, B]);
+    assert.equal(hit?.def.api_name, 'A');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('two achievements sharing a name are told apart by the English description', () => {
+    // The case this stage exists for. Both are called the same thing, so the name stage refuses
+    // (hit.size !== 1) and returns null — only the description can separate them
+    const dupA = { ...A, name_cn: '收集', name_en: 'Collect' };
+    const dupB = { ...B, name_cn: '收集', name_en: 'Collect' };
+    const hit = resolveTodoToAchievement('**Collect**<br>Do it again.<br>later', [dupA, dupB]);
+    assert.equal(hit?.def.api_name, 'B');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('a description shared by two achievements still refuses, across languages', () => {
+    // Uniqueness is what makes this stage safe, and it has to hold over the union of both
+    // languages — otherwise an English description colliding with another achievement's Chinese one
+    // would match wrongly, which is worse than not matching
+    const collide = { ...B, description: 'Unlock the first achievement.' };
+    assert.equal(resolveTodoToAchievement('Unlock the first achievement.', [A, collide]), null);
+  });
+
+  test('**one achievement whose two descriptions are the same string still matches**', () => {
+    // Counting occurrences rather than achievements reads this as a collision with itself and
+    // refuses a match that is in fact unambiguous. Some games ship identical text in both schemas
+    const same = { api_name: 'S', name_cn: '同文', name_en: 'Same', description: 'Do the thing.', description_en: 'Do the thing.' };
+    const hit = resolveTodoToAchievement('**Same**<br>Do the thing.', [same, B]);
+    assert.equal(hit?.def.api_name, 'S');
+    assert.equal(hit?.via, 'description');
+  });
+
+  test('an achievement with only a Chinese description is unaffected', () => {
+    // Every guide written before description_en existed is in this state
+    const old = { api_name: 'O', name_cn: '旧的', name_en: 'Old', description: '只有中文描述。' };
+    assert.equal(resolveTodoToAchievement('**旧的**<br>只有中文描述。', [old, B])?.def.api_name, 'O');
+  });
+});
+

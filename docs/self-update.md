@@ -1,161 +1,166 @@
-# 自更新(设计与交接)
+# Self-update (design and handover)
 
-> 代码怎么写的看 `launcher/README.md` 的 Self-update 一节,**为什么只能这么写**看这里。
-> 实现在 `launcher/updater.js`、`launcher/main.js`、`launcher/postbuild.js`,测试在 `test/selfupdate.test.js`。
+> How the code is written is in `launcher/README.md`'s Self-update section; **why it can only be written that way** is here.
+> The implementation is `launcher/updater.js`, `launcher/main.js` and `launcher/postbuild.js`; the tests are `test/selfupdate.test.js`.
 
-**读这份文档的顺序**:先看「已经验过的事实」,那些是花了工夫查的,不要重新推导;再看「三条不能违反的约束」,那是安全边界;最后才看方案。
-
----
-
-## 一、这件事要解决什么
-
-摩擦不是「不知道有新版」,而是**重下太烦**(下载 → 退出 → 解压覆盖三步)。所以只做通知不够,要做到一键。
-
-但真正的驱动力是另一件事,而且它比方便重要得多:
-
-> **覆盖式更新永远不删文件。** 哪天某个版本删掉了一个文件,用户机器上那个文件就永远留着。Electron 版本升级会换掉一大批 dll 和 locales,新旧混在一起。最终每个用户的文件夹都是「他装过的所有版本的并集」—— 谁也没法复现他的状态,**「干净解压能跑」不再等于「他机器上能跑」**。
-
-这已经不是假设了。见下面「文件集已经变过一次」。
+**Read this in order**: the verified facts first — those cost real effort to establish, do not re-derive them; then the three constraints that must not be violated, which are the safety boundary; the design only after that.
 
 ---
 
-## 二、已经验过的事实(不要重新推导)
+## 1. What this solves
 
-| 事实 | 怎么验的 | 后果 |
+The friction was never "not knowing there is a new version", it is that **re-downloading is tedious** (download → quit → unzip over the top, three steps). So a notification alone is not enough; it has to be one click.
+
+But the real driver is something else, and it matters far more than convenience:
+
+> **An overwrite-style update never deletes anything.** The day a version drops a file, that file stays on the user's machine forever. An Electron version bump swaps out a large batch of DLLs and locales, and old and new end up mixed together. Eventually every user's folder is **the union of every version they ever installed** — nobody can reproduce their state, and **"a clean unzip runs" stops meaning "it runs on their machine"**.
+
+This is no longer hypothetical. See "the file set has already changed once" below.
+
+---
+
+## 2. Verified facts (do not re-derive)
+
+| Fact | How it was verified | Consequence |
 |---|---|---|
-| **`electron-updater` 在 Windows 只有 `NsisUpdater`** | 列 `electron-userland/electron-builder` 的 `packages/electron-updater/src`,平台实现只有 `NsisUpdater` / `MacUpdater` / 几个 Linux 的。zip 更新只存在于 macOS | 用现成方案 = 必须放弃 `zip` target 改 NSIS |
-| **GitHub Releases API 每个附件带 sha256** | 打真实 API:`assets[].digest` = `sha256:6f4fa98e…` | 自建更新器能免费验完整性,不需要额外基础设施 |
-| **用户数据在 `resources/tracker/`,和程序文件同层** | import **打包出来的那份** `lib/config.js` 打印 `CONFIG_PATH` | 见下面的约束 1 —— 这是整件事最关键的一条 |
-| **zip 里没有任何用户数据** | `unzip -l` 查 `config.json` / `steam.db` / `local.config` 全 0 | 清单天然不含用户数据,安全是构造出来的 |
-| **`launcher/` 运行时依赖为 0** | 读 `package.json`,只有 devDependencies | 装 `electron-updater` 会是第一个 |
-| **`app.getVersion()` 恰好等于 tag 去掉 `v`** | `launcher/package.json` 的版本就是 tag 的来源 | 版本比对是直接的,不需要额外元数据 |
-| **文件集已经变过一次** | v1.1.3 发布版 102 条,加了托盘图标之后 104 条 | 「四个版本 102 条一模一样」这个性质已经不成立 |
-| **`extraResources` 的 `lib/**/*` 会装进 `lib/` 下任何文件** | 变异脚本留下的两个 `.mutbak` 一度被打进 zip | 垃圾文件进包不会有任何报错 |
+| **`electron-updater` on Windows has only `NsisUpdater`** | Listed `electron-userland/electron-builder`'s `packages/electron-updater/src`; the platform implementations are `NsisUpdater` / `MacUpdater` / a few Linux ones. Zip updating exists only on macOS | Using the off-the-shelf solution = abandoning the `zip` target for NSIS |
+| **The GitHub Releases API carries a sha256 per asset** | Hit the real API: `assets[].digest` = `sha256:6f4fa98e…` | A hand-rolled updater gets integrity verification for free, with no extra infrastructure |
+| **User data lives in `resources/tracker/`, on the same level as program files** | Imported **the packaged copy** of `lib/config.js` and printed `CONFIG_PATH` | See constraint 1 below — this is the single most important fact here |
+| **The zip contains no user data at all** | `unzip -l` for `config.json` / `steam.db` / `local.config` returns 0 for each | The manifest cannot contain user data; the safety is constructed, not filtered |
+| **`launcher/` has zero runtime dependencies** | Read `package.json` — devDependencies only | Installing `electron-updater` would be the first one |
+| **`app.getVersion()` is exactly the tag minus the `v`** | `launcher/package.json`'s version is where the tag comes from | Version comparison is direct; no extra metadata needed |
+| **The file set has already changed once** | The v1.1.3 release had 102 entries; adding the tray icon made it 104 | "Four releases, the same 102 entries" is no longer a property that holds |
+| **`extraResources`' `lib/**/*` will package *any* file under `lib/`** | Two `.mutbak` files left behind by a mutation script once made it into the zip | Junk files entering the package raise no error whatsoever |
 
-### 为什么不换 NSIS
+### Why not switch to NSIS
 
-它跟这个项目**已经付过学费的两个决定**正面冲突:
+It collides head-on with **two decisions this project has already paid for**:
 
-1. `launcher/README.md` 明确写了不用 NSIS 系 target,因为自解压到 temp 会在两次运行之间丢掉 `config.json` 和数据库。
-2. 数据故意放在程序目录而不是 `userData`,因为 userData 在沙箱/虚拟化进程里会被静默重定向 —— 同一个绝对路径对不同进程指向不同内容。README 说这"costs a long debugging session"。
+1. `launcher/README.md` states explicitly that no NSIS-family target is used, because self-extracting to a temp directory loses `config.json` and the database between runs.
+2. Data lives in the program directory rather than `userData` deliberately, because `userData` gets silently redirected inside sandboxed/virtualised processes — the same absolute path points at different content for different processes. The README notes this "costs a long debugging session".
 
-换 NSIS 意味着数据要搬进受管目录,正好走回那个坑,外加欠现有用户一次数据迁移。
+Switching to NSIS means moving the data into a managed directory, walking straight back into that hole, and owing every existing user a data migration on top.
 
 ---
 
-## 三、三条不能违反的约束
+## 3. Three constraints that must not be violated
 
-### 1. 绝不按「保留名单」删除
+### 1. Never delete by a keep-list
 
-用户数据和程序文件在同一层,所以「先清空文件夹再解压」会删掉数据库。
+User data and program files sit on the same level, so "empty the folder, then extract" deletes the database.
 
-两种写法的**失败方向相反**,这是选清单的全部理由:
+**The two designs fail in opposite directions, and that is the entire argument for the manifest:**
 
-| 做法 | 搞错了会怎样 |
+| Approach | What happens when it's wrong |
 |---|---|
-| 保留名单:「删掉除了这些以外的一切」 | **删掉用户数据库**。而且 `dbPath` / `guidesDir` 是可配置的,名单天然不可能齐 |
-| 清单:「只删上一版装过的那些文件」 | **留下一个多余文件** —— 也就是今天的现状 |
+| Keep-list: "delete everything except these" | **Destroys the user's database.** And `dbPath` / `guidesDir` are configurable, so the list can never be complete |
+| Manifest: "delete only the files the previous build installed" | **Leaves one junk file behind** — i.e. exactly today's status quo |
 
-跟这个项目已有的偏好同源:*宁可漏勾一个框,也不要勾错一个。*
+Same root as this project's existing bias: *prefer a missed checkbox over a wrong one.*
 
-### 2. 清单缺失时退回覆盖,绝不猜
+### 2. A missing manifest falls back to overwrite — never guess
 
-从 ≤1.1.3 升上来的用户没有清单。**这时候必须退回今天的覆盖行为并补写清单**,不能试图推断哪些文件是程序文件。老用户会有最后一次脏覆盖,之后永远干净 —— 这个代价是明确接受的。
+Users coming from ≤1.1.3 have no manifest. **In that case it must fall back to today's overwrite behaviour and write the manifest afterwards**, never attempt to infer which files are program files. Existing users get one last dirty overwrite and are clean forever after — that price is explicitly accepted.
 
-### 3. 替换之前必须真的退出
+### 3. It must genuinely quit before replacing anything
 
-**托盘改动之后「关掉 app」不等于退出了。** 窗口关闭只是隐藏,exe 还锁着。更新流程必须走 `app.quit()`(或托盘的退出),否则 Windows 拒绝替换文件,而且失败信息会很难懂。
+**Since the tray change, "closing the app" does not mean it exited.** Closing the window only hides it; the exe is still locked. The update flow must go through `app.quit()` (or the tray's exit), or Windows refuses to replace the files and the failure message is hard to read.
 
 ---
 
-## 四、方案
+## 4. The design
 
-### 构建时
+### At build time
 
-`postbuild.js` 把 zip 的文件列表写成清单一起发布。清单里只有程序文件 —— 用户数据不在 zip 里,所以天然不会进清单。
+`postbuild.js` writes the zip's file list into a manifest and publishes it alongside. The manifest holds only program files — user data is not in the zip, so it cannot reach the manifest.
 
-### 运行时
+### At runtime
 
 ```
-启动(或定时)→ 打 GitHub API 比版本
-  ↓ 有新版
-主进程 dialog 问要不要更新
-  ↓ 要
-下载 zip 到 temp → 用 API 给的 sha256 校验
-  ↓ 通过
-写一个 .ps1 到 temp,detached 启动
+launch (or the timer) → hit the GitHub API and compare versions
+  ↓ newer version exists
+main-process dialog asks whether to update
+  ↓ yes
+download the zip to temp → verify against the sha256 the API returned
+  ↓ passes
+write a .ps1 to temp, launch it detached
 app.quit()
-  ↓ helper 接管
-等 PID 退出 → 按旧清单删 → Expand-Archive → 写新清单 → 重启 exe
+  ↓ the helper takes over
+wait for the PID to exit → delete by the old manifest → Expand-Archive → write the new manifest → restart the exe
 ```
 
-依然零运行时依赖:`Expand-Archive` 是 PowerShell 自带的,`postbuild.js` 已经在用 `WScript.Shell`,有先例。
+Still zero runtime dependencies: `Expand-Archive` ships with PowerShell, and `postbuild.js` already uses `WScript.Shell`, so there is precedent.
 
-**失败模式意外地良性**:zip 里没有用户数据,所以哪怕解压炸在一半,坏的也只是程序文件 —— 重新下载一次就恢复,数据碰不到。
+**The failure mode is unexpectedly benign**: the zip contains no user data, so even if extraction blows up halfway, only program files are damaged — one more download restores them, and the data is never touched.
 
-### 通知放在哪
+### Where the notification lives
 
-**launcher,不是 tracker。** 项目作者自己走 CLI + `git pull`,朋友们用的是打包版;放进 server 会给 CLI 用户弹一个他们根本不用的 zip 下载提示。
+**In the launcher, not the tracker.** The author himself uses the CLI plus `git pull`, while friends use the packaged build; putting it in the server would show CLI users a zip-download prompt for something they never use.
 
-主进程的 `dialog` 是**可以用**的 —— CLAUDE.md 里那条「不许用 `window.confirm`」说的是渲染进程,原生对话框归主进程所有,这正是两者的分界。`main.js` 已经在用 `dialog.showErrorBox`。
+**The plan was wrong here, and the sentence is kept so the correction has something to point at.** It assumed the main process's `dialog` was usable — that the earlier `window.confirm` failure had been a *renderer* problem and native dialogs belonged to the main process. The rehearsals killed that: `showMessageBox` fails from the main process too, and the boundary is **native-vs-page, not renderer-vs-main** (see "The rehearsals were worth more than the rehearsal" below, and CLAUDE.md's "Known pitfalls"). **The prompt ended up being a web page for exactly this reason.**
 
-三个细节是死的:
-- 失败必须**静默**(离线是常态,没网不该弹错)
-- 要能关掉
-- **记住用户跳过的版本**,否则每次开都弹一遍,两天就被训练成无视
+`main.js` still calls `dialog.showErrorBox` twice. That is a different shape — fire-and-forget, no return value — so the `response: 420` failure cannot apply to it, but whether the box is actually visible in the packaged build has never been rehearsed. Do not read those two calls as evidence that native dialogs work.
 
----
+Three details are fixed:
 
-## 五、怎么测
+- Failure must be **silent** (being offline is the normal case; no network should not raise an error box)
+- It must be switchable off
+- **Remember the version the user skipped**, or it prompts on every launch and trains itself into being ignored within two days
 
-更新器最难的部分不是代码,是验证 —— 需要两个真实版本才跑得通整条路径。
-
-**排练法:让它指向 v1.1.2 做一次「降级」。** 不用发新版就能验完整的「下载 → 校验 → 按清单删 → 解压 → 重启」。
-
-可单测的:清单生成、版本比对、sha256 校验、跳过版本的记忆。
-不可单测的:实际的文件替换(靠上面的排练)。
-
-四件可单测的都在 `test/selfupdate.test.js` 里,每一条都做过变异验证。生成出来的 PowerShell 还会被 `[Parser]::ParseFile` 解析一遍(只在 Windows 上跑)—— 那段脚本在一个没有控制台、也没人看着的进程里执行,语法错误不会被任何人看见,表现只是「程序自己退了,再也没起来」。
-
-整条路径在真实发布上走通过,包括最后那一步「新发布带清单 ⇒ helper 装上新清单」(`Copy-Item $NewManifest`),它需要**连续两个都带清单的版本**才走得到。
-
-**但「更新成功了」并不等于装清单那一步落对了**,这个区别要记住:它是最后一步,失败也不会让这次更新看起来失败,后果要等**再下一次更新**才显形(按过期清单删,留下一堆陈旧文件)—— 又是一次静默降级。**要确认就去看 `resources/tracker/update-manifest.json` 在不在、里面写的版本对不对。**
-
-### 排练的产出比排练本身值钱
-
-排练一共失败了三次,每一次都暴露一个**单测和本地排练都够不着**的静默失效。这三条比更新器的代码更值得留:
-
-1. **原生对话框在这个 app 里立不住。** `dialog.showMessageBox` 秒返回 `response: 420`(不在按钮范围内),被读成「以后再说」。十种调用形式全是 420,而同机器上纯 Win32 的 MessageBox 立得好好的。这是仓库**第二次**撞上同一类事——第一次是 `window.confirm` 让「生成攻略」在打包版里整个是死的。当时记下的结论「原生对话框归主进程所有」**太窄了**:主进程一样不行。界线不是渲染/主进程,是原生/网页。
-2. **`detached` 不能让 helper 活过 `app.quit()`。** Electron 把子进程放进 kill-on-close 的作业对象,而 `DETACHED_PROCESS` 管的是控制台、逃不出 job。实测只有 `cmd /c start` 和 WMI 能活。
-3. **盲退是把 2 从"烦人"升级成"灾难"的那一步。** 现在 helper 起来第一件事是报到,app 等到报到才退;等不到就报错并继续运行。
-
-方法论上还有一条:**「我这边测不了」要当场说出来。** 中间有一轮我拿沙箱里的结论去推真实环境,而沙箱会在父进程退出时杀掉整个进程树 —— 那个环境根本测不了"活过父进程"这件事,推出来的结论自然是错的。真正定案的是让**用户在自己的会话里**跑一个四选一的探针。
-
-`launcher/main.js` 需要 Electron 才能 import,所以那部分**只能用源码断言** —— 参考 `test/tray.test.js` 和 `test/guidequeue.test.js` 里 `drainNext` 那条。
-
-⚠️ **源码断言必须先去注释再匹配。** `test/tray.test.js` 里有现成的 `stripComments`。不这样做的话断言会被自己旁边的注释满足 —— 已经发生过一次,变异验证抓到的,读代码读不出来。
+> **Note:** point one about `dialog` was later proved wrong — see "the rehearsals were worth more than the rehearsal" below. The prompt is a web page for that reason.
 
 ---
 
-## 六、几个不显然的决定
+## 5. How to test it
 
-- **检查频率:启动后 10 秒一次,之后每天一次。** 只在启动时查是不够的,理由和 `maybeAutoSync` 当年被迫从「进程启动」搬到「窗口显示」完全一样:托盘常驻之后进程可以连着跑几天,「启动」变成了很稀少的事件,而漏查不会报错,只是永远收不到提示。挂在「窗口显示」上则太吵 —— 一天开合十次不该查十次,那正是 `syncStaleHours` 那道闸门存在的理由。10 秒的延迟是为了不和服务器启动、首次同步抢带宽。
-- **数据留在 `resources/tracker/`,不挪到 exe 旁边。** 清单已经把「删除会碰到用户数据」这个风险解决掉了,所以挪动纯粹是卫生问题。它自己需要一次用户机器上的数据迁移,风险独立 —— 分开评估,别叠在更新器上一起上。
-- **「包里没有意外文件」只做了针对性的一条,没做通用的。** `postbuild.js` 在清单里出现 `local.config.json` 时直接让 build 失败。那是这个口子里**唯一会造成伤害**的一种脏东西(它进清单 = 下次更新删掉用户的数据目录指针),其余的脏文件进清单只是被正式记录成垃圾,和今天的现状一样。通用的「包里不该有什么」检查还是没有 —— 需要先说清楚「意外」的定义,而 `lib/**/*` 那个口子今天还给不出。
+The hard part of an updater is not the code, it is the verification — the whole path needs two real releases before it can run at all.
 
-### 实现时新冒出来的三个决定
+**The rehearsal trick: point it at v1.1.2 and perform a "downgrade".** That exercises the complete download → verify → delete-by-manifest → extract → restart path without publishing anything.
 
-- **清单是单独的发布附件,不在 zip 里。** 不是风格选择:zip 由 electron-builder 生成,`postbuild.js` 拿到它时已经封好了,而清单要描述这个 zip 的内容 —— 打进去是循环的。好处是白捡的:全新解压的用户手上没有清单,第一次更新自然走约束 2 的覆盖路径,不需要为老用户写任何特例。
-- **`digest` 认不出来就拒绝更新,不是跳过校验。** 「验不了就不验」意味着让用户执行一份没验过的 133MB 可执行文件,而且这个退化没有任何征兆 —— 更新照样"成功"。宁可更新不了。
-- **「要能关掉」落在 `local.config.json` 的 `autoUpdate`,不是新开一个配置面。** 那已经是 launcher 唯一的本机配置文件,为一个布尔值再开一处不值得。对话框里的「不再提示这个版本」是另一件事,记在 exe 旁边的 `update-state.json`。
+Unit-testable: manifest generation, version comparison, sha256 verification, skipped-version memory.
+Not unit-testable: the actual file replacement (that is what the rehearsal is for).
+
+All four unit-testable pieces live in `test/selfupdate.test.js`, each mutation-verified. The generated PowerShell is additionally parsed with `[Parser]::ParseFile` (Windows only) — that script runs in a process with no console and nobody watching, so a syntax error would be seen by no one; the symptom is simply "the program quit itself and never came back".
+
+The whole path has been walked on a real release, including the final step where a **new release carrying a manifest ⇒ the helper installs the new manifest** (`Copy-Item $NewManifest`), which requires **two consecutive manifest-carrying versions** to reach at all.
+
+**But "the update succeeded" is not the same as "the manifest step landed correctly"**, and that distinction matters: it is the last step, failing it does not make the update look failed, and the consequence only appears at the **next** update (deleting by a stale manifest, leaving a pile of obsolete files) — another silent degradation. **To confirm it, check that `resources/tracker/update-manifest.json` exists and names the right version.**
+
+### The rehearsals were worth more than the rehearsal
+
+Three rehearsals failed, and each exposed a silent failure that **neither unit tests nor a local rehearsal could reach**. These three are worth more than the updater's code:
+
+1. **Native dialogs cannot stand up in this app.** `dialog.showMessageBox` returns instantly with `response: 420` (outside the button range), which reads as "later". Ten call shapes all gave 420, while a plain Win32 MessageBox on the same machine worked fine. This is the **second** time the repo hit this class of thing — the first was `window.confirm` making "generate guide" completely dead in the packaged build. The conclusion recorded then, "native dialogs belong to the main process", **was too narrow**: the main process fails too. **The boundary is native-vs-page, not renderer-vs-main.**
+2. **`detached` does not let the helper outlive `app.quit()`.** Electron puts child processes in a kill-on-close job object, while `DETACHED_PROCESS` governs the console and cannot escape the job. Measured: only `cmd /c start` and WMI survive.
+3. **Blind-quitting is what upgrades number 2 from "annoying" to "catastrophic".** The helper's first act is now to report in, and the app waits for that report before quitting; if it never arrives, the app shows an error and keeps running.
+
+One methodological lesson goes with them: **say "I can't test that here" out loud, at the time.** One round took a conclusion from the sandbox and extrapolated it to the real environment — and the sandbox kills the whole process tree when the parent exits, so that environment simply cannot test "outlives the parent", and the conclusion drawn from it was wrong. What actually settled it was having **the user run a four-way probe in their own session**.
+
+`launcher/main.js` needs Electron to import, so that part can only be covered by **source assertions** — see `test/tray.test.js` and the `drainNext` case in `test/guidequeue.test.js`.
+
+⚠️ **A source assertion must strip comments before matching.** `test/tray.test.js` has a ready-made `stripComments`. Without it the assertion is satisfied by the comment sitting beside the code — this has already happened once, caught by mutation testing, invisible to reading.
 
 ---
 
-## 七、动手前要知道的项目惯例
+## 6. A few non-obvious decisions
 
-- **先建分支再写代码**,不是提交时才建。
-- **新断言必须做变异验证** —— 故意弄坏,确认测试变红。这个仓库出现过多条静默空跑的检查。
-- **UI 文案要少**:一个明确的控件胜过一排相似的。解释性段落放 `docs/`,不放屏幕上。
-- **文档不等人问**:改动影响到的每个文档面都要一起更新(`CLAUDE.md`、`launcher/README.md`、发布说明清单)。
-- 提交信息中英文都行。
-- 发布说明清单在 `launcher/README.md` 的「Cutting a release」一节,已经包含「升级前要从托盘退出」这一条。
+- **Check frequency: once 10 seconds after launch, then once a day.** Checking only at startup is not enough, for exactly the reason `maybeAutoSync` had to move from "process start" to "window shown": once the app lives in the tray the process can run for days, "startup" becomes a rare event, and a missed check raises no error — the prompt simply never arrives. Hanging it on "window shown" is too noisy: opening and closing ten times a day should not mean ten checks, which is precisely why the `syncStaleHours` gate exists. The 10-second delay keeps it from competing with server startup and the first sync for bandwidth.
+- **Data stays in `resources/tracker/` rather than moving beside the exe.** The manifest has already removed the "deletion can touch user data" risk, so moving it is purely hygiene. It would need its own data migration on user machines, with its own independent risk — evaluate that separately, don't stack it on top of the updater.
+- **"No unexpected files in the package" was only implemented for one specific case, not generally.** `postbuild.js` fails the build outright if `local.config.json` appears in the manifest. That is the **only** kind of junk in this gap that causes harm (it in the manifest = the next update deletes the user's data-directory pointer); any other junk file merely gets formally recorded as junk, the same as today. A general "what shouldn't be in the package" check still does not exist — it would need a definition of "unexpected", and the `lib/**/*` gap cannot supply one today.
+
+### Three decisions that only surfaced during implementation
+
+- **The manifest is a separate release asset, not a file inside the zip.** Not a style choice: the zip is produced by electron-builder and is already sealed by the time `postbuild.js` sees it, while the manifest has to describe that zip's contents — putting it inside is circular. The benefit is free: a user with a fresh unzip has no manifest, so their first update naturally takes constraint 2's overwrite path, and no special case has to be written for existing users.
+- **An unrecognised `digest` refuses the update rather than skipping verification.** "Can't verify, so don't" means making the user execute an unverified 133 MB executable, and that degradation has no visible symptom — the update still "succeeds". Better to not update.
+- **"Must be switchable off" landed as `autoUpdate` in `local.config.json`, not a new configuration surface.** That is already the launcher's only per-machine config file, and a second one for a single boolean is not worth it. The dialog's "don't tell me about this version again" is a different thing, recorded in `update-state.json` beside the exe.
+
+---
+
+## 7. Project conventions to know before starting
+
+- **Branch before writing code**, not at commit time.
+- **A new assertion must be mutation-verified** — break it deliberately and confirm the test goes red. This repo has produced several checks that silently passed nothing.
+- **Keep UI copy short**: one unambiguous control beats a row of similar ones. Explanatory paragraphs go in `docs/`, not on screen.
+- **Documentation is not updated on request**: every doc surface a change touches gets updated with it (`CLAUDE.md`, `launcher/README.md`, the release-notes checklist).
+- Commit messages may be Chinese or English.
+- The release-notes checklist is in `launcher/README.md`'s "Cutting a release" section, and already includes "quit from the tray before upgrading".
