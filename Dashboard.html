@@ -340,27 +340,26 @@
       text-transform: uppercase;
       color: var(--text-3);
       margin-right: 0.42em;
-      /* **No raise: the two scripts share a baseline, which is what "the same height" means here.**
-         There used to be a `vertical-align: 0.16em` lift, and enlarging STEAM made it obvious — a
-         length `vertical-align` resolves against the element's own font-size, so the same 0.16em
-         grew with it and the word visibly rode above the Chinese.
-         Measured on this font at the shipping sizes, ink relative to each own baseline: STEAM
+      /* **No vertical nudge — the two scripts share a baseline, and that is what "the same height"
+         means here.** A length `vertical-align` resolves against the element's **own** font-size, so
+         a lift added here scales with STEAM and drifts the moment the size above it is touched.
+         Ink relative to each own baseline, measured on this font at the shipping sizes: STEAM
          (23.22px/500) reaches 18.0 up and 1.0 down; 成就追踪器 (27px/800) reaches 24.0 up and 3.0
-         down. Sharing the baseline puts the bottoms flush and leaves the Han taller at the top,
-         which is simply what a smaller Latin word beside larger Han looks like — the lift was
-         inventing a problem the scripts do not have. */
+         down. A shared baseline therefore sets the bottoms flush and leaves the Han taller at the
+         top, which is what a smaller Latin word beside larger Han is supposed to look like. If it
+         ever reads as tilted, look for a reintroduced lift before touching the size. */
     }
     /* 「成就」 is this tool's keyword, so it gets the accent. All white is too flat, and colouring the whole phrase is too noisy */
     .wm-key { color: var(--accent); }
-    /* **The word gap belongs to the script, and it is a real character.** The two spans sit flush
-       against each other because 成就追踪器 is one uninterrupted phrase; the same markup in English
-       ran 「Achievement」 and 「Tracker」 together.
-       It is a space in the DOM rather than a margin, because a margin leaves the *text* still
-       reading 「AchievementTracker」 — which is what a screen reader announces and what copying the
-       heading puts on the clipboard. Shown only under lang="en", the attribute `applyStrings`
-       already sets on <html>; hidden it contributes nothing to the accessible name, which is
-       correct for Chinese. A literal space in the string table is the wrong home for it: invisible
-       in a diff and the first thing a trim would eat. */
+    /* **The word gap belongs to the script, and it is a real character.** 成就追踪器 is one
+       uninterrupted phrase, so its spans sit flush; English needs a space between 「Achievement」 and
+       「Tracker」 or the two words run together.
+       A space in the DOM rather than a margin, because a margin separates the glyphs and leaves the
+       *text* still reading 「AchievementTracker」 — which is what a screen reader announces and what
+       copying the heading puts on the clipboard. It is shown only under lang="en", the attribute
+       `applyStrings` already sets on <html>; hidden it contributes nothing to the accessible name,
+       which is correct for Chinese. The string table is the wrong home for it: a literal space
+       there is invisible in a diff and the first thing a trim eats. */
     .wm-gap { display: none; }
     :root[lang="en"] .wm-gap { display: inline; }
     /* position: relative is no longer needed — it was only ever the anchor for that absolutely positioned underline */
