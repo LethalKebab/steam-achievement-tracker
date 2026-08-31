@@ -1,0 +1,72 @@
+# Package the app, and prove the artifact carries nothing of the user's.
+#
+# **The test suite never builds anything.** `tray.test.js` and `selfupdate.test.js` read
+# `launcher/main.js` and `updater.js` as *source*; electron-builder, the `extraResources` allow-list
+# and `postbuild.js` have only ever run on the maintainer's machine. So packaging breaks were found
+# at release time, which is the worst moment to find them — the release is already the plan.
+#
+# **The security half is why this exists rather than being nice to have.** `extraResources` is an
+# allow-list, and it is the only thing keeping `config.json` — Steam, Notion and AI keys, in plain
+# text — out of a zip published for anyone to download. One widened glob publishes them, and every
+# visible signal stays green: the build succeeds, the app runs, the zip is merely larger.
+# The release checklist has asked for this check by hand from the start; a hand-run check is skipped
+# exactly on the release that was rushed.
+#
+# **Why the decoys.** `config.json` and `data/` are gitignored, so a CI checkout has neither, and
+# grepping the zip for them on a clean clone passes whether the filter is right or wide open — it
+# tests that the file does not exist. `--plant` puts one file at each of them first, and
+# `verify-artifact.mjs` refuses to run when they are absent.
+#
+# **Trigger.** Every push to main, so nothing lands unbuilt. On pull requests only when something
+# that decides *what gets packaged* changed — the filter lives in `launcher/package.json`, so that
+# is where the leak can be introduced. A PR touching only `lib/` is already covered: `lib/**/*` is
+# in the allow-list, so new modules need no packaging change, and main builds it a minute later.
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'launcher/**'
+      - 'package.json'
+      - 'assets/**'
+      - '.github/workflows/build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+
+      # Only launcher/ installs anything. The tracker itself stays at zero runtime dependencies,
+      # which tests.yml asserts by having no install step at all
+      - name: install the packaging toolchain
+        working-directory: launcher
+        run: npm ci
+
+      # **Before the build, not after.** The point is that the build gets the chance to package them
+      - name: plant the decoys
+        run: node launcher/verify-artifact.mjs --plant
+
+      - name: build
+        working-directory: launcher
+        run: npm run build
+
+      - name: nothing of the user's is in the artifact
+        run: node launcher/verify-artifact.mjs
