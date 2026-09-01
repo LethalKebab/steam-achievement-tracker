@@ -53,7 +53,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "allowedDomains": [],     // non-empty = hard restrict search to these; empty = no limit
     "maxContinuations": 5,    // server-tool loop resumes before giving up
     "maxRetries": 3,
-    "requestTimeoutMs": 600000,
+    "requestTimeoutMs": 600000, // how long one request may run; also settable (in minutes) from /setup step 2
     "fallbacks": true,        // anthropic: re-run on another model if a classifier declines
     "showThinking": false,    // stream a summary of the reasoning; debugging only
 

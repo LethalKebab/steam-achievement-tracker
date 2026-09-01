@@ -409,3 +409,64 @@ describe('saveAiConfig persists the legacy adoption, not only the new vendor', (
     } finally { v.close(); }
   });
 });
+
+// ---------------------------------------------------------------------------
+// The plain latency knob — unlike saveAiConfig this sends no request to any
+// vendor, so no fakeVendor is needed
+// ---------------------------------------------------------------------------
+
+describe('saveAiTimeout', () => {
+  // saveAiTimeout never touches the database, so one db is shared across every case below —
+  // only config.json is reset per test
+  const timeoutDb = openDb(join(DIR, 'save-timeout.db'));
+
+  /** Fresh api + fresh on-disk config per test, so one test's save can't leak into the next */
+  const makeApi = () => {
+    writeConfig({ provider: 'anthropic', providers: { anthropic: { apiKey: 'ANT' } } });
+    const config = loadConfig();
+    return createApi({
+      db: timeoutDb,
+      steam: {}, config,
+      syncState: { snapshot: () => ({}) },
+      startBackgroundSync: null, guideGenState: null, startGuideGen: null,
+      planGuidePreflight: null, maybeAutoSync: null,
+    });
+  };
+
+  test('below the 30-second floor is refused', () => {
+    assert.ok(makeApi().saveAiTimeout(29999).error);
+  });
+
+  test('the 30-second floor itself is accepted', () => {
+    assert.equal(makeApi().saveAiTimeout(30000).error, undefined);
+  });
+
+  test('above the 60-minute ceiling is refused', () => {
+    assert.ok(makeApi().saveAiTimeout(3600001).error);
+  });
+
+  test('the 60-minute ceiling itself is accepted', () => {
+    const r = makeApi().saveAiTimeout(3600000);
+    assert.equal(r.error, undefined);
+    assert.equal(r.minutes, 60);
+  });
+
+  test('a non-finite value is refused rather than silently becoming NaN', () => {
+    assert.ok(makeApi().saveAiTimeout(NaN).error);
+    assert.ok(makeApi().saveAiTimeout(undefined).error, 'Number(undefined) is NaN, not the current value');
+  });
+
+  test('minutes round-trip through getSettings, rounded to the nearest whole minute', () => {
+    const api = makeApi();
+    api.saveAiTimeout(7 * 60000);
+    assert.equal(api.getSettings().aiTimeoutMin, 7);
+  });
+
+  test('it writes ai.requestTimeoutMs on disk and leaves the vendor blocks alone', () => {
+    makeApi().saveAiTimeout(5 * 60000);
+    const onDisk = JSON.parse(readFileSync(join(DIR, 'config.json'), 'utf8'));
+    assert.equal(onDisk.ai.requestTimeoutMs, 300000);
+    assert.equal(onDisk.ai.providers.anthropic.apiKey, 'ANT',
+      'saving the timeout must not disturb a field saveAiConfig owns');
+  });
+});

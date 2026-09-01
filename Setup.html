@@ -802,9 +802,12 @@
       <label for="ai-timeout" data-t="step2.timeout">请求超时(分钟)</label>
       <!-- High effort + web research legitimately takes minutes — this is not an ordinary HTTP
            timeout, and turning it down "to fail faster" throws away a run that was still working.
-           No `required`: an empty field means keep the current value, same as the secret fields
-           above, checked in JS rather than by the browser -->
-      <input id="ai-timeout" name="ai-timeout" type="number" min="1" max="60" step="1" autocomplete="off" placeholder="默认 10" data-t-placeholder="step2.timeout.ph">
+           No `required`, and deliberately no `min`/`max`/`step` either: this field lives on step 2,
+           which can be `hidden` while step 1 is showing (see the comment above the step-1 inputs) —
+           a hidden control failing native constraint validation blocks the whole submit with nothing
+           on screen. An empty field means keep the current value; both that and the 1-60 range are
+           checked in the submit handler instead -->
+      <input id="ai-timeout" name="ai-timeout" type="number" autocomplete="off" placeholder="默认 10" data-t-placeholder="step2.timeout.ph">
     </section>
 
     <section class="step" data-step="3" hidden>
@@ -1114,6 +1117,7 @@
       'step2.model.ph':       ['留空 = 用默认模型', 'Blank = the default model'],
       'step2.timeout':        ['请求超时(分钟)', 'Request timeout (minutes)'],
       'step2.timeout.ph':     ['默认 10', 'Default 10'],
+      'step2.timeout.range':  ['请求超时要在 1 到 60 分钟之间。', 'Request timeout must be between 1 and 60 minutes.'],
 
       'step3.title':          ['第 3 步 · Notion 攻略同步', 'Step 3 · Notion guide sync'],
       'step3.li1.a':          ['在 ', 'On the '],
@@ -2229,6 +2233,16 @@
       if ((!key && !isEditMode) || !id) {
         showStep(1);
         stepOneOk();
+        return;
+      }
+
+      // The range this used to enforce via `min`/`max` on the input itself — moved here because
+      // a hidden step's invalid control blocks the whole submit natively, the same failure the
+      // comment on the input documents. Skipped when the field was left alone (blank = keep)
+      if (aiTimeoutRaw && (!Number.isFinite(aiTimeoutMin) || aiTimeoutMin < 1 || aiTimeoutMin > 60)) {
+        showStep(2);
+        msg.className = 'msg error';
+        msg.textContent = t('step2.timeout.range');
         return;
       }
 
