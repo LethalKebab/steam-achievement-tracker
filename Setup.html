@@ -799,6 +799,12 @@
       <input id="ai-key" name="ai-key" type="password" autocomplete="off">
       <label for="ai-model" data-t="step2.model">模型(可选)</label>
       <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用默认模型" data-t-placeholder="step2.model.ph">
+      <label for="ai-timeout" data-t="step2.timeout">请求超时(分钟)</label>
+      <!-- High effort + web research legitimately takes minutes — this is not an ordinary HTTP
+           timeout, and turning it down "to fail faster" throws away a run that was still working.
+           No `required`: an empty field means keep the current value, same as the secret fields
+           above, checked in JS rather than by the browser -->
+      <input id="ai-timeout" name="ai-timeout" type="number" min="1" max="60" step="1" autocomplete="off" placeholder="默认 10" data-t-placeholder="step2.timeout.ph">
     </section>
 
     <section class="step" data-step="3" hidden>
@@ -1106,6 +1112,8 @@
       'step2.off':            ['不启用', 'Off'],
       'step2.model':          ['模型(可选)', 'Model (optional)'],
       'step2.model.ph':       ['留空 = 用默认模型', 'Blank = the default model'],
+      'step2.timeout':        ['请求超时(分钟)', 'Request timeout (minutes)'],
+      'step2.timeout.ph':     ['默认 10', 'Default 10'],
 
       'step3.title':          ['第 3 步 · Notion 攻略同步', 'Step 3 · Notion guide sync'],
       'step3.li1.a':          ['在 ', 'On the '],
@@ -1172,6 +1180,7 @@
       'msg.steam.ok':         ['Steam 凭据可用({n} 款游戏)', 'Steam credentials work ({n} games)'],
       'msg.ai.ok':            ['AI 可用({provider} / {model}{note})', 'AI works ({provider} / {model}{note})'],
       'msg.ai.nosearch':      [',注意:该供应商不支持联网搜索', ' — note: this provider cannot search the web'],
+      'msg.ai.timeout.ok':    ['请求超时已设为 {min} 分钟', 'Request timeout set to {min} minutes'],
       'msg.notion.token.ok':  ['Notion token 可用', 'The Notion token works'],
       'msg.notion.db.ok':     ['Notion 可用(数据库里 {n} 个页面)', 'Notion works ({n} pages in the database)'],
       // **Whole sentences.** These were assembled from a prefix, a joined list and a full stop,
@@ -1360,6 +1369,7 @@
     let isEditMode = false;
     let loadedAiProvider = '';
     let loadedAiModel = '';
+    let loadedAiTimeoutMin = 10;
     // Each vendor's own state: `{ hasKey, model }`. **The key itself never
     // reaches here** — getSettings answers only "is it configured", and nowhere
     // on the page needs to display it
@@ -1406,6 +1416,8 @@
       $('ai-provider').value = s.aiProvider || '';
       loadedAiProvider = s.aiProvider || '';
       loadedAiModel = s.aiModel || '';
+      $('ai-timeout').value = s.aiTimeoutMin;
+      loadedAiTimeoutMin = s.aiTimeoutMin;
       aiProviders = s.aiProviders || {};
       paintAiProvider();
 
@@ -1450,7 +1462,7 @@
     // The secret fields are **always empty** in settings mode (they only carry a
     // placeholder), so blank means 「没动过」.
     const DIRTY_FIELDS =
-      ['key', 'id', 'ai-provider', 'ai-key', 'ai-model', 'notion-token', 'notion-db'];
+      ['key', 'id', 'ai-provider', 'ai-key', 'ai-model', 'ai-timeout', 'notion-token', 'notion-db'];
     /** Each field's "value as saved". With no argument it re-syncs the whole set */
     const saved = {};
     const markSaved = (...ids) => {
@@ -1569,6 +1581,10 @@
      * submit reads hidden nodes. But a button permanently reading 「跳过」 conveys
      * exactly the opposite, so the label follows the content.
      */
+    // **`ai-timeout` is deliberately not listed for step 2.** Unlike the other three it is never
+    // blank — it is pre-filled with the real default the second the page loads — so including it
+    // here would make stepHasInput(2) always true and 「跳过」 would never show for someone who
+    // has not touched AI at all
     const STEP_INPUTS = {
       2: ['ai-provider', 'ai-key', 'ai-model'],
       3: ['notion-token', 'notion-db'],
@@ -2200,6 +2216,10 @@
       const aiProvider = $('ai-provider').value.trim();
       const aiKey = $('ai-key').value.trim();
       const aiModel = $('ai-model').value.trim();
+      // Blank means "keep the current value", same reasoning as the secret fields — the field
+      // is pre-filled with the real number, so blank only happens if someone deliberately clears it
+      const aiTimeoutRaw = $('ai-timeout').value.trim();
+      const aiTimeoutMin = aiTimeoutRaw ? Number(aiTimeoutRaw) : loadedAiTimeoutMin;
 
       // In edit mode the key may be left blank (meaning keep), while first-run
       // setup requires it.
@@ -2247,6 +2267,14 @@
             provider: r.provider, model: r.model,
             note: r.canSearch ? '' : t('msg.ai.nosearch'),
           }));
+        }
+
+        // Independent of the block above on purpose: that one sends a real (paid) verification
+        // request, and someone tweaking only the timeout should not pay for one
+        if (aiTimeoutMin !== loadedAiTimeoutMin) {
+          const r = await call('saveAiTimeout', [aiTimeoutMin * 60000]);
+          if (r.error) throw new Error('AI:' + r.error);
+          done.push(t('msg.ai.timeout.ok', { min: r.minutes }));
         }
 
         const notionChanged = Boolean(notionToken) || notionDb !== loadedNotionDb;
