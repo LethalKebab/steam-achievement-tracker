@@ -698,7 +698,16 @@
   </style>
 </head>
 <body>
-  <form class="card" id="setup-form">
+  <!-- `novalidate`: only one step is ever visible, and the browser refuses to run native
+       constraint validation on a hidden control — it silently blocks the whole submit and logs
+       "not focusable", never reaching this file's own JS at all. That was already worked around
+       twice, once per attribute removed (no `required` on step 1's inputs, no `min`/`max`/`step`
+       on step 2's ai-timeout), before it turned out `type="number"` alone still carries a native
+       "bad input" state (a lone "-" or "1e" leaves .value === "" with validity.badInput true) —
+       the same failure reappearing through an attribute that was never touched. `novalidate`
+       closes the whole class at once: every field here is validated by hand instead (stepOneOk,
+       and the range check below) -->
+  <form class="card" id="setup-form" novalidate>
     <!-- **The exit.** The packaged build has no address bar and no back key, and
          the tray's 「打开面板」 is only show/focus (showWindow in
          launcher/main.js does not loadURL) — without this button, the only way
@@ -802,11 +811,9 @@
       <label for="ai-timeout" data-t="step2.timeout">请求超时(分钟)</label>
       <!-- High effort + web research legitimately takes minutes — this is not an ordinary HTTP
            timeout, and turning it down "to fail faster" throws away a run that was still working.
-           No `required`, and deliberately no `min`/`max`/`step` either: this field lives on step 2,
-           which can be `hidden` while step 1 is showing (see the comment above the step-1 inputs) —
-           a hidden control failing native constraint validation blocks the whole submit with nothing
-           on screen. An empty field means keep the current value; both that and the 1-60 range are
-           checked in the submit handler instead -->
+           No `min`/`max`/`step` (see the form's `novalidate` comment for why native validation
+           does not run at all on this page). An empty field means keep the current value; both
+           that and the 1-60 range are checked in the submit handler instead -->
       <input id="ai-timeout" name="ai-timeout" type="number" autocomplete="off" placeholder="默认 10" data-t-placeholder="step2.timeout.ph">
     </section>
 
@@ -1117,7 +1124,7 @@
       'step2.model.ph':       ['留空 = 用默认模型', 'Blank = the default model'],
       'step2.timeout':        ['请求超时(分钟)', 'Request timeout (minutes)'],
       'step2.timeout.ph':     ['默认 10', 'Default 10'],
-      'step2.timeout.range':  ['请求超时要在 1 到 60 分钟之间。', 'Request timeout must be between 1 and 60 minutes.'],
+      'step2.timeout.range':  ['请求超时要是 1 到 60 之间的整数分钟。', 'Request timeout must be a whole number of minutes, from 1 to 60.'],
 
       'step3.title':          ['第 3 步 · Notion 攻略同步', 'Step 3 · Notion guide sync'],
       'step3.li1.a':          ['在 ', 'On the '],
@@ -2236,10 +2243,15 @@
         return;
       }
 
-      // The range this used to enforce via `min`/`max` on the input itself — moved here because
-      // a hidden step's invalid control blocks the whole submit natively, the same failure the
-      // comment on the input documents. Skipped when the field was left alone (blank = keep)
-      if (aiTimeoutRaw && (!Number.isFinite(aiTimeoutMin) || aiTimeoutMin < 1 || aiTimeoutMin > 60)) {
+      // The range and the integer-ness `min`/`max`/`step` used to enforce on the input itself —
+      // moved here because a hidden step's invalid control blocks the whole submit natively, the
+      // same failure `novalidate` (see the form tag) exists to avoid. Skipped when the field was
+      // left alone (blank = keep). Number.isInteger matters on its own: without it "2.5" passes
+      // this check, gets stored as exactly 150000ms, and then only *displays* as "3 minutes"
+      // (Math.round(150000 / 60000)) everywhere — a value that looks fine but was never what was
+      // actually saved
+      if (aiTimeoutRaw &&
+        (!Number.isInteger(aiTimeoutMin) || aiTimeoutMin < 1 || aiTimeoutMin > 60)) {
         showStep(2);
         msg.className = 'msg error';
         msg.textContent = t('step2.timeout.range');

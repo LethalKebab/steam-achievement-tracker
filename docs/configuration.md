@@ -53,7 +53,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "allowedDomains": [],     // non-empty = hard restrict search to these; empty = no limit
     "maxContinuations": 5,    // server-tool loop resumes before giving up
     "maxRetries": 3,
-    "requestTimeoutMs": 600000, // how long one request may run; also settable (in minutes) from /setup step 2
+    "requestTimeoutMs": 600000,
     "fallbacks": true,        // anthropic: re-run on another model if a classifier declines
     "showThinking": false,    // stream a summary of the reasoning; debugging only
 
@@ -152,6 +152,8 @@ One visible consequence: because several passes are being written at once, progr
 **`chunkSize` is a ceiling, not a pass length.** The number of passes is computed from it and the achievements are then spread evenly, so 55 achievements at the default become two passes of 28 and 27 — not 50 and 5. Lowering it therefore shortens every pass and adds passes only as needed; it can never make a pass longer.
 
 `maxTokens` caps thinking **and** prose together, not prose alone. A pass that runs out mid-way is not silently accepted — the generator halves that pass and re-asks the two halves, repeating until the writing fits or the pass is down to five achievements. **So a truncation is usually not something you need to act on**, and reaching for a bigger `maxTokens` is usually the wrong reflex: the budget is shared with thinking, and raising it has been measured to buy thinking rather than prose (16000 → 32000 moved output tokens +79% and guide text +7%). If a five-achievement pass still won't fit, the message says so, and the thing to change is the endpoint or model. There is no temperature setting, because the models this targets reject it outright.
+
+**`requestTimeoutMs` (600000, 10 minutes) is how long one request may run before it's treated as failed** — a different thing from a plain network error, and reported separately (`请求超过 N 秒没结束`). Kept generous on purpose: high `effort` plus real web research legitimately takes minutes, and turning this down "to fail faster" throws away a run that was still working, not stuck. Settable two ways, same shape as `effort` below: edit this value directly (30 seconds to 60 minutes), or set it in whole minutes on step 2 of `/setup`, which uses the same range in a friendlier unit.
 
 **`effort` decides how much research goes into a guide, and it is the only setting here that changes how long a run takes.** You can set it three ways, in increasing order of scope: pick it in the confirmation that appears before each generation on the Dashboard; pass `--effort low` to `guide-gen` or `ai-check`; or change this value to move the default.
 

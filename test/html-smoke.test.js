@@ -25,6 +25,10 @@
  * - A hidden `required` control makes the browser **refuse to submit silently**, logging
  *   "not focusable" in the console, and presenting as "pressing save does nothing".
  *   (Check: no required inside the stepped form)
+ * - The same failure came back through `type="number"`'s own "bad input" state (typing a lone
+ *   "-" is enough) after `required` and then `min`/`max`/`step` had each been removed from the
+ *   offending control individually — three attributes, one failure mode. (Check: the form
+ *   carries `novalidate`, so no fourth attribute can reopen it)
  * - `classList.toggle(name, undefined)` **flips rather than clears**, so with a field missing from
  *   the state object the sync line in the topbar blinks every 3 seconds and never stops.
  *   (Check: the second argument has to be booleanised)
@@ -276,6 +280,23 @@ describe('pits fallen into, pinned', () => {
     assert.deepEqual(offenders, [],
       'the browser refuses to validate a display:none required control and only logs not focusable in the console — '
       + 'on screen that is "pressing save does nothing". Validation has to go through the manual stepOneOk path');
+  });
+
+  /**
+   * `required` and then `min`/`max`/`step` were each removed from the stepped form once the
+   * attribute was caught blocking a hidden-step submit. `type="number"` alone reopened the same
+   * failure with neither attribute anywhere in sight: it carries its own native "bad input" state
+   * (type a lone "-" or "1e" and `.value` reads back `""` with `validity.badInput` true).
+   * `novalidate` on the form is the fix that generalises instead of chasing the next attribute
+   * that turns out to validate — it has to actually be there, not merely true in spirit
+   */
+  test('the stepped Setup form disables native constraint validation entirely, via novalidate', () => {
+    const markup = markupOnly(read('Setup.html'));
+    const formTag = markup.match(/<form\b[^>]*>/);
+    assert.ok(formTag, 'the setup <form> itself could not be found');
+    assert.match(formTag[0], /\bnovalidate\b/,
+      'without novalidate, any native-validation attribute on any hidden-step control (present now or added '
+      + 'later) can silently block the whole submit — this is not optional hardening, it is the actual fix');
   });
 
   /**
