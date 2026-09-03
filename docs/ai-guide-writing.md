@@ -34,7 +34,9 @@ This is the most important section in the design, and the UI must state it hones
 
 **Machine-verifiable (all against real local data):** every achievement has its own checkbox line · no merged lines · checked state equals real `achieved` · **whether the description is copied verbatim** (compared directly against `achievements.description`) · whether same-named achievements quoted their descriptions · the local md carries the `# 游戏名` line · section headings carry no 「共 N 个」 counts · no "data source" note.
 
-**Not machine-verifiable: whether the guide's content is correct.** Whether the steps work, whether the difficulty ratings are right, whether the "easy to miss" flags are true, whether the mutual-exclusion relationships are real — and that is the entire value of a guide.
+Also machine-verifiable, but only as **form**: the spoiler notation's label, its attachment to an achievement, and that it holds no checkbox.
+
+**Not machine-verifiable: whether the guide's content is correct.** Whether the steps work, whether the difficulty ratings are right, whether the "easy to miss" flags are true, whether the mutual-exclusion relationships are real, **whether what a spoiler fold hides really spoils and whether something left unfolded should have been folded** — and that is the entire value of a guide.
 
 So what this system guarantees is **"the format and the data are correct"**, not **"the guide is correct"**. The UI must say the content is unverified. Forcing the model to supply source URLs for spot-checking: **decided against.**
 
@@ -273,6 +275,23 @@ Clusters go down two roads, **tell the model first, then back it up ourselves**:
 Rule 五 only says "fold content once it reaches 10 lines"; it never said "but never the achievements themselves". Measured on 马特: the whole `## 世界全清` section's 13 achievements were packed into a toggle called 「世界 1~12 全清与通关」. Sync still recognised them (90/90), but that section opens empty in Notion.
 
 `unwrapAchievementToggles` flattens them **before** the re-arrangement (afterwards, assertion 3 would read it as "the regroup tore a toggle open" and roll the whole pass back). Two conditions must both hold, and either alone leaves it untouched: **the toggle is at top level (not indented)**, and **it contains a checkbox that resolves to a real achievement**. Group-label collapses (前置/步骤/注意) are always indented under an achievement, so they fail the first gate and can't be caught by accident. The unwrapped draft is re-linted, and rolled back if it no longer passes.
+
+### The spoiler notation: a fold, one fixed label, and no completeness check
+
+A guide un-hides what the game hid — most sharply for a hidden achievement, whose condition Steam supplies nowhere and whose only statement anywhere is the guide's own line. So there is a notation for it: an indented `<details>` under the achievement, `<summary>` reading nothing but `剧透` / `Spoiler`, prose inside.
+
+**Every part of that shape was forced by something measured, and the obvious alternatives are excluded:**
+
+- **Inline hiding is impossible on Notion, and that decided the whole shape.** Notion's rich text `annotations` object is `{bold, italic, strikethrough, underline, code, color}` — no spoiler — and `color` is a *single* enum (`"gray"` or `"gray_background"`), so text and background cannot both be set and the usual "invisible until selected" trick is not expressible. A toggle is the only hiding primitive Notion has.
+- **So the convention cannot be copied.** Every platform that offers spoilers offers one unlabelled, inline primitive: Steam's own BBCode is `[spoiler]…[/spoiler]` with no parameters, wiki.gg's template takes `hover`/`block`/`class` and no taxonomy, PSNProfiles renders a bare `<span class="spoiler">` mid-sentence — "doing so will reveal that ⟨…⟩", the sentence still readable around the hole. **In that convention the surrounding sentence does the labelling**, which is why no category vocabulary was ever needed. Moving to a block-level fold loses that sentence, so a label has to be reintroduced — **as compensation for a platform limit, not as a taxonomy**. That argues for the smallest possible vocabulary, and the vocabulary is one word.
+- **The label is closed so that it cannot leak.** A free-form summary is read by everyone who does not open the fold, and `剧透:凶手是医生` has folded nothing away. One fixed word makes that structurally impossible rather than something to check.
+- **It is meant to be rare, and the number comes from real guides.** A narrative game's whole trophy guide on PSNProfiles carried **2** spoiler spans across 15 trophies; another, 88 trophies, carried **0**. Folding every hidden achievement is the opposite of that — 28 of 《罗曼圣诞探案集》's 50 are hidden, so more than half the entries would carry a fold, and a reader who meets that many opens everything by reflex. **The only mechanically-guaranteed version of this feature is the one most likely to be ignored**, which is why the choice is left to the model and the count is only ever reported.
+
+**Three properties are form and are checked; one is not checkable at all.** `spoilerFolds` in `guidelint.js` reports a leaky label (warn — it defeats the notation but breaks neither the sync nor a rewrite, and every error is paid for as another round), a checkbox inside the fold (error — it becomes a sub-step and is cascade-ticked into a record of something never done), and a detached fold (error). **Attachment is decided by `todoSpansWithToggles`, the function partial rewriting actually uses**, not by a lookalike "is the line above a checkbox" test: the question is exactly whether a rewrite of that achievement carries the fold along, and a blank line between the two is enough for it not to.
+
+**There can be no completeness check, ever.** An absent fold and "nothing here spoils" are the same text. So the count is reported and never compared against a threshold — a rule that fires on a visual novel where most entries genuinely are spoilers is a rule nobody reads.
+
+**On the Notion side the count is `null`, not `0`.** Folds are toggles, toggles are not `to_do` blocks, and nothing in `lintGuide`'s inputs can see them; a `0` there would state "this guide folds nothing" on the strength of not having looked. The same fact has a consequence on the Dashboard — see `docs/guides.md`.
 
 ## Structural guarantees, not checks
 

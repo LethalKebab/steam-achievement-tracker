@@ -997,6 +997,11 @@ async function cmdGuideLint() {
       clog('lint.guide', { mark, name: r.name, appid: r.appid, covered: stats.covered, achievements: stats.achievements, todos: stats.todos })
     );
     if (detail) {
+      // **Only when there are any, and only when it was possible to look.** `spoilerFolds` is null
+      // on the Notion side, where the folds are toggles this validator's inputs cannot see; a 0
+      // there would report "folds nothing" without having looked. A 0 on a local guide is real but
+      // says nothing either — the notation is meant to be rare, so most guides carry none
+      if (stats.spoilerFolds) console.log(clog('lint.spoilerFolds', { n: stats.spoilerFolds }));
       for (const f of findings) console.log(`     ${f.level === 'error' ? '✖' : '·'} ${f.message}`);
       continue;
     }
