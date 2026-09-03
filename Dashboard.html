@@ -3019,9 +3019,8 @@
       'gen.deep':             ['深度模式', 'Thorough'],
       'gen.spoiler':          ['防剧透', 'Spoiler guard'],
       'gen.spoilerOff':       ['关', 'Off'],
-      'gen.spoilerOffHint':   ['默认,不额外调用。', 'The default, and nothing extra is called.'],
       'gen.spoilerOn':        ['开', 'On'],
-      'gen.spoilerOnHint':    ['会多一次 AI 调用。', 'Costs one more call to the AI.'],
+      'gen.spoilerHint':      ['开启后会增加一次 AI 调用。', 'Turning it on adds one more call to the AI.'],
       'mv.checkboxes':        ['{n} 个 checkbox 原样搬过去(含勾选状态)。', '{n} checkboxes move across as they are, ticks included.'],
       'mv.localKept':         ['本地文件挪进 guides/.migrated/,不会删。', 'The local file moves into guides/.migrated/ — nothing is deleted.'],
       'mv.unconverted':       ['{n} 行特殊排版会转为普通段落,文字不会丢失。', '{n} specially formatted lines become ordinary paragraphs. No text is lost.'],
@@ -5107,7 +5106,11 @@
            * `aria-describedby` attaches it to this group, so a screen reader reading these buttons
            * announces the current sentence along with them
            */
-          const hasHints = g.options.some(function (o2) { return o2.hint; });
+          // **`g.hint` is the group's own note and does not change with the selection**, for a
+          // sentence that is true in both states. Per-option notes describe the state you are in;
+          // this one describes the control. It also keeps the row from changing height when only
+          // one of the two states would have had something to say
+          const hasHints = g.hint || g.options.some(function (o2) { return o2.hint; });
           const hintEl = hasHints ? document.createElement('div') : null;
           if (hintEl) {
             hintEl.className = 'ask-hint';
@@ -5116,6 +5119,7 @@
           }
           function paintHint() {
             if (!hintEl) return;
+            if (g.hint) { hintEl.textContent = g.hint; return; }
             const cur = g.options.filter(function (o2) { return o2.value === g.value; })[0];
             hintEl.textContent = (cur && cur.hint) || '';
           }
@@ -6107,7 +6111,10 @@
      * **This is the one group that keeps a note**, and it says one thing: that turning it on costs
      * another call. The tiers above lost theirs because their names carry the meaning; this one
      * cannot, since nothing about 开 says it is the only choice in the dialog that adds a request.
-     * Both states carry a line so the row does not change height when it is switched.
+     *
+     * It hangs on the group rather than on either state. 关 is the default and needs no explaining —
+     * the screen already shows it — and the cost is a fact about the switch, not about where it
+     * happens to be standing.
      *
      * **Off by default**, and that is not timidity about the feature: a guide is usually written for
      * a game already finished, where there is nothing left to spoil, so the common case should not
@@ -6117,9 +6124,10 @@
       return {
         key: 'spoiler',
         label: t('gen.spoiler'),
+        hint: t('gen.spoilerHint'),
         options: [
-          { value: 'off', label: t('gen.spoilerOff'), hint: t('gen.spoilerOffHint') },
-          { value: 'on', label: t('gen.spoilerOn'), hint: t('gen.spoilerOnHint') },
+          { value: 'off', label: t('gen.spoilerOff') },
+          { value: 'on', label: t('gen.spoilerOn') },
         ],
         value: 'off',
       };

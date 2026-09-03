@@ -1058,12 +1058,16 @@ describe('the wording in the confirmation dialog', () => {
     for (const o of effortChoice().options) {
       assert.equal(o.hint, undefined, `${o.label} grew a note again`);
     }
-    for (const o of spoilerChoice().options) {
-      assert.ok(o.hint, `${o.label} lost its note`);
+    // **On the group, not on either state.** 关 is the default and the screen already shows it, so
+    // there is nothing to explain there; the cost is a fact about the switch rather than about
+    // where it is standing, and hanging it on the group also stops the row changing height on click
+    const guard = spoilerChoice();
+    assert.ok(guard.hint, 'the spoiler guard lost the one line that states its cost');
+    for (const o of guard.options) {
+      assert.equal(o.hint, undefined, `${o.label} grew a per-state note`);
     }
-    const on = spoilerChoice().options.find((x) => x.value === 'on');
-    assert.match(on.hint, /调用/, 'the note has to name the cost, which is the only reason it exists');
-    assert.match(STRINGS['gen.spoilerOnHint'][1], /call/i, 'and the English half has to say it too');
+    assert.match(guard.hint, /调用/, 'the note has to name the cost, which is the only reason it exists');
+    assert.match(STRINGS['gen.spoilerHint'][1], /call/i, 'and the English half has to say it too');
   });
 
   test('the selected state has to be reported, and written in both places', () => {
