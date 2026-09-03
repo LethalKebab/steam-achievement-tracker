@@ -3016,14 +3016,12 @@
       'rw.running':           ['⏳ 重写《{game}》…', '⏳ Rewriting {game}…'],
       'gen.style':            ['写法', 'How to write it'],
       'gen.fast':             ['极速模式', 'Fast'],
-      'gen.fastHint':         ['便宜得多也快得多。最难的几条照样写得好,中间那批大多只剩一句模板。', 'Much cheaper and much faster. The hardest few still come out well; most of the middle ones end up a single template line.'],
       'gen.deep':             ['深度模式', 'Thorough'],
-      'gen.deepHint':         ['默认。每条成就都会真的去查一遍,更慢也更贵。', 'The default. Every achievement is really researched — slower and dearer.'],
-      'gen.spoiler':          ['剧透', 'Spoilers'],
-      'gen.spoilerOff':       ['直接写', 'Written out'],
-      'gen.spoilerOffHint':   ['默认。结局、反转、隐藏成就的条件都直接写在条目里。', 'The default. Endings, twists and hidden achievements’ conditions are written out in the entry.'],
-      'gen.spoilerOn':        ['折叠起来', 'Folded away'],
-      'gen.spoilerOnHint':    ['说破故事的句子收进折叠,点开才看得到。多花一次请求。', 'Sentences that give the story away go into a fold you click to open. Costs one more request.'],
+      'gen.spoiler':          ['防剧透', 'Spoiler guard'],
+      'gen.spoilerOff':       ['关', 'Off'],
+      'gen.spoilerOffHint':   ['默认,不额外调用。', 'The default, and nothing extra is called.'],
+      'gen.spoilerOn':        ['开', 'On'],
+      'gen.spoilerOnHint':    ['会多一次 AI 调用。', 'Costs one more call to the AI.'],
       'mv.checkboxes':        ['{n} 个 checkbox 原样搬过去(含勾选状态)。', '{n} checkboxes move across as they are, ticks included.'],
       'mv.localKept':         ['本地文件挪进 guides/.migrated/,不会删。', 'The local file moves into guides/.migrated/ — nothing is deleted.'],
       'mv.unconverted':       ['{n} 行特殊排版会转为普通段落,文字不会丢失。', '{n} specially formatted lines become ordinary paragraphs. No text is lost.'],
@@ -6098,13 +6096,18 @@
      * even with three its shape implied even spacing.
      */
     /**
-     * **A third group rather than a checkbox.** The dialog already renders label + segmented
-     * buttons + a note per group and does it twice; a checkbox would be a second mechanism for the
-     * same kind of question, which is the shape that drifts here.
+     * **A third group rather than a checkbox.** The dialog already renders a label plus segmented
+     * buttons per group and does it twice; a checkbox would be a second mechanism for the same kind
+     * of question, which is the shape that drifts here.
      *
-     * The options say the **outcome** — written out / folded away — not the parameter name, for the
-     * same reason the tier names do. The cost sits in the note rather than in the label: it is what
-     * decides the choice, and the note line is where this dialog already puts what a tier costs.
+     * 「防剧透」 is the name this feature has in Chinese, so the group is named that and the buttons
+     * are 关/开 — a switch needs no invented state names, and inventing two would also collide with
+     * the 「…模式」 pair sitting directly above it.
+     *
+     * **This is the one group that keeps a note**, and it says one thing: that turning it on costs
+     * another call. The tiers above lost theirs because their names carry the meaning; this one
+     * cannot, since nothing about 开 says it is the only choice in the dialog that adds a request.
+     * Both states carry a line so the row does not change height when it is switched.
      *
      * **Off by default**, and that is not timidity about the feature: a guide is usually written for
      * a game already finished, where there is nothing left to spoil, so the common case should not
@@ -6131,16 +6134,19 @@
          * The group name and the tier names state the **outcome**, not the parameter. The knob on the
          * API is called effort with values low/high, but what the screen has to answer is 「选它会怎
          * 样」 — carrying the parameter name across says not one word about what deep does or what
-         * shallow does, leaving a first-time user with nothing but the default and somebody wanting to
-         * save money with no idea what they are giving up.
+         * shallow does.
          *
-         * One sentence per tier, saying what choosing it gains and what it loses — both state one end
-         * each, or it would read as pushing one of them.
+         * **Labels only: no note line.** Each tier used to carry a sentence, and the fast one named
+         * the measured cost (9 of 16 entries came back as template sentences). With a third group
+         * added, three stacked explanations turned a two-click confirmation into something to read.
+         * The difference between the tiers is not lost, it moved: `docs/configuration.md` carries the
+         * whole measured table, which is more than a note line could ever say. **A dialog is not
+         * where someone reads.**
          */
         label: t('gen.style'),
         options: [
-          { value: 'low', label: t('gen.fast'), hint: t('gen.fastHint') },
-          { value: 'high', label: t('gen.deep'), hint: t('gen.deepHint') },
+          { value: 'low', label: t('gen.fast') },
+          { value: 'high', label: t('gen.deep') },
         ],
         value: 'high',
       };

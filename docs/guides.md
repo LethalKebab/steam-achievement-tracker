@@ -86,9 +86,9 @@ This is not a quality check. Your guide is your guide — it is moved as written
 
 ### Having one written for you
 
-**Hiding spoilers is asked each time, not configured.** The confirmation dialog carries a **Spoilers** (「剧透」) choice beside the treatment: **Written out** (直接写), the default, or **Folded away** (折叠起来). Choosing the second makes the program ask, once the guide is written, which sentences give the story away, and move those into a fold you click to open — endings, twists, who somebody turns out to be, and what a hidden achievement actually asks of you, since Steam publishes no description for those and your guide is the only place that condition appears.
+**Hiding spoilers is asked each time, not configured.** The confirmation dialog carries a **Spoiler guard** (「防剧透」) switch beside the treatment, off by default. Turn it on and the program asks, once the guide is written, which sentences give the story away, and moves those into a fold you click to open — endings, twists, who somebody turns out to be, and what a hidden achievement actually asks of you, since Steam publishes no description for those and your guide is the only place that condition appears.
 
-It costs one more request per guide, which is why it is a choice at the moment you confirm the spend rather than a setting in a file. It is off by default because a guide is usually written for a game you have already finished, where there is nothing left to spoil. On the command line it is `--spoiler`; the same choice applies to **Rewrite** (「重写」) and to a partial rewrite, and on a partial rewrite only the entries you named are looked at.
+Turning it on costs one more call to the AI, which the dialog says beside the switch; that is why it is a choice at the moment you confirm the spend rather than a setting in a file. It is off by default because a guide is usually written for a game you have already finished, where there is nothing left to spoil. On the command line it is `--spoiler`; the same choice applies to **Rewrite** (「重写」) and to a partial rewrite, and on a partial rewrite only the entries you named are looked at.
 
 **What it does not promise:** whether a folded sentence really spoils anything, and whether an unfolded one should have been folded, are judgements no checker can make. It also only looks at achievement entries, not at a section's introductory prose.
 
