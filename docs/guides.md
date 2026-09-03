@@ -452,6 +452,8 @@ To decide *which* achievement a given checkbox refers to, it needs an unambiguou
 1. the achievement's **full description**, quoted in the checkbox text, when that description is unique in the game;
 2. the achievement's **name**, when that name maps to exactly one achievement.
 
+One box can satisfy the first handle for several achievements at once, because a tiered family writes the easier tier's description inside the harder one's — Factorio's `建造出内燃机车。` sits inside `在游戏90分钟内建造出内燃机车。`. The **longest** quoted description is the one taken, since a proper substring of it says less about the same sentence; two different achievements quoted at the same length is a genuine tie and resolves to nothing. A description holding no characters at all — Steam ships a few that are a single space — is not a handle in the first place, and an achievement carrying one is reached only by its name.
+
 If neither applies, the box is counted as undetermined and reported as such — never guessed. That's why output distinguishes "confirmed wrong" from "couldn't tell": on a 310-game library, 1,175 ticked boxes resolved cleanly and 65 didn't, and claiming the latter were fine would have been a lie. Writing guides so they quote the official description verbatim is what keeps that second number small.
 
 ## How matching works, and why it's strict
