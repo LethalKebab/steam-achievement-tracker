@@ -629,6 +629,21 @@ describe('the search box does two jobs at once', () => {
     assert.match(searchBranch, /return/, 'with a search term it has to return on the spot rather than carrying on through the chips');
   });
 
+  /**
+   * The markup of the filter-chip container, from its opening tag to its own closing one. **Sliced
+   * to the container rather than to a fixed number of characters**: the chips carry explanatory
+   * `title` attributes, so the block grows without anyone adding a chip, and a window that fell
+   * short would report the last chip as missing rather than as unreachable.
+   */
+  const chipsMarkup = () => {
+    const page = read('Dashboard.html');
+    const at = page.indexOf('id="filterChips"');
+    assert.ok(at > 0, 'cannot find the filter-chip container');
+    const end = page.indexOf('</div>', at);
+    assert.ok(end > at, 'the filter-chip container is not closed');
+    return page.slice(at, end);
+  };
+
   test('the keys of the chips and of the FILTERS table have to correspond one for one, in the same order', () => {
     // **Missing one on either side raises no error; it just "does nothing when clicked".** The
     // event is delegated to the container, so one extra chip in the markup still cycles colours —
@@ -645,10 +660,7 @@ describe('the search box does two jobs at once', () => {
     const src = js();
     const table = src.slice(src.indexOf('const FILTERS = ['), src.indexOf('const NEXT_STATE'));
     const inTable = [...table.matchAll(/key:\s*'([a-z]+)'/g)].map((m) => m[1]);
-    const page = read('Dashboard.html');
-    const chipsAt = page.indexOf('id="filterChips"');
-    const inMarkup = [...page.slice(chipsAt, chipsAt + 3000).matchAll(/data-filter="([a-z]+)"/g)]
-      .map((m) => m[1]);
+    const inMarkup = [...chipsMarkup().matchAll(/data-filter="([a-z]+)"/g)].map((m) => m[1]);
     assert.ok(inTable.length >= 5, 'the FILTERS table read empty — this check has lost its target rather than passed');
     assert.deepEqual(inMarkup, inTable, 'the chips and FILTERS have to share names and order');
   });
@@ -657,7 +669,7 @@ describe('the search box does two jobs at once', () => {
     // **The direction is not arbitrary; reversed, the two most common actions each cost an extra
     // click.**
     // The three states form a ring and neutral has only one predecessor, so only one direction is a
-    // single click. At startup favourite/family are neutral and the other three are excluded — the
+    // single click. At startup favourite/family are neutral and the other four are excluded — the
     // next step for the former is usually "only", and for the latter "back to neutral" (unhide to
     // go find a game), and this direction makes both one click.
     // Arranged the other way both become two clicks, while **the table still works** and nothing
@@ -671,15 +683,19 @@ describe('the search box does two jobs at once', () => {
     assert.match(m[1], /not:\s*'off'/, 'the next state after excluded has to be neutral');
   });
 
-  test('the startup state: favourite and family neutral, the other three excluded', () => {
+  test('the startup state: favourite and family neutral, the other four excluded', () => {
     // The default view has to be **line for line the same** as the checkbox version — the three
     // "hide" checkboxes were ticked by default, which is the excluded state. Changing this changes
-    // the first screen everyone sees on opening the page, and it raises no error
-    const page = read('Dashboard.html');
-    const chipsAt = page.indexOf('id="filterChips"');
-    const states = [...page.slice(chipsAt, chipsAt + 3000)
+    // the first screen everyone sees on opening the page, and it raises no error.
+    //
+    // 已隐藏 is the fourth, and it is the only one whose excluded state is the point rather than a
+    // default: the other three describe what a game *is*, while this one records what the reader
+    // said to do with it. Neutral at startup would mean the mark did nothing until someone found
+    // the chip
+    const states = [...chipsMarkup()
       .matchAll(/data-filter="([a-z]+)" data-state="([a-z]+)"/g)].map((m) => m[1] + ':' + m[2]);
-    assert.deepEqual(states, ['fav:off', 'family:off', 'complete:not', 'unvetted:not', 'noach:not']);
+    assert.deepEqual(states,
+      ['fav:off', 'family:off', 'complete:not', 'unvetted:not', 'noach:not', 'hidden:not']);
   });
 
   test('whether the library has it must not decide whether to search Steam', () => {

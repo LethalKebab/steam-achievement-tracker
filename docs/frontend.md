@@ -218,17 +218,23 @@ Opening the panel marks everything read: the dot answers "is there anything new"
 
 ## 7. The filter row
 
-Five **tri-state** chips, not checkboxes. Each chip is one attribute (喜爱 / 家庭 / 已完成 / 受限 / 无成就) cycling 中立 → 只看 → 排除 → 中立.
+Six **tri-state** chips, not checkboxes. Each chip is one attribute (喜爱 / 家庭 / 已完成 / 受限 / 无成就 / 已隐藏) cycling 中立 → 只看 → 排除 → 中立.
 
 Two states cannot express that, which forces the direction into the label (`隐藏已完成` vs `只看喜爱`) and leaves the other direction unreachable. Names are bare nouns, because a direction-carrying name reads as `只看隐藏已完成` in the other state.
 
-**The cycle direction is derived, not a taste call**: three states form a ring, so 中立 has exactly one cheap predecessor. 喜爱/家庭 start neutral and their usual next step is 只看; the other three start excluded and theirs is back to 中立 — this order gives both one click. Returning to a state you just left costs two clicks; that is the ring's topology, not a defect, and a reverse gesture (right-click) was considered and deliberately not built.
+**The cycle direction is derived, not a taste call**: three states form a ring, so 中立 has exactly one cheap predecessor. 喜爱/家庭 start neutral and their usual next step is 只看; the other four start excluded and theirs is back to 中立 — this order gives both one click. Returning to a state you just left costs two clicks; that is the ring's topology, not a defect, and a reverse gesture (right-click) was considered and deliberately not built.
 
 **The state lives in the leading mark; the label text is never touched.** Shape is the primary signal (dot / lit dot / dash) with colour secondary — WCAG forbids encoding by colour alone, and the four surface levels are only ~15% apart, so tint cannot separate three states on a 30px chip. A strikethrough on the excluded label is ruled out: this row gets scanned dozens of times a day, and a mark changing shape reads far quieter than five labels sometimes wearing a line. The dash is one step brighter than its own label (`--text-2` over `--text-3`) so the eye lands on the mark rather than the word.
 
 **The mark's box is a fixed 9×9 with the stroke drawn in `::before`** — animating the element's own width widens the chip, and chips sit in a row, so one cycle nudges every chip to its right.
 
-**Excluded is not red**: red is `--danger` here and three of five chips sit excluded at rest, so red would be a permanent alarm.
+**Excluded is not red**: red is `--danger` here and four of six chips sit excluded at rest, so red would be a permanent alarm.
+
+已隐藏 is the odd one of the six, and the difference is worth stating. The other five describe what a game **is** — read off its own data, true whether or not anyone looked. 已隐藏 records what the reader **decided**, stored in `games.hidden` and set from the row's ⋯ menu. Three consequences follow, all deliberate:
+
+- **It is scoped to this table and nothing else.** The four readings in the top-right still count a hidden game, the rotating sweep still reconciles it against Steam, and Steam is never told — hiding is not a lightweight `删除`, and a mark that quietly moved the completion average would make that number untrustworthy. `hidden-games.test.js` pins each of those.
+- **The chip is the only way back**, which is why it exists at all rather than the mark being an implicit filter. Hiding a row makes it disappear on the spot; without a control saying 「这里还有一类」 the games would be reachable only by searching for one by name. (Search does reach them — a search term makes every chip yield — but that requires already knowing what you hid.)
+- **It is orthogonal to `sync_locked`**, the same separation `status` already keeps from it: one is what you see, the other is what runs.
 
 Multiple non-neutral chips **intersect** (只看喜爱 + 只看家庭 can legitimately be empty; the row count reports it and nothing rescues it).
 
@@ -271,7 +277,7 @@ Each card carries the matching checkbox's own text from the guide (name + verbat
 **Three things are load-bearing:**
 
 - **Attribution is `resolveTodoToAchievement`, unchanged** — the same reverse lookup `audit` uses, which demands a unique verbatim description or an unambiguous name and otherwise returns null. **The pull to loosen it is much stronger here than in the tick path**, because a blank card *looks* like a bug while a wrong one looks fine; and it is the same function that decides what gets written into the user's notes, so loosening it for display loosens it for writing. `mapAchievementGuides` is therefore a pure assembly layer over it (`matching.test.js` pins first-wins on a repeated achievement, that a sub-step which is itself an achievement is not filed under its neighbour, and that a same-name collision yields **no** entry).
-- **An achievement it cannot attribute says 「攻略里还没写这条」 and keeps the search link** — chosen over silence because the blanks are the actionable half: the header reads `还差 8 / 44 个成就 · 攻略里已写 8 / 8 条`, which makes the panel a coverage map that previously needed `guide-lint` across the whole corpus to produce.
+- **An achievement it cannot attribute says 「攻略里还没写这条」 and keeps the search link** — chosen over silence because the blanks are the actionable half: each uncovered achievement says so on its own card, which makes the panel a coverage map that previously needed `guide-lint` across the whole corpus to produce. **The header does not also count them** — it states `剩余 8 个成就` and stops, because a tally of what the cards below already show is the header narrating the panel rather than adding to it.
 - **The guide read is soft-failed**: a dead Notion token puts its message in the header and leaves the achievement list untouched, verified by running a real server with a bogus `NOTION_TOKEN`.
 
 A game with no registered guide is untouched (search link only) — and so is one whose achievement schema hasn't synced, because `resolveTodoToAchievement` needs `api_name`/`name_cn`/`name_en`/`description` and `getMissingAchievements`'s live-schema fallback can't produce that shape; claiming 「攻略里还没写」 there would be a guess.

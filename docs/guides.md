@@ -361,13 +361,9 @@ The card already prints the name and the official description from Steam, so the
 
 Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement`): a verbatim quote of a description that is unique in the game, or a name that maps to exactly one achievement. **It refuses to guess.** An achievement it can't attribute shows **Not written up yet** (「攻略里还没写这条」) and keeps the search link. Do not loosen the matching to fill those blanks — the same function decides which boxes get ticked in your notes, so loosening it here loosens it there.
 
-That refusal is what makes the header worth reading:
+That refusal is what makes the panel worth reading: every achievement your guide doesn't cover says so on its own card. So the panel doubles as a map of **which achievements your guide still doesn't cover** — something that was previously only reachable by running `guide-lint` across the corpus.
 
-```
-还差 8 / 44 个成就 · 攻略里已写 8 / 8 条
-```
-
-So the panel doubles as a map of **which achievements your guide still doesn't cover** — a number that was previously only reachable by running `guide-lint` across the corpus.
+The header above them stays out of it, stating only how many achievements are left (`剩余 8 个成就`) plus, when they disagree, the guide's own language.
 
 Details:
 
