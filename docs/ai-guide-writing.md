@@ -465,7 +465,26 @@ Both of these were hit while measuring quality:
 
 A generated guide is written in the interface language (`config.uiLanguage`). The language is resolved **once**, in `planGuide`, and travels on the plan alongside `target` — full generation, partial rewrite and `--dry-run`'s preview all have to send the same prompt, and a caller resolving it for itself is where the three first diverge. The preview exists precisely to show what will be sent.
 
-**There is one builder; the rule text is per-language.** A translation is a different string all the way down, so the two prompts cannot share sentences. What they share is the shape: `PROMPT_SECTIONS` in `lib/guidegen.js` pairs the `##` sections of the two languages in the order they appear, and `test/guidegen.test.js` requires each prompt to carry its own half, in that order, with no heading missing from the table on either side. A section added to one language and forgotten in the other is a failing test rather than an English guide quietly written to a shorter rule set.
+**Every prompt forks, not only the rules.** The system prompt is the cached prefix and was the
+first to fork; the round-by-round messages — write this shard, this shard failed validation, rewrite these entries, and the classification pass that decides the final section headings — are sent just as often and were Chinese for a year afterwards. An English guide written to English rules and then instructed in Chinese every round comes back in whichever language the model settles on, and the section headings are where that shows first ([#121](https://github.com/LethalKebab/steam-achievement-tracker/issues/121)). Each builder takes `lang`, defaulting to `'zh'`, so a call site that forgets falls back to the language this project has always spoken rather than to English.
+
+**There is one builder per language; the rule text is per-language.** A translation is a different string all the way down, so the two prompts cannot share sentences. What they share is the shape: `PROMPT_SECTIONS` in `lib/guidegen.js` pairs the `##` sections of the two languages in the order they appear, and `test/guidegen.test.js` requires each prompt to carry its own half, in that order, with no heading missing from the table on either side. A section added to one language and forgotten in the other is a failing test rather than an English guide quietly written to a shorter rule set.
+
+### The classification pass has three halves to translate
+
+`buildRegroupPrompt` runs after the prose is written and **decides the guide's final section
+headings**, so it is the one pass where a missed fork is visible in the finished product. Three
+things move with the language, and leaving any one behind is enough to produce Chinese headings on
+an English guide:
+
+| | |
+|---|---|
+| The instructions | Including an explicit "write the section titles in English". Every other rule in the English fork says which language to answer in; this pass overwrites exactly the headings those rules produced |
+| The achievement **name** per row | Resolved against the guide's language rather than the process-wide message language. The two disagree for the whole of a run started in one language and watched in the other |
+| The achievement **description** per row | `description_en` where the game has one. Measured on Delta Force (2507950, 53 achievements, so two shards and therefore this pass): every description mentioning 烽火地带 has a complete English one saying "Operations", and handing the model the Chinese column is how a heading comes back naming a term the English guide never uses |
+
+**`lintGuide` cannot catch this.** It guarantees format and data, never content, so a heading in the
+wrong language passes validation silently.
 
 ### The four rules that genuinely differ
 
@@ -493,6 +512,10 @@ The marker appears in the achievement panel and nowhere else: that panel is the 
 ### The density guard is parameterised, not exempted
 
 `test/i18n-boundary.test.js` requires the Chinese prompt to be more than 40% Chinese **and** the English one to be almost free of it. Exempting the English variant instead would leave the one real hole open — a pass that translates both and reports itself fine — because the Chinese prompt would then be English with nothing looking at it. Two assertions pointing in opposite directions cannot both be satisfied by one sweeping translation.
+
+**A ratio was the wrong instrument for the round-by-round messages, and the fixture is why.** Names and official descriptions are quoted into those prompts verbatim by rule, so a fixture with Chinese in it forces the English assertion down to a ratio — and a ratio cannot tell "the prompt is Chinese" from "the game is". The parameterised checks use an **entirely English fixture**, which makes any Chinese character in an English prompt the prompt's own and lets the assertion be *none at all*, with the Chinese direction still asserted the same way.
+
+**The check that catches the next one reads the source rather than a list.** Every assertion above names its builder, so a builder written later is simply absent and nothing goes red — which is exactly how this family grew. So a function holding a Chinese string literal must take a `lang`; it is writing Chinese for somebody and has to be able to answer for the other language too.
 
 ## Explicitly not doing
 
