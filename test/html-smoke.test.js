@@ -1084,11 +1084,16 @@ describe('the wording in the confirmation dialog', () => {
     }
   });
 
-  test('the tier chosen really travels with the request', () => {
+  test('every choice in the dialog really travels with the request', () => {
     // The control is built and the value is not passed down — everything looks fine on screen while
-    // every run still uses the default tier
-    assert.match(js, /startGuideGen\(appid, false, choice\.value\)/, 'the generate path');
-    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value, scope\)/, 'the rewrite path');
+    // every run still uses the default. **Each control added to these dialogs belongs here**: the
+    // spoiler group was added later and would otherwise have been a switch that silently did nothing
+    assert.match(js, /startGuideGen\(appid, false, choice\.value, null, spoiler\.value === 'on'\)/, 'the generate path');
+    assert.match(
+      js,
+      /startGuideGen\(appid, true, rewriteChoice\.value, scope, rewriteSpoiler\.value === 'on'\)/,
+      'the rewrite path'
+    );
   });
 
   test('the scope of a partial rewrite really travels with the request, and is exclusive with the whole guide', () => {

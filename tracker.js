@@ -1202,8 +1202,8 @@ async function cmdGuideGen() {
   const steam = new SteamClient(config, { log: () => {} });
   const notion = new NotionClient(config);
   const local = flags.has('--local');
-  // One run's opt-out. `ai.spoilerFold: false` in config.json is the standing one
-  if (flags.has('--no-spoiler')) config.ai.spoilerFold = false;
+  // Opt in for this run. There is no setting: see the comment on generateGuide's spoilerFold
+  const spoilerFold = flags.has('--spoiler');
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
@@ -1297,7 +1297,7 @@ async function cmdGuideGen() {
   const started = Date.now();
 
   const r = await generateGuide(db, {
-    config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan,
+    config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan, spoilerFold,
     onProgress(ev) {
       if (ev.phase === 'plan' && ev.chunks > 1) {
         p.done(clog('gg.sharded', { achievements: ev.achievements, chunks: ev.chunks }));
@@ -1539,6 +1539,9 @@ async function cmdGuidePatch(appid) {
   const r = await patchGuide(db, {
     config, provider: probe, steam, appid, notion,
     selector, instruction, rounds, patchPlan: pp,
+    // Read here rather than passed down from cmdGuideGen: `--only` is dispatched into its own
+    // command, so the flag has to be looked at on this side too or it silently does nothing here
+    spoilerFold: flags.has('--spoiler'),
     onProgress(ev) {
       if (ev.phase === 'write') p.update(clog('gp.write', { round: ev.round, of: ev.of, scope: ev.scope }));
       else if (ev.phase === 'rewrite') p.update(clog('gp.rewrite', { round: ev.round, of: ev.of }));

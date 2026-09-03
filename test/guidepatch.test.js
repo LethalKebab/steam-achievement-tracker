@@ -1207,7 +1207,9 @@ describe('patchGuide, driven end to end on a local guide', () => {
   test('it runs, and the spoiler pass folds inside the entry that was rewritten', async () => {
     const { db, config, file } = env();
     const p = provider(REWRITTEN, [[1, '真凶是医生。']]);
-    const r = await patchGuide(db, { config, provider: p, steam: steam(), appid: '1', selector: '第一步' });
+    const r = await patchGuide(db, {
+      config, provider: p, steam: steam(), appid: '1', selector: '第一步', spoilerFold: true,
+    });
 
     assert.equal(r.ok, true, r.reason ?? '');
     assert.equal(p.spoilerAsks, 1, 'the pass has to run on this path too, not only on a whole-guide rewrite');
@@ -1222,7 +1224,9 @@ describe('patchGuide, driven end to end on a local guide', () => {
     // cannot reach into an entry the user did not ask about even if that entry does hold a spoiler
     const { db, config, file } = env();
     const p = provider(REWRITTEN, [[1, '真凶是医生。']]);
-    await patchGuide(db, { config, provider: p, steam: steam(), appid: '1', selector: '第一步' });
+    await patchGuide(db, {
+      config, provider: p, steam: steam(), appid: '1', selector: '第一步', spoilerFold: true,
+    });
     const text = readFileSync(file, 'utf8');
     assert.match(text, /- \[ \] \*\*第二步\*\*<br>完成第二关。<br>别的条目,不许动。/);
   });
@@ -1235,7 +1239,9 @@ describe('patchGuide, driven end to end on a local guide', () => {
       if (args.system === spoilerSystemFor('zh')) throw new Error('fell over');
       return inner(args);
     };
-    const r = await patchGuide(db, { config, provider: p, steam: steam(), appid: '1', selector: '第一步' });
+    const r = await patchGuide(db, {
+      config, provider: p, steam: steam(), appid: '1', selector: '第一步', spoilerFold: true,
+    });
     assert.equal(r.ok, true);
     const text = readFileSync(file, 'utf8');
     assert.match(text, /新的正文。真凶是医生。/, 'the rewrite still landed, just unfolded');

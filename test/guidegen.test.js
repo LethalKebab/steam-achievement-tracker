@@ -871,11 +871,8 @@ describe('generateGuide', () => {
     const r = await generateGuide(db, {
       config, provider: fakeProvider([MISSING_B, GOOD]), steam: fakeSteam(), appid: '1', rounds: 3,
     });
-    // Three, not two: the two writing rounds plus the spoiler pass, which runs on every generation
-    // and is a real request on a session of its own. A total that left it out would be lower than
-    // the bill with nothing marking it as partial
-    assert.equal(r.usage.requests, 3);
-    assert.equal(r.usage.outputTokens, 41, 'two rounds at 20 output tokens, plus the spoiler pass at 1');
+    assert.equal(r.usage.requests, 2);
+    assert.equal(r.usage.outputTokens, 40);
   });
 
   test('the system prompt is byte-identical, which is what lets the feedback round hit the prefix cache', async () => {
@@ -1644,15 +1641,15 @@ describe('sharded writing', () => {
       );
       const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
       assert.equal(provider.regroupAsks, 1, 'the premise of this case is that the classification pass really ran');
-      assert.equal(provider.spoilerAsks, 1, 'and so did the spoiler pass, which runs on every generation');
+      assert.equal(provider.spoilerAsks, 0, 'and nothing here asked for the spoiler pass');
       assert.equal(
-        res.usage.requests, provider.asked.length + provider.regroupAsks + provider.spoilerAsks,
-        'an aside session is missing from the total — those tokens were spent and are not reported'
+        res.usage.requests, provider.asked.length + provider.regroupAsks,
+        'the classification session is missing from the total — those tokens were spent and are not reported'
       );
-      // Both aside replies report 1 input token where a shard reply reports 10, so the total
-      // distinguishes "the passes were counted" from "the shards happen to add up"
-      assert.equal(res.usage.inputTokens, provider.asked.length * 10 + 2,
-        'the total is exactly the two shards, so neither aside pass contributed to it');
+      // The classification reply reports 1 input token where a shard reply reports 10, so the
+      // total distinguishes "the pass was counted" from "the shards happen to add up"
+      assert.equal(res.usage.inputTokens, provider.asked.length * 10 + 1,
+        'the total is exactly the two shards, so the classification pass contributed nothing to it');
     });
 
     test('both interfaces have to report "unifying the sections" and "could not unify"', () => {
@@ -3147,6 +3144,7 @@ describe('the spoiler pass inside generateGuide', () => {
       const provider = fakeProvider([WITH_SPOILER], { spoilers: [[1, '真凶是医生。']], lang });
       const r = await generateGuide(db, {
         config: { ...config, uiLanguage: lang }, provider, steam: fakeSteam(['A']), appid: '1',
+        spoilerFold: true,
       });
 
       assert.equal(r.ok, true, r.reason ?? '');
@@ -3171,7 +3169,7 @@ describe('the spoiler pass inside generateGuide', () => {
     };
     const events = [];
     const r = await generateGuide(db, {
-      config, provider, steam: fakeSteam(['A']), appid: '1', onProgress: (e) => events.push(e),
+      config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true, onProgress: (e) => events.push(e),
     });
 
     assert.equal(r.ok, true, 'a cosmetic pass must not be able to fail the whole run');
@@ -3192,7 +3190,7 @@ describe('the spoiler pass inside generateGuide', () => {
       return inner(args);
     };
     await assert.rejects(
-      generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' }),
+      generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true }),
       (e) => e.cancelled === true
     );
   });
@@ -3203,27 +3201,26 @@ describe('paying for the spoiler pass, or not', () => {
     + '- [ ] **第一步**<br>完成第一关。<br>开局就能拿。真凶是医生。\n'
     + '- [ ] **第二步**<br>完成第二关。<br>接着打\n```';
 
-  test('`ai.spoilerFold: false` skips it entirely — no request, no fold', async () => {
-    // The point of the switch is the request, not the fold: an implementation that still asked and
-    // then discarded the answer would cost exactly the same and read as if it had been turned off
+  test('**not asked for means not paid for** — no request, no fold', async () => {
+    // The default, and the point of it being an argument. What must be skipped is the request: an
+    // implementation that still asked and then discarded the answer would cost exactly the same
+    // while reading as though nothing had been spent
     const { db, config } = freshEnv();
     const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
-    const r = await generateGuide(db, {
-      config: { ...config, ai: { ...config.ai, spoilerFold: false } },
-      provider, steam: fakeSteam(['A']), appid: '1',
-    });
+    const r = await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
 
     assert.equal(r.ok, true);
-    assert.equal(provider.spoilerAsks, 0, 'switched off means the request is never sent');
+    assert.equal(provider.spoilerAsks, 0, 'nobody asked for it, so the request is never sent');
     assert.equal(r.usage.requests, 1, 'and it is not paid for');
     assert.ok(!readFileSync(r.path, 'utf8').includes('<details>'));
   });
 
-  test('it is on unless it is turned off', async () => {
-    // Default-on is only defensible because it is cheap; the pin below is what makes it cheap
+  test('asking for it runs it', async () => {
     const { db, config } = freshEnv();
     const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
-    await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
+    await generateGuide(db, {
+      config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true,
+    });
     assert.equal(provider.spoilerAsks, 1);
   });
 
@@ -3239,7 +3236,9 @@ describe('paying for the spoiler pass, or not', () => {
       efforts.push([args.system === spoilerSystemFor('zh') ? 'aside' : 'writing', args.effort ?? null]);
       return inner(args);
     };
-    await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
+    await generateGuide(db, {
+      config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true,
+    });
 
     // **The literal, not ASIDE_EFFORT.** Comparing the observed value against the same constant the
     // code reads makes the assertion true by construction — setting the constant to null then keeps

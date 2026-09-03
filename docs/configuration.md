@@ -46,7 +46,6 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "chunkSize": 50,          // max achievements per writing pass; passes are evenly sized
     "maxRounds": 3,           // rewrite rounds before the draft is kept as-is
     "concurrency": 3,         // how many passes are written at once; 1 = one at a time
-    "spoilerFold": true,      // hide story spoilers behind a fold; costs one extra request
 
     "maxSearches": 30,        // web_search calls per request
     "maxFetches": 10,         // web_fetch calls per request
@@ -157,18 +156,6 @@ Raising it further has diminishing returns and one real cost: if every sync clea
 **`concurrency` (3) is how many of those passes are written at the same time.** Each pass covers a different set of achievements and none depends on another, so the first round takes about as long as its slowest pass instead of the sum of all of them — the difference on a large game is most of the total time. Set it to `1` to go back to one pass at a time, which is worth doing if you are trying to reproduce a problem. Raising it mostly spends your provider's rate limit; being throttled is retried automatically and doesn't lose a pass. Only the first round runs in parallel: later rounds re-ask just the passes that failed validation, usually one or two, where there is nothing to gain.
 
 One visible consequence: because several passes are being written at once, progress reports **how many passes are finished** rather than which one is in progress. `maxRounds` (3) is how many times a failed validation gets fed back to the model before the attempt is kept as a draft under `guides/.drafts/` — that directory is invisible to guide discovery, so an unvalidated draft can never be registered and can never be used to tick your checkboxes.
-
-### Hiding spoilers (`spoilerFold`, on by default)
-
-A guide un-hides what the game hid — most sharply for a hidden achievement, whose unlock condition Steam publishes nowhere, so your guide's line is the only place it appears. With this on, the program makes one more request after the guide is written, asks which sentences give away the story, and moves those into a fold you have to click to open. Everything else stays where it is: how to do it, where it is, how many runs it takes, whether it can be missed.
-
-**What it costs.** One request per generation, and it is deliberately run at the shallowest reasoning depth because it only picks out sentences rather than writing any. Measured on a 16-achievement guide: the writing spent 40,615 output tokens, this pass spent 2,636 — about 6% on top. Run at the depth used for writing it would have cost 24,594 for the identical answer, which is why the depth is pinned here rather than inherited.
-
-Set it to `false` to skip it entirely — no request, nothing paid. `--no-spoiler` does the same for a single run without changing the file.
-
-It applies to a new guide, to **Rewrite** (「重写」) and to a partial rewrite alike; on a partial rewrite only the entries you named are looked at.
-
-**What it cannot promise.** Whether a folded sentence really spoils anything, and whether an unfolded one should have been folded, are judgements no checker can make — an absent fold and "nothing here spoils" are the same text. It also only looks at achievement entries, not at a section's introductory prose.
 
 **`chunkSize` is a ceiling, not a pass length.** The number of passes is computed from it and the achievements are then spread evenly, so 55 achievements at the default become two passes of 28 and 27 — not 50 and 5. Lowering it therefore shortens every pass and adds passes only as needed; it can never make a pass longer.
 
