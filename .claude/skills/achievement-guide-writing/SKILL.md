@@ -254,7 +254,7 @@ Group labels (rule 1) do not go by line count: the fold there is **the carrier f
 
 ### [rule-5/spoiler] The spoiler fold
 
-Content that ruins a first playthrough — an ending, a twist, who someone turns out to be, what a hidden achievement actually asks of you — does not go straight into the notes. Hang a fold under that achievement:
+When a sentence **states a fact about the story itself** — how it ends, what the twist is, who someone turns out to be, what actually happened in some scene — fold that sentence away rather than writing it straight into the notes. Hang the fold under that achievement:
 
 ```
 - [ ] **成就名**<br>官方描述<br>不剧透的那半做法
@@ -269,7 +269,8 @@ Content that ruins a first playthrough — an ending, a twist, who someone turns
 - **The fold comes immediately after the achievement's line, indented more deeply, with no blank line between them.**
 - **Prose inside, not checkboxes.** A checkbox in there is read as a sub-step and cascade-ticked with the parent achievement (rule 1's nesting rules), which files a record of something never done.
 - **The 10-line floor above does not apply**: this one is folded because it spoils, not because it is long.
-- **Use it rarely.** On real guide sites a narrative game's whole trophy guide carries 0 to 2 of these. Do not hang one on every hidden achievement — fold too much and the reader opens everything by reflex, which retires the marker.
+- **That is the only thing folded.** How to do it, where it is, how many runs it takes, how hard it is, whether it can be missed — none of that spoils anything, and all of it stays in the notes. Fold too much and the reader opens everything by reflex, which retires the marker; on real guide sites a narrative game's whole trophy guide carries 0 to 2 of these.
+- **Hidden achievements are where such a sentence turns up most often** — Steam gives no description, so the line you write is the only place that condition appears anywhere. Not every hidden achievement needs a fold: only the ones whose line really does state a fact about the story.
 
 **Why a fold and not inline hiding:** Notion has none. Its rich text `annotations` are `{bold, italic, strikethrough, underline, code, color}`, and `color` is a single enum, so text and background cannot both be set. A toggle is the only hiding primitive there, which is also why the label exists at all — Steam's `[spoiler]`, wiki.gg's template and PSNProfiles' span are all inline and unlabelled, and rely on the surrounding sentence to say what is hidden.
 

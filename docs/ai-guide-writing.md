@@ -293,6 +293,26 @@ A guide un-hides what the game hid — most sharply for a hidden achievement, wh
 
 **There can be no completeness check, ever.** An absent fold and "nothing here spoils" are the same text. So the count is reported and never compared against a threshold — a rule that fires on a visual novel where most entries genuinely are spoilers is a rule nobody reads.
 
+#### Measured: the notation has never once been used, and neither have its neighbours
+
+Three live runs on 2026-09-03, `deepseek-v4-flash`, all landing clean (one round each, full coverage, zero warnings) and **zero spoiler folds between them**:
+
+| Game | Achievements | Hidden | Prompt | Folds |
+|---|---|---|---|---|
+| 《尘埃终须落定》 | 9 | 0 | first shape | 0 |
+| Return of the Obra Dinn | 16 | 3 | first shape | 0 |
+| Return of the Obra Dinn (`--overwrite`) | 16 | 3 | reshaped | 0 |
+
+The first is **not** a miss: with no hidden achievements, every name and description was already public on Steam and the model's own prose said where each achievement fires rather than what it reveals. Nothing was left to fold. Selecting a narrative *genre* was the wrong test — what makes the notation apply is `hidden`, where Steam supplies nothing and the guide's line is the condition's only appearance anywhere.
+
+The other two are misses. Obra Dinn's guide names the captain outright and describes the ending it produces, in the notes, unfolded.
+
+**The prompt was verified present in the assembled request** both times, and reshaping it — trigger first, frequency cap replaced by a scope limit — changed nothing. The discriminator is that **the other notations in that same section did not appear either**: zero `underline` runs across both guides, no `易错过!!`, no `※需要`, no `※除去追加内容`. So the spoiler rule is not an outlier that was worded badly; the whole 「标注用固定写法」 section is what is not landing. (Held loosely: some of those genuinely may not have applied to these two games.)
+
+Meanwhile **the hard-rules section landed perfectly on all three runs** — full coverage, descriptions verbatim, no merged lines, `paraphrased-description` never fired. The difference between the two sections is that the hard rules are the ones the linter checks and the prompt says are machine-checked.
+
+That points at something uncomfortable for this notation specifically: **what the gate checks, the model does; what the gate cannot check, it skips** — and this notation is the one thing here that can never have a completeness check, by the argument above. If that is the real mechanism, no wording fixes it, and the options are a stronger model or accepting that the notation is available rather than reliable. **Untested: any model above `deepseek-v4-flash`.** Run that before rewording anything again.
+
 **On the Notion side the count is `null`, not `0`.** Folds are toggles, toggles are not `to_do` blocks, and nothing in `lintGuide`'s inputs can see them; a `0` there would state "this guide folds nothing" on the strength of not having looked. The same fact has a consequence on the Dashboard — see `docs/guides.md`.
 
 ## Structural guarantees, not checks
