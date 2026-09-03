@@ -108,6 +108,11 @@ describe('CLI_HINTS covers every error code in lib/ that carries a detail', () =
     'bad-api-key', 'deepseek-length',
     'gemini-model-retired', 'gemini-model-unknown', 'gemini-no-allowance',
     'gemini-429-no-detail', 'gemini-tool-rejected',
+    // Thrown as `timeoutErr.code = 'ai-timeout'` in all three providers — the capital E in
+    // `timeoutErr` means the literal substring `err.code = '` never occurs, so the
+    // /err\.code = '.../ scan just below silently never sees it. Hardcoded here for the same
+    // reason as bad-api-key and deepseek-length just above: escapes the scan, still needs a hint
+    'ai-timeout',
   ];
   for (const code of CODES) {
     test(code, () => {

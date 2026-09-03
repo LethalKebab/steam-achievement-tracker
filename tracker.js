@@ -1904,6 +1904,7 @@ const CLI_HINTS = {
   'gemini-tool-rejected': 'hint.geminiToolRejected',
   'bad-api-key': 'hint.badApiKey',
   'deepseek-length': 'hint.deepseekLength',
+  'ai-timeout': 'hint.aiTimeout',
   'guide-exists': 'hint.guideExists',
   'file-exists': 'hint.fileExists',
   // ---- Partial rewrite (--only) ----
