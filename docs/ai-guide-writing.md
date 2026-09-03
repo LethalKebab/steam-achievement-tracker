@@ -331,6 +331,14 @@ So the fix is a pass, and two constraints on it are already known:
 
 One piece of scope is still open: the probe fed it `to_do` blocks only, and the run before this one put a spoiler in a **section paragraph** (that Chapter VIII is a hidden chapter, in the mechanics preamble). A pass over entries alone would not see it.
 
+#### What it costs, and the knob
+
+One request per generation, on both the whole-guide and the partial-rewrite paths. **Pinned to `low` effort rather than inheriting the run's**, and that is the whole difference between it being affordable and not: measured on the same 16-entry guide with a byte-identical answer, inheriting `high` cost **24,594** output tokens and `low` cost **2,636**, against the **40,615** the writing itself spent. Six per cent on top, not sixty. `low` and not `off` — `off` stops the field being sent at all, which on this endpoint is the uncapped case (337 s, 145,955 characters of thinking).
+
+The override rides on the request rather than on a second provider: depth is the only thing that differs, and a second provider would re-resolve the key, the model and the endpoint capability table as well, giving the aside three more ways to disagree with the run it belongs to.
+
+`ai.spoilerFold` (default `true`) turns it off, as does `--no-spoiler` for one run. **What the switch skips is the request**, not just the folding — an implementation that asked and then discarded the answer would cost the same while reading as though it were off.
+
 **On the Notion side the count is `null`, not `0`.** Folds are toggles, toggles are not `to_do` blocks, and nothing in `lintGuide`'s inputs can see them; a `0` there would state "this guide folds nothing" on the strength of not having looked. The same fact has a consequence on the Dashboard — see `docs/guides.md`.
 
 ## Structural guarantees, not checks

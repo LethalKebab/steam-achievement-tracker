@@ -1202,6 +1202,8 @@ async function cmdGuideGen() {
   const steam = new SteamClient(config, { log: () => {} });
   const notion = new NotionClient(config);
   const local = flags.has('--local');
+  // One run's opt-out. `ai.spoilerFold: false` in config.json is the standing one
+  if (flags.has('--no-spoiler')) config.ai.spoilerFold = false;
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 

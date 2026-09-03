@@ -32,7 +32,7 @@ import {
   openDb, insertGame, replaceAchievements, upsertGuide, allGuides, setGuideLang,
 } from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
-import { spoilerSystemFor } from '../lib/guidespoiler.js';
+import { spoilerSystemFor, ASIDE_EFFORT } from '../lib/guidespoiler.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
   generateGuide,
@@ -3194,6 +3194,62 @@ describe('the spoiler pass inside generateGuide', () => {
     await assert.rejects(
       generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' }),
       (e) => e.cancelled === true
+    );
+  });
+});
+
+describe('paying for the spoiler pass, or not', () => {
+  const WITH_SPOILER_2 = '```markdown\n## 主线\n\n'
+    + '- [ ] **第一步**<br>完成第一关。<br>开局就能拿。真凶是医生。\n'
+    + '- [ ] **第二步**<br>完成第二关。<br>接着打\n```';
+
+  test('`ai.spoilerFold: false` skips it entirely — no request, no fold', async () => {
+    // The point of the switch is the request, not the fold: an implementation that still asked and
+    // then discarded the answer would cost exactly the same and read as if it had been turned off
+    const { db, config } = freshEnv();
+    const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
+    const r = await generateGuide(db, {
+      config: { ...config, ai: { ...config.ai, spoilerFold: false } },
+      provider, steam: fakeSteam(['A']), appid: '1',
+    });
+
+    assert.equal(r.ok, true);
+    assert.equal(provider.spoilerAsks, 0, 'switched off means the request is never sent');
+    assert.equal(r.usage.requests, 1, 'and it is not paid for');
+    assert.ok(!readFileSync(r.path, 'utf8').includes('<details>'));
+  });
+
+  test('it is on unless it is turned off', async () => {
+    // Default-on is only defensible because it is cheap; the pin below is what makes it cheap
+    const { db, config } = freshEnv();
+    const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
+    await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
+    assert.equal(provider.spoilerAsks, 1);
+  });
+
+  test('**the aside is pinned to low effort, not the depth the run writes at**', async () => {
+    // Measured, same guide and byte-identical answer: inheriting `high` cost 24,594 output tokens,
+    // `low` cost 2,636. Inheriting silently is a 9x bill for the same result, and nothing in the
+    // output would say so
+    const { db, config } = freshEnv();
+    const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
+    const efforts = [];
+    const inner = provider.send.bind(provider);
+    provider.send = async (args) => {
+      efforts.push([args.system === spoilerSystemFor('zh') ? 'aside' : 'writing', args.effort ?? null]);
+      return inner(args);
+    };
+    await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
+
+    // **The literal, not ASIDE_EFFORT.** Comparing the observed value against the same constant the
+    // code reads makes the assertion true by construction — setting the constant to null then keeps
+    // this green, which is exactly what happened when it was written that way. The value is a
+    // measured decision, so changing it should have to come here and say so
+    assert.deepEqual(efforts.find((e) => e[0] === 'aside'), ['aside', 'low']);
+    assert.equal(ASIDE_EFFORT, 'low', 'and the constant the code uses is that same value');
+    assert.deepEqual(
+      efforts.find((e) => e[0] === 'writing'), ['writing', null],
+      'the writing rounds must keep taking the depth the run was configured with'
     );
   });
 });
