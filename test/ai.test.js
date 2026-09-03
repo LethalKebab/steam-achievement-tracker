@@ -475,7 +475,11 @@ test('a failed fetch is reported but does not block — and it has to be reporte
   });
   assert.equal(v.ok, true);
   assert.equal(v.warnings.length, 1, 'not blocking is not the same as staying silent');
-  assert.match(v.warnings[0], /url_not_allowed、url_not_accessible/);
+  // A warning travels as the entry it came from, not as a sentence: it outlives the run in the
+  // generation panel, and the interface language can change while it sits there (lib/server.js)
+  assert.equal(v.warnings[0].key, 'gp.fetchFailed');
+  assert.equal(v.warnings[0].values.n, 2);
+  assert.match(v.warnings[0].values.codes, /url_not_allowed、url_not_accessible/);
 });
 
 test('a failed search still kills the round, even when a fetch failed in the same round', () => {

@@ -3,8 +3,9 @@
  * ------------------------------------------------
  * This project deliberately keeps two languages, split by audience:
  *
- *  - **Anything a user reads at runtime is Chinese**: the Dashboard and Setup copy, the messages
- *    thrown from `lib/`, the CLI's output, and the prompt sent to the model.
+ *  - **Anything a user reads at runtime is in the interface language**: the Dashboard and Setup
+ *    copy, the messages thrown from `lib/`, the CLI's output, and the prompt sent to the model.
+ *    Each of those is a pair, and Chinese is the half that answers when nothing says otherwise.
  *  - **Anything a developer reads is English**: comments, documentation, test names.
  *
  * Everything on the second list was translated in one pass. **The failure this file guards is the
@@ -13,8 +14,9 @@
  *
  *  - A translated error message from `lib/` renders verbatim in the Dashboard's floating bar, so
  *    the packaged app shows a sentence in the wrong language and nothing reports it.
- *  - A translated prompt changes **what the model is asked for**, not merely how it reads. That is
- *    why the prompt was excluded by hand; nothing in the code says so.
+ *  - A prompt half-translated changes **what the model is asked for**, not merely how it reads —
+ *    and half is the state it reaches on its own, because the rules and the round-by-round
+ *    messages are written in different places and only the rules were forked at first.
  *  - Translated CLI advice fails the same way as the error messages, one surface over.
  *
  * **What this file is not.** It does not check that the comments really were translated — that is
@@ -34,7 +36,12 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildSystemPrompt } from '../lib/guidegen.js';
+import {
+  buildSystemPrompt, buildChunkMessage, buildChunkFeedback, buildFeedback, buildPatchMessage,
+  buildRegroupPrompt, regroupSystemFor, chunkDefs,
+} from '../lib/guidegen.js';
+import { buildPatchFeedback } from '../lib/guidepatch.js';
+import { clusterConstraint, sameKindClusters } from '../lib/guidecluster.js';
 import { MESSAGES, setMessageLanguage } from '../lib/messages.js';
 import { CLI_MESSAGES, clog } from '../lib/cli-messages.js';
 import { TRACKER_MESSAGES } from '../lib/tracker-messages.js';
@@ -223,6 +230,10 @@ describe('the messages in ' + TABLE_NAME, () => {
    */
   const NO_PROSE = {
     'gp.header': 'a game line: 《》 and · against ( ) and ·, with everything else interpolated',
+    'ai.leakedSample': 'a label and a sample, separated by the colon each language spaces differently',
+    'ai.blockSep': 'the separator between block counts: 、 against a comma and a space',
+    'ai.httpError': 'a vendor, a status and a body, joined by the colon each language spaces differently',
+    'ai.keyShapeSep': 'the separator between the facts about a key: , against a comma and a space',
   };
 
   test('every entry has both languages, and the Chinese half really is Chinese', () => {
@@ -417,6 +428,182 @@ describe('each language of the prompt is written in that language', () => {
     for (const lang of ['fr', '', null, undefined, 'ZH']) {
       const p = buildSystemPrompt('测试游戏', '1', defs, { target: 'notion', lang });
       assert.ok(cjkCount(p) / p.length > 0.4, `lang=${JSON.stringify(lang)} produced a non-Chinese prompt`);
+    }
+  });
+});
+
+describe('every prompt that reaches the model forks, not only the rules', () => {
+  /**
+   * **The ratio test above covers `buildSystemPrompt` and nothing else.** That is the cached prefix;
+   * everything below is a turn message, written elsewhere in the file, and for a long time none of
+   * them forked at all — an English guide was asked for in English rules and instructed in Chinese
+   * every round after. The pass that decides the guide's **final section headings**
+   * (`buildRegroupPrompt`) was among them, which is what issue #121 reported: English prose under
+   * Chinese headings, with `lintGuide` green, because the validator checks format and data and never
+   * content.
+   *
+   * **The fixture is entirely English on purpose.** Names and official descriptions are quoted into
+   * these prompts verbatim by rule, so a fixture with Chinese in it forces the English assertion
+   * down to a ratio, and a ratio cannot tell "the prompt is Chinese" from "the game is". With
+   * nothing Chinese to quote, any Chinese character in an English prompt is the prompt's own, and
+   * the assertion can be **none at all**.
+   */
+  const ach = (n, name, desc) => ({
+    api_name: n, name_cn: '', name_en: name, description: desc, description_en: desc,
+    game_name: 'Test Game', hidden: 0, icon: '',
+  });
+  // The last three share a description template, which is what sameKindClusters looks for. **The
+  // shared part has to come first**: it clusters on a common prefix, so "Deal 10,000 damage in
+  // Operations" and "Deal 50,000 damage in Operations" share only "Deal " and do not cluster at all.
+  // Without a cluster `clusterConstraint` returns '' in both languages and passes every check below
+  // vacuously
+  const DEFS = [
+    ach('A', 'First Step', 'Finish the first level.'),
+    ach('B', 'Collector', 'Collect 25 items.'),
+    ach('C', 'Mascot Swap', 'Swap the mascot once.'),
+    ach('D', 'Deal 10k', 'Deal cumulative damage in Operations: 10,000.'),
+    ach('E', 'Deal 50k', 'Deal cumulative damage in Operations: 50,000.'),
+    ach('F', 'Deal 100k', 'Deal cumulative damage in Operations: 100,000.'),
+  ];
+  const CHUNKS = chunkDefs(DEFS, 3);
+  const CLUSTERS = sameKindClusters(DEFS);
+  const FINDINGS = [
+    { code: 'missing-checkbox', level: 'error', message: '"First Step" has no `- [ ]` line of its own', apiName: 'A' },
+    { code: 'paraphrased-description', level: 'warn', message: '"Collector" has a reworded description', apiName: 'B' },
+  ];
+  const ENTRIES = [
+    { apiName: 'B', def: DEFS[1], text: '- [ ] **Collector**<br>Collect 25 items.' },
+    { apiName: 'C', def: DEFS[2], text: '- [ ] **Mascot Swap**<br>Swap the mascot once.' },
+  ];
+  const CURRENT = {
+    assignment: new Map([['A', 'Opening'], ['B', 'Collectibles'], ['C', 'Shop'], ['D', 'Combat']]),
+    sections: ['Opening', 'Collectibles', 'Shop', 'Combat'],
+  };
+
+  /** Every prompt the generator sends, as a function of the language alone */
+  const PROMPTS = [
+    ['the opening message of a single-shard guide', (lang) => buildChunkMessage([DEFS], 0, new Set(), lang)],
+    ['one shard of several', (lang) => buildChunkMessage(CHUNKS, 0, new Set(), lang)],
+    ['the last shard', (lang) => buildChunkMessage(CHUNKS, CHUNKS.length - 1, new Set(), lang)],
+    ['the brief-entry note inside a shard', (lang) => buildChunkMessage(CHUNKS, 0, new Set(['A']), lang)],
+    ["a shard's rejection list", (lang) => buildChunkFeedback(FINDINGS, CHUNKS, 0, new Set(), lang)],
+    ["the whole guide's rejection list", (lang) => buildFeedback(FINDINGS, lang)],
+    ['a partial rewrite', (lang) => buildPatchMessage(ENTRIES, { lang })],
+    ['a partial rewrite with a requirement', (lang) => buildPatchMessage(ENTRIES, { instruction: 'say what is mutually exclusive', lang })],
+    ["a partial rewrite's rejection list", (lang) => buildPatchFeedback(FINDINGS, ENTRIES, ['C'], lang)],
+    ["the classification pass's system prompt", (lang) => regroupSystemFor(lang)],
+    ['the classification pass', (lang) => buildRegroupPrompt('Test Game', DEFS, CURRENT, CLUSTERS, lang)],
+    ['the same-kind cluster constraint', (lang) => clusterConstraint(DEFS, CLUSTERS, lang)],
+  ];
+
+  for (const [what, build] of PROMPTS) {
+    test(`${what} says nothing in Chinese when the guide is English`, () => {
+      const en = build('en');
+      assert.ok(en.length > 0, 'the English variant is empty, which would pass every check vacuously');
+      assert.equal(cjkCount(en), 0,
+        `${what} still has ${cjkCount(en)} Chinese characters in its English form: ${en.slice(0, 160)}`);
+    });
+
+    /**
+     * Pointed the opposite way, and for the reason given on the ratio pair above: one sweeping
+     * translation satisfies "the English one has no Chinese" everywhere by translating both, and
+     * only an assertion that the Chinese one is still Chinese notices.
+     */
+    test(`${what} is still Chinese when the guide is Chinese`, () => {
+      const zh = build('zh');
+      assert.ok(cjkCount(zh) >= 10,
+        `${what} has only ${cjkCount(zh)} Chinese characters left in its Chinese form: ${zh.slice(0, 160)}`);
+    });
+
+    test(`${what} is two different texts, not one returned twice`, () => {
+      assert.notEqual(build('zh'), build('en'));
+    });
+  }
+
+  /**
+   * **The one that catches the next one.** Every check above names its builder, so a builder added
+   * later is simply absent from the list and nothing goes red — which is exactly how this family
+   * grew: the fork was added for the rules, and each turn message written afterwards inherited
+   * nothing. This reads the source instead: a function that holds a Chinese string literal is
+   * writing Chinese for somebody, and it has to be able to answer for the other language too.
+   */
+  /**
+   * The one exemption, and the reason it is real.
+   *
+   * `'回复一个字:好'` is the **prompt** the connectivity check sends to the model, not a sentence
+   * anybody reads — nothing renders the reply, only whether one came back. Putting it in a table
+   * whose stated subject is what a person reads would make that table say something untrue about
+   * itself. Written out here instead, the way `rpc.js` is above.
+   *
+   * Keys are the path with forward slashes; `posix` normalises whatever `join` produced.
+   */
+  const EXEMPT_PROMPTS = { 'lib/api.js': ['回复一个字'] };
+  const posix = (p) => p.split('\\').join('/');
+
+  test('no prompt builder holds Chinese without taking a language', () => {
+    /**
+     * **The whole of `lib/`, not only the prompt builders.** It began at three files, which is how
+     * far the fork itself had got; the sweep that followed found the same defect in nine more —
+     * progress labels, provider hints, lint findings quoted straight into the rejection prompt.
+     * Naming the files is what let those sit there, so the list is now "everything except the
+     * tables and what is written out below".
+     *
+     * **Declared functions only.** Every builder is written as `function name(...)`, and that is the
+     * shape a new one will take. The two prompt sources that are consts (`rulesFor`,
+     * `REGROUP_SYSTEM`) are named individually in the checks above, so nothing is outside both nets.
+     *
+     * Comments have already been stripped, so what is examined is string literals: Chinese in a
+     * comment documents the code, Chinese in a string is a sentence somebody reads.
+     */
+    const TABLES = ['messages.js', 'cli-messages.js', 'tracker-messages.js'];
+    const FILES = readdirSync(join(ROOT, 'lib'))
+      .filter((f) => f.endsWith('.js') && !TABLES.includes(f))
+      .map((f) => join('lib', f));
+
+    /** From the `(` at `i`, the parameter list — signatures wrap, and `new Set()` closes a paren early */
+    const paramsAt = (src, i) => {
+      let depth = 0;
+      for (let k = i; k < src.length; k++) {
+        if (src[k] === '(') depth++;
+        else if (src[k] === ')' && --depth === 0) return src.slice(i + 1, k);
+      }
+      return '';
+    };
+
+    const offenders = [];
+    for (const file of FILES) {
+      const src = stripComments(read(file));
+      for (const m of src.matchAll(/^(?:export )?(?:async )?function (\w+)\s*\(/gm)) {
+        const open = m.index + m[0].length - 1;
+        if (/\blang\b/.test(paramsAt(src, open))) continue;
+        const end = src.indexOf('\n}\n', open);
+        const body = src.slice(open, end === -1 ? src.length : end);
+        const strings = body.match(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g) ?? [];
+        const allowed = EXEMPT_PROMPTS[posix(file)] ?? [];
+        const bad = strings.filter((s) => CJK.test(s) && !allowed.some((a) => s.includes(a)));
+        if (bad.length) offenders.push(`${file}: ${m[1]} — ${bad[0].slice(0, 60)}`);
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'these hold Chinese text but cannot be asked for it in English:\n  ' + offenders.join('\n  '));
+  });
+
+  /**
+   * **Found by breaking the check above.** Widening a fragment to `''` makes it a substring of every
+   * string, so the guard passed while exempting the whole of `lib/` — the exemption list becoming
+   * the place a real offender hides is the same failure `NO_PROSE` is held to further up, and it
+   * needs the same two questions asked of it: is it specific, and is it still needed.
+   */
+  test('the prompt exemption is specific, and is still doing something', () => {
+    for (const [file, fragments] of Object.entries(EXEMPT_PROMPTS)) {
+      assert.ok(fragments.length, `${file} is listed with nothing exempted`);
+      const src = stripComments(read(file));
+      for (const fragment of fragments) {
+        assert.ok(fragment.length >= 4 && CJK.test(fragment),
+          `${file}: "${fragment}" is too broad to be an exemption — it has to name the string it excuses`);
+        assert.ok(src.includes(fragment),
+          `${file}: "${fragment}" is no longer in that file, so the exemption has to be deleted rather than left standing`);
+      }
     }
   });
 });

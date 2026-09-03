@@ -1505,7 +1505,7 @@ async function cmdGuidePatch(appid) {
   if (dryRun) {
     console.log(clog('gp.dryRun'));
     console.log('─'.repeat(70));
-    console.log(buildPatchMessage(entries, { instruction }));
+    console.log(buildPatchMessage(entries, { instruction, lang: plan.lang }));
     console.log('─'.repeat(70));
     console.log(clog('gp.samePrompt'));
     return;

@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { createGuideGenState, serve } from '../lib/server.js';
+import { setMessageLanguage, messageLanguage, msgError } from '../lib/messages.js';
 import { openDb, insertGame, replaceAchievements } from '../lib/db.js';
 
 describe('basic queue semantics', () => {
@@ -406,6 +407,60 @@ describe('begin must not erase the previous result either', () => {
     s.begin('2', 'B', 3);
     assert.deepEqual(s.snapshot().finished[0].warnings, ['第 3 段未生成']);
     assert.deepEqual(s.snapshot().warnings, [], 'after begin the current round should not carry the previous round warnings');
+  });
+
+  /**
+   * **The language is decided when the page reads, not when the run happened.**
+   *
+   * A finished card outlives a language switch — that is the whole point of `finished` — so a
+   * sentence composed at `warn()` time is frozen in whatever language the run started in, and
+   * nothing repaints it afterwards. Measured in the wild: one English warning line sitting on an
+   * otherwise Chinese card, every other line of which the page had composed itself through `t()`.
+   *
+   * The two assertions point in opposite directions on purpose. "It reads English after switching"
+   * alone is satisfied by a state that always answers English; pinning the Chinese one first is
+   * what makes the pair mean "it followed the switch".
+   */
+  test('a notice kept from a finished run answers in the language asked now', () => {
+    const was = messageLanguage();
+    try {
+      const s = createGuideGenState();
+      setMessageLanguage('zh');
+      s.begin('1', 'A', 1);
+      s.warn({ key: 'gp.regroupFailed' });
+      s.end(null, { ok: true });
+
+      assert.match(s.snapshot().finished[0].warnings[0], /分区统一失败/);
+      setMessageLanguage('en');
+      assert.match(s.snapshot().finished[0].warnings[0], /grouping failed/,
+        'the warning was composed when it happened and cannot follow the interface');
+    } finally {
+      setMessageLanguage(was);
+    }
+  });
+
+  test('a failed run states its reason in the language asked now', () => {
+    const was = messageLanguage();
+    try {
+      const s = createGuideGenState();
+      setMessageLanguage('zh');
+      s.begin('1', 'A', 1);
+      // Raised through msgError, so the entry travels with the sentence
+      s.end(msgError('gen.noGroups'));
+
+      assert.match(s.snapshot().finished[0].error, /挑不出成形的分组/);
+      setMessageLanguage('en');
+      assert.match(s.snapshot().finished[0].error, /No usable grouping/);
+    } finally {
+      setMessageLanguage(was);
+    }
+  });
+
+  test('an error raised any other way keeps its own words rather than becoming [object Object]', () => {
+    const s = createGuideGenState();
+    s.begin('1', 'A', 1);
+    s.end(new Error('provider 500'));
+    assert.equal(s.snapshot().finished[0].error, 'provider 500');
   });
 
   test('seq increases monotonically — the page uses it to fetch increments', () => {

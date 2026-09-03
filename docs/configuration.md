@@ -89,7 +89,15 @@ Everything written for a person follows it. Messages that can reach the Dashboar
 
 The split between those tables is by audience: only the terminal ones may name a command line, because the packaged app's user has no terminal to run one in.
 
+Everything `lib/` says follows it, not merely the messages that already sat in a table: the guide validator's findings, the Notion setup verdict, every provider's error hints, and the reports the CLI prints before a rewrite. **A guide's own text is the exception, and deliberately** — an achievement's name and official description are copied from Steam verbatim, so they arrive in whatever language Steam has for that game.
+
+**The Windows app's own windows follow it too** — the tray menu, the close-to-tray notice, the crash box and the update prompt. That program is a separate process from the tracker and cannot read the tables above, so it keeps its own, in `launcher/strings.js`. It re-reads this setting rather than remembering it, because the setting is written by the *other* process and nothing tells this one; the tray menu is the one exception, since Windows draws it from a copy handed over once, and it is repainted when the language moves.
+
+**A notice that outlives the run it came from is composed when it is read, not when it happened.** The generation panel keeps a finished run's warnings on screen, and the interface language can change while they sit there — so what is stored is the entry, and the sentence is made at the moment the page asks for it. Without that, one warning sits in the language the run started in while everything around it has followed the switch.
+
 **A newly generated guide is written in this language too**, and so is a rewrite — switching this and pressing **Rewrite** (「重写」) is how an existing guide changes language. Guides already written stay exactly as they are until they are rewritten, and the achievement panel marks one whose language differs from the interface.
+
+What the guide **cannot** follow is the achievement text itself. Names and official descriptions are copied from Steam verbatim, by a rule the guide format depends on, so a game Steam ships no Chinese for produces a largely English guide however this is set — Titanfall 2 is one. That is the silent fallback above doing its job, not the language setting failing.
 
 **`syncStaleHours`** — `serve` checks how long ago the last successful sync finished. If it's longer ago than this, it kicks off a sync in the background and shows a progress bar in the corner of the page. Note this check happens **once, when the server starts** — refreshing the page in your browser re-reads the local database but never re-checks Steam. (The packaged Windows app additionally re-runs the same check each time its window is shown, since its server process can live in the tray for days.) Set it to `0` if you'd rather only ever sync manually.
 

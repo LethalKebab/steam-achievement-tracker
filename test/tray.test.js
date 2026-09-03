@@ -22,6 +22,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import { createApi } from '../lib/api.js';
+import { LAUNCHER_MESSAGES } from '../launcher/strings.js';
 
 /**
  * Strip comments before matching.
@@ -96,11 +97,30 @@ describe('window lifecycle — closing is not quitting', () => {
 
 describe('the tray — the only way out once the window is closed', () => {
   const trayBlock = () => blockFrom(mainSrc, 'function createTray');
+  // The menu itself moved into `paintTray`, which `createTray` calls and which is also what repaints
+  // it after a language switch. The item and its wiring are still what this asks about
+  const menuBlock = () => blockFrom(mainSrc, 'function paintTray');
 
   test('the menu has to carry 「退出」, and it has to really call app.quit', () => {
-    const body = trayBlock();
-    assert.match(body, /label: '退出'/, 'the tray menu has no quit item — the user is left with Task Manager');
+    const body = menuBlock();
+    assert.match(body, /label: lt\('tray\.quit'\)/,
+      'the tray menu has no quit item — the user is left with Task Manager');
     assert.match(body, /app\.quit\(\)/, 'there is a quit item but it is not wired to app.quit');
+    // The label is a key now, so the word the user actually looks for is one step away
+    assert.equal(LAUNCHER_MESSAGES['tray.quit'][0], '退出');
+    assert.equal(LAUNCHER_MESSAGES['tray.quit'][1], 'Exit');
+  });
+
+  test('the menu is repainted when the interface language moves under it', () => {
+    // A context menu is handed to Windows once and drawn by Windows from then on, so unlike every
+    // other string in this process it cannot resolve its own language when it is read. Without the
+    // repaint the tray keeps the language the launcher started in, for ever
+    const body = trayBlock();
+    assert.match(body, /launcherLanguage\(\) !== trayLanguage/,
+      'nothing notices the language changing, so the tray menu keeps the one it was built with');
+    assert.match(body, /paintTray\(\)/, 'the change is noticed but the menu is never rebuilt');
+    assert.match(stripComments(mainSrc), /if \(trayLanguageTimer\) clearInterval\(trayLanguageTimer\)/,
+      'the repaint timer is never cleared, so quitting leaves it running');
   });
 
   test('an empty icon has to be reported rather than passing silently', () => {

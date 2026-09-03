@@ -40,6 +40,8 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+import { lt, htmlLang } from './strings.js';
+
 /** Change this one line for your own repository. A public repo needs no token (60 unauthenticated requests an hour is ample for one check a day) */
 export const REPO = 'LethalKebab/steam-achievement-tracker';
 
@@ -389,7 +391,7 @@ export const PROMPT_TITLE_PREFIX = 'choice:';
 export function renderUpdatePromptHtml({ version, sizeMb }) {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   return `<!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><title>Steam 成就追踪器</title>
+<html lang="${htmlLang()}"><head><meta charset="utf-8"><title>${esc(lt('app.name'))}</title>
 <style>
   :root { color-scheme: light dark; --fg: #1a1a1a; --bg: #f7f7f8; --muted: #6b6b70; --line: #d8d8dc; --accent: #2f6fed; }
   @media (prefers-color-scheme: dark) {
@@ -408,16 +410,16 @@ export function renderUpdatePromptHtml({ version, sizeMb }) {
   button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 </style></head>
 <body>
-  <h1>有新版本 ${esc(version)}</h1>
-  <p>下载约 ${esc(sizeMb)} MB,完成后会自动重启。</p>
-  <label><input type="checkbox" id="skip">不再提示这个版本</label>
+  <h1>${esc(lt('prompt.heading', { version }))}</h1>
+  <p>${esc(lt('prompt.size', { mb: sizeMb }))}</p>
+  <label><input type="checkbox" id="skip">${esc(lt('prompt.skip'))}</label>
   <div class="row">
-    <button id="later">以后再说</button>
-    <button id="now" class="primary">立即更新</button>
+    <button id="later">${esc(lt('prompt.later'))}</button>
+    <button id="now" class="primary">${esc(lt('prompt.now'))}</button>
   </div>
 <script>
-  // 结果走 document.title —— 主进程监听 page-title-updated。不需要 preload,
-  // 也就不需要给这个窗口开任何特权
+  // The answer travels through document.title - the main process listens for page-title-updated.
+  // No preload is needed, and so this window needs no privileges of any kind
   var sent = false;
   function choose(what) {
     if (sent) return;
