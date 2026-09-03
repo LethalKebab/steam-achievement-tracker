@@ -311,7 +311,25 @@ The other two are misses. Obra Dinn's guide names the captain outright and descr
 
 Meanwhile **the hard-rules section landed perfectly on all three runs** — full coverage, descriptions verbatim, no merged lines, `paraphrased-description` never fired. The difference between the two sections is that the hard rules are the ones the linter checks and the prompt says are machine-checked.
 
-That points at something uncomfortable for this notation specifically: **what the gate checks, the model does; what the gate cannot check, it skips** — and this notation is the one thing here that can never have a completeness check, by the argument above. If that is the real mechanism, no wording fixes it, and the options are a stronger model or accepting that the notation is available rather than reliable. **Untested: any model above `deepseek-v4-flash`.** Run that before rewording anything again.
+#### The cause is not the model, and not the wording — it is that this belongs in a pass
+
+That first reading — "what the gate checks the model does, so an uncheckable rule is skipped" — was wrong, and the experiment that settles it is cheap. Asked **the same question in the same words, as the only question**, over the finished guide, `deepseek-v4-flash` finds it immediately:
+
+```
+【15】让公司报告认定“船长杀了所有人”的坏结局彩蛋。
+```
+
+That is exactly the sentence that shipped unfolded. One request, no search, no tools. So the model can both write the spoiler and recognise it; what it does not do is *restructure an entry it is in the middle of writing*, on rule 38 of a 13,000-character prompt.
+
+**Which is a shape this pipeline already rejected everywhere else.** Ticking, unwrapping achievement toggles, `collapseEmptyBreaks`, `stripLeadingHeader` and the whole classification pass are all transformations applied *after* the writing, several of them mechanical. Folding a sentence away is a transformation of finished prose — the same shape as `regroup` — and it is the only one of them that was asked for inline. That, not the model tier, is why it never fires.
+
+So the fix is a pass, and two constraints on it are already known:
+
+- **The model returns a selection; the program does the splice.** Exactly `--only`'s rule — anything else it returns is discarded, because "did it leave the rest alone" cannot be verified. The invariant then becomes sharp and checkable: the achievement's own line and its verbatim description stay **byte-identical**, and prose is only ever relocated, never lost.
+- **Locate the sentence with `flatCompare`, never with a raw match.** Measured in that same probe: told to copy verbatim, the model returned `“船长杀了所有人”` where the guide holds `"船长杀了所有人"`. `includes` says false, `flatCompare` says true. A pass built on raw matching splices nothing and **reports no error** — the invisible direction.
+- **Ordering: before `regroup`**, in the same slot as `unwrapAchievementToggles`, for the reason recorded there — `regroup`'s third assertion compares toggle contents, and a pass that creates toggles would be judged to have torn one open and roll the whole thing back.
+
+One piece of scope is still open: the probe fed it `to_do` blocks only, and the run before this one put a spoiler in a **section paragraph** (that Chapter VIII is a hidden chapter, in the mechanics preamble). A pass over entries alone would not see it.
 
 **On the Notion side the count is `null`, not `0`.** Folds are toggles, toggles are not `to_do` blocks, and nothing in `lintGuide`'s inputs can see them; a `0` there would state "this guide folds nothing" on the strength of not having looked. The same fact has a consequence on the Dashboard — see `docs/guides.md`.
 
