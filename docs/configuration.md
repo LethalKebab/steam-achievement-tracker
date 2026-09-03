@@ -89,6 +89,8 @@ Everything written for a person follows it. Messages that can reach the Dashboar
 
 The split between those tables is by audience: only the terminal ones may name a command line, because the packaged app's user has no terminal to run one in.
 
+Everything `lib/` says follows it, not merely the messages that already sat in a table: the guide validator's findings, the Notion setup verdict, every provider's error hints, and the reports the CLI prints before a rewrite. **A guide's own text is the exception, and deliberately** — an achievement's name and official description are copied from Steam verbatim, so they arrive in whatever language Steam has for that game.
+
 **The Windows app's own windows follow it too** — the tray menu, the close-to-tray notice, the crash box and the update prompt. That program is a separate process from the tracker and cannot read the tables above, so it keeps its own, in `launcher/strings.js`. It re-reads this setting rather than remembering it, because the setting is written by the *other* process and nothing tells this one; the tray menu is the one exception, since Windows draws it from a copy handed over once, and it is repainted when the language moves.
 
 **A notice that outlives the run it came from is composed when it is read, not when it happened.** The generation panel keeps a finished run's warnings on screen, and the interface language can change while they sit there — so what is stored is the entry, and the sentence is made at the moment the page asks for it. Without that, one warning sits in the language the run started in while everything around it has followed the switch.

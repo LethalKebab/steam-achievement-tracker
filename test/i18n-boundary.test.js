@@ -230,6 +230,10 @@ describe('the messages in ' + TABLE_NAME, () => {
    */
   const NO_PROSE = {
     'gp.header': 'a game line: 《》 and · against ( ) and ·, with everything else interpolated',
+    'ai.leakedSample': 'a label and a sample, separated by the colon each language spaces differently',
+    'ai.blockSep': 'the separator between block counts: 、 against a comma and a space',
+    'ai.httpError': 'a vendor, a status and a body, joined by the colon each language spaces differently',
+    'ai.keyShapeSep': 'the separator between the facts about a key: , against a comma and a space',
   };
 
   test('every entry has both languages, and the Chinese half really is Chinese', () => {
@@ -523,17 +527,38 @@ describe('every prompt that reaches the model forks, not only the rules', () => 
    * nothing. This reads the source instead: a function that holds a Chinese string literal is
    * writing Chinese for somebody, and it has to be able to answer for the other language too.
    */
+  /**
+   * The one exemption, and the reason it is real.
+   *
+   * `'回复一个字:好'` is the **prompt** the connectivity check sends to the model, not a sentence
+   * anybody reads — nothing renders the reply, only whether one came back. Putting it in a table
+   * whose stated subject is what a person reads would make that table say something untrue about
+   * itself. Written out here instead, the way `rpc.js` is above.
+   *
+   * Keys are the path with forward slashes; `posix` normalises whatever `join` produced.
+   */
+  const EXEMPT_PROMPTS = { 'lib/api.js': ['回复一个字'] };
+  const posix = (p) => p.split('\\').join('/');
+
   test('no prompt builder holds Chinese without taking a language', () => {
     /**
-     * **Declared functions only.** Every builder in these files is written as `function name(...)`,
-     * and that is the shape a new one will take too. The two prompt sources that are consts
-     * (`rulesFor`, `REGROUP_SYSTEM`) are named individually in the checks above, so nothing is
-     * outside both nets.
+     * **The whole of `lib/`, not only the prompt builders.** It began at three files, which is how
+     * far the fork itself had got; the sweep that followed found the same defect in nine more —
+     * progress labels, provider hints, lint findings quoted straight into the rejection prompt.
+     * Naming the files is what let those sit there, so the list is now "everything except the
+     * tables and what is written out below".
+     *
+     * **Declared functions only.** Every builder is written as `function name(...)`, and that is the
+     * shape a new one will take. The two prompt sources that are consts (`rulesFor`,
+     * `REGROUP_SYSTEM`) are named individually in the checks above, so nothing is outside both nets.
      *
      * Comments have already been stripped, so what is examined is string literals: Chinese in a
      * comment documents the code, Chinese in a string is a sentence somebody reads.
      */
-    const FILES = ['lib/guidegen.js', 'lib/guidepatch.js', 'lib/guidecluster.js'];
+    const TABLES = ['messages.js', 'cli-messages.js', 'tracker-messages.js'];
+    const FILES = readdirSync(join(ROOT, 'lib'))
+      .filter((f) => f.endsWith('.js') && !TABLES.includes(f))
+      .map((f) => join('lib', f));
 
     /** From the `(` at `i`, the parameter list — signatures wrap, and `new Set()` closes a paren early */
     const paramsAt = (src, i) => {
@@ -554,11 +579,32 @@ describe('every prompt that reaches the model forks, not only the rules', () => 
         const end = src.indexOf('\n}\n', open);
         const body = src.slice(open, end === -1 ? src.length : end);
         const strings = body.match(/'[^'\n]*'|"[^"\n]*"|`[^`]*`/g) ?? [];
-        if (strings.some((s) => CJK.test(s))) offenders.push(`${file}: ${m[1]}`);
+        const allowed = EXEMPT_PROMPTS[posix(file)] ?? [];
+        const bad = strings.filter((s) => CJK.test(s) && !allowed.some((a) => s.includes(a)));
+        if (bad.length) offenders.push(`${file}: ${m[1]} — ${bad[0].slice(0, 60)}`);
       }
     }
     assert.deepEqual(offenders, [],
       'these hold Chinese text but cannot be asked for it in English:\n  ' + offenders.join('\n  '));
+  });
+
+  /**
+   * **Found by breaking the check above.** Widening a fragment to `''` makes it a substring of every
+   * string, so the guard passed while exempting the whole of `lib/` — the exemption list becoming
+   * the place a real offender hides is the same failure `NO_PROSE` is held to further up, and it
+   * needs the same two questions asked of it: is it specific, and is it still needed.
+   */
+  test('the prompt exemption is specific, and is still doing something', () => {
+    for (const [file, fragments] of Object.entries(EXEMPT_PROMPTS)) {
+      assert.ok(fragments.length, `${file} is listed with nothing exempted`);
+      const src = stripComments(read(file));
+      for (const fragment of fragments) {
+        assert.ok(fragment.length >= 4 && CJK.test(fragment),
+          `${file}: "${fragment}" is too broad to be an exemption — it has to name the string it excuses`);
+        assert.ok(src.includes(fragment),
+          `${file}: "${fragment}" is no longer in that file, so the exemption has to be deleted rather than left standing`);
+      }
+    }
   });
 });
 
