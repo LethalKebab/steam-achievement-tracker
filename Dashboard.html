@@ -2460,6 +2460,14 @@
         <span class="reading" title="库里的游戏总数" data-t-title="card.totalTitle">
           <span class="value" id="cardTotal">–</span><span class="label" data-t="card.total">游戏</span>
         </span>
+        <!-- Second, beside the game count and ahead of the two rates: these two are the plain
+             「库里有多少」 pair, and both rates after them are derived from these numbers.
+             **The label names the state, not the noun.** A bare 「成就」 sitting next to 「游戏」
+             reads as 「库里一共有多少个成就」, which is a different and equally believable
+             number; 「已解锁成就」 can only mean the one thing -->
+        <span class="reading" title="整个库里已解锁的成就总数" data-t-title="card.achievedTitle">
+          <span class="value" id="cardAchieved">–</span><span class="label" data-t="card.achieved">已解锁成就</span>
+        </span>
         <span class="reading" title="AGCR:所有游戏完成率的平均值" data-t-title="card.avgTitle">
           <span class="value" id="cardAvg">–</span><span class="label" data-t="card.avg">平均完成率</span>
         </span>
@@ -2801,6 +2809,8 @@
       'wm.rest':              ['追踪器', 'Tracker'],
       'card.total':           ['游戏', 'Games'],
       'card.totalTitle':      ['库里的游戏总数', 'How many games are in the library'],
+      'card.achieved':        ['已解锁成就', 'Unlocked'],
+      'card.achievedTitle':   ['整个库里已解锁的成就总数', 'How many achievements you have unlocked across the whole library'],
       'card.avg':             ['平均完成率', 'Average completion'],
       'card.avgTitle':        ['AGCR:所有游戏完成率的平均值', 'AGCR: the mean completion rate across every game'],
       'card.perfect':         ['完美', 'Perfect'],
@@ -2886,8 +2896,20 @@
       // ---- The achievement panel ----------------------------------------------
       'ach.loading':          ['正在查询缺失成就…', 'Looking up what is missing…'],
       'ach.allDone':          ['所有成就都已解锁', 'Every achievement is unlocked'],
-      'ach.remaining':        ['还差 {n} / {total} 个成就', '{n} of {total} achievements to go'],
-      'ach.written':          [' · 攻略里已写 {written} / {n} 条', ' · {written} of {n} written up'],
+      // **Neither half is a fraction any more.** They used to read 「还差 2 / 15 个成就 ·
+      // 攻略里已写 2 / 2 条」, which misleads twice over. `x / y` is read everywhere as
+      // 「做完了 x, 共 y 个」, so putting the *remaining* count in the x slot states the
+      // opposite of what it means; and the second denominator silently switches from 「所有成就」
+      // to 「剩下的成就」, so two adjacent fractions count different things while looking alike.
+      // The Chinese now spends a clause on it and the English keeps `of`, which never carried the
+      // ambiguity; 「其中」 / `of them` is what pins the second number to the first
+      'ach.remaining':        ['{total} 个成就,还差 {n} 个', '{n} of {total} achievements to go'],
+      'ach.written':          [' · 攻略里写了其中 {written} 个', ' · {written} of them written up'],
+      // Zero gets its own sentence because Chinese has no natural reading of 「写了其中 0 个」 —
+      // a counted noun phrase does not go to zero the way English's does. Reachable state, not a
+      // hypothetical: a guide written before these achievements existed, or one whose bold names
+      // stopped matching, registers fine and covers none of what is left
+      'ach.writtenNone':      [' · 攻略里一个都未写', ' · none of them written up'],
       // Both languages are spelled out in **both** halves, and that is not redundancy. The marker
       // is only drawn when the guide's language differs from the interface's, so a table holding
       // only 「英文攻略」/「Chinese guide」 would be correct solely under that condition — the string
@@ -3288,6 +3310,17 @@
     function fmtPct(rate) {
       if (rate === null || rate === undefined) return '';
       return (rate * 100).toFixed(1) + '%';
+    }
+
+    /**
+     * A count for the readout, with a thousands separator. The unlocked-achievement total runs to
+     * four and five digits, and 「3412」 has to be read digit by digit where 「3,412」 is read at a
+     * glance. **All three counts go through it**, not only the long one — two numbers side by side
+     * under one heading, separated by different rules, look like a bug rather than a rule.
+     * The locale follows the interface for the same reason the timestamp does.
+     */
+    function fmtCount(n) {
+      return typeof n === 'number' ? n.toLocaleString(LANG === 'en' ? 'en-GB' : 'zh-CN') : '–';
     }
 
     /**
@@ -3752,7 +3785,7 @@
       // The topbar's reading is **always the library total** — it answers 「我一共有多少游戏」
       // and should not be rewritten by one search. The filtered count is a different question
       // (「这张表现在给我看多少」) and sits against the table
-      document.getElementById('cardTotal').textContent = String(allGames.length);
+      document.getElementById('cardTotal').textContent = fmtCount(allGames.length);
       document.getElementById('rowCount').textContent =
         t('table.count', { shown: rows.length, total: allGames.length });
       // While searching, the filters have no effect (see hidingFilter). **Let the controls say
@@ -4160,7 +4193,7 @@
         let head = t('ach.remaining', { n: data.missingCount, total: data.total });
         if (hasGuide) {
           const written = data.missing.filter(function(a) { return a.guide; }).length;
-          head += t('ach.written', { written: written, n: data.missingCount });
+          head += written === 0 ? t('ach.writtenNone') : t('ach.written', { written: written });
           // A guide written in the other language says so **here and nowhere else**. This panel is
           // the one place the guide's own text is on screen, so it is the one place the mismatch is
           // about to matter. On the row button it would be a badge on most rows carrying the same
@@ -5547,7 +5580,8 @@
         allGames = data.games;
         // cardTotal belongs solely to render() — only it knows the filter results
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
-        document.getElementById('cardPerfect').textContent = data.perfectCount;
+        document.getElementById('cardPerfect').textContent = fmtCount(data.perfectCount);
+        document.getElementById('cardAchieved').textContent = fmtCount(data.achievedTotal);
         // The element ships with data-t="ui.loading" so it reads correctly before this arrives.
         // Once it holds a real timestamp that key is wrong, and applyStrings would repaint 「加载中…」
         // over it on the next call — so the key is removed along with the placeholder text

@@ -364,7 +364,7 @@ Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement
 That refusal is what makes the header worth reading:
 
 ```
-还差 8 / 44 个成就 · 攻略里已写 8 / 8 条
+44 个成就,还差 8 个 · 攻略里写了其中 8 个
 ```
 
 So the panel doubles as a map of **which achievements your guide still doesn't cover** — a number that was previously only reachable by running `guide-lint` across the corpus.
