@@ -18,6 +18,7 @@
     "files": [
       "main.js",
       "updater.js",
+      "strings.js",
       "package.json",
       "icon.ico"
     ],

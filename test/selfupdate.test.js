@@ -826,14 +826,32 @@ describe('the wiring in main.js', () => {
 });
 
 describe('packaging and release', () => {
-  test('updater.js has to be in build.files', () => {
-    // Missing it breaks only the **packaged** build: npm start is fine throughout while the
-    // released package fails at launch with a module not found. The same class as the icon.ico one
+  /**
+   * **Derived from the imports, not from a list of names.** Missing an entry breaks only the
+   * **packaged** build: `npm start` is fine throughout while the released package dies at launch on
+   * a module not found. The same class as the `icon.ico` one.
+   *
+   * It was a list of two names, and that is exactly how `strings.js` came to be left out — added,
+   * imported by both entry points, and invisible to a check that only knew about the files somebody
+   * had thought of. Reading the imports means the next module added is covered before anybody
+   * remembers to come back here.
+   */
+  test('everything the launcher imports has to be in build.files', () => {
     const pkg = JSON.parse(
       readFileSync(new URL('../launcher/package.json', import.meta.url), 'utf8')
     );
-    assert.ok(pkg.build.files.includes('updater.js'), 'build.files does not contain updater.js');
-    assert.ok(pkg.build.files.includes('main.js'));
+    const entryPoints = ['main.js', 'updater.js'];
+    for (const entry of entryPoints) {
+      assert.ok(pkg.build.files.includes(entry), `build.files does not contain ${entry}`);
+    }
+    for (const entry of entryPoints) {
+      const src = readFileSync(new URL(`../launcher/${entry}`, import.meta.url), 'utf8');
+      // Local modules only: a bare specifier is a dependency and electron-builder brings those in
+      for (const m of src.matchAll(/^import[^']*'\.\/([\w.-]+\.js)'/gm)) {
+        assert.ok(pkg.build.files.includes(m[1]),
+          `${entry} imports ./${m[1]}, which is not in build.files — the packaged app dies at launch`);
+      }
+    }
   });
 
   test('postbuild generates the manifest first, then copies local.config.json', () => {
