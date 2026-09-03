@@ -2623,6 +2623,12 @@
            To see the whole library (to find a game and change a mark, say), one click
            returns it to neutral -->
       <button type="button" class="chip" data-filter="noach" data-state="not"><span class="chip-dot"></span><span class="chip-label" data-t="filter.noach">无成就</span></button>
+      <!-- Excluded at startup, which is the whole point of the mark — and last on the row, because
+           unlike the other four this one is set per game by hand and so is reached far less often.
+           **The chip is the only way back.** Hiding a row makes it vanish on the spot, so without a
+           control that says 「这里还有一类」 the games would be unreachable except by searching for
+           one by name — and a mark you cannot undo without knowing what you marked is a trap -->
+      <button type="button" class="chip" data-filter="hidden" data-state="not" data-t-title="chip.hiddenTitle" title="你自己标为隐藏的游戏,默认不出现在表格里。这个标记只存在本地,不会改动 Steam,也不影响上方的读数和同步。"><span class="chip-dot"></span><span class="chip-label" data-t="filter.hidden">已隐藏</span></button>
       </div>
       <div class="row-count" id="rowCount"></div>
     </div>
@@ -2852,6 +2858,8 @@
       'filter.complete':      ['已完成', 'Complete'],
       'filter.unvetted':      ['受限', 'Limited'],
       'filter.noach':         ['无成就', 'No achievements'],
+      'filter.hidden':        ['已隐藏', 'Hidden'],
+      'chip.hiddenTitle':     ['你自己标为隐藏的游戏,默认不出现在表格里。这个标记只存在本地,不会改动 Steam,也不影响上方的读数和同步。', 'Games you have marked hidden, kept out of the table by default. The mark is local: it never touches Steam, and it changes neither the readings above nor what gets synced.'],
       'chip.off':             ['不筛选', 'Off'],
       'chip.only':            ['只看', 'Only'],
       'chip.not':             ['排除', 'Exclude'],
@@ -2901,7 +2909,7 @@
       // were redundant against the thing they sat on top of. The cards below *are* the list, so
       // their number is the total; and each card that has no guide entry already says so in place,
       // so counting them in words is the header narrating what the panel is showing
-      'ach.remaining':        ['还差 {n} 个成就', '{n} achievements to go'],
+      'ach.remaining':        ['剩余 {n} 个成就', '{n} achievements remaining'],
       // Both languages are spelled out in **both** halves, and that is not redundancy. The marker
       // is only drawn when the guide's language differs from the interface's, so a table holding
       // only 「英文攻略」/「Chinese guide」 would be correct solely under that condition — the string
@@ -2944,6 +2952,12 @@
       // ---- The row menu -------------------------------------------------------
       'menu.edit':            ['编辑', 'Edit'],
       'menu.editTitle':       ['会同时锁定这一行(停止自动同步)', 'Also locks this row, stopping automatic syncing'],
+      // One entry, two labels, because the menu is built fresh each time it opens and so always
+      // knows which way this row goes. A single 「隐藏」 that toggles would be the same word for
+      // two opposite outcomes on a control the reader sees once per game
+      'menu.hide':            ['隐藏', 'Hide'],
+      'menu.unhide':          ['取消隐藏', 'Unhide'],
+      'menu.hideTitle':       ['从表格里移出这一行。同步、统计和 Steam 都不受影响,用「已隐藏」筛选可以找回来。', 'Takes this row out of the table. Syncing, the readings and Steam are all untouched; the 「Hidden」 filter brings it back.'],
       'menu.delete':          ['删除', 'Delete'],
 
       // ---- Adding a game ------------------------------------------------------
@@ -3168,6 +3182,7 @@
       { key: 'complete', labelKey: 'filter.complete', has: (g) => g.rate === 1 },
       { key: 'unvetted', labelKey: 'filter.unvetted', has: (g) => Boolean(g.unvetted) },
       { key: 'noach',    labelKey: 'filter.noach',    has: (g) => g.total === 'N/A' },
+      { key: 'hidden',   labelKey: 'filter.hidden',   has: (g) => Boolean(g.hidden) },
     ];
 
     /** The next position one click moves to. **neutral → only → exclude → neutral; do not casually change the direction** (see .chip in the CSS) */
@@ -4386,6 +4401,27 @@
     }
 
     /** Exits edit mode: the lock is unchanged and the numbers revert to plain text */
+    /**
+     * Flips one row's hidden mark. **The same optimistic shape as the family toggle**: change it
+     * locally, repaint, and put it back if the write fails — a mark that appears to take and then
+     * silently is not there next reload is worse than one that visibly refuses.
+     *
+     * The repaint is what makes the row vanish (the 「已隐藏」 chip starts excluded), and that
+     * disappearance **is** the confirmation — there is no message to write.
+     */
+    function toggleHiddenFlag(appid) {
+      const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
+      if (!game) return;
+      game.hidden = !game.hidden;
+      render();
+      rpc.withSuccessHandler(function(result) {
+        if (result && typeof result.hidden === 'boolean') game.hidden = result.hidden;
+      }).withFailureHandler(function() {
+        game.hidden = !game.hidden;
+        render();
+      }).toggleHidden(appid);
+    }
+
     function stopManualEdit() {
       if (editingAppid === null) return;
       editingAppid = null;
@@ -4679,6 +4715,13 @@
         label: t('menu.edit'),
         title: game.manual ? '' : t('menu.editTitle'),
         run: function(){ startManualEdit(appid); },
+      });
+      // Between 编辑 and 删除 rather than beside 删除: both of those act on this row, and hiding is
+      // the reversible one of the pair, so it must not sit inside the danger group's reading distance
+      item({
+        label: game.hidden ? t('menu.unhide') : t('menu.hide'),
+        title: t('menu.hideTitle'),
+        run: function(){ toggleHiddenFlag(appid); },
       });
       item({ label: t('menu.delete'), cls: 'danger', run: function(){ deleteGameFlow(appid); } });
 

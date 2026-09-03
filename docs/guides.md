@@ -363,7 +363,7 @@ Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement
 
 That refusal is what makes the panel worth reading: every achievement your guide doesn't cover says so on its own card. So the panel doubles as a map of **which achievements your guide still doesn't cover** — something that was previously only reachable by running `guide-lint` across the corpus.
 
-The header above them stays out of it, stating only how many achievements are left (`还差 8 个成就`) plus, when they disagree, the guide's own language.
+The header above them stays out of it, stating only how many achievements are left (`剩余 8 个成就`) plus, when they disagree, the guide's own language.
 
 Details:
 

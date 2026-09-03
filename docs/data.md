@@ -28,7 +28,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
+`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `hidden` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
 
 Six decisions worth knowing before you write queries:
 
