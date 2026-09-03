@@ -2896,20 +2896,12 @@
       // ---- The achievement panel ----------------------------------------------
       'ach.loading':          ['正在查询缺失成就…', 'Looking up what is missing…'],
       'ach.allDone':          ['所有成就都已解锁', 'Every achievement is unlocked'],
-      // **Neither half is a fraction any more.** They used to read 「还差 2 / 15 个成就 ·
-      // 攻略里已写 2 / 2 条」, which misleads twice over. `x / y` is read everywhere as
-      // 「做完了 x, 共 y 个」, so putting the *remaining* count in the x slot states the
-      // opposite of what it means; and the second denominator silently switches from 「所有成就」
-      // to 「剩下的成就」, so two adjacent fractions count different things while looking alike.
-      // The Chinese now spends a clause on it and the English keeps `of`, which never carried the
-      // ambiguity; 「其中」 / `of them` is what pins the second number to the first
-      'ach.remaining':        ['{total} 个成就,还差 {n} 个', '{n} of {total} achievements to go'],
-      'ach.written':          [' · 攻略里写了其中 {written} 个', ' · {written} of them written up'],
-      // Zero gets its own sentence because Chinese has no natural reading of 「写了其中 0 个」 —
-      // a counted noun phrase does not go to zero the way English's does. Reachable state, not a
-      // hypothetical: a guide written before these achievements existed, or one whose bold names
-      // stopped matching, registers fine and covers none of what is left
-      'ach.writtenNone':      [' · 攻略里一个都未写', ' · none of them written up'],
+      // **One number, and it is the only one the header is allowed.** It used to carry a total and
+      // a guide-coverage tally as well — 「还差 2 / 15 个成就 · 攻略里已写 2 / 2 条」 — and both
+      // were redundant against the thing they sat on top of. The cards below *are* the list, so
+      // their number is the total; and each card that has no guide entry already says so in place,
+      // so counting them in words is the header narrating what the panel is showing
+      'ach.remaining':        ['还差 {n} 个成就', '{n} achievements to go'],
       // Both languages are spelled out in **both** halves, and that is not redundancy. The marker
       // is only drawn when the guide's language differs from the interface's, so a table holding
       // only 「英文攻略」/「Chinese guide」 would be correct solely under that condition — the string
@@ -4186,14 +4178,11 @@
       } else if (data.missingCount === 0) {
         inner = '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
       } else {
-        // Only with a registered guide that was genuinely read this time is there any "how many
-        // are written" to speak of. A failed read says so honestly, so that 0 does not look
-        // like "not one entry was written"
+        // A guide that was genuinely read this time is the only one whose language can be trusted;
+        // a failed read puts its own message here instead
         const hasGuide = Boolean(data.guide) && !data.guide.error;
-        let head = t('ach.remaining', { n: data.missingCount, total: data.total });
+        let head = t('ach.remaining', { n: data.missingCount });
         if (hasGuide) {
-          const written = data.missing.filter(function(a) { return a.guide; }).length;
-          head += written === 0 ? t('ach.writtenNone') : t('ach.written', { written: written });
           // A guide written in the other language says so **here and nowhere else**. This panel is
           // the one place the guide's own text is on screen, so it is the one place the mismatch is
           // about to matter. On the row button it would be a badge on most rows carrying the same
