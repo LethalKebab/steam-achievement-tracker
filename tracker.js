@@ -1312,6 +1312,12 @@ async function cmdGuideGen() {
         // This is the program **overriding the classification the model gave**, and the finished
         // product does not show who changed it. Say plainly how many places were changed
         p.done(clog('gg.clustered', { clusters: ev.clusters, into: ev.into.join('、'), moved: ev.moved }));
+      } else if (ev.phase === 'spoiler-done') {
+        p.done(clog('gg.spoilerFolded', { n: ev.folded, skipped: ev.skipped }));
+      } else if (ev.phase === 'spoiler-failed') {
+        // A degradation that stays in the finished product: the spoilers are simply written out in
+        // the open. Same rule as regroup-failed — say so rather than letting it read as success
+        p.done(clog('gg.spoilerFailed', { reason: ev.reason }));
       } else if (ev.phase === 'unwrapped-toggles') {
         p.done(clog('gg.unwrapped', { n: ev.titles.length, titles: ev.titles.join('、') }));
       } else if (ev.phase === 'unwrap-failed') {

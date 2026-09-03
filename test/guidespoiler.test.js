@@ -12,7 +12,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { guideEntries, parseSpoilerReply, foldSpoilers } from '../lib/guidespoiler.js';
+import {
+  guideEntries, parseSpoilerReply, foldSpoilers, foldSpoilersInBlocks, spoilerSystemFor,
+} from '../lib/guidespoiler.js';
 import { lintGuide } from '../lib/guidelint.js';
 import { loadTodos } from '../lib/markdown.js';
 import { writeFileSync, mkdtempSync } from 'node:fs';
@@ -146,5 +148,81 @@ describe('where the fold is put', () => {
     const r = foldSpoilers(guide, picks, DEFS);
     assert.equal(r.applied.length, 2);
     assert.equal((r.text.match(/<details>/g) ?? []).length, 1);
+  });
+});
+
+describe('both languages', () => {
+  // The pass is asked in whichever language the guide is written in, and the label it writes has
+  // to match — a Chinese label on an English guide is not something any checker can see, since
+  // guidelint accepts either on purpose (a label in the wrong language is a content fault)
+  const EN_GUIDE = [
+    '# The Game', '', 'appid: 123', '',
+    '- [ ] **Alpha**<br>Finish chapter one.<br>Just follow the route. The doctor did it.',
+    '- [ ] **Beta**<br>Finish chapter two.<br>Grind it three times.',
+    '',
+  ].join('\n');
+  const EN_DEFS = [
+    { api_name: 'A', name_cn: '', name_en: 'Alpha', description: 'Finish chapter one.' },
+    { api_name: 'B', name_cn: '', name_en: 'Beta', description: 'Finish chapter two.' },
+  ];
+
+  test('the two system prompts are each written in their own language', () => {
+    assert.match(spoilerSystemFor('zh'), /剧透/);
+    assert.doesNotMatch(spoilerSystemFor('en'), /[一-鿿]/, 'the English half must carry no Chinese at all');
+    assert.notEqual(spoilerSystemFor('zh'), spoilerSystemFor('en'));
+  });
+
+  test('an unknown language falls back to Chinese, not to English', () => {
+    // Same rule as every other builder here: a forgotten call site lands on what this project has
+    // always spoken rather than silently switching the guide's language
+    assert.equal(spoilerSystemFor(undefined), spoilerSystemFor('zh'));
+  });
+
+  test('an English guide gets an English label, and the linter accepts it', () => {
+    const entries = guideEntries(EN_GUIDE);
+    const { picks, discarded } = parseSpoilerReply('【1】The doctor did it.', entries);
+    assert.deepEqual(discarded, []);
+    const out = foldSpoilers(EN_GUIDE, picks, EN_DEFS, 'en');
+    assert.equal(out.applied.length, 1);
+    assert.match(out.text, /<summary>Spoiler<\/summary>/);
+    assert.doesNotMatch(out.text, /<summary>剧透<\/summary>/);
+
+    const dir = mkdtempSync(join(tmpdir(), 'spoiler-en-'));
+    const file = join(dir, 'g.md');
+    writeFileSync(file, out.text);
+    const r = lintGuide({ todos: loadTodos(file), defs: EN_DEFS, text: out.text, kind: 'local' });
+    assert.deepEqual(r.findings.filter((f) => f.code.startsWith('spoiler-')), []);
+    assert.equal(r.stats.spoilerFolds, 1);
+  });
+
+  test('a Chinese guide gets the Chinese label', () => {
+    const entries = guideEntries(GUIDE);
+    const { picks } = parseSpoilerReply('【1】真凶是医生。', entries);
+    const out = foldSpoilers(GUIDE, picks, DEFS, 'zh');
+    assert.match(out.text, /<summary>剧透<\/summary>/);
+  });
+});
+
+describe('the partial-rewrite shape — only the named entries', () => {
+  const BLOCKS = [
+    ['- [ ] **甲**<br>官方甲描述<br>照着流程走就行。真凶是医生。'],
+    ['- [ ] **乙**<br>官方乙描述<br>刷三次即可。', '  - [ ] 子步骤'],
+  ];
+
+  test('a fold lands inside its own block and the other block is untouched', () => {
+    const r = foldSpoilersInBlocks(BLOCKS, '【1】真凶是医生。', DEFS, 'zh');
+    assert.equal(r.applied.length, 1);
+    assert.ok(!r.blocks[0].join('\n').includes('真凶是医生。<'), 'cut from the entry line');
+    assert.ok(r.blocks[0].join('\n').includes('<summary>剧透</summary>'));
+    assert.deepEqual(r.blocks[1], BLOCKS[1], 'the block nobody picked must come back identical');
+  });
+
+  test('a sentence from outside the given blocks lands nowhere', () => {
+    // This is the scoping guarantee: --only may not fold an entry the user did not name, and the
+    // pass is never shown one
+    const r = foldSpoilersInBlocks(BLOCKS, '【1】某个不在这些条目里的句子。', DEFS, 'zh');
+    assert.equal(r.applied.length, 0);
+    assert.equal(r.skipped[0].reason, 'not-found');
+    assert.deepEqual(r.blocks, BLOCKS);
   });
 });

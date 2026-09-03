@@ -172,7 +172,11 @@ describe('a real provider driving the whole pipeline', () => {
 
       assert.equal(r.ok, true, r.reason ?? '');
       assert.equal(r.rounds, 1);
-      assert.equal(fetchImpl.calls.length, 1, 'two achievements should take exactly one request');
+      // **Two requests, and the second one is the price of the spoiler pass.** Writing two
+      // achievements is one request; every generation then pays a second to ask which sentences
+      // spoil the story (`lib/guidespoiler.js`). That is a real cost on every run and this number
+      // is where it is visible — if it moves again, something started making per-shard aside calls.
+      assert.equal(fetchImpl.calls.length, 2, 'one request to write, one for the spoiler pass');
       assert.ok(existsSync(r.path));
 
       const text = readFileSync(r.path, 'utf8');
