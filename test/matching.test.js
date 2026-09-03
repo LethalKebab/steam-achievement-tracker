@@ -954,3 +954,51 @@ describe('resolveTodoToAchievement stage 1 — either language', () => {
   });
 });
 
+/**
+ * Stage 1 asks whether a checkbox **contains** an achievement's complete description, and two ways
+ * of satisfying that question by accident are pinned here. Both were live in Factorio at once and
+ * between them cost 61 of 88 cards their guide.
+ *
+ * They share a failure shape worth naming: the stage answered with an achievement it had *some*
+ * evidence for, rather than with the achievement the evidence was strongest for — and
+ * mapAchievementGuides gives each achievement to the first box that claims it, so one wrong answer
+ * also silently swallows every later box that should have had it.
+ */
+describe('resolveTodoToAchievement stage 1 — evidence that only looks like evidence', () => {
+  const A = {
+    api_name: 'A', name_cn: '第一个', name_en: 'The First',
+    description: '解锁第一个成就。', description_en: 'Unlock the first achievement.',
+  };
+
+  test('**a description that is only whitespace is not evidence at all**', () => {
+    // Steam really does ship these — Factorio's 咸鱼翻身 stores a single space. It is truthy, so a
+    // `!raw` guard admits it, and it flattens to '', which every text on earth contains. Left
+    // unguarded that one achievement answers for every checkbox in the game
+    const blank = { api_name: 'BLANK', name_cn: '咸鱼翻身', name_en: 'So long', description: ' ', description_en: ' ' };
+    assert.equal(resolveTodoToAchievement('完全无关的一段话', [blank, A]), null);
+    assert.equal(resolveTodoToAchievement('**第一个**<br>解锁第一个成就。', [blank, A])?.def.api_name, 'A');
+  });
+
+  test('**the longest contained description wins, not the first one listed**', () => {
+    // A tiered family writes the lower tier's description inside the higher tier's, so a box for
+    // the higher tier contains both. Order in `defs` must not decide it: taking the first filed
+    // 「在游戏90分钟内建造出内燃机车。」 under the achievement that only asks for a locomotive
+    const lower = { api_name: 'LOW', name_cn: '你上道了', name_en: 'On track', description: '建造出内燃机车。' };
+    const higher = { api_name: 'HIGH', name_cn: '轻车熟路', name_en: 'Like a pro', description: '在游戏90分钟内建造出内燃机车。' };
+    const box = '轻车熟路<br>在游戏90分钟内建造出内燃机车。';
+    assert.equal(resolveTodoToAchievement(box, [lower, higher])?.def.api_name, 'HIGH');
+    assert.equal(resolveTodoToAchievement(box, [higher, lower])?.def.api_name, 'HIGH');
+    // The lower tier's own box contains only its own description and is unaffected
+    assert.equal(resolveTodoToAchievement('你上道了<br>建造出内燃机车。', [lower, higher])?.def.api_name, 'LOW');
+  });
+
+  test('two different achievements contained at the same length answer with nothing', () => {
+    // Length is a tie-break between nested sentences, not a way to pick a winner out of a genuine
+    // ambiguity. Neither is more specific than the other, so the stage declines and the name stage
+    // gets its turn
+    const x = { api_name: 'X', name_cn: '甲', name_en: 'X', description: '做完这件事。' };
+    const y = { api_name: 'Y', name_cn: '乙', name_en: 'Y', description: '做完那件事。' };
+    assert.equal(resolveTodoToAchievement('做完这件事。做完那件事。', [x, y]), null);
+  });
+});
+
