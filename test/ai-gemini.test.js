@@ -587,3 +587,57 @@ describe('a stream that fails partway must not leak the connection', () => {
       'aborting a response whose body was already consumed is what the streaming gate exists to prevent');
   });
 });
+
+/**
+ * The 503, which is a third thing and used to look like the other two.
+ *
+ * Measured on one key within a few minutes: `gemini-flash-latest` and `gemini-3.6-flash` both 503,
+ * `gemini-3.8-flash` answered 200 and then 503 for the byte-identical request, and
+ * `gemini-2.5-flash` gave 404 「no longer available to new users」. Only the last of those is a
+ * model-name problem, and only it should send anybody to change a setting.
+ */
+describe('a 503 is capacity, and is not reported as a model problem', () => {
+  test('it gets its own code, so the terminal can give its own advice', async () => {
+    const p = new GeminiProvider(AI, {
+      fetchImpl: fakeFetch([errResponse(503, { error: { status: 'UNAVAILABLE', message: 'This model is currently experiencing high demand.' } })]),
+    });
+    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+      assert.equal(e.code, 'gemini-unavailable',
+        'without its own code this falls through as the vendor’s raw sentence, which reads like a misconfigured model');
+      assert.equal(e.retryable, true);
+      return true;
+    });
+  });
+
+  test('a retired model keeps saying it is a model problem', () => {
+    // The two must not converge: one wants a setting changed, the other wants time
+    assert.notEqual('gemini-unavailable', 'gemini-model-retired');
+  });
+
+  test('**it waits longer than an ordinary error before giving up**', async () => {
+    // 1s + 2s + 4s is sized for a hiccup. This is not one — it persisted across repeated attempts
+    // over several minutes — so the ordinary ladder amounted to not retrying at all, and a run that
+    // had already spent minutes researching died at the first request of the next shard
+    const waits = [];
+    const sleeps = [];
+    const realSleep = global.setTimeout;
+    global.setTimeout = (fn, ms) => { sleeps.push(ms); return realSleep(fn, 0); };
+    try {
+      const busy = fakeFetch([
+        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
+        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
+        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
+        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
+      ]);
+      const p = new GeminiProvider({ ...AI, maxRetries: 3 }, { fetchImpl: busy, log: () => {} });
+      await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }));
+      assert.equal(busy.calls.length, 4, 'a 503 is retried, unlike a detail-free 429');
+      // The request timeout arms a timer of its own on every attempt; only the backoff is of interest
+      waits.push(...sleeps.filter((ms) => ms < 60000));
+    } finally {
+      global.setTimeout = realSleep;
+    }
+    assert.deepEqual(waits, [5000, 10000, 20000],
+      'the ladder for a 503 is its own; at 1/2/4 seconds it gives up inside eight, which is no retry at all');
+  });
+});
