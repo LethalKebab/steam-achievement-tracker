@@ -597,15 +597,31 @@ describe('a stream that fails partway must not leak the connection', () => {
  * model-name problem, and only it should send anybody to change a setting.
  */
 describe('a 503 is capacity, and is not reported as a model problem', () => {
+  const busyResponse = () => errResponse(503, { error: { status: 'UNAVAILABLE', message: 'This model is currently experiencing high demand.' } });
+
+  /** Runs `fn` with the backoff sleeps collected instead of waited out */
+  async function withoutWaiting(fn) {
+    const sleeps = [];
+    const real = global.setTimeout;
+    global.setTimeout = (cb, ms) => { sleeps.push(ms); return real(cb, 0); };
+    try {
+      await fn();
+    } finally {
+      global.setTimeout = real;
+    }
+    // Every attempt arms a request-timeout timer too; only the backoff is of interest here
+    return sleeps.filter((ms) => ms < 60000);
+  }
+
   test('it gets its own code, so the terminal can give its own advice', async () => {
-    const p = new GeminiProvider(AI, {
-      fetchImpl: fakeFetch([errResponse(503, { error: { status: 'UNAVAILABLE', message: 'This model is currently experiencing high demand.' } })]),
-    });
-    await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
-      assert.equal(e.code, 'gemini-unavailable',
-        'without its own code this falls through as the vendor’s raw sentence, which reads like a misconfigured model');
-      assert.equal(e.retryable, true);
-      return true;
+    const p = new GeminiProvider(AI, { fetchImpl: fakeFetch(Array.from({ length: 8 }, busyResponse)), log: () => {} });
+    await withoutWaiting(async () => {
+      await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }), (e) => {
+        assert.equal(e.code, 'gemini-unavailable',
+          'without its own code this falls through as the vendor’s raw sentence, which reads like a misconfigured model');
+        assert.equal(e.retryable, true);
+        return true;
+      });
     });
   });
 
@@ -614,30 +630,18 @@ describe('a 503 is capacity, and is not reported as a model problem', () => {
     assert.notEqual('gemini-unavailable', 'gemini-model-retired');
   });
 
-  test('**it waits longer than an ordinary error before giving up**', async () => {
-    // 1s + 2s + 4s is sized for a hiccup. This is not one — it persisted across repeated attempts
-    // over several minutes — so the ordinary ladder amounted to not retrying at all, and a run that
-    // had already spent minutes researching died at the first request of the next shard
-    const waits = [];
-    const sleeps = [];
-    const realSleep = global.setTimeout;
-    global.setTimeout = (fn, ms) => { sleeps.push(ms); return realSleep(fn, 0); };
-    try {
-      const busy = fakeFetch([
-        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
-        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
-        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
-        errResponse(503, { error: { status: 'UNAVAILABLE', message: 'high demand' } }),
-      ]);
-      const p = new GeminiProvider({ ...AI, maxRetries: 3 }, { fetchImpl: busy, log: () => {} });
+  test('**it is re-asked more often, and waits longer, than an ordinary failure**', async () => {
+    // Measured during a spike, 10 bare requests per model: flash-latest answered 6, 3.8-flash 4.
+    // A per-request lottery — so the number of draws is what decides whether a run survives, and a
+    // guide run is many requests. At 40% a request wins, `maxRetries: 3` loses one attempt in eight
+    const busy = fakeFetch(Array.from({ length: 8 }, busyResponse));
+    const p = new GeminiProvider({ ...AI, maxRetries: 3 }, { fetchImpl: busy, log: () => {} });
+    const waits = await withoutWaiting(async () => {
       await assert.rejects(p.send({ system: 's', messages: [{ role: 'user', content: 'q' }] }));
-      assert.equal(busy.calls.length, 4, 'a 503 is retried, unlike a detail-free 429');
-      // The request timeout arms a timer of its own on every attempt; only the backoff is of interest
-      waits.push(...sleeps.filter((ms) => ms < 60000));
-    } finally {
-      global.setTimeout = realSleep;
-    }
-    assert.deepEqual(waits, [5000, 10000, 20000],
-      'the ladder for a 503 is its own; at 1/2/4 seconds it gives up inside eight, which is no retry at all');
+    });
+
+    assert.equal(busy.calls.length, 6, 'a 503 gets its own budget: five retries, not ai.maxRetries');
+    assert.deepEqual(waits, [5000, 10000, 20000, 30000, 30000],
+      'and its own ladder; at 1/2/4 seconds it gives up inside eight, which is no retry at all');
   });
 });
