@@ -1088,6 +1088,20 @@
     /* A segmented control: two buttons sharing one trough, with the selected one
        raised. It used to be two independent buttons whose selected state was only a
        difference in fill darkness, which does not read as "one of two" */
+    /* The run's history. Fixed height with its own scroll: it grows for twenty minutes, and a
+       progress bar that keeps getting taller pushes the page around while somebody is reading it */
+    .gen-log {
+      margin-top: var(--s2);
+      max-height: 168px;
+      overflow-y: auto;
+      font-size: var(--fs-sm);
+      color: var(--text-2);
+      border-top: 1px solid var(--line-2);
+      padding-top: var(--s2);
+    }
+    .gen-log div { display: flex; gap: var(--s2); padding: 1px 0; }
+    /* Tabular figures so the times form a column instead of shifting line to line */
+    .gen-log time { color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
     .view-toggle {
       display: inline-flex;
       gap: 2px;
@@ -2833,6 +2847,10 @@
       'ui.toTop':             ['回到顶部', 'Back to top'],
       'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but excluded from the average completion rate above — the same as Steam’s own method.'],
       'gen.collapse':         ['收起', 'Collapse'],
+      'gen.stepOf':           ['第 {n} / {of} 步', 'step {n} of {of}'],
+      'gen.written':          ['已写 {done} / {of} 条', '{done} of {of} written'],
+      'gen.showLog':          ['查看步骤', 'Show steps'],
+      'gen.hideLog':          ['收起步骤', 'Hide steps'],
       'gen.collapseTitle':    ['收起(任务仍在进行)', 'Collapse — the task keeps running'],
       'addc.title':           ['将这款游戏添加到列表？', 'Add this game to the list?'],
       'addc.family':          ['家庭组游戏', 'Family-shared game'],
@@ -6276,6 +6294,50 @@
      *                         false explicitly**, or it cannot be closed: the close button only
      *                         appears when not live
      */
+    /**
+     * The run's history, behind a disclosure.
+     *
+     * **Closed by default.** The one line above answers "what now"; this answers "has it moved",
+     * and only somebody who has started to doubt that goes looking. Opening it is what issue #78
+     * asked for — during a twenty-minute run the bar could only ever show the current sentence, so
+     * a run that had been working for a quarter of an hour looked like one that had died.
+     *
+     * The times are what does the work here, not the wording: a line stamped four minutes ago says
+     * "stuck" and one stamped four seconds ago says "fine", without anyone having to describe either.
+     */
+    let genLogOpen = false;
+
+    /**
+     * `hh:mm:ss`, built from the parts rather than through `toLocaleTimeString`.
+     *
+     * **No locale is involved, deliberately.** The system one gives `3:45:47 PM` under a Chinese
+     * interface, and hardcoding `zh-CN` instead is the defect this project has already been bitten
+     * by twice — a locale argument is invisible to the string table, so it survives a language
+     * switch untouched. A timestamp column is not prose; it wants one fixed shape and a stable
+     * width, which is also what `tabular-nums` on it is for.
+     */
+    function logTime(iso) {
+      const d = new Date(iso);
+      const two = function(n) { return String(n).padStart(2, '0'); };
+      return two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
+    }
+
+    function genLogHtml(s) {
+      const log = (s && s.log) || [];
+      if (!log.length) return '';
+      const btn = '<button type="button" class="gen-link" data-genlog="1">'
+        + escapeHtml(t(genLogOpen ? 'gen.hideLog' : 'gen.showLog')) + '</button>';
+      // Newest last, so it reads downward like a transcript and the live end is where it rests
+      const rows = log.map(function(e) {
+        return '<div><time>' + escapeHtml(logTime(e.at)) + '</time>'
+          + '<span>' + escapeHtml(e.text) + '</span></div>';
+      }).join('');
+      // **Always emitted, hidden when closed**, so opening it is one attribute rather than a
+      // repaint. The repaint is driven by a three-second poll, and a disclosure that does nothing
+      // for up to three seconds reads as a button that does not work
+      return '<br>' + btn + '<div class="gen-log"' + (genLogOpen ? '' : ' hidden') + '>' + rows + '</div>';
+    }
+
     function showGen(html, dim, live) {
       genBar.style.display = 'block';
       if (live !== undefined) {
@@ -6372,6 +6434,23 @@
           }).deleteGuideArchive(b.getAttribute('data-drop-backup'));
         });
       });
+
+      genMsg.querySelectorAll('[data-genlog]').forEach(function(b) {
+        b.addEventListener('click', function(e) {
+          e.stopPropagation();   // the bar itself is a collapse target while collapsed
+          genLogOpen = !genLogOpen;
+          const box = genMsg.querySelector('.gen-log');
+          if (box) {
+            box.hidden = !genLogOpen;
+            if (genLogOpen) box.scrollTop = box.scrollHeight;
+          }
+          b.textContent = t(genLogOpen ? 'gen.hideLog' : 'gen.showLog');
+        });
+      });
+      // **The tail is the live end**, and a repaint every three seconds would otherwise drop the
+      // reader back to the top of a log that is still growing
+      const openLog = genMsg.querySelector('.gen-log:not([hidden])');
+      if (openLog) openLog.scrollTop = openLog.scrollHeight;
 
       genMsg.querySelectorAll('[data-reveal]').forEach(function(b) {
         b.addEventListener('click', function(e) {
@@ -6627,7 +6706,21 @@
             // The round is shown only during an actual rewrite (round 2 onwards) — writing "round
             // 1/3" on a first pass reads as though something went wrong and it needs three attempts
             const round = s.rounds && s.round > 1 ? t('res.round', { round: s.round, rounds: s.rounds }) : '';
-            showGen('⏳ 《' + escapeHtml(s.game) + '》' + escapeHtml(round) + (s.note ? ' · ' + escapeHtml(s.note) : '') + escapeHtml(waiting) + warns + doneTail, false, true);
+            // **Which step, out of a total that was settled before the run started.** The total is
+            // the answer to "how much longer is this"; a total that grew while somebody watched
+            // would be worse than none, which is why the rewrite rounds are not steps (see
+            // generationSteps). The round is still shown separately, as progress within the writing
+            const stepTxt = s.steps && s.steps.length
+              ? ' · ' + t('gen.stepOf', { n: Math.max(1, s.step || 1), of: s.steps.length })
+              : '';
+            // The live count of entries. **Only while a shard is being written** — left on screen
+            // afterwards it would read as the guide's size rather than as something in progress
+            const wrote = s.written && s.written.of
+              ? ' · ' + t('gen.written', { done: s.written.done, of: s.written.of })
+              : '';
+            showGen('⏳ 《' + escapeHtml(s.game) + '》' + escapeHtml(round) + escapeHtml(stepTxt)
+              + (s.note ? ' · ' + escapeHtml(s.note) : '') + escapeHtml(wrote)
+              + escapeHtml(waiting) + warns + doneTail + genLogHtml(s), false, true);
             return;
           }
           genRunningAppid = null;

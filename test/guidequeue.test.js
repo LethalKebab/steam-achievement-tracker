@@ -859,3 +859,65 @@ describe('the spoiler choice reaches the job', () => {
     });
   }
 });
+
+/**
+ * The run's history (issue #78).
+ *
+ * `note` holds one sentence and the next event overwrites it, which is why a run that had been
+ * working for twenty minutes was indistinguishable from one that died ten minutes ago. The log is
+ * what tells those apart, and the timestamps are the part that does the telling.
+ */
+describe('createGuideGenState keeps a history', () => {
+  test('a note is appended with the time it happened', () => {
+    const st = createGuideGenState();
+    st.begin('1', '测试游戏');
+    st.onProgress({ note: '正在联网搜索' });
+    const log = st.snapshot().log;
+    assert.equal(log.length, 1);
+    assert.equal(log[0].text, '正在联网搜索');
+    assert.ok(!Number.isNaN(Date.parse(log[0].at)), 'a line without a usable time cannot answer "is it stuck"');
+  });
+
+  test('the same note repeated does not fill the log', () => {
+    // The entry counter moves while the wording stays put, so the same sentence arrives over and
+    // over. A log that repeats itself is one nobody reads to the end
+    const st = createGuideGenState();
+    st.begin('1', '测试游戏');
+    for (let i = 0; i < 5; i++) st.onProgress({ note: '正在联网搜索' });
+    st.onProgress({ note: '正在读取网页' });
+    st.onProgress({ note: '正在联网搜索' });
+    assert.deepEqual(st.snapshot().log.map((e) => e.text), ['正在联网搜索', '正在读取网页', '正在联网搜索'],
+      'consecutive duplicates collapse, but the same note returning later is real progress and stays');
+  });
+
+  test('progress with no note leaves the log alone', () => {
+    // The entry count and the step number go through onProgress too, and neither is a log line
+    const st = createGuideGenState();
+    st.begin('1', '测试游戏');
+    st.onProgress({ note: '开始' });
+    st.onProgress({ written: { done: 3, of: 25 } });
+    st.onProgress({ step: 2 });
+    assert.equal(st.snapshot().log.length, 1);
+    assert.deepEqual(st.snapshot().written, { done: 3, of: 25 });
+    assert.equal(st.snapshot().step, 2);
+  });
+
+  test('a long run stays bounded, keeping the tail', () => {
+    const st = createGuideGenState();
+    st.begin('1', '测试游戏');
+    for (let i = 0; i < 400; i++) st.onProgress({ note: 'n' + i });
+    const log = st.snapshot().log;
+    assert.equal(log.length, 300);
+    assert.equal(log.at(-1).text, 'n399', 'the tail is the live end and is what must survive');
+  });
+
+  test('the next run starts with an empty log', () => {
+    // begin() is `{...idle}`; a log carried over would attribute one game's steps to another
+    const st = createGuideGenState();
+    st.begin('1', '甲');
+    st.onProgress({ note: '甲的第一步' });
+    st.end(null, { ok: true });
+    st.begin('2', '乙');
+    assert.deepEqual(st.snapshot().log, []);
+  });
+});

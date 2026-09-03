@@ -206,6 +206,24 @@ Writing per shard is negligible next to a two-to-three-minute network call. The 
 
 Note that the end-of-round `writeDraft()` overwrites what most tests observe, so **the per-shard write is only observable on a path that aborts the round** — it takes a provider-level exception to pin it.
 
+### Saying how far along a run is (issue #78)
+
+A generation on a large game runs for twenty minutes, and what it used to show was one sentence that the next event overwrote a few seconds later, with nothing kept. The reporter of #78 fell back to watching the API console for spend to tell a working run from a dead one — the interface could not answer that.
+
+Three separate causes, and only the first is about wording:
+
+- **The longest phase said the least.** Web research is most of the wall time, and on Anthropic-family endpoints the progress line was the tool's wire name — `web_search`, and before the tool names carried a date, `web_search_20260209` — because `emitProgress` ran ahead of the accumulator and the query had not been assembled yet. Swapping that order and emitting at `content_block_stop` gets the query. **All three vendors now report the same sentence**, which is what the contract test checks.
+- **Nothing was kept.** `note` is one slot. `guideGenState` now also appends `{at, text}` to a `log`, capped at 300, deduped against the previous line so a repeated note does not fill it. **The timestamps are what answer "is it stuck"** — a line stamped four minutes ago says one thing and one stamped four seconds ago says another, with nobody having to define the word.
+- **There was no total.** See below.
+
+**Why "step N of M" is answerable at all.** The pipeline looks unable to give one because several stages are conditional, but only *one* thing about a run is genuinely unknown before it starts: how many rewrite rounds the linter will force. Everything else is settled once the plan exists — the shard count, whether classification runs (`chunks > 1`), whether the spoiler pass was asked for, whether there is an existing guide to back up. So `generationSteps` computes the list up front and **keeps the rounds out of it**: they are progress *within* the writing step. A total that grew while somebody watched would be worse than no total, since watching whether it advances is the entire point.
+
+`unwrap` is deliberately not a step: whether it runs depends on what the model wrote, so it cannot be listed in advance, and it is mechanical and near-instant.
+
+**Per-achievement progress inside a shard.** A shard is one streaming response, so there is no per-achievement event to listen for — but the prose arrives one `- [ ]` line at a time in a format the linter enforces, so `countStreamedEntries` counts them. It counts a line when its bracket arrives rather than when it ends, so the figure moves during a slow entry, and it counts top-level checkboxes only, since sub-steps would report more written than the shard was asked for. It is reported through its own state slot and **never into the log** — one line per achievement would bury the handful of lines that say something.
+
+The honest limit: a model often thinks for minutes before emitting any prose, so the count sits at 0 and then jumps. That is why the search line matters more than the count — during that stretch it is the only thing with anything to say.
+
 ## Concurrent shards
 
 The shards' contents are disjoint — each shard's prompt names its numbered range and its first and last achievement. Sharing one session made them one chain, so each shard now gets its own, turning round 1 from "the sum of the shards" into "the slowest shard". `ai.concurrency` defaults to 3; set it to 1 for the old sequential behaviour.
