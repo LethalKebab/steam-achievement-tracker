@@ -33,7 +33,12 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { openDb, insertGame, replaceAchievements } from '../lib/db.js';
+import { syncGuidesFromMarkdown } from '../lib/guides.js';
+import { spoilerSystemFor } from '../lib/guidespoiler.js';
 
 import { parseTodos, todoSpans, spliceLines } from '../lib/markdown.js';
 import { lintGuide, computeCheckedKeys } from '../lib/guidelint.js';
@@ -41,7 +46,7 @@ import {
   RARE_PCT, resolveScope, scopeEntries, classifyFindings,
 } from '../lib/guidescope.js';
 import {
-  parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback, landPatchNotion,
+  parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback, landPatchNotion, patchGuide,
 } from '../lib/guidepatch.js';
 import { patchPreflight, formatPatchPreflight } from '../lib/guidebackup.js';
 import { NotionClient } from '../lib/notion.js';
@@ -1139,4 +1144,107 @@ test('with no closing tag the collapsible is not guessed at and the range does n
   ].join('\n');
   const got = parsePatchReply(md, DEFS, { kind: 'notion' }).found.get('B');
   assert.equal(got.length, 1, 'unclosed falls back to the conservative range, and one line too few is a visible failure');
+});
+
+/**
+ * `patchGuide` end to end, on the local backend.
+ *
+ * **This file had no case that ran the orchestration at all** — everything above tests the pure
+ * halves — which is how a whole block of new wiring reached it with zero coverage. Found by planting
+ * a throw inside that block and watching the suite stay green.
+ *
+ * Local rather than Notion because it needs no fake page: the guide is a file, and what lands can
+ * simply be read back off disk.
+ */
+describe('patchGuide, driven end to end on a local guide', () => {
+  const GUIDE = [
+    '# 测试游戏', '', 'appid: 1', '', '## 主线', '',
+    '- [ ] **第一步**<br>完成第一关。<br>旧的正文。',
+    '- [ ] **第二步**<br>完成第二关。<br>别的条目,不许动。',
+    '',
+  ].join('\n');
+
+  const env = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'patchguide-'));
+    const db = openDb(':memory:');
+    insertGame(db, { appid: '1', name: '测试游戏' });
+    replaceAchievements(db, '1', DEFS.slice(0, 2).map((d) => ({
+      apiName: d.api_name, gameName: d.game_name, nameCn: d.name_cn,
+      nameEn: d.name_en, description: d.description, hidden: 0, icon: '',
+    })));
+    const file = join(dir, 'test_achievements.md');
+    writeFileSync(file, GUIDE);
+    const config = { guidesDir: dir, ai: { maxAchievements: 100 } };
+    syncGuidesFromMarkdown(db, config);
+    return { db, config, file };
+  };
+
+  const steam = () => ({
+    async fetchPlayerAchievements() {
+      return { achievements: DEFS.slice(0, 2).map((d) => ({ apiname: d.api_name, achieved: 0 })) };
+    },
+    async fetchGlobalAchievementPercentages() { return null; },
+  });
+
+  /** Answers the rewrite, and separately the spoiler pass, the way the fakes in guidegen.test.js do */
+  const provider = (rewritten, spoilers = null) => ({
+    model: 'claude-opus-5', asked: [], spoilerAsks: 0, webTools: () => [],
+    async send({ system, messages }) {
+      const isSpoiler = system === spoilerSystemFor('zh');
+      if (isSpoiler) this.spoilerAsks++;
+      else this.asked.push(messages.at(-1).content);
+      const text = isSpoiler ? (spoilers ?? []).map(([n, s]) => `【${n}】${s}`).join('\n') : rewritten;
+      return {
+        content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
+        usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
+        model: 'x', continuations: 0, toolErrors: [], searchQueries: [],
+      };
+    },
+  });
+
+  const REWRITTEN = '```markdown\n- [ ] **第一步**<br>完成第一关。<br>新的正文。真凶是医生。\n```';
+
+  test('it runs, and the spoiler pass folds inside the entry that was rewritten', async () => {
+    const { db, config, file } = env();
+    const p = provider(REWRITTEN, [[1, '真凶是医生。']]);
+    const r = await patchGuide(db, {
+      config, provider: p, steam: steam(), appid: '1', selector: '第一步', spoilerFold: true,
+    });
+
+    assert.equal(r.ok, true, r.reason ?? '');
+    assert.equal(p.spoilerAsks, 1, 'the pass has to run on this path too, not only on a whole-guide rewrite');
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /<summary>剧透<\/summary>/);
+    assert.match(text, /真凶是医生。/, 'moved, not dropped');
+    assert.ok(!/新的正文。真凶是医生。/.test(text), 'and gone from the entry line');
+  });
+
+  test('**the entry nobody named comes back byte for byte**', async () => {
+    // The guarantee --only exists for. The spoiler pass is scoped to the rewritten blocks, so it
+    // cannot reach into an entry the user did not ask about even if that entry does hold a spoiler
+    const { db, config, file } = env();
+    const p = provider(REWRITTEN, [[1, '真凶是医生。']]);
+    await patchGuide(db, {
+      config, provider: p, steam: steam(), appid: '1', selector: '第一步', spoilerFold: true,
+    });
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /- \[ \] \*\*第二步\*\*<br>完成第二关。<br>别的条目,不许动。/);
+  });
+
+  test('the spoiler pass falling over does not fail the rewrite', async () => {
+    const { db, config, file } = env();
+    const p = provider(REWRITTEN);
+    const inner = p.send.bind(p);
+    p.send = async (args) => {
+      if (args.system === spoilerSystemFor('zh')) throw new Error('fell over');
+      return inner(args);
+    };
+    const r = await patchGuide(db, {
+      config, provider: p, steam: steam(), appid: '1', selector: '第一步', spoilerFold: true,
+    });
+    assert.equal(r.ok, true);
+    const text = readFileSync(file, 'utf8');
+    assert.match(text, /新的正文。真凶是医生。/, 'the rewrite still landed, just unfolded');
+    assert.ok(!text.includes('<details>'));
+  });
 });

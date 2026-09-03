@@ -86,6 +86,12 @@ This is not a quality check. Your guide is your guide — it is moved as written
 
 ### Having one written for you
 
+**Hiding spoilers is asked each time, not configured.** The confirmation dialog carries a **Spoiler guard** (「防剧透」) switch beside the treatment, off by default. Turn it on and the program asks, once the guide is written, which sentences give the story away, and moves those into a fold you click to open — endings, twists, who somebody turns out to be, and what a hidden achievement actually asks of you, since Steam publishes no description for those and your guide is the only place that condition appears.
+
+Turning it on costs one more call to the AI, which the dialog says beside the switch; that is why it is a choice at the moment you confirm the spend rather than a setting in a file. It is off by default because a guide is usually written for a game you have already finished, where there is nothing left to spoil. On the command line it is `--spoiler`; the same choice applies to **Rewrite** (「重写」) and to a partial rewrite, and on a partial rewrite only the entries you named are looked at.
+
+**What it does not promise:** whether a folded sentence really spoils anything, and whether an unfolded one should have been folded, are judgements no checker can make. It also only looks at achievement entries, not at a section's introductory prose.
+
 `node tracker.js guide-gen <appid>` has an AI research the game online and write the guide, then validates the result against your actual achievement data and registers it. Set it up once:
 
 ```bash
@@ -369,6 +375,7 @@ Details:
 
 - **Cards in a row line up; the guide text inside them doesn't have to.** The accent rule beside a guide traces the text, so it stops where the text stops — a rule that ran on into blank space would read as "there's more below". Evening out the row is the card's job instead. A guide longer than six lines (sub-steps included) is cut there with a fade and expands on click; clicking again collapses it. One that fits shows no fade and isn't clickable, because there's nothing more to show. While a card is open its row drops back to natural heights, so the others don't become tall empty boxes.
 - Sub-steps nested under an achievement come along, indented, with their ticked state.
+- **Anything folded away stays folded away here — it is not on the card at all.** A card is built from checkbox blocks, and a fold is a toggle, so a generated guide's spoiler fold (`docs/ai-guide-writing.md`) never reaches this panel. That is the useful direction: the panel lists the achievements you have *not* unlocked and opens unprompted while you browse, so every word of guide text on it is about something still ahead of you. To read what is folded, open the guide itself.
 - One Notion read per game, on the first expand, cached for the rest of the page's life.
 - **Failure is soft.** An expired token leaves the achievement list exactly as it was and says why in the header — it does not take the panel down.
 - Local markdown guides show the text but no jump link: a line number is not an anchor.

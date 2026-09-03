@@ -248,6 +248,27 @@ describe('the messages in ' + TABLE_NAME, () => {
     assert.deepEqual(bad, [], 'these entries are not a [zh, en] pair with a Chinese first half');
   });
 
+  /**
+   * **The same assertion pointing the other way**, and it has to be its own test rather than a
+   * second condition in the one above: "the Chinese half is Chinese" is satisfied by an entry whose
+   * *English* half is also Chinese, which is exactly what a half-finished translation leaves behind.
+   * One direction alone leaves the real hole open.
+   *
+   * What it caught on the way in: `notion.dbUnreadable` told an English-interface user to press
+   * 「新建一个攻略数据库」, a button that reads `＋ Create a guide database` on their screen. Both
+   * halves were present, they differed, the slots matched, and the advice named a control that was
+   * not there.
+   *
+   * A Chinese **name** reaching an English message is not this — game and achievement names arrive
+   * through slots, and a slot's value is never in this table.
+   */
+  test('and the English half carries no Chinese', () => {
+    const bad = Object.entries(TABLE)
+      .filter(([, v]) => Array.isArray(v) && v.length === 2 && CJK.test(v[1]))
+      .map(([k]) => k);
+    assert.deepEqual(bad, [], 'these entries have Chinese left in the English half');
+  });
+
   test('the entries exempted from that are really wordless, and really do differ', () => {
     for (const [k, why] of Object.entries(NO_PROSE)) {
       if (!(k in TABLE)) continue;              // the exemption lists both tables' names

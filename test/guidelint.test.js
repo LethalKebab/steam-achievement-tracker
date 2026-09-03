@@ -446,3 +446,79 @@ describe('duplicate names: either language\'s description distinguishes them', (
     assert.equal(r.findings.filter((f) => f.code === 'ambiguous-empty-description').length, 2);
   });
 });
+
+describe('the spoiler notation — form only, and never completeness', () => {
+  /** A guide whose one achievement carries `body` immediately under it, at a deeper indent */
+  const guide = (body) => `# 游戏\n\nappid: 123\n\n- [ ] **X**<br>d<br>不剧透的那半\n${body}`;
+  const lint = (text) => lintGuide({ defs: [def('A', 'X', 'd')], todos: [todo(1, '**X**<br>d')], text, kind: 'local' });
+
+  const FOLD = '  <details>\n  <summary>剧透</summary>\n  真凶是医生\n  </details>\n';
+
+  test('a well-formed fold reports nothing and is counted', () => {
+    const r = lint(guide(FOLD));
+    assert.deepEqual(r.findings.filter((f) => f.code.startsWith('spoiler-')), []);
+    assert.equal(r.stats.spoilerFolds, 1);
+  });
+
+  test('the English label is accepted on a Chinese guide, and the other way round', () => {
+    // Rejecting the other language would need `lang` threaded in to buy nothing — a label in the
+    // wrong language is a content fault, and content is what this file does not check
+    const r = lint(guide('  <details>\n  <summary>Spoiler</summary>\n  真凶是医生\n  </details>\n'));
+    assert.deepEqual(r.findings.filter((f) => f.code.startsWith('spoiler-')), []);
+    assert.equal(r.stats.spoilerFolds, 1);
+  });
+
+  test('a label carrying anything beyond the fixed word → warn, and only warn', () => {
+    const r = lint(guide('  <details>\n  <summary>剧透:凶手是医生</summary>\n  细节\n  </details>\n'));
+    assert.deepEqual(codesOf(r).filter((c) => c.startsWith('spoiler-')), ['spoiler-summary-form']);
+    assert.equal(r.ok, true, 'it defeats the notation but breaks neither the sync nor a rewrite, so it must not cost a paid round');
+  });
+
+  test('a checkbox inside the fold → error (it becomes a cascade-ticked sub-step)', () => {
+    const r = lint(guide('  <details>\n  <summary>剧透</summary>\n  - [ ] 选医生结局\n  </details>\n'));
+    assert.ok(codesOf(r).includes('spoiler-fold-checkbox'));
+    assert.equal(r.ok, false);
+  });
+
+  test('a blank line before the fold detaches it → error', () => {
+    // Measured against todoSpansWithToggles rather than assumed: with the blank line the
+    // achievement's span stops at its own line, so a partial rewrite leaves the fold behind
+    const r = lint(guide(`\n${FOLD}`));
+    assert.ok(codesOf(r).includes('spoiler-fold-detached'));
+  });
+
+  test('a fold at the same indent as the achievement is detached too', () => {
+    const r = lint(guide('<details>\n<summary>剧透</summary>\n真凶是医生\n</details>\n'));
+    assert.ok(codesOf(r).includes('spoiler-fold-detached'));
+  });
+
+  // ---- The false positives that would make this rule not worth having ----
+
+  test('an ordinary long-list fold is not a spoiler fold', () => {
+    const r = lint(guide('  <details>\n  <summary>全结局对照</summary>\n  A / B / C\n  </details>\n'));
+    assert.deepEqual(r.findings.filter((f) => f.code.startsWith('spoiler-')), []);
+    assert.equal(r.stats.spoilerFolds, 0, 'rule five folds are not this notation and must not be counted as it');
+  });
+
+  test('the word in ordinary prose is not a fold', () => {
+    // A real hand-written guide says 「这段包含对本篇内容的直接剧透式吐槽」 in an achievement's
+    // notes. Reading that as the notation would report on guides that never opted into it
+    const r = lint('# 游戏\n\nappid: 123\n\n- [ ] **X**<br>d<br>注意这段包含直接剧透式吐槽\n');
+    assert.deepEqual(r.findings.filter((f) => f.code.startsWith('spoiler-')), []);
+    assert.equal(r.stats.spoilerFolds, 0);
+  });
+
+  test('an unclosed `<details>` is not guessed at', () => {
+    // markdown.js deliberately refuses to guess where an unclosed block ends; guessing it a
+    // second time here would be a second answer to the same question
+    const r = lint(guide('  <details>\n  <summary>剧透</summary>\n  真凶是医生\n'));
+    assert.deepEqual(r.findings.filter((f) => f.code.startsWith('spoiler-')), []);
+  });
+
+  test('on the Notion side the count is null, not 0', () => {
+    // Folds are toggles there, and toggles are not to_do blocks, so nothing this function is
+    // given can see them. A 0 would report "folds nothing" on the strength of not having looked
+    const r = lintGuide({ defs: [def('A', 'X', 'd')], todos: [todo(1, '**X**<br>d')], kind: 'notion' });
+    assert.equal(r.stats.spoilerFolds, null);
+  });
+});

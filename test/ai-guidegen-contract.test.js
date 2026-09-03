@@ -172,6 +172,9 @@ describe('a real provider driving the whole pipeline', () => {
 
       assert.equal(r.ok, true, r.reason ?? '');
       assert.equal(r.rounds, 1);
+      // **One, because nothing here asked for an aside.** The spoiler pass costs a second request
+      // and is opt-in for exactly that reason (`spoilerFold`), so an ordinary generation is still
+      // one request. If this number moves, something started spending without being asked.
       assert.equal(fetchImpl.calls.length, 1, 'two achievements should take exactly one request');
       assert.ok(existsSync(r.path));
 

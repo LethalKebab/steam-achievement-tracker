@@ -252,6 +252,32 @@ Group labels (rule 1) do not go by line count: the fold there is **the carrier f
 
 **Only a Notion page can put a fold between an achievement and its sub-steps.** In a local `*_achievements.md` that truncates `todoSpans`' range — see rule 1, "group labels on sub-checkboxes". A fold in a local md is only for long content that contains no achievement sub-steps (ending tables, bestiary lists).
 
+### [rule-5/spoiler] The spoiler fold
+
+When a sentence **states a fact about the story itself** — how it ends, what the twist is, who someone turns out to be, what actually happened in some scene — fold that sentence away rather than writing it straight into the notes. Hang the fold under that achievement:
+
+```
+- [ ] **成就名**<br>官方描述<br>不剧透的那半做法
+  <details>
+  <summary>剧透</summary>
+  具体内容写在这里,写成段落
+  </details>
+```
+
+- **The `<summary>` reads `剧透` (or `Spoiler` in an English guide) and nothing else.** That label is what a reader sees without opening the fold, so 「剧透:凶手是医生」 has folded nothing away. The label is a closed vocabulary of one word precisely so that it cannot leak.
+- **The achievement's own line carries the context**, so a reader can tell what kind of thing is inside and whether it is worth opening, without opening it.
+- **The fold comes immediately after the achievement's line, indented more deeply, with no blank line between them.**
+- **Prose inside, not checkboxes.** A checkbox in there is read as a sub-step and cascade-ticked with the parent achievement (rule 1's nesting rules), which files a record of something never done.
+- **The 10-line floor above does not apply**: this one is folded because it spoils, not because it is long.
+- **That is the only thing folded.** How to do it, where it is, how many runs it takes, how hard it is, whether it can be missed — none of that spoils anything, and all of it stays in the notes. Fold too much and the reader opens everything by reflex, which retires the marker; on real guide sites a narrative game's whole trophy guide carries 0 to 2 of these.
+- **Hidden achievements are where such a sentence turns up most often** — Steam gives no description, so the line you write is the only place that condition appears anywhere. Not every hidden achievement needs a fold: only the ones whose line really does state a fact about the story.
+
+**Why a fold and not inline hiding:** Notion has none. Its rich text `annotations` are `{bold, italic, strikethrough, underline, code, color}`, and `color` is a single enum, so text and background cannot both be set. A toggle is the only hiding primitive there, which is also why the label exists at all — Steam's `[spoiler]`, wiki.gg's template and PSNProfiles' span are all inline and unlabelled, and rely on the surrounding sentence to say what is hidden.
+
+**Backends differ, and it is worth knowing which one you are in.** On Notion the fold becomes a child toggle of the achievement's block and a partial rewrite carries it along. In a local `*_achievements.md` it does not: `spliceIntoText` uses `todoSpans`, whose range stops at the first non-checkbox line, so `guide-gen --only` rewrites the entry and leaves the old fold sitting there — **stale rather than lost**. Re-read it after a partial rewrite.
+
+`lib/guidelint.js` checks the form of all this and nothing else. **Whether what you folded really spoils, and whether something you left unfolded should have been folded, is not checkable** — an absent fold and "nothing here spoils" are the same text, so there is no completeness check and never will be.
+
 ### [rule-5/tables] Using tables
 
 Where there are many columns and plain text will not align, an HTML `<table>` may be used inside a `<details>` or in the body. Prefer a checkbox list wherever one says it clearly.
