@@ -15,6 +15,8 @@ import { readFileSync, existsSync, mkdirSync, appendFileSync, rmSync } from 'nod
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { lt, launcherLanguage, setLanguageResolver } from './strings.js';
+
 import {
   ALIVE_MARKER_NAME,
   MANIFEST_NAME,
@@ -115,6 +117,25 @@ function loadDataDirOverride() {
   return null;
 }
 
+/**
+ * The interface language, read from the tracker's own `config.json`.
+ *
+ * **The same file the child writes**, because `saveUiLanguage` is handled in the child process and
+ * this one is never told about it. `DATA_ROOT` there is `TRACKER_DATA_DIR` or the tracker's root,
+ * which is exactly the pair resolved here — spelled differently, a packaged build would read a
+ * config file nobody writes and the launcher would stay Chinese for ever while the page was English.
+ *
+ * Anything unreadable answers `null` and `strings.js` falls back to the default: no config file yet
+ * is the ordinary state before first-run setup, not a fault.
+ */
+function readUiLanguage() {
+  const path = join(loadDataDirOverride() ?? TRACKER_ROOT, 'config.json');
+  if (!existsSync(path)) return null;
+  return JSON.parse(readFileSync(path, 'utf8')).uiLanguage ?? null;
+}
+
+setLanguageResolver(readUiLanguage);
+
 let serverProcess = null;
 let mainWindow = null;
 let setupPollTimer = null;
@@ -122,6 +143,8 @@ let tray = null;
 let hideHintShown = false;
 let updateTimer = null;
 let updateBusy = false;
+let trayLanguage = null;
+let trayLanguageTimer = null;
 
 const ICON_PATH = join(__dirname, 'icon.ico');
 
@@ -167,10 +190,8 @@ function startServer() {
     if (app.isQuitting) return;
     const reason = lastErrorLine(stderrTail);
     dialog.showErrorBox(
-      'Steam 成就追踪器',
-      reason
-        ? `后台服务意外退出(代码 ${code}):\n\n${reason}\n\n看不懂或者反复出现,请联系开发者。`
-        : `后台服务意外退出(代码 ${code})。请重新打开程序;如果反复出现,请联系开发者。`
+      lt('app.name'),
+      reason ? lt('serve.crashedWhy', { code, reason }) : lt('serve.crashed', { code })
     );
     app.quit();
   });
@@ -244,7 +265,7 @@ function pollSetupStatus() {
 async function createWindow() {
   const up = await waitForServer();
   if (!up) {
-    dialog.showErrorBox('Steam 成就追踪器', '后台服务启动超时,请重新打开程序。');
+    dialog.showErrorBox(lt('app.name'), lt('serve.startTimeout'));
     app.quit();
     return;
   }
@@ -252,7 +273,7 @@ async function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 800,
-    title: 'Steam 成就追踪器',
+    title: lt('app.name'),
     autoHideMenuBar: true,
     icon: ICON_PATH,
   });
@@ -301,8 +322,8 @@ async function createWindow() {
       hideHintShown = true;
       tray?.displayBalloon({
         icon: ICON_PATH,
-        title: 'Steam 成就追踪器还在后台运行',
-        content: '同步和攻略生成会继续。要完全退出,右键任务栏托盘图标选「退出」。',
+        title: lt('tray.hintTitle'),
+        content: lt('tray.hintBody'),
       });
     }
   });
@@ -408,7 +429,7 @@ function askUpdate({ version, sizeMb }) {
       minimizable: false,
       maximizable: false,
       autoHideMenuBar: true,
-      title: 'Steam 成就追踪器',
+      title: lt('app.name'),
       webPreferences: { nodeIntegration: false, contextIsolation: true },
     });
 
@@ -543,8 +564,8 @@ async function checkForUpdate() {
   updateBusy = true;
   tray?.displayBalloon({
     icon: ICON_PATH,
-    title: `正在下载 ${remoteVersion}`,
-    content: '下载完会自动重启,期间可以继续用。',
+    title: lt('update.downloading', { version: remoteVersion }),
+    content: lt('update.downloadingBody'),
   });
 
   const stageDir = join(app.getPath('temp'), 'steam-tracker-update');
@@ -570,8 +591,8 @@ async function checkForUpdate() {
     // is normal; here the user clicked update themselves and is waiting for a result, and no answer
     // is the worst outcome
     dialog.showErrorBox(
-      'Steam 成就追踪器',
-      `更新失败:${err.message}\n\n数据没有受到影响。可以稍后再试,或到 ${RELEASES_PAGE} 手动下载。`
+      lt('app.name'),
+      lt('update.failed', { reason: err.message, url: RELEASES_PAGE })
     );
     return true;
   }
@@ -609,8 +630,8 @@ async function checkForUpdate() {
   if (!launched) {
     updateBusy = false;
     dialog.showErrorBox(
-      'Steam 成就追踪器',
-      `更新没能开始:更新程序起不来。\n\n数据和程序都没有被改动。可以到 ${RELEASES_PAGE} 手动下载。\n\n诊断信息:${join(stageDir, 'updater.log')}`
+      lt('app.name'),
+      lt('update.helperFailed', { url: RELEASES_PAGE, log: join(stageDir, 'updater.log') })
     );
     return true;
   }
@@ -676,27 +697,44 @@ function scheduleUpdateCheck(delayMs) {
   }, delayMs);
 }
 
+/** How often the tray checks whether the interface language moved under it */
+const TRAY_LANGUAGE_POLL_MS = 5000;
+
+/** The tray's tooltip and menu in the current language. Only ever called when that changed */
+function paintTray() {
+  if (!tray) return;
+  trayLanguage = launcherLanguage();
+  tray.setToolTip(lt('app.name'));
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: lt('tray.open'), click: showWindow },
+      { type: 'separator' },
+      { label: lt('tray.quit'), click: () => app.quit() },
+    ])
+  );
+}
+
 function createTray() {
   // createFromPath rather than handing the path straight to Tray: given a wrong path it returns an
   // empty image, and an empty image in the tray is an **invisible icon** — combined with closing the
   // window not exiting, the user is left with nothing but Task Manager. So this checks explicitly.
   const icon = nativeImage.createFromPath(ICON_PATH);
   if (icon.isEmpty()) {
-    dialog.showErrorBox(
-      'Steam 成就追踪器',
-      `托盘图标加载失败(${ICON_PATH})。程序会继续运行,但关闭窗口后需要在任务管理器里结束进程。`
-    );
+    dialog.showErrorBox(lt('app.name'), lt('tray.iconFailed', { path: ICON_PATH }));
   }
 
   tray = new Tray(icon);
-  tray.setToolTip('Steam 成就追踪器');
-  tray.setContextMenu(
-    Menu.buildFromTemplate([
-      { label: '打开面板', click: showWindow },
-      { type: 'separator' },
-      { label: '退出', click: () => app.quit() },
-    ])
-  );
+  paintTray();
+  /**
+   * **Every other string in this process is composed when it is shown; the tray's cannot be.** A
+   * context menu is handed to Windows once and drawn by Windows from then on, so a menu built at
+   * startup keeps its labels through a language switch made afterwards on /setup. It is the one
+   * surface here that cannot resolve its own language at the moment it is read, so it is repainted
+   * when the language actually moves and left alone the rest of the time.
+   */
+  trayLanguageTimer = setInterval(() => {
+    if (launcherLanguage() !== trayLanguage) paintTray();
+  }, TRAY_LANGUAGE_POLL_MS);
   tray.on('click', showWindow);
   tray.on('double-click', showWindow);
 }
@@ -754,6 +792,7 @@ app.on('window-all-closed', () => {});
 app.on('before-quit', () => {
   app.isQuitting = true;
   if (setupPollTimer) clearInterval(setupPollTimer);
+  if (trayLanguageTimer) clearInterval(trayLanguageTimer);
   if (updateTimer) clearTimeout(updateTimer);
   serverProcess?.kill();
   tray?.destroy();
