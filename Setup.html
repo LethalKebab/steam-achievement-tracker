@@ -798,7 +798,6 @@
         <option value="" data-t="step2.off">不启用</option>
         <option value="deepseek">DeepSeek</option>
         <option value="anthropic">Anthropic (Claude)</option>
-        <option value="gemini">Google Gemini</option>
       </select>
       <label for="ai-key">API Key<span class="configured" id="ai-key-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
       <!-- The placeholder is filled in per provider by paintAiProvider (they all
@@ -1514,10 +1513,9 @@
     // depends on how each platform renders a dropdown. A suffix aligns without
     // trouble.
     // **Each vendor's key looks different, so the placeholder has to follow.** A
-    // hardcoded `sk-...` is wrong for both Anthropic and Gemini, and once the
-    // three share one input, "paste the Anthropic key into the Gemini field" is a
-    // mistake this redesign newly created — a matching prefix stops it on the
-    // spot.
+    // hardcoded `sk-...` is wrong for Anthropic, and once every vendor shares one
+    // input, "paste one vendor's key into another vendor's field" is a mistake
+    // this redesign newly created — a matching prefix stops it on the spot.
     //
     // **This is a shape hint and is never used to validate.** The same rule as the
     // Notion field (see the comment above): recognising prefixes means that the
@@ -1526,7 +1524,6 @@
     // a vendor changes format, one line here changes.
     const AI_KEY_HINT = {
       anthropic: 'sk-ant-...',
-      gemini: 'AIza...',
       deepseek: 'sk-...',
     };
 
@@ -1548,7 +1545,7 @@
       $('ai-model').value = cur?.model ?? '';
       // The 「已配置」 on the step title answers "is this step done", not "is the
       // current vendor configured" — with Anthropic configured but the selection
-      // sitting on Gemini, this step has plainly been done
+      // sitting on another vendor, this step has plainly been done
       $('ai-set').hidden = !Object.values(aiProviders).some((p) => p?.hasKey);
     }
 

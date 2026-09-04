@@ -585,7 +585,7 @@ Three details are load-bearing and none of them errors when wrong:
 
 - **The option labels are rebuilt from `opt.dataset.label`, never appended to** — `textContent += ' · 已配置'` is right the first time and produces 「DeepSeek · 已配置 · 已配置」 on the second repaint, which happens on every switch.
 - **Changing vendor clears whatever is typed in the key box**, because that string was meant for the vendor you just left and submitting it would store a guaranteed-wrong key under the new one, surfacing as a validation failure that says nothing about the switch.
-- **The step header's 已配置 asks whether the step is done, not whether the current vendor has a key** (`Object.values(aiProviders).some(...)`): configured Anthropic while parked on Gemini is still a finished step, and `!cur?.hasKey` there reads as "the config was lost".
+- **The step header's 已配置 asks whether the step is done, not whether the current vendor has a key** (`Object.values(aiProviders).some(...)`): configured Anthropic while parked on DeepSeek is still a finished step, and `!cur?.hasKey` there reads as "the config was lost".
 
 A native `<option>` cannot hold an SVG and leading-space alignment is renderer-dependent, so the marker is a suffix here rather than the leading mark the filter chips use. Pinned as source assertions in `html-smoke.test.js` (no DOM in the runner), the first two mutation-tested.
 

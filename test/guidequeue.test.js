@@ -256,7 +256,7 @@ describe('end to end: two simultaneous clicks on the same game', () => {
         // api.anthropic.com, and that request would land after the test has torn down the db —
         // an unhandled rejection.
         // This test looks at exactly one thing: **how many times the gate let something through**
-        ai: { provider: 'anthropic', apiKey: 'NOT_A_REAL_KEY_LOCAL_TEST', model: 'gemini-2.5-pro' },
+        ai: { provider: 'anthropic', apiKey: 'NOT_A_REAL_KEY_LOCAL_TEST', model: 'deepseek-chat' },
       },
       log: () => {},
     });

@@ -1327,15 +1327,15 @@ describe('switching AI vendor', () => {
   test('each vendor own model is painted back into the input', () => {
     // Like the key, model is one value per vendor (see ai.providers in lib/config.js). Without
     // painting it, switching back leaves the previous vendor's model name in the box, and
-    // submitting writes it into this vendor's slot — where a claude-* sent to Gemini is stopped by
-    // assertModelMatchesProvider, reporting "the model and the vendor do not match", which points
+    // submitting writes it into this vendor's slot — where a claude-* sent to DeepSeek is stopped
+    // by assertModelMatchesProvider, reporting "the model and the vendor do not match", which points
     // nowhere near "this value was left behind by the switch"
     assert.match(paintBlock(), /\$\('ai-model'\)\.value = cur\?\.model/);
   });
 
   test('switching vendor first clears the key already typed in', () => {
-    // **This is the only one here that writes bad data.** Type half a Gemini key and switch back to
-    // Anthropic, and without clearing, that string is stored as the Anthropic key. It is certain to
+    // **This is the only one here that writes bad data.** Type half a DeepSeek key and switch back
+    // to Anthropic, and without clearing, that string is stored as the Anthropic key. It is certain to
     // be wrong, and what is reported is a failed validation, pointing nowhere near the real cause
     // of "you just switched vendor"
     const js = setupJs();
@@ -1347,7 +1347,7 @@ describe('switching AI vendor', () => {
   });
 
   test('the 「已配置」 on the step heading asks whether this step is done, not whether the current vendor is configured', () => {
-    // Anthropic configured while sitting on Gemini plainly means the step was done. Written as
+    // Anthropic configured while sitting on DeepSeek plainly means the step was done. Written as
     // `!cur?.hasKey`, switching to an unconfigured vendor marks the whole step unconfigured — which
     // looks like the configuration was lost
     assert.match(paintBlock(), /\$\('ai-set'\)\.hidden = !Object\.values\(aiProviders\)/);
@@ -1357,23 +1357,23 @@ describe('switching AI vendor', () => {
 /**
  * The API key placeholder changes with the vendor.
  *
- * Once the three vendors share one input, "pasting the Anthropic key into the Gemini field" is a
- * mistake this revision **newly created**, and a hardcoded `sk-...` is wrong for two of the three —
- * far from stopping it, it endorses the mistake. Reported by a user.
+ * Once every vendor shares one input, "pasting one vendor's key into another vendor's field" is a
+ * mistake this revision **newly created**, and a hardcoded `sk-...` is wrong for Anthropic — far
+ * from stopping it, it endorses the mistake. Reported by a user.
  */
 describe('the AI key placeholder', () => {
   const html = read('Setup.html');
 
   test('the static markup hardcodes no vendor shape', () => {
-    // For the instant before the JS starts, empty is better than wrong. Hardcoding one means two
-    // vendors are being lied to
+    // For the instant before the JS starts, empty is better than wrong. Hardcoding one vendor's
+    // shape means every other vendor is being lied to
     const step = stepBlock(html, 2);
     const m = step.match(/<input[^>]*id="ai-key"[^>]*>/);
     assert.ok(m, 'cannot find the ai-key input');
     assert.doesNotMatch(m[0], /placeholder=/, 'the ai-key placeholder is filled in per vendor by paintAiProvider');
   });
 
-  test('all three have their own shape, and they differ from one another', () => {
+  test('every vendor has its own shape, and they differ from one another', () => {
     const js = inlineScripts(html)
       .join('\n')
       .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -1383,7 +1383,7 @@ describe('the AI key placeholder', () => {
     const block = js.slice(i, js.indexOf('}', i));
 
     const hints = [...block.matchAll(/(\w+):\s*'([^']+)'/g)].map((m) => [m[1], m[2]]);
-    assert.deepEqual(hints.map((h) => h[0]).sort(), ['anthropic', 'deepseek', 'gemini']);
+    assert.deepEqual(hints.map((h) => h[0]).sort(), ['anthropic', 'deepseek']);
     assert.equal(
       new Set(hints.map((h) => h[1])).size, hints.length,
       'two vendors share one shape — exactly what this test exists to prevent'
@@ -1391,7 +1391,7 @@ describe('the AI key placeholder', () => {
     // An Anthropic key starts with sk-ant- and a DeepSeek one only with sk-. One is a prefix of the
     // other, so "both start with sk-" is not a distinction; the whole strings have to differ
     assert.equal(Object.fromEntries(hints).anthropic, 'sk-ant-...');
-    assert.equal(Object.fromEntries(hints).gemini, 'AIza...');
+    assert.equal(Object.fromEntries(hints).deepseek, 'sk-...');
   });
 
   test('the shape is only a hint and is never used to validate anywhere', () => {

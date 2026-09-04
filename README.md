@@ -33,7 +33,7 @@ If you keep achievement guides as checklists — a Notion page or a local Markdo
 
 Optional. The AI searches the web and drafts an achievement guide, and what it writes is checked against your real achievement data before it lands.
 
-* Works with **DeepSeek**, **Anthropic** and **Gemini**. You hold your own API key.
+* Works with **DeepSeek** and **Anthropic**. You hold your own API key.
 * Every run tells you how many tokens it spent.
 * **What the program guarantees**: the shape and the data — one checkbox per achievement, names matching Steam exactly, descriptions quoted as they are, unlock states true to your account.
 * **What it cannot**: whether the advice is any good. It checks format and data, never content. Read the guide through yourself.

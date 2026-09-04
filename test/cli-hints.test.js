@@ -106,8 +106,6 @@ describe('CLI_HINTS covers every error code in lib/ that carries a detail', () =
     'provider-model-mismatch', 'too-many-achievements',
     'chunk-too-small', 'guide-exists', 'file-exists',
     'bad-api-key', 'deepseek-length',
-    'gemini-model-retired', 'gemini-model-unknown', 'gemini-no-allowance',
-    'gemini-429-no-detail', 'gemini-tool-rejected',
     // Thrown as `timeoutErr.code = 'ai-timeout'` in all three providers — the capital E in
     // `timeoutErr` means the literal substring `err.code = '` never occurs, so the
     // /err\.code = '.../ scan just below silently never sees it. Hardcoded here for the same
@@ -146,15 +144,6 @@ describe('CLI_HINTS covers every error code in lib/ that carries a detail', () =
     // Still unwritable at the floor: **it advises against**, and this one is far easier to get backwards than the two above
     assert.match(advice, /别急着调大 ai\.maxTokens/);
     assert.match(advice, /Do not reach for a larger ai\.maxTokens/);
-    // Gemini: all three model-name codes point at one entry rather than three copies of it
-    assert.equal((tracker.match(/'hint\.geminiModel'/g) ?? []).length, 3,
-      'the three Gemini model-name codes have to share one entry');
-    assert.match(advice, /ai-check --models/, '"how to find out which models are available" must not be lost');
-    assert.match(advice, /列出来 ≠ 能用/, 'a retired model still appears in the list, which was learned the hard way');
-    assert.match(advice, /listed does not mean/, 'and the English half has to carry the same warning');
-    assert.match(advice, /AI_MODEL=gemini-2\.5-flash/, 'it has to name a concrete model that can be tried');
-    assert.match(advice, /别名/, 'an alias may resolve to a new model outside the free tier');
-    assert.match(advice, /geminiTools/);
     // DeepSeek's 401: an env var overrides the config file, and clearing it can only be done in a terminal
     assert.match(advice, /Remove-Item Env:\{envVar\}/);
   });
@@ -165,7 +154,7 @@ describe('CLI_HINTS covers every error code in lib/ that carries a detail', () =
     // advice that cannot be followed
     const src = readFileSync(join(ROOT, 'lib', 'tracker-messages.js'), 'utf8');
     for (const literal of ['--provider', '--model', '--overwrite', '--only', 'ai.maxTokens',
-      'ai.maxAchievements', 'ai.geminiTools', 'Remove-Item Env:', 'node tracker.js ai-check --models']) {
+      'ai.maxAchievements', 'Remove-Item Env:']) {
       const n = (src.split(literal).length - 1);
       assert.ok(n >= 2, `${literal} appears ${n} time(s) — one of the two languages dropped it`);
     }
