@@ -921,3 +921,33 @@ describe('createGuideGenState keeps a history', () => {
     assert.deepEqual(st.snapshot().log, []);
   });
 });
+
+/**
+ * **A degradation that does not say which gate rejected it is one nobody can diagnose.**
+ *
+ * The classification pass has five ways to fail and they all reached the finished card as one
+ * sentence. 月圆之夜 landed with its four shards' own headings — 「购买内容」 three times over — and
+ * by the time anyone looked, the run's state was gone and nothing anywhere recorded the reason.
+ * Source assertions because reaching that handler needs a provider and a network.
+ */
+describe('a degraded pass carries its reason', () => {
+  const src = readFileSync(new URL('../lib/server.js', import.meta.url), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('the classification failure hands the reason to the warning', () => {
+    assert.match(src, /warn\(\{ key: 'gp\.regroupFailed', values: \{ reason: shortReason\(ev\.reason\) \} \}\)/,
+      'without the reason the card says a pass failed and nothing says which one');
+  });
+
+  test('so does the section merge', () => {
+    assert.match(src, /warn\(\{ key: 'gp\.mergeFailed', values: \{ reason: shortReason\(ev\.reason\) \} \}\)/);
+  });
+
+  test('and the reason is cut to a length rather than dropped when it is long', () => {
+    const fn = src.slice(src.indexOf('const shortReason ='), src.indexOf('createGuideGenState'));
+    assert.ok(fn.length > 0 && fn.length < 600, 'what was sliced should be that helper');
+    assert.match(fn, /REASON_MAX/, 'the cut is a named length, not a number written in place');
+    assert.match(fn, /slice\(0, REASON_MAX - 1\)/, 'and it cuts rather than returning nothing');
+  });
+});

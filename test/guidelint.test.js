@@ -446,3 +446,44 @@ describe('duplicate names: either language\'s description distinguishes them', (
     assert.equal(r.findings.filter((f) => f.code === 'ambiguous-empty-description').length, 2);
   });
 });
+
+describe('a section title used twice', () => {
+  const withText = (text) => lintGuide({
+    defs: [def('A', 'X')],
+    todos: [todo(1, '**X**')],
+    text,
+    kind: 'local',
+  });
+
+  test('→ warn, never blocking', () => {
+    // The mechanical merge fixes this at generation time, so one reaching here is a hand-written
+    // guide or that pass rolled back. Refusing a finished guide over its headings would be worse
+    const r = withText('# 游戏\n\n## 购买内容\n\n- [ ] **X**\n\n## 战斗\n\n## 购买内容\n');
+    const hit = r.findings.filter((f) => f.code === 'duplicate-heading');
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].level, 'warn');
+    assert.ok(r.ok, 'a repeated heading does not make a guide unusable');
+  });
+
+  test('is reported once, however many times it repeats', () => {
+    const r = withText('# 游戏\n\n## 购买内容\n\n- [ ] **X**\n\n## 战斗\n\n## 购买内容\n\n## 别的\n\n## 购买内容\n');
+    assert.equal(r.findings.filter((f) => f.code === 'duplicate-heading').length, 1,
+      'one line per title; one per repeat is how a rule stops being read');
+  });
+
+  test('a title at two different levels is two different sections', () => {
+    const r = withText('# 游戏\n\n## 收集\n\n- [ ] **X**\n\n### 收集\n');
+    assert.equal(r.findings.some((f) => f.code === 'duplicate-heading'), false);
+  });
+
+  test('and two wordings of one topic are not the same title', () => {
+    // The same line mergeDuplicateSections draws: reconciling these is a judgement, not a match
+    const r = withText('# 游戏\n\n## 经典模式:通用挑战成就\n\n- [ ] **X**\n\n## 经典模式·通用挑战\n');
+    assert.equal(r.findings.some((f) => f.code === 'duplicate-heading'), false);
+  });
+
+  test('a guide with one heading per section says nothing', () => {
+    const r = withText('# 游戏\n\n## 主线\n\n- [ ] **X**\n\n## 支线\n');
+    assert.equal(r.findings.some((f) => f.code === 'duplicate-heading'), false);
+  });
+});

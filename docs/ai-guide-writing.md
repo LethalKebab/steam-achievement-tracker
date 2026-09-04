@@ -263,6 +263,29 @@ Asking a shard what to write has **exactly one exit** (`chunkMessage`). With the
 
 **Why not classify before writing.** That pass only has the achievement *names*, and names are often jokes: in 《马特的寻猫游戏》 「海拉鲁老流氓」 is actually smashing 100 pots, and 「半条命4」 is prying a crate with a crowbar. A names-only pass returns themed labels like 「自然与美食」 or 「囤积狂的自我修养」; adding the descriptions and running it again still lost genuinely important structure like 「难度模式」. **The information was missing, not the prompt** — classification needs "having researched this, what does the player actually do", and that does not exist until the prose does.
 
+### One title, one section — the half that needs no judgement
+
+`mergeDuplicateSections` runs before the classification pass and folds sections carrying **the same title** into the one that used it first. It is mechanical and it runs whether or not the pass after it will, which is the point: **the classification pass is the half that can fail.**
+
+Measured on 月圆之夜 (162 achievements, four shards, generated 2026-09-03): the landed page held 47 heading blocks under 37 distinct titles, with 「购买内容」 three times over holding one, two and one entries, 「镜中的记忆」 four times — three of those carrying no entry at all — and two separate 「职业通关 · 普通难度」 **inside a single shard's own output**. Section boundaries fell exactly on shard boundaries (41 / 82 / 123), so what landed was the four shards concatenated with nothing reconciled. The pass that would have reconciled them ran — the guide landed, and landing takes the same condition the pass is gated on — so it failed and rolled back, and nothing recorded why.
+
+Two rules, each refusing a specific wrong merge:
+
+- **Identical titles only**, once whitespace and case are set aside. 「经典模式:通用挑战成就」 and 「经典模式·通用挑战」 are one topic to a reader and stay two sections here; reconciling differently-worded ones is the classification pass's judgement to make, and a program guessing at it would eventually merge two that differ for a reason.
+- **Same parent, same level.** `### 角色通关` under 「镜中的记忆」 and `### 角色通关` under 「愿望之夜」 are two game modes that happen to share a subtitle, and merging them moves entries into the wrong one. A section owns its subsections, so folding one into an earlier twin carries its children along.
+
+It carries the same losslessness assertions as the rearrangement and rolls back the same way. With no duplicates the output is the input, byte for byte.
+
+`joinBodies` still merges duplicates **at a seam** during assembly; that is all a pass running mid-document can decide, since a heading repeated with others in between may simply be the next shard's first section. Titles repeated further apart are this pass's job, once at the end.
+
+`guidelint` reports what is left as `duplicate-heading`, **a warn**: the merge fixes it at generation time, so one reaching the linter is a hand-written guide or a rolled-back pass, and refusing a finished guide over its headings would be the wrong trade. It uses the same predicate the merge does, so what one reports is exactly what the other folds. Note that it needs the guide's full text, which only the local markdown backend supplies — a Notion guide is read back as `to_do` blocks with no headings among them.
+
+### A degradation says which gate rejected it
+
+The classification pass is **asked twice before it degrades** (`REGROUP_ATTEMPTS`). Every way it fails except a cancellation depends on what came back — a reply judged unusable, a grouping nothing could be read out of, an assignment that loses a line when the prose is rearranged by it — so a second ask is a real second chance rather than the same sentence thrown at the wall again. Each attempt gets its own session; a rejected reply left in the context is the model being shown its own bad answer. A cancellation is the one failure the retry must not swallow.
+
+When it does degrade, `ev.reason` travels with the warning onto the finished card. It used to be dropped: five different failures produced the one sentence 「分区统一失败」, so a guide landing with its shards' own headings left nothing to diagnose from once the run's in-memory state was gone. The reason is quoted verbatim rather than mapped to something friendlier, cut to `REASON_MAX` — the kind is at the front of these messages.
+
 ### Losslessness is a hard requirement, not best-effort
 
 `regroupByAssignment` has three exit assertions; failing any of them throws and rolls the whole pass back:
