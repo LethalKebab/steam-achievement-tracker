@@ -525,6 +525,44 @@ describe('the finished screen has to be able to get the backup id', () => {
 });
 
 /**
+ * **Two pipelines, one set of words for how far along a run is.**
+ *
+ * `runGuideGen` hands `onProgress` to whichever of `patchGuide` / `generateGuide` it is running,
+ * and those two handlers began as separate copies. The steps, the step number and the entry count
+ * were then added to one of them, and the partial rewrite shipped a release reporting none of the
+ * three — no error, nothing missing on screen to point at, just a progress bar that says less on
+ * one path than the other.
+ *
+ * So the shared half is one function and this asserts that **both** handlers go through it. A
+ * source assertion because reaching either handler needs a provider and a network.
+ */
+describe('both pipelines report the same progress', () => {
+  const src = readFileSync(new URL('../lib/server.js', import.meta.url), 'utf8')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('the shared half exists and is where the three live', () => {
+    const fn = src.slice(src.indexOf('const reportProgress = (ev)'), src.indexOf('const job = scope'));
+    assert.ok(fn.length > 0 && fn.length < 1200, 'what was sliced should be that function');
+    assert.match(fn, /ev\.phase === 'plan' && ev\.steps/, 'the step list is announced before anything runs');
+    assert.match(fn, /ev\.phase === 'step'/);
+    assert.match(fn, /ev\.phase === 'written'/);
+  });
+
+  test('**both** handlers route through it', () => {
+    const calls = src.match(/if \(reportProgress\(ev\)\) return;/g) ?? [];
+    assert.equal(calls.length, 2, 'one per pipeline — a handler that skips it is one that stops reporting');
+  });
+
+  test('and neither keeps its own copy of the three', () => {
+    const handlers = src.slice(src.indexOf('const job = scope'), src.indexOf('.then('));
+    assert.ok(handlers.length > 0, 'the two onProgress handlers should be in there');
+    assert.doesNotMatch(handlers, /guideGenState\.onProgress\(\{ step:/, 'that belongs to reportProgress now');
+    assert.doesNotMatch(handlers, /guideGenState\.onProgress\(\{ written:/, 'and so does that');
+  });
+});
+
+/**
  * Cancelling — issue #79. Two shapes, and `cancelGuideGen` in server.js picks between them by
  * asking `snapshot()`, not by trying one then the other: **the running job and a queued one are
  * different objects with different recovery paths** (an AbortController to fire vs. an array

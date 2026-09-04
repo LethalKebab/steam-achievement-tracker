@@ -41,7 +41,7 @@ import {
   RARE_PCT, resolveScope, scopeEntries, classifyFindings,
 } from '../lib/guidescope.js';
 import {
-  parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback, landPatchNotion,
+  parsePatchReply, applyPatchToTodos, spliceIntoText, buildPatchFeedback, landPatchNotion, patchSteps,
 } from '../lib/guidepatch.js';
 import { patchPreflight, formatPatchPreflight } from '../lib/guidebackup.js';
 import { NotionClient } from '../lib/notion.js';
@@ -899,6 +899,20 @@ describe('the checked state of a partial rewrite', () => {
   });
 });
 
+describe('how far along a partial rewrite says it is', () => {
+  test('three steps, and all three always run', () => {
+    // A patch has an existing guide by definition, so unlike generationSteps' the backup is not
+    // conditional — nothing here is decided by what the run turns out to need
+    assert.deepEqual(patchSteps(), ['write', 'backup', 'land']);
+  });
+
+  test('rewrite rounds are not steps', () => {
+    // The one thing about a run nobody can know in advance. Counted, the total would grow while
+    // somebody watched it, which is worse than having no total at all
+    assert.equal(patchSteps({ rounds: 3 }).length, patchSteps().length);
+  });
+});
+
 describe('the wiring of patchGuide (source assertions — this part cannot be reached without a network)', () => {
   const src = readFileSync(new URL('../lib/guidepatch.js', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '')
@@ -923,6 +937,33 @@ describe('the wiring of patchGuide (source assertions — this part cannot be re
     assert.match(between, /patched\s*=\s*patched\.map\(/,
       'the computed set has to be written back into patched, or validation still sees the unticked copy');
     assert.match(between, /checked:\s*true/);
+  });
+
+  /**
+   * What a person watching a twenty-minute rewrite is given. All three of these existed on the
+   * generation path for a release while this one reported none of them — the two `onProgress`
+   * handlers are separate copies, and the lines were added to the other one.
+   */
+  test('a tool event is turned into a sentence, not put on screen as its own word', () => {
+    assert.match(src, /phase: 'tool'[^}]*name: toolNote\(ev\.name\)/,
+      'handing ev.name straight through puts a bare English `search` under a Chinese interface');
+    assert.doesNotMatch(src, /phase: 'tool', round, name: ev\.name \}/, 'that is the shape of the defect');
+  });
+
+  test('the entry count is reported as the prose streams back', () => {
+    const fn = src.slice(src.indexOf('const ask = async (prompt, round)'), src.indexOf('const verdict = checkResult'));
+    assert.ok(fn.length > 0 && fn.length < 2000, 'what was sliced should be the ask');
+    assert.match(fn, /countStreamedEntries\(streamed\)/, 'the one figure this path can move per achievement');
+    assert.match(fn, /phase: 'written'[^}]*of: entries\.length/,
+      'counted against what was asked for, or the figure has no denominator');
+  });
+
+  test('the steps are announced up front and then marked off', () => {
+    assert.match(src, /const steps = patchSteps\(\)/);
+    assert.match(src, /stepReporter\(steps, onProgress\)/, 'the reporter is shared with the generation path, not copied');
+    for (const key of ['write', 'backup', 'land']) {
+      assert.match(src, new RegExp(`step\\('${key}'\\)`), `nothing marks the ${key} step as started`);
+    }
   });
 
   test('the Notion landing accepts the computed set rather than recomputing it', () => {

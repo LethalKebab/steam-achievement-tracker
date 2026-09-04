@@ -32,7 +32,7 @@ import {
   openDb, insertGame, replaceAchievements, upsertGuide, allGuides, setGuideLang,
 } from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
-import { countStreamedEntries, generationSteps } from '../lib/guidegen.js';
+import { countStreamedEntries, generationSteps, writeStepCount, stepReporter } from '../lib/guidegen.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
   generateGuide,
@@ -2337,6 +2337,42 @@ describe('sharded writing', () => {
     assert.equal((text.match(/^# /gm) || []).length, 1, 'there can be only one title, not one per shard');
   });
 
+  test('a sharded run reports one step per shard, and the total never moves', async () => {
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider: fakeProvider(chunks.map(seg)), steam: bigSteam(), appid: '1',
+      onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+
+    const steps = events.filter((e) => e.phase === 'step');
+    assert.deepEqual(steps.map((e) => e.key), ['write:1', 'write:2', 'write:3', 'regroup', 'land']);
+    assert.deepEqual([...new Set(steps.map((e) => e.of))], [5],
+      'the total is settled before the run and cannot move while somebody watches it');
+  });
+
+  test('a second round re-asking one shard does not walk the step backwards', async () => {
+    // The step is how many shards are finished, and in a later round only the failed ones are
+    // re-asked — so the figure it is derived from falls. A step number going down reads as the run
+    // having lost work rather than as it retrying something
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const bad = seg([chunks[1][0]]); // shard 2 comes back a checkbox short
+    const provider = fakeProvider([seg(chunks[0]), bad, seg(chunks[2]), seg(chunks[1])]);
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider, steam: bigSteam(), appid: '1', onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+    assert.equal(r.rounds, 2, 'this run has to reach a second round for the test to mean anything');
+
+    const ns = events.filter((e) => e.phase === 'step').map((e) => e.n);
+    assert.deepEqual(ns, [...ns].sort((a, b) => a - b), `the step went backwards: ${ns.join(' ')}`);
+    assert.equal(new Set(ns).size, ns.length, 'and no step is announced twice');
+  });
+
   test('when only one shard has a problem, round two re-asks only that shard', async () => {
     const { db, config } = envFor(2);
     const chunks = chunkDefs(BIG, 2);
@@ -3127,12 +3163,22 @@ describe('how far along a run says it is', () => {
     });
 
     test('each conditional stage is counted only when it will actually run', () => {
-      assert.deepEqual(generationSteps({ chunks: 4 }), ['write', 'regroup', 'land']);
       assert.deepEqual(generationSteps({ chunks: 1, existing: true }), ['write', 'backup', 'land']);
       assert.deepEqual(
-        generationSteps({ chunks: 4, existing: true }),
-        ['write', 'regroup', 'backup', 'land']
+        generationSteps({ chunks: 2, existing: true }),
+        ['write:1', 'write:2', 'regroup', 'backup', 'land']
       );
+    });
+
+    test('a shard is a step, because writing is nearly the whole run', () => {
+      // One step covering all the writing leaves the count reading 1/2 for twenty minutes, which
+      // answers nothing that "is it stuck" was asking
+      assert.deepEqual(
+        generationSteps({ chunks: 4 }),
+        ['write:1', 'write:2', 'write:3', 'write:4', 'regroup', 'land']
+      );
+      assert.equal(writeStepCount(generationSteps({ chunks: 4 })), 4);
+      assert.equal(writeStepCount(generationSteps({ chunks: 1 })), 1);
     });
 
     test('**rewrite rounds are never steps**', () => {
@@ -3142,6 +3188,38 @@ describe('how far along a run says it is', () => {
       for (const rounds of [1, 2, 3]) {
         assert.equal(generationSteps({ chunks: 2, existing: true, rounds }).length, before);
       }
+    });
+  });
+
+  describe('stepReporter', () => {
+    const collect = (steps, keys) => {
+      const seen = [];
+      const step = stepReporter(steps, (e) => seen.push(e));
+      for (const k of keys) step(k);
+      return seen;
+    };
+
+    test('each step is reported once, against a total that does not move', () => {
+      const seen = collect(['write', 'backup', 'land'], ['write', 'backup', 'land']);
+      assert.deepEqual(seen.map((e) => [e.key, e.n, e.of]), [
+        ['write', 1, 3], ['backup', 2, 3], ['land', 3, 3],
+      ]);
+      assert.deepEqual([...new Set(seen.map((e) => e.phase))], ['step']);
+    });
+
+    test('**it never walks backwards**', () => {
+      // A later round re-asks only the shards that failed, so the figure the writing step is
+      // derived from falls. A step number going down reads as the run having lost work
+      const seen = collect(['write:1', 'write:2', 'write:3', 'land'], ['write:3', 'write:1', 'write:2', 'land']);
+      assert.deepEqual(seen.map((e) => e.n), [3, 4]);
+    });
+
+    test('the same step announced twice is reported once', () => {
+      assert.equal(collect(['write', 'land'], ['write', 'write', 'write']).length, 1);
+    });
+
+    test('a key that is not in the list is dropped rather than reported as step 0', () => {
+      assert.deepEqual(collect(['write', 'land'], ['unwrap']), []);
     });
   });
 
