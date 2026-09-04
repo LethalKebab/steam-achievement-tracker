@@ -2541,6 +2541,31 @@ describe('regroupByAssignment (the rearrangement after classification moved to a
     assert.equal((out.match(/开盒/g) ?? []).length, 1, 'nor duplicated');
   });
 
+  /**
+   * **Two spellings of one section title must not emit that section twice.**
+   *
+   * `parseRegroupReply` drops a repeated `== 标题` only when the two are the same string to the
+   * character, so a trailing space, a full-width space or a difference in case gets through and
+   * both resolve to one bucket here. Emitted once per spelling, every entry in that section is
+   * written twice — assertion 2 catches the duplication and throws, and the cost of that throw is
+   * the **whole** classification: the guide lands with each shard's own headings instead.
+   *
+   * Measured on 月圆之夜 twice in a row, then reproduced offline with exactly this input.
+   */
+  test('a section title arriving in two spellings is emitted once, not twice', () => {
+    const body = ['## 商店', '- [ ] **喵界图鉴**<br>解锁所有吉祥物。', '- [ ] **开盒**<br>使用各式钥匙打开30个宝箱。'].join('\n');
+    for (const sections of [['商店', '商店 '], ['商店', '商店']]) {
+      const out = regroupByAssignment(body, {
+        defs: D,
+        assignment: map([['A', '商店'], ['B', '商店']]),
+        sections,
+      });
+      assert.equal((out.match(/^## 商店/gm) ?? []).length, 1, `${JSON.stringify(sections)}: one heading`);
+      assert.equal((out.match(/喵界图鉴/g) ?? []).length, 1, `${JSON.stringify(sections)}: no entry written twice`);
+      assert.equal((out.match(/开盒/g) ?? []).length, 1);
+    }
+  });
+
   // With a Notion target, one achievement's body is "its own line plus a few `<details>` groups".
   // The move has to take the whole block: moving only the first line leaves the sub-steps in the
   // original section — the old ailment of todoSpans recognising only checkbox lines

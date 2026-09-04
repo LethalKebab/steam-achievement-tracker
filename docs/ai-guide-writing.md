@@ -286,6 +286,10 @@ The classification pass is **asked twice before it degrades** (`REGROUP_ATTEMPTS
 
 When it does degrade, `ev.reason` travels with the warning onto the finished card. It used to be dropped: five different failures produced the one sentence 「分区统一失败」, so a guide landing with its shards' own headings left nothing to diagnose from once the run's in-memory state was gone. The reason is quoted verbatim rather than mapped to something friendlier, cut to `REASON_MAX` — the kind is at the front of these messages.
 
+**And the gate it turned out to be, measured.** 月圆之夜 was rewritten and landed the same way a second time — 31 headings, 「愿望之夜」 three times, one section of 31 holding entries from two shards (and that one a `joinBodies` seam merge, not a regrouping). Reproduced offline with no API call: hand `regroupByAssignment` a section list naming one title twice and it **emits that bucket once per naming**, duplicating every entry in it, which assertion 2 catches and pays for by throwing the whole pass away.
+
+`parseRegroupReply` drops a repeated `== 标题`, but only when the two are the same string to the character — a trailing space, a full-width space or a difference in case survives it, and both spellings resolve to one bucket. `wanted` is deduped by normalised key now, so one bucket is emitted once however many spellings named it. **Two spellings of one title is a likely reply from a model asked for 8–14 sections over 162 achievements**, which is why this reproduced twice on the same guide and on nothing smaller.
+
 ### Losslessness is a hard requirement, not best-effort
 
 `regroupByAssignment` has three exit assertions; failing any of them throws and rolls the whole pass back:
