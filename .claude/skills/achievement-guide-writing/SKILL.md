@@ -226,6 +226,8 @@ On the generated path the program has a backstop (`lib/guidecluster.js` identifi
 
 Section headings are `##`, and every section of a guide sits at that one level. `###` is only for dividing a section one level further, and belongs to the section above it — a run of `###` opening topics of its own renders as subheadings of whichever section happened to precede them.
 
+A section's intro goes inside that section. A heading holding one paragraph — "these are all done in X mode" — with the achievements themselves listed under other headings leaves the reader a heading with prose and nothing under it, and no way to tell which achievements it was about. The mechanics quick reference of 3.5 is the exception: it serves the whole guide rather than introducing one section.
+
 Section headings carry no counts ("12 total, 3 remaining").
 
 To group an existing achievement list by category (by DLC, say), prefer the `update_content` targeted insertion described in rule 9 over re-transcribing the whole page.

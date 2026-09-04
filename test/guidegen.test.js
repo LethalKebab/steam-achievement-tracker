@@ -62,6 +62,7 @@ import {
   mergeDuplicateSections,
   REGROUP_ATTEMPTS,
   ASIDE_EFFORT,
+  buildRegroupFillPrompt,
 } from '../lib/guidegen.js';
 import { msg } from '../lib/messages.js';
 
@@ -111,8 +112,17 @@ function freshEnv({ defs = DEFS } = {}) {
  * Passing null for `sections` models "classification did not succeed" and takes the degraded path
  * (equivalent to the behaviour before this pass was added).
  */
+/** One aside reply, in the shape every provider returns */
+function replyOf(text) {
+  return {
+    content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
+    usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
+    model: 'plan', continuations: 0, toolErrors: [], searchQueries: [],
+  };
+}
+
 const REGROUP_SECTIONS = ['主线', '支线', '收集', '杂项'];
-function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
+function regroupReply(system, sections = REGROUP_SECTIONS, count = 5, omit = 0) {
   // Recognised by REGROUP_SYSTEM; the format is 「== 标题 / 编号」 — what `parseRegroupReply` reads
   if (system !== REGROUP_SYSTEM) return null;
   const text = sections
@@ -122,15 +132,14 @@ function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
       const from = Math.floor((i * count) / sections.length) + 1;
       const to = i === sections.length - 1 ? count : Math.floor(((i + 1) * count) / sections.length);
       const nums = [];
-      for (let n = from; n <= to; n++) nums.push(String(n));
+      // `omit` leaves the last few out, which is what a real reply does — measured at 9 of 162, in
+      // topic-sized clumps rather than at the tail; the tail is simply the easiest to script
+      for (let n = from; n <= to && n <= count - omit; n++) nums.push(String(n));
       return `== ${x}\n${nums.join('\n')}`;
-    }).join('\n')
+    }).filter((s) => !s.endsWith('\n'))
+    .join('\n')
     : '这个游戏不用分区。';
-  return {
-    content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
-    usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
-    model: 'plan', continuations: 0, toolErrors: [], searchQueries: [],
-  };
+  return replyOf(text);
 }
 
 /**
@@ -144,11 +153,13 @@ function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
  * Passing null for `sections` models "classification did not succeed" and takes the degraded path
  * (equivalent to the behaviour before this pass was added).
  */
-function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'], badRegroups = 0 } = {}) {
+function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'], badRegroups = 0, omit = 0, fillSection = null } = {}) {
   return {
     model: 'claude-opus-5',
     asked: [],
     regroupAsks: 0,
+    fillAsks: 0,
+    fillPrompt: null,
     regroupEfforts: [],
     askedEfforts: [],
     regroupPrompt: null,
@@ -159,7 +170,15 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
       // The first `badRegroups` classification asks come back with nothing a grouping can be read
       // out of — which is the subject of the retry, and the shape a real one takes most often
       const usable = this.regroupAsks >= badRegroups;
-      const planned = regroupReply(system, usable ? sections : null, replies.count ?? 5);
+      // The follow-up for what the first reply left out runs in the **same session**, so it arrives
+      // with the same system prompt and is told apart by the message
+      if (system === REGROUP_SYSTEM && /漏掉了|were left out/.test(messages.at(-1).content)) {
+        this.fillAsks++;
+        this.fillPrompt = messages.at(-1).content;
+        const nums = [...this.fillPrompt.matchAll(/^(\d+)\. /gm)].map((m) => m[1]);
+        return replyOf(['== ' + (fillSection ?? sections[0]), ...nums].join('\n'));
+      }
+      const planned = regroupReply(system, usable ? sections : null, replies.count ?? 5, omit);
       if (planned) {
         this.regroupEfforts.push(effort);
         this.regroupAsks++;
@@ -2401,6 +2420,60 @@ describe('sharded writing', () => {
       'every writing round has to leave the depth alone — 深度模式 still decides what the guide says');
   });
 
+  /**
+   * **What the classification reply leaves out.** Measured at 9 of 162 on 月圆之夜, dropped in
+   * topic-sized clumps rather than at the tail, on a prompt that already says every number appears
+   * exactly once. Each one keeps whichever section its own shard opened, so a reconciled guide
+   * still ended in a row of one-entry sections.
+   */
+  test('achievements the grouping left out get one follow-up, and land where it says', async () => {
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const provider = fakeProvider(chunks.map(seg), { omit: 2, fillSection: '收集' });
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider, steam: bigSteam(), appid: '1', onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+    assert.equal(provider.fillAsks, 1, 'the program knows exactly which ones were left out; it has to ask');
+
+    const asked = events.find((e) => e.phase === 'regroup-fill');
+    assert.equal(asked.missing, 2);
+    assert.equal(events.find((e) => e.phase === 'regroup-filled').filled, 2);
+
+    // The follow-up lists only what was missing — sending all 162 again is the request that was
+    // truncated in the first place
+    assert.match(provider.fillPrompt, /^4\. /m);
+    assert.match(provider.fillPrompt, /^5\. /m);
+    assert.doesNotMatch(provider.fillPrompt, /^1\. /m, 'an achievement already placed must not be re-asked');
+
+    const text = readFileSync(r.path, 'utf8');
+    const under = text.slice(text.indexOf('## 收集'));
+    assert.match(under.slice(0, under.indexOf('\n## ') + 1 || undefined), /成就4[\s\S]*成就5|成就5[\s\S]*成就4/,
+      'both have to end up in the section the follow-up named');
+  });
+
+  test('**and a follow-up naming a section that is not on the list is dropped**', async () => {
+    // The section count was settled by the pass before it; a follow-up inventing a twelfth undoes
+    // that. The achievement keeps the section its shard opened — where it would have stayed anyway
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const provider = fakeProvider(chunks.map(seg), { omit: 2, fillSection: '凭空冒出来的小节' });
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider, steam: bigSteam(), appid: '1', onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+    assert.equal(provider.fillAsks, 1);
+    assert.equal(events.find((e) => e.phase === 'regroup-filled').filled, 0);
+
+    const text = readFileSync(r.path, 'utf8');
+    assert.equal(text.includes('凭空冒出来的小节'), false, 'the closed list is the whole point');
+    for (const name of ['成就4', '成就5']) {
+      assert.equal((text.match(new RegExp(name, 'g')) ?? []).length, 1, `${name} has to survive exactly once`);
+    }
+  });
+
   test('a classification pass that comes back unusable is asked once more', async () => {
     const { db, config } = envFor(2);
     const chunks = chunkDefs(BIG, 2);
@@ -2477,6 +2550,12 @@ test('both prompt languages pin the heading level a section opens at', () => {
   const en = systemPromptFor({ ...plan, lang: 'en' }, '1', { canSearch: true });
   assert.match(zh, /小节标题一律用 `##`/);
   assert.match(en, /Section headings are `##`/);
+
+  // A shard writing 「## 愿望之夜」 with one paragraph and then listing those achievements under
+  // other headings leaves a heading with prose and nothing under it — and the rearrangement has no
+  // basis to move a paragraph, so it keeps it. Measured: three of them on one landed page
+  assert.match(zh, /一节的引言写在那一节里面/);
+  assert.match(en, /A section's intro goes inside that section/);
 });
 
 test('the prompt has one entry point, so a dry run and a real send cannot fork', () => {
@@ -3497,4 +3576,36 @@ describe('the passes that tidy a finished guide up', () => {
     assert.equal(said.folded, 1);
   });
 
+});
+
+describe('the follow-up for what the grouping left out', () => {
+  // **An entirely English fixture for the English half**, the same reason i18n-boundary uses one:
+  // descriptions are quoted verbatim by rule, so a Chinese one in the fixture cannot be told apart
+  // from a Chinese prompt
+  const D = [
+    { ...def('A', '甲', '做甲。', 'Alpha'), description_en: 'Do alpha.' },
+    { ...def('B', '乙', '做乙。', 'Beta'), description_en: 'Do beta.' },
+    { ...def('C', '丙', '做丙。', 'Gamma'), description_en: 'Do gamma.' },
+  ];
+  const SECTIONS = ['主线', '收集'];
+
+  test('asks about the missing numbers and nothing else', () => {
+    const p = buildRegroupFillPrompt(D, [2], SECTIONS, 'zh');
+    assert.match(p, /^3\. 丙 — 做丙。$/m, 'the row carries the number the first pass used');
+    assert.doesNotMatch(p, /^1\. /m, 'an achievement already placed must not be re-asked');
+    assert.doesNotMatch(p, /^2\. /m);
+  });
+
+  test('hands over a closed list of sections', () => {
+    const p = buildRegroupFillPrompt(D, [2], SECTIONS, 'zh');
+    for (const s of SECTIONS) assert.ok(p.includes('- ' + s), `${s} has to be offered`);
+    assert.match(p, /只能用这些小节/, 'a follow-up inventing a section undoes the count the pass before it settled');
+  });
+
+  test('and is written in the guide language', () => {
+    const en = buildRegroupFillPrompt(D, [2], ['Main story'], 'en');
+    assert.match(en, /Use only these sections/);
+    assert.match(en, /^3\. Gamma — /m, 'the English fork names the achievement in English too');
+    assert.doesNotMatch(en, /[\u4e00-\u9fff]/, 'no Chinese may reach an English guide prompt');
+  });
 });

@@ -280,6 +280,22 @@ It carries the same losslessness assertions as the rearrangement and rolls back 
 
 `guidelint` reports what is left as `duplicate-heading`, **a warn**: the merge fixes it at generation time, so one reaching the linter is a hand-written guide or a rolled-back pass, and refusing a finished guide over its headings would be the wrong trade. It uses the same predicate the merge does, so what one reports is exactly what the other folds. Note that it needs the guide's full text, which only the local markdown backend supplies — a Notion guide is read back as `to_do` blocks with no headings among them.
 
+### What the reply leaves out, and where an intro belongs
+
+With the depth fixed the pass completes, and two smaller things are then visible on the page it produces. Both measured on the first run that got that far (月圆之夜, 162 achievements, 「分区统一好了(11 个,归了 153/162 条)」).
+
+**Nine of 162 were not assigned at all** — #57, #74–76, #131, #139–142. Not the tail, and not scattered singles: they come in topic-sized clumps (「第四章」 and 「梦魇乐章」 together, all four 狼人/巫师精通 tiers together). The prompt already says every number appears exactly once; a model enumerating 162 of them drops a few anyway. Each unassigned achievement keeps whichever section its own shard opened, which is the right fallback and is also why a reconciled guide still ended with four one-entry sections at the bottom, two of them `###`.
+
+The program knows exactly which ones, so it asks once more, in the same session, listing only those numbers against the section list it just produced. Three properties hold it up:
+
+- **The list is closed.** The follow-up chooses from the sections already decided; an answer naming a new one is dropped and that achievement keeps the section it was in. The count was settled by the pass before it, and a twelfth section arriving through the back door undoes that.
+- **It never overwrites.** An achievement the first reply placed is not re-asked and not reassigned.
+- **Failure degrades to the first reply.** Every unassigned achievement already has a home, so losing this ask costs tidiness, never a guide.
+
+**And three sections held an intro and no achievements** — 「小红帽日记 · 开局流派通关」, 「愿望之夜」, 「经典模式」, each one paragraph saying "these are all done in X mode" with the achievements themselves listed under other headings. That is not the rearrangement emptying them: `regroupByAssignment` folds an emptied section's intro into whichever section took most of its entries, and that rule was verified working. These never had entries — the model wrote them that way, and a section that never had any is deliberately left alone, because no rule can say which section a paragraph belongs to and dropping it is an invisible loss.
+
+So the fix is in the prompt, both forks: **a section's intro goes inside that section.** The mechanics quick reference of rule 3.5 stays the exception — it serves the whole guide rather than introducing one section.
+
 ### The pass's depth is not the run's depth
 
 `max_tokens` caps thinking **plus** prose, so a budget cannot separate the two — the depth is the only knob that can, and the classification pass had been inheriting whatever the run was given.
