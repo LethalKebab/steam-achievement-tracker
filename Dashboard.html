@@ -923,25 +923,10 @@
     }
     .add-game-btn:hover:not(:disabled) { background: var(--accent-hi); }
     .add-game-btn:disabled { opacity: 0.45; cursor: default; }
+    /* Only ever a state or a fault: adding writes nothing on success, because the row
+       appears in the table below */
     .add-game-msg { font-size: var(--fs-sm); }
     .add-game-msg.error { color: var(--danger); }
-    .add-game-msg.success { color: var(--ok); }
-    /* The sentence after adding **is clickable**: one click jumps to that row.
-       A <button> rather than an onclick on a <span> — the keyboard has to be able to
-       Tab to it and Enter has to trigger it, and a button gives that for free. Visually
-       the button's fill and border are erased, leaving an underline to hint that it is
-       clickable */
-    button.add-game-msg {
-      background: none;
-      border: none;
-      padding: 0;
-      font: inherit;
-      cursor: pointer;
-      text-decoration: underline;
-      text-underline-offset: 3px;
-      text-decoration-color: var(--line-3);
-    }
-    button.add-game-msg:hover { text-decoration-color: currentColor; }
 
     .game-search-results {
       display: flex;
@@ -1184,31 +1169,6 @@
     tr.game-row.expandable { cursor: pointer; }
     /* The whole row brightens on hover. A surface rather than a line: one more line among 167 rows is graph paper */
     tr.game-row:hover td { background: var(--surface-2); }
-
-    /* A flash after jumping, so the eye can find where it landed.
-       **One-off; afterwards this row is exactly like the others** — "just jumped to"
-       is a momentary fact, not a property of the row. `both` is mandatory: without it
-       the background snaps back to the animation's starting highlight the instant it
-       ends and only disappears once JS removes the class, so the "fade out" looks like
-       "flash, then light up again" */
-    @keyframes row-flash {
-      0%, 55% { background: rgba(102, 192, 244, 0.30); }
-      100%    { background: transparent; }
-    }
-    tr.game-row.just-added > td { animation: row-flash 2s ease-out both; }
-    /* A card is covered by its cover art, so the fill cannot show through; the grid
-       view uses an inset outline instead.
-       outline rather than border/box-shadow: the former takes no space, and the latter
-       two are already taken by .g-card's hover */
-    @keyframes card-flash {
-      0%, 55% { outline-color: var(--accent); }
-      100%    { outline-color: transparent; }
-    }
-    .g-card.just-added {
-      outline: 2px solid transparent;
-      outline-offset: -2px;
-      animation: card-flash 2s ease-out both;
-    }
 
     /* ---- Row contents ----------------------------------------------------
        A row really holds three groups: **marks** (star, heart), **identity** (cover,
@@ -2303,12 +2263,6 @@
         transition: none;
         transform: none;
       }
-      /* The highlight **must not be removed along with the animation** — it is not
-         decoration, it is the sentence "this is the row you were looking for"; switching
-         motion off should only switch off the fading process. It becomes a static fill,
-         still removed by JS when its time is up */
-      tr.game-row.just-added > td { animation: none; background: rgba(102, 192, 244, 0.24); }
-      .g-card.just-added { animation: none; outline-color: var(--accent); }
       .bar-fill { transition: none; }
       /* The skeleton rows **do not pulse**, but they stay — they are not decoration, they are the sentence "waiting for Steam to answer" */
       .game-search-result.skeleton { animation: none; opacity: 0.6; }
@@ -2546,11 +2500,8 @@
          space otherwise. It answers two questions in order:
          「库里有几个」 → and if there are none in the library, 「Steam 上有这些,点一个就
          能加」.
-         After adding, #addGameMsg becomes a clickable button (see showAddedMsg): clicking
-         it jumps to that row.
-         **It does not jump automatically** — adding one after another is a very common
-         pattern, and auto-scrolling several hundred rows away would take the search box
-         with it.
+         Adding says nothing more: the term stays in the box, so the row just added is in
+         the table below on the next render.
          The whole block stays inside the frozen area: it belongs to the input above. The
          frozen area therefore grows temporarily, and --topbar-h is re-measured by
          measureTopbar(), so the table header yields on its own -->
@@ -2560,10 +2511,9 @@
            "these are what I have" -->
       <div class="steam-label" id="steamLabel" hidden data-t="ui.steamStore">Steam 商店</div>
       <div id="gameSearchResults" class="game-search-results" style="display:none;"></div>
-      <!-- **Words only when words are genuinely needed**: neither side has it, the
-           service is unreachable, and the clickable 「已添加 X」 after adding. Being busy
-           is conveyed by the skeleton rows and success by the results themselves — neither
-           needs words -->
+      <!-- **Words only when words are genuinely needed**: neither side has it, and the
+           service is unreachable. Being busy is conveyed by the skeleton rows, and success
+           by the results and by the row appearing — neither needs words -->
       <span class="add-game-msg" id="addGameMsg"></span>
     </div>
 
@@ -2956,9 +2906,6 @@
       'menu.delete':          ['删除', 'Delete'],
 
       // ---- Adding a game ------------------------------------------------------
-      'add.addedHidden':      ['已添加: {game} (被「{filter}」挡住了,点这里查看)', 'Added: {game} — hidden by “{filter}”, click to see it'],
-      'add.added':            ['已添加: {game} —— 点这里查看', 'Added: {game} — click to see it'],
-      'add.jumpTo':           ['跳到这一行', 'Jump to this row'],
       'add.adding':           ['添加中…', 'Adding…'],
       'add.failed':           ['添加失败: {reason}', 'Could not add: {reason}'],
       'add.storeResults':     ['Steam 商店 · {n} 个', 'Steam store · {n}'],
@@ -3239,16 +3186,9 @@
     }
 
     /**
-     * The filter hiding this row, or null when nothing hides it.
-     *
-     * It returns **the control itself** rather than a boolean, because two callers want
-     * different things: render only asks 「留不留」, while "jump to the game just added" also
-     * has to be able to **switch off whatever is in the way** — the user clicked "take me
-     * there", not "tell me why I cannot see it".
-     *
-     * Both sides sharing this one function is a hard requirement: with separate judgements,
-     * sooner or later the row is plainly in the table while it claims to be hidden, or the
-     * reverse — it claims to have jumped and lands somewhere that does not exist.
+     * The filter hiding this row, or null when nothing hides it. It returns **the control
+     * itself** rather than a boolean, so that what is in the way can be named and not merely
+     * counted.
      */
     function hidingFilter(g, f) {
       // **With a search term, search is the only criterion and all five chips yield.**
@@ -4721,87 +4661,7 @@
       }
     });
 
-    /** How long the highlight lasts. **The durations of row-flash / card-flash in the CSS are the same number**, so changing one means changing both */
-    const FLASH_MS = 2000;
-
-    /**
-     * Scrolls to a game's row (or card) and flashes it. **Only ever triggered by a user click.**
-     *
-     * Two details are deliberate rather than incidental:
-     *
-     * - **It does not use `scrollIntoView` and computes the target itself.** The topbar and the
-     *   table header are both sticky, and a row they cover does not count as "visible", while
-     *   `scrollIntoView` knows nothing about that: `'start'` puts the row at the top of the
-     *   viewport, which is directly **under** the frozen header; `'center'` puts it in the middle
-     *   of the viewport, which on a narrow screen is likewise covered once the topbar's readout
-     *   wraps and grows taller. What has to be computed is the middle of the part that is not
-     *   covered.
-     * - **It only searches the current view.** The other view's DOM still holds the previous
-     *   render (render branches between the two views and does not clear the hidden one), and the
-     *   search dropdown and the confirm dialog each carry a data-appid too — searching the whole
-     *   page for the first match would very likely find that hidden stale node.
-     */
-    function revealGame(appid) {
-      const view = document.getElementById(viewMode === 'gallery' ? 'gallery' : 'gameTableBody');
-      const el = view.querySelector('[data-appid="' + appid + '"]');
-      if (!el) return false;
-
-      // The table header only exists in the table view; in the grid view #gameTable carries hidden and its offsetHeight is 0
-      const bar = document.querySelector('.topbar');
-      const head = document.querySelector('#gameTable thead');
-      const covered = (bar ? bar.offsetHeight : 0) + (head ? head.offsetHeight : 0);
-
-      const r = el.getBoundingClientRect();
-      const top = window.scrollY + r.top - covered - (window.innerHeight - covered - r.height) / 2;
-      const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      window.scrollTo({ top: Math.max(0, top), behavior: still ? 'auto' : 'smooth' });
-
-      el.classList.add('just-added');
-      setTimeout(function() { el.classList.remove('just-added'); }, FLASH_MS);
-      return true;
-    }
-
-    /**
-     * The 「已添加」 sentence — made clickable, jumping there when clicked.
-     *
-     * **It does not jump automatically.** Adding one after another is a very common pattern, and
-     * auto-scrolling several hundred rows away would take the 「添加新游戏」 input with it, forcing
-     * a scroll back. So whether to jump is left to the user, and the notice that had to be shown
-     * anyway doubles as the button — taking no extra space.
-     *
-     * When a filter hides it, **clicking switches that filter off and then jumps**: the user
-     * clicked "take me there", while "tell you why you cannot see it" was the previous step and is
-     * already in that sentence.
-     */
-    function showAddedMsg(game) {
-      const old = document.getElementById('addGameMsg');
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.id = 'addGameMsg';
-      btn.className = 'add-game-msg success';
-
-      const hidden = hidingFilter(game, currentFilters());
-      btn.textContent = hidden
-        ? t('add.addedHidden', { game: game.name, filter: hidden.label })
-        : t('add.added', { game: game.name });
-      btn.title = t('add.jumpTo');
-      btn.addEventListener('click', function() {
-        const blocking = hidingFilter(game, currentFilters());
-        if (blocking) {
-          // The search box is an input and gets cleared; a chip goes back to neutral. **Back to
-          // neutral rather than one step round the cycle** — one step from excluded is 「只看」,
-          // which would swap the table for an entirely opposite set, while all the person wants
-          // is to see this row
-          if (blocking.el.dataset.filter) setChipState(blocking.el, 'off');
-          else blocking.el.value = '';
-          render();
-        }
-        revealGame(game.appid);
-      });
-      old.replaceWith(btn);
-    }
-
-    /** Resets the notice to a non-clickable span — the previous button would jump to a different game if clicked */
+    /** The one line under the search box. Empty text clears it. */
     function setAddMsg(text, cls) {
       const old = document.getElementById('addGameMsg');
       const span = document.createElement('span');
@@ -4821,7 +4681,9 @@
         }
         allGames.push(result);
         render();
-        showAddedMsg(result);
+        // **Success writes nothing**, for the same reason the search itself writes nothing:
+        // the term stays in the box, so the row just added is in the table this render drew
+        setAddMsg('');
       }).withFailureHandler(function(err) {
         setAddMsg(t('add.failed', { reason: err.message }), 'error');
       }).addGame(appid, name, family);
@@ -4984,9 +4846,8 @@
       const extra = document.getElementById('searchExtra');
       clearTimeout(searchTimeout);
 
-      // Starting to search for the next term means the previous 「已添加…点这里查看」 should leave
-      // — that button points at the previous game, and leaving it beside the new one only invites
-      // a mis-click
+      // The previous term owns both its results and its notice, so a new term clears them
+      // before it has anything of its own to put there
       renderSearchResults([]);
       setAddMsg('');
 
@@ -5023,9 +4884,8 @@
       renderSearchResults([]);
       // **The search box is not cleared.** It is also the filter box now: clearing it would snap
       // the table back to the whole library and drown the row just added among three hundred —
-      // keeping the term leaves the new game right there in the table
-      // (it necessarily matches the term, or it could not have been found), which is also what
-      // makes the 「已添加…点这里查看」 below line up
+      // keeping the term leaves the new game right there in the table (it necessarily matches
+      // the term, or it could not have been found)
       // Reset to ticked by default: this dialog is reused, and the previous unticking should not carry over to the next game
       document.getElementById('confirmFamily').checked = true;
       addSelectedGame(appid, name, family);
