@@ -61,6 +61,7 @@ import {
   unwrapAchievementToggles,
   mergeDuplicateSections,
   REGROUP_ATTEMPTS,
+  ASIDE_EFFORT,
 } from '../lib/guidegen.js';
 import { msg } from '../lib/messages.js';
 
@@ -148,21 +149,25 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
     model: 'claude-opus-5',
     asked: [],
     regroupAsks: 0,
+    regroupEfforts: [],
+    askedEfforts: [],
     regroupPrompt: null,
     // Web tools are declared by the provider itself and the orchestration layer only forwards
     // them. A test needs no real tools
     webTools: () => [],
-    async send({ system, messages, onEvent }) {
+    async send({ system, messages, onEvent, effort = null }) {
       // The first `badRegroups` classification asks come back with nothing a grouping can be read
       // out of — which is the subject of the retry, and the shape a real one takes most often
       const usable = this.regroupAsks >= badRegroups;
       const planned = regroupReply(system, usable ? sections : null, replies.count ?? 5);
       if (planned) {
+        this.regroupEfforts.push(effort);
         this.regroupAsks++;
         this.regroupPrompt = messages.at(-1).content;
         return planned;
       }
       this.asked.push(messages.at(-1).content);
+      this.askedEfforts.push(effort);
       const text = replies[this.asked.length - 1];
       if (text === undefined) throw new Error('fakeProvider ran out of replies');
       // **Every real provider streams the prose out as `text` events**, and the entry counter that
@@ -2377,6 +2382,23 @@ describe('sharded writing', () => {
     const ns = events.filter((e) => e.phase === 'step').map((e) => e.n);
     assert.deepEqual(ns, [...ns].sort((a, b) => a - b), `the step went backwards: ${ns.join(' ')}`);
     assert.equal(new Set(ns).size, ns.length, 'and no step is announced twice');
+  });
+
+  test('the classification pass asks at its own depth, and the writing rounds keep the run own', async () => {
+    // `max_tokens` caps thinking plus prose, so on a 「深度模式」 run this pass spent 31,998 of the
+    // 32,000 budget thinking and was truncated before the answer — twice on 月圆之夜, losing the
+    // sectioning both times. It decides nothing about what the guide says, so it does not need the
+    // depth the writing does
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const provider = fakeProvider(chunks.map(seg));
+    const r = await generateGuide(db, { config, provider, steam: bigSteam(), appid: '1' });
+    assert.equal(r.ok, true, r.reason ?? '');
+
+    assert.deepEqual(provider.regroupEfforts, [ASIDE_EFFORT],
+      'the classification ask has to carry its own depth, not the run one');
+    assert.deepEqual([...new Set(provider.askedEfforts)], [null],
+      'every writing round has to leave the depth alone — 深度模式 still decides what the guide says');
   });
 
   test('a classification pass that comes back unusable is asked once more', async () => {

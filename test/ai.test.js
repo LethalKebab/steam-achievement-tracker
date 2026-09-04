@@ -853,3 +853,34 @@ test('createSession.ask forwards signal to provider.send, and dropLastTurn leave
   session.dropLastTurn();
   assert.equal(session.messages.length, 0);
 });
+
+/**
+ * **A pass whose depth is not the run's depth.**
+ *
+ * `max_tokens` caps thinking plus prose, so a budget cannot separate the two — the depth is the
+ * only knob that can. Measured on 月圆之夜: the classification pass inheriting a 「深度模式」 run's
+ * `high` spent 31,998 of the 32,000 budget thinking and was truncated before the answer, twice in a
+ * row, losing the whole sectioning each time.
+ */
+describe('a per-call effort override', () => {
+  const KEY = { apiKey: 'k' };
+  const build = (ai, opts) =>
+    new AnthropicProvider(ai, { fetchImpl: fakeFetch([]) })
+      .buildBody({ system: 's', messages: [{ role: 'user', content: 'x' }], ...opts });
+
+  test('replaces the run depth for that one request', () => {
+    const body = build({ ...KEY, effort: 'high' }, { effort: 'low' });
+    assert.deepEqual(body.output_config, { effort: 'low' });
+  });
+
+  test('and every request without one still carries the run depth', () => {
+    assert.deepEqual(build({ ...KEY, effort: 'high' }, {}).output_config, { effort: 'high' });
+  });
+
+  test('**but it never becomes the one request that sends a field the endpoint refuses**', () => {
+    // `effort: 'off'` is "do not send output_config at all". An aside sending it anyway is a 400 on
+    // a request the writing rounds survive — the override may only replace a value already going out
+    const body = build({ ...KEY, effort: 'off' }, { effort: 'low' });
+    assert.ok(!('output_config' in body), 'off means the field is not sent, by anybody');
+  });
+});
