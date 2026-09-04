@@ -34,9 +34,7 @@ This is the most important section in the design, and the UI must state it hones
 
 **Machine-verifiable (all against real local data):** every achievement has its own checkbox line · no merged lines · checked state equals real `achieved` · **whether the description is copied verbatim** (compared directly against `achievements.description`) · whether same-named achievements quoted their descriptions · the local md carries the `# 游戏名` line · section headings carry no 「共 N 个」 counts · no "data source" note.
 
-Also machine-verifiable, but only as **form**: the spoiler notation's label, its attachment to an achievement, and that it holds no checkbox.
-
-**Not machine-verifiable: whether the guide's content is correct.** Whether the steps work, whether the difficulty ratings are right, whether the "easy to miss" flags are true, whether the mutual-exclusion relationships are real, **whether what a spoiler fold hides really spoils and whether something left unfolded should have been folded** — and that is the entire value of a guide.
+**Not machine-verifiable: whether the guide's content is correct.** Whether the steps work, whether the difficulty ratings are right, whether the "easy to miss" flags are true, whether the mutual-exclusion relationships are real — and that is the entire value of a guide.
 
 So what this system guarantees is **"the format and the data are correct"**, not **"the guide is correct"**. The UI must say the content is unverified. Forcing the model to supply source URLs for spot-checking: **decided against.**
 
@@ -216,7 +214,7 @@ Three separate causes, and only the first is about wording:
 - **Nothing was kept.** `note` is one slot. `guideGenState` now also appends `{at, text}` to a `log`, capped at 300, deduped against the previous line so a repeated note does not fill it. **The timestamps are what answer "is it stuck"** — a line stamped four minutes ago says one thing and one stamped four seconds ago says another, with nobody having to define the word.
 - **There was no total.** See below.
 
-**Why "step N of M" is answerable at all.** The pipeline looks unable to give one because several stages are conditional, but only *one* thing about a run is genuinely unknown before it starts: how many rewrite rounds the linter will force. Everything else is settled once the plan exists — the shard count, whether classification runs (`chunks > 1`), whether the spoiler pass was asked for, whether there is an existing guide to back up. So `generationSteps` computes the list up front and **keeps the rounds out of it**: they are progress *within* the writing step. A total that grew while somebody watched would be worse than no total, since watching whether it advances is the entire point.
+**Why "step N of M" is answerable at all.** The pipeline looks unable to give one because several stages are conditional, but only *one* thing about a run is genuinely unknown before it starts: how many rewrite rounds the linter will force. Everything else is settled once the plan exists — the shard count, whether classification runs (`chunks > 1`), whether there is an existing guide to back up. So `generationSteps` computes the list up front and **keeps the rounds out of it**: they are progress *within* the writing step. A total that grew while somebody watched would be worse than no total, since watching whether it advances is the entire point.
 
 `unwrap` is deliberately not a step: whether it runs depends on what the model wrote, so it cannot be listed in advance, and it is mechanical and near-instant.
 
@@ -293,71 +291,6 @@ Clusters go down two roads, **tell the model first, then back it up ourselves**:
 Rule 五 only says "fold content once it reaches 10 lines"; it never said "but never the achievements themselves". Measured on 马特: the whole `## 世界全清` section's 13 achievements were packed into a toggle called 「世界 1~12 全清与通关」. Sync still recognised them (90/90), but that section opens empty in Notion.
 
 `unwrapAchievementToggles` flattens them **before** the re-arrangement (afterwards, assertion 3 would read it as "the regroup tore a toggle open" and roll the whole pass back). Two conditions must both hold, and either alone leaves it untouched: **the toggle is at top level (not indented)**, and **it contains a checkbox that resolves to a real achievement**. Group-label collapses (前置/步骤/注意) are always indented under an achievement, so they fail the first gate and can't be caught by accident. The unwrapped draft is re-linted, and rolled back if it no longer passes.
-
-### The spoiler notation: a fold, one fixed label, and no completeness check
-
-A guide un-hides what the game hid — most sharply for a hidden achievement, whose condition Steam supplies nowhere and whose only statement anywhere is the guide's own line. So there is a notation for it: an indented `<details>` under the achievement, `<summary>` reading nothing but `剧透` / `Spoiler`, prose inside.
-
-**Every part of that shape was forced by something measured, and the obvious alternatives are excluded:**
-
-- **Inline hiding is impossible on Notion, and that decided the whole shape.** Notion's rich text `annotations` object is `{bold, italic, strikethrough, underline, code, color}` — no spoiler — and `color` is a *single* enum (`"gray"` or `"gray_background"`), so text and background cannot both be set and the usual "invisible until selected" trick is not expressible. A toggle is the only hiding primitive Notion has.
-- **So the convention cannot be copied.** Every platform that offers spoilers offers one unlabelled, inline primitive: Steam's own BBCode is `[spoiler]…[/spoiler]` with no parameters, wiki.gg's template takes `hover`/`block`/`class` and no taxonomy, PSNProfiles renders a bare `<span class="spoiler">` mid-sentence — "doing so will reveal that ⟨…⟩", the sentence still readable around the hole. **In that convention the surrounding sentence does the labelling**, which is why no category vocabulary was ever needed. Moving to a block-level fold loses that sentence, so a label has to be reintroduced — **as compensation for a platform limit, not as a taxonomy**. That argues for the smallest possible vocabulary, and the vocabulary is one word.
-- **The label is closed so that it cannot leak.** A free-form summary is read by everyone who does not open the fold, and `剧透:凶手是医生` has folded nothing away. One fixed word makes that structurally impossible rather than something to check.
-- **It is meant to be rare, and the number comes from real guides.** A narrative game's whole trophy guide on PSNProfiles carried **2** spoiler spans across 15 trophies; another, 88 trophies, carried **0**. Folding every hidden achievement is the opposite of that — 28 of 《罗曼圣诞探案集》's 50 are hidden, so more than half the entries would carry a fold, and a reader who meets that many opens everything by reflex. **The only mechanically-guaranteed version of this feature is the one most likely to be ignored**, which is why the choice is left to the model and the count is only ever reported.
-
-**Three properties are form and are checked; one is not checkable at all.** `spoilerFolds` in `guidelint.js` reports a leaky label (warn — it defeats the notation but breaks neither the sync nor a rewrite, and every error is paid for as another round), a checkbox inside the fold (error — it becomes a sub-step and is cascade-ticked into a record of something never done), and a detached fold (error). Attachment is decided by `todoSpansWithToggles` rather than by a lookalike "is the line above a checkbox" test, and a blank line between the two is enough to fail it.
-
-**Attachment is not the same question as "will a partial rewrite carry the fold along", and only Notion answers yes to the second.** `parsePatchReply` picks `todoSpansWithToggles` for Notion and plain `todoSpans` for local markdown, and `spliceIntoText` — the local write — uses `todoSpans` unconditionally; its range ends at the first non-checkbox line, so it never contains a fold. On a local guide `--only` therefore replaces the entry's line and leaves the old fold where it was: **stale rather than lost**, which is why it is not reported. Widening `todoSpans` is not on the table — that conservatism is what stops a splice deleting text silently.
-
-**There can be no completeness check, ever.** An absent fold and "nothing here spoils" are the same text. So the count is reported and never compared against a threshold — a rule that fires on a visual novel where most entries genuinely are spoilers is a rule nobody reads.
-
-#### Measured: the notation has never once been used, and neither have its neighbours
-
-Three live runs on 2026-09-03, `deepseek-v4-flash`, all landing clean (one round each, full coverage, zero warnings) and **zero spoiler folds between them**:
-
-| Game | Achievements | Hidden | Prompt | Folds |
-|---|---|---|---|---|
-| 《尘埃终须落定》 | 9 | 0 | first shape | 0 |
-| Return of the Obra Dinn | 16 | 3 | first shape | 0 |
-| Return of the Obra Dinn (`--overwrite`) | 16 | 3 | reshaped | 0 |
-
-The first is **not** a miss: with no hidden achievements, every name and description was already public on Steam and the model's own prose said where each achievement fires rather than what it reveals. Nothing was left to fold. Selecting a narrative *genre* was the wrong test — what makes the notation apply is `hidden`, where Steam supplies nothing and the guide's line is the condition's only appearance anywhere.
-
-The other two are misses. Obra Dinn's guide names the captain outright and describes the ending it produces, in the notes, unfolded.
-
-**The prompt was verified present in the assembled request** both times, and reshaping it — trigger first, frequency cap replaced by a scope limit — changed nothing. The discriminator is that **the other notations in that same section did not appear either**: zero `underline` runs across both guides, no `易错过!!`, no `※需要`, no `※除去追加内容`. So the spoiler rule is not an outlier that was worded badly; the whole 「标注用固定写法」 section is what is not landing. (Held loosely: some of those genuinely may not have applied to these two games.)
-
-Meanwhile **the hard-rules section landed perfectly on all three runs** — full coverage, descriptions verbatim, no merged lines, `paraphrased-description` never fired. The difference between the two sections is that the hard rules are the ones the linter checks and the prompt says are machine-checked.
-
-#### The cause is not the model, and not the wording — it is that this belongs in a pass
-
-That first reading — "what the gate checks the model does, so an uncheckable rule is skipped" — was wrong, and the experiment that settles it is cheap. Asked **the same question in the same words, as the only question**, over the finished guide, `deepseek-v4-flash` finds it immediately:
-
-```
-【15】让公司报告认定“船长杀了所有人”的坏结局彩蛋。
-```
-
-That is exactly the sentence that shipped unfolded. One request, no search, no tools. So the model can both write the spoiler and recognise it; what it does not do is *restructure an entry it is in the middle of writing*, on rule 38 of a 13,000-character prompt.
-
-**Which is a shape this pipeline already rejected everywhere else.** Ticking, unwrapping achievement toggles, `collapseEmptyBreaks`, `stripLeadingHeader` and the whole classification pass are all transformations applied *after* the writing, several of them mechanical. Folding a sentence away is a transformation of finished prose — the same shape as `regroup` — and it is the only one of them that was asked for inline. That, not the model tier, is why it never fires.
-
-So the fix is a pass, and two constraints on it are already known:
-
-- **The model returns a selection; the program does the splice.** Exactly `--only`'s rule — anything else it returns is discarded, because "did it leave the rest alone" cannot be verified. The invariant then becomes sharp and checkable: the achievement's own line and its verbatim description stay **byte-identical**, and prose is only ever relocated, never lost.
-- **Locate the sentence with `flatCompare`, never with a raw match.** Measured in that same probe: told to copy verbatim, the model returned `“船长杀了所有人”` where the guide holds `"船长杀了所有人"`. `includes` says false, `flatCompare` says true. A pass built on raw matching splices nothing and **reports no error** — the invisible direction.
-- **Ordering: before `regroup`**, in the same slot as `unwrapAchievementToggles`, for the reason recorded there — `regroup`'s third assertion compares toggle contents, and a pass that creates toggles would be judged to have torn one open and roll the whole thing back.
-
-One piece of scope is still open: the probe fed it `to_do` blocks only, and the run before this one put a spoiler in a **section paragraph** (that Chapter VIII is a hidden chapter, in the mechanics preamble). A pass over entries alone would not see it.
-
-#### What it costs, and the knob
-
-One request per generation, on both the whole-guide and the partial-rewrite paths. **Pinned to `low` effort rather than inheriting the run's**, and that is the whole difference between it being affordable and not: measured on the same 16-entry guide with a byte-identical answer, inheriting `high` cost **24,594** output tokens and `low` cost **2,636**, against the **40,615** the writing itself spent. Six per cent on top, not sixty. `low` and not `off` — `off` stops the field being sent at all, which on this endpoint is the uncapped case (337 s, 145,955 characters of thinking).
-
-The override rides on the request rather than on a second provider: depth is the only thing that differs, and a second provider would re-resolve the key, the model and the endpoint capability table as well, giving the aside three more ways to disagree with the run it belongs to.
-
-`ai.spoilerFold` (default `true`) turns it off, as does `--no-spoiler` for one run. **What the switch skips is the request**, not just the folding — an implementation that asked and then discarded the answer would cost the same while reading as though it were off.
-
-**On the Notion side the count is `null`, not `0`.** Folds are toggles, toggles are not `to_do` blocks, and nothing in `lintGuide`'s inputs can see them; a `0` there would state "this guide folds nothing" on the strength of not having looked. The same fact has a consequence on the Dashboard — see `docs/guides.md`.
 
 ## Structural guarantees, not checks
 

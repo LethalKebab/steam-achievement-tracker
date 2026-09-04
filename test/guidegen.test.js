@@ -32,7 +32,6 @@ import {
   openDb, insertGame, replaceAchievements, upsertGuide, allGuides, setGuideLang,
 } from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
-import { spoilerSystemFor, ASIDE_EFFORT } from '../lib/guidespoiler.js';
 import { countStreamedEntries, generationSteps } from '../lib/guidegen.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
@@ -131,26 +130,6 @@ function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
 }
 
 /**
- * The spoiler pass's reply, answered separately for the same reason as the classification pass:
- * it runs on **every** generation, so without this every test in this file would have to remember
- * to append one more reply to its queue, and forgetting shows up as "the replies ran out" reported
- * a very long way from the cause.
- *
- * **The default is "found nothing", which is the no-op**, so an existing test's expectations about
- * rounds, call counts and the finished text are all unchanged by the pass existing. A test that
- * wants a fold passes `spoilers`.
- */
-function spoilerReply(system, spoilers = null, lang = 'zh') {
-  if (system !== spoilerSystemFor(lang)) return null;
-  const text = (spoilers ?? []).map(([n, s]) => `【${n}】${s}`).join('\n');
-  return {
-    content: [{ type: 'text', text }], text, stopReason: 'end_turn', stopDetails: null,
-    usage: { inputTokens: 1, outputTokens: 1, cacheCreationTokens: 0, cacheReadTokens: 0, webSearches: 0, requests: 1 },
-    model: 'plan', continuations: 0, toolErrors: [], searchQueries: [],
-  };
-}
-
-/**
  * Yields the prepared replies in order and records the user message sent each time.
  *
  * **The classification pass does not consume this queue.** It runs in its own session (its system
@@ -161,14 +140,12 @@ function spoilerReply(system, spoilers = null, lang = 'zh') {
  * Passing null for `sections` models "classification did not succeed" and takes the degraded path
  * (equivalent to the behaviour before this pass was added).
  */
-function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'], spoilers = null, lang = 'zh' } = {}) {
+function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'] } = {}) {
   return {
     model: 'claude-opus-5',
     asked: [],
     regroupAsks: 0,
     regroupPrompt: null,
-    spoilerAsks: 0,
-    spoilerPrompt: null,
     // Web tools are declared by the provider itself and the orchestration layer only forwards
     // them. A test needs no real tools
     webTools: () => [],
@@ -178,12 +155,6 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
         this.regroupAsks++;
         this.regroupPrompt = messages.at(-1).content;
         return planned;
-      }
-      const spoiled = spoilerReply(system, spoilers, lang);
-      if (spoiled) {
-        this.spoilerAsks++;
-        this.spoilerPrompt = messages.at(-1).content;
-        return spoiled;
       }
       this.asked.push(messages.at(-1).content);
       const text = replies[this.asked.length - 1];
@@ -886,9 +857,7 @@ describe('generateGuide', () => {
     const provider = fakeProvider([MISSING_B, GOOD]);
     const inner = provider.send.bind(provider);
     provider.send = async (args) => {
-      // **The writing rounds only.** The aside passes run on systems of their own by design, and
-      // counting those here would make this read as three prompts that failed to match
-      if (args.system !== spoilerSystemFor('zh')) seen.push(args.system);
+      seen.push(args.system);
       return inner(args);
     };
     await generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1', rounds: 3 });
@@ -1646,7 +1615,6 @@ describe('sharded writing', () => {
       );
       const res = await generateGuide(db, { db, config, provider, steam: bigSteam(), appid: '1' });
       assert.equal(provider.regroupAsks, 1, 'the premise of this case is that the classification pass really ran');
-      assert.equal(provider.spoilerAsks, 0, 'and nothing here asked for the spoiler pass');
       assert.equal(
         res.usage.requests, provider.asked.length + provider.regroupAsks,
         'the classification session is missing from the total — those tokens were spent and are not reported'
@@ -1748,8 +1716,6 @@ describe('sharded writing', () => {
         async send({ system, messages }) {
           const planned = regroupReply(system);
           if (planned) return planned;
-          const spoiled = spoilerReply(system);
-          if (spoiled) return spoiled;
           this.seen.push(JSON.stringify(messages));
           this.asked.push(messages.at(-1).content);
           const step = script[this.asked.length - 1];
@@ -2233,8 +2199,6 @@ describe('sharded writing', () => {
           async send({ system, messages }) {
             const planned = regroupReply(system);
             if (planned) return planned;
-            const spoiled = spoilerReply(system);
-            if (spoiled) return spoiled;
             const msg = messages.at(-1).content;
             this.asked.push(msg);
             const from = Number(msg.match(/第 (\d+)–/)?.[1] ?? 0);
@@ -3131,134 +3095,6 @@ describe('the landed guide records which language it was written in', () => {
 });
 
 /**
- * The spoiler pass, seen from the pipeline rather than from its own unit tests.
- *
- * The language assertion here is structural rather than a string comparison: `spoilerReply` only
- * answers when the system prompt is `spoilerSystemFor(lang)`, so a pass asked in the wrong language
- * never matches, the scripted queue is consumed instead, and the test fails loudly. That is what
- * makes `spoilerAsks === 1` a real bilingual check.
- */
-describe('the spoiler pass inside generateGuide', () => {
-  const WITH_SPOILER = '```markdown\n## 主线\n\n'
-    + '- [ ] **第一步**<br>完成第一关。<br>开局就能拿。真凶是医生。\n'
-    + '- [ ] **第二步**<br>完成第二关。<br>接着打\n```';
-
-  for (const [lang, label] of [['zh', '剧透'], ['en', 'Spoiler']]) {
-    test(`a guide written in ${lang} is asked in ${lang} and folded with that label`, async () => {
-      const { db, config } = freshEnv();
-      const provider = fakeProvider([WITH_SPOILER], { spoilers: [[1, '真凶是医生。']], lang });
-      const r = await generateGuide(db, {
-        config: { ...config, uiLanguage: lang }, provider, steam: fakeSteam(['A']), appid: '1',
-        spoilerFold: true,
-      });
-
-      assert.equal(r.ok, true, r.reason ?? '');
-      assert.equal(provider.spoilerAsks, 1, 'asked in the wrong language the reply never matches and the queue is eaten instead');
-      const text = readFileSync(r.path, 'utf8');
-      assert.match(text, new RegExp(`<summary>${label}</summary>`));
-      assert.match(text, /真凶是医生。/, 'the sentence is moved, never dropped');
-      assert.ok(!/开局就能拿。真凶是医生。/.test(text), 'and it is gone from the entry line it came from');
-    });
-  }
-
-  test('the pass failing leaves the guide exactly as it was written', async () => {
-    // The whole point of degrading rather than aborting: the prose is written, ticked and through
-    // the gates by then, and losing it over a cosmetic pass is a bad trade. What must not happen is
-    // the failure being silent, so the event is asserted too
-    const { db, config } = freshEnv();
-    const provider = fakeProvider([WITH_SPOILER]);
-    const inner = provider.send.bind(provider);
-    provider.send = async (args) => {
-      if (args.system === spoilerSystemFor('zh')) throw new Error('the spoiler pass fell over');
-      return inner(args);
-    };
-    const events = [];
-    const r = await generateGuide(db, {
-      config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true, onProgress: (e) => events.push(e),
-    });
-
-    assert.equal(r.ok, true, 'a cosmetic pass must not be able to fail the whole run');
-    const text = readFileSync(r.path, 'utf8');
-    assert.ok(!text.includes('<details>'), 'nothing folded');
-    assert.match(text, /开局就能拿。真凶是医生。/, 'and the entry is byte-for-byte what was written');
-    assert.ok(events.some((e) => e.phase === 'spoiler-failed'), 'a degradation has to speak up');
-  });
-
-  test('a cancelled spoiler pass is a cancellation, not a quiet "finished without folding"', async () => {
-    // The same trap the classification pass documents: this is reachable only after every writing
-    // round already succeeded, so "any failure degrades" would turn a Cancel click into success
-    const { db, config } = freshEnv();
-    const provider = fakeProvider([WITH_SPOILER]);
-    const inner = provider.send.bind(provider);
-    provider.send = async (args) => {
-      if (args.system === spoilerSystemFor('zh')) throw Object.assign(new Error('cancelled'), { cancelled: true });
-      return inner(args);
-    };
-    await assert.rejects(
-      generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true }),
-      (e) => e.cancelled === true
-    );
-  });
-});
-
-describe('paying for the spoiler pass, or not', () => {
-  const WITH_SPOILER_2 = '```markdown\n## 主线\n\n'
-    + '- [ ] **第一步**<br>完成第一关。<br>开局就能拿。真凶是医生。\n'
-    + '- [ ] **第二步**<br>完成第二关。<br>接着打\n```';
-
-  test('**not asked for means not paid for** — no request, no fold', async () => {
-    // The default, and the point of it being an argument. What must be skipped is the request: an
-    // implementation that still asked and then discarded the answer would cost exactly the same
-    // while reading as though nothing had been spent
-    const { db, config } = freshEnv();
-    const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
-    const r = await generateGuide(db, { config, provider, steam: fakeSteam(['A']), appid: '1' });
-
-    assert.equal(r.ok, true);
-    assert.equal(provider.spoilerAsks, 0, 'nobody asked for it, so the request is never sent');
-    assert.equal(r.usage.requests, 1, 'and it is not paid for');
-    assert.ok(!readFileSync(r.path, 'utf8').includes('<details>'));
-  });
-
-  test('asking for it runs it', async () => {
-    const { db, config } = freshEnv();
-    const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
-    await generateGuide(db, {
-      config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true,
-    });
-    assert.equal(provider.spoilerAsks, 1);
-  });
-
-  test('**the aside is pinned to low effort, not the depth the run writes at**', async () => {
-    // Measured, same guide and byte-identical answer: inheriting `high` cost 24,594 output tokens,
-    // `low` cost 2,636. Inheriting silently is a 9x bill for the same result, and nothing in the
-    // output would say so
-    const { db, config } = freshEnv();
-    const provider = fakeProvider([WITH_SPOILER_2], { spoilers: [[1, '真凶是医生。']] });
-    const efforts = [];
-    const inner = provider.send.bind(provider);
-    provider.send = async (args) => {
-      efforts.push([args.system === spoilerSystemFor('zh') ? 'aside' : 'writing', args.effort ?? null]);
-      return inner(args);
-    };
-    await generateGuide(db, {
-      config, provider, steam: fakeSteam(['A']), appid: '1', spoilerFold: true,
-    });
-
-    // **The literal, not ASIDE_EFFORT.** Comparing the observed value against the same constant the
-    // code reads makes the assertion true by construction — setting the constant to null then keeps
-    // this green, which is exactly what happened when it was written that way. The value is a
-    // measured decision, so changing it should have to come here and say so
-    assert.deepEqual(efforts.find((e) => e[0] === 'aside'), ['aside', 'low']);
-    assert.equal(ASIDE_EFFORT, 'low', 'and the constant the code uses is that same value');
-    assert.deepEqual(
-      efforts.find((e) => e[0] === 'writing'), ['writing', null],
-      'the writing rounds must keep taking the depth the run was configured with'
-    );
-  });
-});
-
-/**
  * Progress detail (issue #78). What a person watching a twenty-minute run needs is not more
  * phases — it is a number that moves and a total that does not.
  */
@@ -3292,20 +3128,19 @@ describe('how far along a run says it is', () => {
 
     test('each conditional stage is counted only when it will actually run', () => {
       assert.deepEqual(generationSteps({ chunks: 4 }), ['write', 'regroup', 'land']);
-      assert.deepEqual(generationSteps({ chunks: 1, spoilerFold: true }), ['write', 'spoiler', 'land']);
       assert.deepEqual(generationSteps({ chunks: 1, existing: true }), ['write', 'backup', 'land']);
       assert.deepEqual(
-        generationSteps({ chunks: 4, spoilerFold: true, existing: true }),
-        ['write', 'spoiler', 'regroup', 'backup', 'land']
+        generationSteps({ chunks: 4, existing: true }),
+        ['write', 'regroup', 'backup', 'land']
       );
     });
 
     test('**rewrite rounds are never steps**', () => {
       // The one thing about a run that cannot be known in advance. Counted as steps, the total would
       // grow while somebody watched it, which is worse than having no total at all
-      const before = generationSteps({ chunks: 2, spoilerFold: true, existing: true }).length;
+      const before = generationSteps({ chunks: 2, existing: true }).length;
       for (const rounds of [1, 2, 3]) {
-        assert.equal(generationSteps({ chunks: 2, spoilerFold: true, existing: true, rounds }).length, before);
+        assert.equal(generationSteps({ chunks: 2, existing: true, rounds }).length, before);
       }
     });
   });
