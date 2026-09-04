@@ -280,6 +280,19 @@ It carries the same losslessness assertions as the rearrangement and rolls back 
 
 `guidelint` reports what is left as `duplicate-heading`, **a warn**: the merge fixes it at generation time, so one reaching the linter is a hand-written guide or a rolled-back pass, and refusing a finished guide over its headings would be the wrong trade. It uses the same predicate the merge does, so what one reports is exactly what the other folds. Note that it needs the guide's full text, which only the local markdown backend supplies — a Notion guide is read back as `to_do` blocks with no headings among them.
 
+### Which level a section opens at
+
+Nothing in the prompt said, and shards cannot see each other. On 月圆之夜's second rewrite shard 1 opened its sections with `##`, shard 2 with `###`, shard 3 with both and shard 4 with `##` again — so twenty topics of their own (「镜中的记忆 · 高难度通关」 and the rest) rendered as subsections of whichever `##` happened to precede them. Every achievement was present, every checkbox worked, and the page read as though the categorisation had collapsed.
+
+Both prompt forks now state it: sections are `##`, and `###` only divides a section one level further, belonging to the section it sits under. SKILL.md 4.2 carries the same sentence, since a hand-written guide has the same choice to make.
+
+`guidelint` reports the two shapes that are decidable without judgement, both as warns:
+
+- **`heading-level-jump`** — a heading more than one level deeper than the one above it, `##` straight to `####` or a guide opening at `###`. The level in between has no heading, so the deeper one hangs off nothing.
+- **`mixed-section-depth`** — a section that lists achievements of its own *and* has subsections listing more. **A section deliberately divided into subsections holds none of its own**, which is what lets this tell a real subdivision from an accidental one. This is the rule that catches the 月圆之夜 shape; `heading-level-jump` does not, because those `###` do follow a `##`.
+
+Measured against the two hand-written local guides in the corpus before shipping: neither fires.
+
 ### A degradation says which gate rejected it
 
 The classification pass is **asked twice before it degrades** (`REGROUP_ATTEMPTS`). Every way it fails except a cancellation depends on what came back — a reply judged unusable, a grouping nothing could be read out of, an assignment that loses a line when the prose is rearranged by it — so a second ask is a real second chance rather than the same sentence thrown at the wall again. Each attempt gets its own session; a rejected reply left in the context is the model being shown its own bad answer. A cancellation is the one failure the retry must not swallow.

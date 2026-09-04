@@ -224,6 +224,8 @@ Divide into sections along the game's own categories (main story / side content 
 
 On the generated path the program has a backstop (`lib/guidecluster.js` identifies same-kind clusters by the common prefix of the official descriptions and merges a split cluster back into whichever section holds the most of it), but **it only runs when the guide was sharded** — a game with fewer achievements than `ai.chunkSize` is written in one pass and never makes that trip, so it rests entirely on this rule. A hand-written guide has no backstop either.
 
+Section headings are `##`, and every section of a guide sits at that one level. `###` is only for dividing a section one level further, and belongs to the section above it — a run of `###` opening topics of its own renders as subheadings of whichever section happened to precede them.
+
 Section headings carry no counts ("12 total, 3 remaining").
 
 To group an existing achievement list by category (by DLC, say), prefer the `update_content` targeted insertion described in rule 9 over re-transcribing the whole page.

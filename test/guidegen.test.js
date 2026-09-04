@@ -2445,6 +2445,18 @@ describe('sharded writing', () => {
 // dry run was missing `rarity` and `target`, so one game's dry run printed the checkbox label
 // version while a real run would send the collapsible version. **Structurally there is only one
 // entry point**, so the fork has nowhere to happen.
+// A shard is written with no sight of the others, and nothing in the prompt said which heading
+// level a section opens at — so on 月圆之夜 one shard used `##`, the next `###`, and twenty topics
+// of their own rendered as subsections of whichever section happened to precede them. Both forks
+// have to carry the rule; a rule in one language only is the shape #121 already cost a release
+test('both prompt languages pin the heading level a section opens at', () => {
+  const plan = { game: '测试游戏', defs: [def('A', '第一步', '完成第一关。')], rarity: null, target: 'notion' };
+  const zh = systemPromptFor({ ...plan, lang: 'zh' }, '1', { canSearch: true });
+  const en = systemPromptFor({ ...plan, lang: 'en' }, '1', { canSearch: true });
+  assert.match(zh, /小节标题一律用 `##`/);
+  assert.match(en, /Section headings are `##`/);
+});
+
 test('the prompt has one entry point, so a dry run and a real send cannot fork', () => {
   const plan = {
     game: '测试游戏',
