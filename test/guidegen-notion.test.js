@@ -19,7 +19,7 @@
  *
  * No network: both Notion and Steam are fake.
  */
-import { test, describe } from 'node:test';
+import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -132,10 +132,24 @@ function fakeNotion(opts = {}) {
   };
 }
 
+
+/**
+ * **No test here may reach the network.** `fetchGameIcon` resolves the store header first now, and
+ * the first step of that is a HEAD on the guessed address — so every path that lands or migrates a
+ * page would otherwise make a real request to Steam's CDN, on every run, in every CI job. A 404
+ * stub sends it straight down the fallback these fakes are built to exercise.
+ */
+const realFetch = globalThis.fetch;
+before(() => { globalThis.fetch = async () => ({ ok: false, status: 404 }); });
+after(() => { globalThis.fetch = realFetch; });
+
 const fakeSteam = {
   async fetchOwnedGames() {
     return [{ appid: 1, img_icon_url: 'deadbeef' }];
   },
+  // Modelled on the real client, which has this. Leaving it off does not mean "no store header":
+  // it means fetchGameIcon calls a method that is not there, and what it hits is a TypeError
+  async fetchStoreHeaderImage() { return null; },
 };
 
 const basePlan = (draftPath, notionPlan) => ({
