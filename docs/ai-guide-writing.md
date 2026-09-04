@@ -280,6 +280,21 @@ It carries the same losslessness assertions as the rearrangement and rolls back 
 
 `guidelint` reports what is left as `duplicate-heading`, **a warn**: the merge fixes it at generation time, so one reaching the linter is a hand-written guide or a rolled-back pass, and refusing a finished guide over its headings would be the wrong trade. It uses the same predicate the merge does, so what one reports is exactly what the other folds. Note that it needs the guide's full text, which only the local markdown backend supplies — a Notion guide is read back as `to_do` blocks with no headings among them.
 
+### The pass's depth is not the run's depth
+
+`max_tokens` caps thinking **plus** prose, so a budget cannot separate the two — the depth is the only knob that can, and the classification pass had been inheriting whatever the run was given.
+
+Measured on 月圆之夜's third rewrite, at 「深度模式」 (`effort: high`): the pass produced **31,998 output tokens against a 32,000 ceiling** and was truncated before the answer. Both attempts. The reply it needed to write is about six hundred tokens — a dozen section names and 162 numbers — so essentially the whole budget went into thinking about how to bucket them. The same run's writing rounds were fine; it is the one request where a high depth buys nothing, because the prose it is sorting is already written.
+
+`ASIDE_EFFORT` is `low`, passed per call (`createSession(provider, { effort })` → `send({ effort })` → `output_config`). The same measurement was taken on the spoiler pass before that feature was removed: inheriting `high` cost **24,594** output tokens against **2,636** at `low`, on writing that itself cost 40,615 — an aside costing 60% extra against one costing 6%.
+
+Two rules on the override:
+
+- **`low`, never `off`.** `off` stops the field being sent at all, which on this endpoint was measured at 337 s and 145,955 characters of thinking — the uncapped case, the opposite of what is wanted.
+- **It only replaces a value that would have been sent anyway.** Where the endpoint does not accept `output_config`, the provider's own effort is null and the aside must not become the one request that sends it: that is a 400 on a request the writing rounds survive.
+
+**The writing rounds are untouched**, and that is the point: 「深度模式」 still governs everything that decides what the guide says. This pass decides nothing about content.
+
 ### Which level a section opens at
 
 Nothing in the prompt said, and shards cannot see each other. On 月圆之夜's second rewrite shard 1 opened its sections with `##`, shard 2 with `###`, shard 3 with both and shard 4 with `##` again — so twenty topics of their own (「镜中的记忆 · 高难度通关」 and the rest) rendered as subsections of whichever `##` happened to precede them. Every achievement was present, every checkbox worked, and the page read as though the categorisation had collapsed.
