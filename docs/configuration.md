@@ -31,13 +31,12 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   },
 
   "ai": {                     // only needed for AI guide generation; `init --ai` writes it
-    "provider": "deepseek",   // "deepseek" | "anthropic" | "gemini" | "deepseek-openai"
+    "provider": "deepseek",   // "deepseek" | "anthropic" | "deepseek-openai"
                               // ↑ which of the blocks below is active right now
 
     "providers": {            // one block per vendor; keep several configured at once
       "deepseek":  { "apiKey": "…", "model": "" },
-      "anthropic": { "apiKey": "…", "model": "" },
-      "gemini":    { "apiKey": "…", "model": "" }
+      "anthropic": { "apiKey": "…", "model": "" }
     },
     "effort": "high",         // low | medium | high | off — research depth; also settable per run
     "thinking": null,         // "adaptive" | "disabled" | "off"; blank = per-endpoint default
@@ -55,10 +54,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
     "maxRetries": 3,
     "requestTimeoutMs": 600000,
     "fallbacks": true,        // anthropic: re-run on another model if a classifier declines
-    "showThinking": false,    // stream a summary of the reasoning; debugging only
-
-    "geminiTools": ["google_search"],  // gemini: which server-side tools to declare
-    "geminiThinkingBudget": null       // gemini: unset means "don't send the field at all"
+    "showThinking": false     // stream a summary of the reasoning; debugging only
   }
 }
 ```
@@ -69,7 +65,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
 
 You do not have to edit the file by hand: step 2 of the **Settings** (「设置」) page writes into these blocks. Pick a vendor, paste its key, save — then switching to another vendor and back needs no key at all. Vendors that already have one are marked `· configured` (「· 已配置」) in the dropdown, and the key field's **Configured — blank keeps it** (「已配置,留空就不改」) badge follows whichever vendor is selected. Saving one vendor never touches another's block. Changing the dropdown clears anything half-typed in the key field, since that text was meant for the vendor you just left.
 
-Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — and the reason is the same for all three: **more than one provider reads them, and the right value differs per vendor.** A model name is vendor-specific (`claude-*` / `gemini-*` / `deepseek-*`), so one shared `model` field has to be wiped every time you switch, which silently discards a version you pinned. `baseUrl` is read by both the Anthropic and DeepSeek paths, and one vendor's endpoint address is meaningless to the other. Everything else stays at the `ai.*` level: the budgets (`maxTokens`, `chunkSize`, `effort`, …) are correct at the same value for every vendor, and the single-vendor knobs (`geminiTools`, `webFetch`, `searchTool`, `anthropicExtras`, …) are only ever read by the one provider they belong to, so a leftover value is ignored rather than misapplied.
+Three fields live inside those blocks — `apiKey`, `model`, and `baseUrl` — and the reason is the same for all three: **more than one provider reads them, and the right value differs per vendor.** A model name is vendor-specific (`claude-*` / `deepseek-*`), so one shared `model` field has to be wiped every time you switch, which silently discards a version you pinned. `baseUrl` is read by both the Anthropic and DeepSeek paths, and one vendor's endpoint address is meaningless to the other. Everything else stays at the `ai.*` level: the budgets (`maxTokens`, `chunkSize`, `effort`, …) are correct at the same value for every vendor, and the single-vendor knobs (`deepseekTools`, `webFetch`, `searchTool`, `anthropicExtras`, …) are only ever read by the one provider they belong to, so a leftover value is ignored rather than misapplied.
 
 The older flat `ai.apiKey` / `ai.model` still work and need no edit. They are treated as belonging to whatever `ai.provider` says in the file — so on load they are adopted into that vendor's block, and they are **never** offered to a different vendor. That refusal is the point: handing DeepSeek's key to `api.anthropic.com` produces a 401 whose message says to check `ANTHROPIC_API_KEY`, sending you after a variable that was set correctly all along. An empty key instead reports which vendor is unconfigured.
 
@@ -197,7 +193,7 @@ Token usage is reported after every run — requests, input, output, and how man
 
 An earlier version had four: `maxTokensPerRun`, `maxSpendPerRunUsd`, `maxTokensPerDay`, `maxSpendPerDayUsd`, backed by a built-in price table and a `ai_usage` ledger. All of it is gone.
 
-The dollar half never worked honestly. Rates change, there was no verified table for DeepSeek or Gemini — the two providers you're most likely to use — and **how server-side web search is billed was never measured at all**. So a "$5 cap" was a number computed from an amount nobody could stand behind. A cap you can't trust is worse than no cap: it reads as protection while protecting nothing.
+The dollar half never worked honestly. Rates change, there was no verified table for DeepSeek — the provider you're most likely to use — and **how server-side web search is billed was never measured at all**. So a "$5 cap" was a number computed from an amount nobody could stand behind. A cap you can't trust is worse than no cap: it reads as protection while protecting nothing.
 
 The token half worked, but it asked you to pick a number you had no basis for choosing, in a unit that doesn't map to anything you care about.
 
@@ -205,7 +201,7 @@ What actually bounds a run is still there and measures real things: `maxSearches
 
 For what you actually spent, read your provider's own dashboard. The token counts printed after each run are the API's own figures, so they're what you'd reconcile against a bill.
 
-**Choosing a provider.** `deepseek`, `anthropic` and `gemini` all do server-side web search, which is what the research step needs. Pricing, rate limits and free allowances are the vendors' to state and change, so they aren't reproduced here — `ai-check --models` asks your key which models it can use, and `ai-check` confirms search works before you spend a run. (`deepseek-openai` is the same vendor's OpenAI-compatible endpoint, which has **no** search — it exists for the no-research path and for future OpenAI-shaped providers, and `guide-gen` refuses to use it without an explicit `--no-research`.)
+**Choosing a provider.** `deepseek` and `anthropic` both do server-side web search, which is what the research step needs. Pricing, rate limits and free allowances are the vendors' to state and change, so they aren't reproduced here — `ai-check --models` asks your key which models it can use, and `ai-check` confirms search works before you spend a run. (`deepseek-openai` is the same vendor's OpenAI-compatible endpoint, which has **no** search — it exists for the no-research path and for future OpenAI-shaped providers, and `guide-gen` refuses to use it without an explicit `--no-research`.)
 
 **Leave `ai.model` blank unless you want to pin a version.** Model names are not portable between providers, so there is no sensible cross-provider default — each provider supplies its own. Filling in one vendor's name is exactly how you end up with "供应商是 deepseek，模型名却是 anthropic 的". If you want to know what your key can actually use, ask the API rather than guessing:
 
@@ -213,9 +209,7 @@ For what you actually spent, read your provider's own dashboard. The token count
 node tracker.js ai-check --models
 ```
 
-**On Gemini's free tier, pick a `flash` model.** The Pro models return `limit: 0` for the free-tier quota — that is not "you used it up", it means the model isn't in that tier at all, and waiting for a reset will never help. The error message says so and doesn't retry. The default (`gemini-flash-latest`) is an alias rather than a version number, because a pinned version goes stale — that exact default was wrong within three months. Pin a concrete version if you want reproducible output.
-
-**`geminiTools`** declares which server-side tools to hand Gemini; it's configurable rather than hard-coded because that provider was written without access to the API docs, so a renamed tool — or one your tier doesn't grant — is a config edit, not a code change. `google_search` alone is the default; adding `url_context` gets full page text rather than search results, at the risk of the whole request failing if your tier doesn't offer it. After any run, `ai-check` reports the search queries the model actually issued — declaring the tools and getting zero searches back is the real answer to "does my tier include grounding", and it's more reliable than any pricing page.
+**After any run, `ai-check` reports the search queries the model actually issued.** Declaring a web tool and getting zero searches back is the real answer to "does my key include grounding", and it is more reliable than any pricing page.
 
 Note that free tiers generally mean **your prompts may be used to improve the vendor's models**. For this project that would be your game library and achievement names. If that matters to you, use a paid tier.
 
@@ -231,7 +225,6 @@ These override the file, which is useful for one-off runs or if you'd rather not
 | `AI_PROVIDER` | `ai.provider` |
 | `AI_MODEL` | `ai.model` |
 | `ANTHROPIC_API_KEY` | the key used when the active provider is `anthropic` |
-| `GEMINI_API_KEY` | the key used when the active provider is `gemini` (or `google`) |
 | `DEEPSEEK_API_KEY` | the key used when the active provider is `deepseek` (either endpoint) |
 | `PORT` | `port` |
 
@@ -242,7 +235,7 @@ STEAM_API_KEY=xxx STEAM_ID=yyy node tracker.js sync
 `AI_PROVIDER` is read **before** the key, which is what makes it possible to try a provider without editing `config.json` at all — otherwise the key lookup would still be going after the old provider's variable:
 
 ```bash
-AI_PROVIDER=gemini GEMINI_API_KEY=xxx node tracker.js ai-check --models
+AI_PROVIDER=deepseek-openai DEEPSEEK_API_KEY=xxx node tracker.js ai-check --models
 ```
 
 **`TRACKER_DATA_DIR`** works differently from the four above: it doesn't override a value inside `config.json`, it changes *where* `config.json`, `data/` and `guidesDir` are read from and written to. Without it, all three sit next to the code, which is what the sections above assume.

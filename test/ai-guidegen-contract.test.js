@@ -6,7 +6,7 @@
  * This file fills a hole that really existed: **`guidegen.js` had never been driven by a real
  * provider.**
  *
- * `ai.test.js` / `ai-gemini.test.js` test the providers themselves (assembling the request,
+ * `ai.test.js` / `ai-deepseek.test.js` test the providers themselves (assembling the request,
  * unpacking the stream, judging failures), and `guidegen.test.js` tests the orchestration — but
  * with a hand-written `fakeProvider`, a stub that happens to implement the few fields the
  * orchestration layer uses today. So **each side is green on its own while the contract between
@@ -122,30 +122,12 @@ const anthropicSse = (text) => [
   .map((e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`)
   .join('');
 
-// --- The Gemini wire format -------------------------------------------------
-
-/** Thought parts and prose share one parts array, separated only by `thought: true` */
-const geminiSse = (text) => [
-  {
-    candidates: [{
-      content: { role: 'model', parts: [{ text: '先查一下这游戏的成就。', thought: true }, { text }] },
-      groundingMetadata: { webSearchQueries: ['测试游戏 成就'] },
-    }],
-  },
-  {
-    candidates: [{ finishReason: 'STOP', content: { role: 'model', parts: [] } }],
-    usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 500, thoughtsTokenCount: 50 },
-  },
-]
-  .map((c) => `data: ${JSON.stringify(c)}\n\n`)
-  .join('');
-
 // ---------------------------------------------------------------------------
-// All three vendors have to carry the same guide through the whole pipeline
+// Every vendor has to carry the same guide through the whole pipeline
 // ---------------------------------------------------------------------------
 
 /**
- * The three vendors' **output has to be byte-identical** — the guide content is written by the
+ * Every vendor's **output has to be byte-identical** — the guide content is written by the
  * model, and everything else on this pipeline (stripping the markdown fence, joining segments,
  * writing the header, mechanical ticking, registration) should not know which vendor is which.
  * Any vendor producing a different result here means the orchestration layer missed that
@@ -154,7 +136,6 @@ const geminiSse = (text) => [
 const CASES = [
   { name: 'anthropic (official endpoint)', ai: { provider: 'anthropic', apiKey: 'k' }, sse: anthropicSse },
   { name: 'deepseek (Anthropic-compatible endpoint preset)', ai: { provider: 'deepseek', apiKey: 'k' }, sse: anthropicSse },
-  { name: 'gemini', ai: { provider: 'gemini', apiKey: 'k' }, sse: geminiSse },
 ];
 
 describe('a real provider driving the whole pipeline', () => {
@@ -203,19 +184,18 @@ describe('a real provider driving the whole pipeline', () => {
    * behavioural differences among the three vendors.**
    *
    * The top of `ai.js` says progress events are normalised too (text / tool / tool-result /
-   * search), and this is the case that used not to hold. Gemini repeats
-   * `groundingMetadata.webSearchQueries` in every chunk, so it could always report the query while
-   * streaming. On Anthropic the query lives in the `server_tool_use` block's **streaming JSON
-   * input**, which has not arrived at `content_block_start` — so for as long as `emitProgress` ran
-   * ahead of the accumulator, the only thing it could say was the tool's wire name.
+   * search), and this is the case that used not to hold. The query lives in the `server_tool_use`
+   * block's **streaming JSON input**, which has not arrived at `content_block_start` — so for as
+   * long as `emitProgress` ran ahead of the accumulator, the only thing it could say was the
+   * tool's wire name.
    *
    * That is what issue #78 was actually reporting. On a large game the research phase runs for
    * minutes with one unchanging word on screen, which cannot be told apart from being stuck, and
    * the reporter fell back to watching the API console for spend.
    *
-   * The accumulator now runs first and the query is emitted at `content_block_stop`, so **all three
-   * vendors report the same sentence** — which is what this file exists to check. Inverting this
-   * assertion was named in advance as the thing that would happen when it was fixed.
+   * The accumulator now runs first and the query is emitted at `content_block_stop`, so **every
+   * vendor reports the same sentence**. Inverting this assertion was named in advance as the thing
+   * that would happen when it was fixed.
    */
   test('every vendor reports the live search query, in the same words', async () => {
     const seen = {};
@@ -228,11 +208,11 @@ describe('a real provider driving the whole pipeline', () => {
       });
       seen[c.ai.provider] = events.filter((e) => e.phase === 'tool').map((e) => e.name);
     }
-    // The fakes issue the same query, so agreement here is agreement about the whole path from
-    // wire format to progress bar — not merely that each vendor said something
-    assert.ok(seen.gemini.includes('搜索「测试游戏 成就」'), JSON.stringify(seen.gemini));
-    assert.ok(seen.anthropic.includes('搜索「测试游戏 成就」'), JSON.stringify(seen.anthropic));
-    assert.ok(seen.deepseek.includes('搜索「测试游戏 成就」'), JSON.stringify(seen.deepseek));
+    // The fake issues one known query, so this is agreement about the whole path from wire format
+    // to progress bar — not merely that something was said
+    for (const [vendor, names] of Object.entries(seen)) {
+      assert.ok(names.includes('搜索「测试游戏 成就」'), `${vendor}: ${JSON.stringify(names)}`);
+    }
     // **And no wire name survives anywhere.** Dropping this is how `web_search_20260209` comes back
     // the next time the tool is revised, since the name is matched by prefix precisely so it can be
     for (const [vendor, names] of Object.entries(seen)) {
@@ -249,34 +229,14 @@ describe('a real provider driving the whole pipeline', () => {
       texts.push(readFileSync(r.path, 'utf8'));
     }
     assert.equal(texts[0], texts[1], 'the anthropic and deepseek presets go through the same class and should not differ');
-    assert.equal(texts[0], texts[2], 'gemini output differs from anthropic — the orchestration layer recognised the vendor');
+    // **This file has lost most of its point and is kept for the next vendor.** Both remaining
+    // presets are AnthropicProvider against different endpoints, so what used to be "two wire
+    // formats produce the same guide" is now one format compared with itself. When a vendor on a
+    // different wire format arrives, add it to CASES and this becomes a real cross-check again —
+    // the structure is left standing for exactly that
   });
 
-  /**
-   * **Thought parts only really land in the file when the model writes no markdown fence.**
-   *
-   * The first version of this test used the fenced BODY, which made it **permanently green**:
-   * `extractMarkdown` takes only what is inside the fence, the thoughts are outside it, and no
-   * amount of leaking reaches the file. Mutation testing found it immediately — turning
-   * `if (p?.thought)` in `ai-gemini.js` into a constant false left all 9 tests green.
-   *
-   * And a fence is no guarantee: `extractMarkdown` itself keeps a "no fence at all ⇒ treat the
-   * whole thing as body" fallback. Stack those two and the chain of thought is written into the
-   * user's guide while **the validator cannot catch it** — those lines are neither checkboxes
-   * nor a violation of any rule. So no fence is sent here on purpose.
-   */
-  test('gemini thought parts must not get into the guide file (when the model writes no fence)', async () => {
-    const bare = BODY.replace(/^```markdown\n/, '').replace(/\n```$/, '');
-    assert.ok(!bare.includes('```'), 'the premise of this test is that there is no fence; with one it verifies nothing');
 
-    const { db, config } = freshEnv({ provider: 'gemini', apiKey: 'k' });
-    const provider = await createProvider(config, { fetchImpl: fakeFetch(() => geminiSse(bare)) });
-    const r = await generateGuide(db, { config, provider, steam: fakeSteam(), appid: '1' });
-
-    const text = readFileSync(r.path, 'utf8');
-    assert.match(text, /- \[ \] \*\*第二步\*\*/, 'the body itself still has to land');
-    assert.ok(!text.includes('先查一下'), 'the model chain of thought was written into the user guide');
-  });
 });
 
 // ---------------------------------------------------------------------------

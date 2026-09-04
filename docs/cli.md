@@ -57,7 +57,7 @@ node tracker.js ai-check             # confirms web search actually works
 node tracker.js guide-gen <appid>    # asks once before it starts
 ```
 
-Works with DeepSeek, Anthropic or Gemini. The finished guide goes into Notion when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead.
+Works with DeepSeek or Anthropic. The finished guide goes into Notion when Notion is configured, so machine-written and hand-written guides live in the same place; `--local` writes a `guides/*.md` file instead.
 
 What the program guarantees is **format and data** — one checkbox per achievement, names matching Steam exactly, descriptions quoted verbatim, ticks matching your real unlock state. **Whether the advice is correct is not checked and cannot be** — read what it wrote.
 
@@ -124,7 +124,7 @@ Because ticking a Notion checkbox cannot be undone from here, run `checkbox-sync
 |---|---|---|
 | `ai-check [appid]` | Checks the provider and that its web search really works | AI provider |
 | `ai-check --dry` | Assembles the request without sending it; needs no key | — |
-| `ai-check --models` | Asks the API which models the key can use (Gemini and `deepseek-openai`) | AI provider |
+| `ai-check --models` | Asks the API which models the key can use (`deepseek-openai` only) | AI provider |
 | `guide-gen <appid>` | Researches and writes a guide, validates it, files it | AI + Steam (+ Notion) |
 | `guide-gen --dry-run` | Prints the prompt and the landing plan, sends no request | — |
 | `guide-gen --overwrite` | Rewrites the whole guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |

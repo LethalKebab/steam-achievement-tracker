@@ -136,8 +136,8 @@ function applyAiFlags(config) {
     // **Without `--model`, nothing is passed and switchAiProvider reaches for that vendor's own
     // pinned model.** Passing '' here is not the same thing: it is a value, so the ?? inside never
     // fires and the pin is cleared instead of read — a model pinned for Anthropic would not survive
-    // switching to Gemini and back. What must not happen is carrying the *previous* vendor's model
-    // across (claude-* / gemini-* / deepseek-* trips assertModelMatchesProvider), and per-vendor
+    // switching away and back. What must not happen is carrying the *previous* vendor's model
+    // across (claude-* / deepseek-* trips assertModelMatchesProvider), and per-vendor
     // storage is what prevents that
     config.ai = switchAiProvider(config.ai, provider, process.env, { model });
   } else if (model) {
@@ -167,8 +167,9 @@ function applyAiFlags(config) {
  * An env var lingers for the whole shell session, while config.json is the copy people can see — and
  * when the two disagree, the person is reading the file while the program uses the variable and
  * nobody can tell where the difference is. Stepped on: config.json said deepseek while the
- * PowerShell session still had $env:AI_PROVIDER at gemini, so deepseek-chat was requested against
- * Gemini's endpoint and what came back was a 404 pointing in entirely the wrong direction.
+ * PowerShell session still had $env:AI_PROVIDER at anthropic, so deepseek-chat was requested
+ * against Anthropic's endpoint and what came back was a 404 pointing in entirely the wrong
+ * direction.
  */
 function warnEnvOverrides() {
   const notes = [];
@@ -177,7 +178,7 @@ function warnEnvOverrides() {
       notes.push(clog('env.fromEnv', { label: clog(label), name, value: process.env[name] }));
     }
   }
-  for (const name of ['ANTHROPIC_API_KEY', 'GEMINI_API_KEY', 'DEEPSEEK_API_KEY']) {
+  for (const name of ['ANTHROPIC_API_KEY', 'DEEPSEEK_API_KEY']) {
     if (process.env[name]) notes.push(clog('env.keyFromEnv', { name }));
   }
   for (const n of notes) console.log(`  ⚠️  ${n}`);
@@ -570,12 +571,6 @@ const AI_PROVIDERS = [
     label: 'Anthropic (Claude)',
     note: 'prov.anthropic',
     env: 'ANTHROPIC_API_KEY',
-  },
-  {
-    key: 'gemini',
-    label: 'Google Gemini',
-    note: 'prov.gemini',
-    env: 'GEMINI_API_KEY',
   },
 ];
 
@@ -1068,9 +1063,8 @@ async function cmdAiCheck() {
   // --dry needs no key: its whole use is "see exactly what would be sent before a key is configured"
   const config = applyAiFlags(loadConfig({ required: dry ? [] : ['ai'] }));
 
-  // --models: ask the API directly which models are available. When the Gemini side was written the
-  // docs were unreachable and model names could only be guessed from memory, so this route was left
-  // in — a wrong guess needs no code change, just one question
+  // --models: ask the API directly which models are available, rather than going by a name written
+  // from memory — a wrong guess then needs no code change, just one question
   if (flags.has('--models')) {
     const provider = await createProvider(config);
     if (typeof provider.listModels !== 'function') {
@@ -1911,17 +1905,6 @@ if (!fn) {
 const CLI_HINTS = {
   'provider-model-mismatch': 'hint.providerModelMismatch',
   'too-many-achievements': 'hint.tooManyAchievements',
-  // Every Gemini model-name problem funnels to the same advice: ask the API for the list, then
-  // change the model. Three codes, one entry — three copies of one sentence drift
-  'gemini-model-retired': 'hint.geminiModel',
-  'gemini-model-unknown': 'hint.geminiModel',
-  'gemini-no-allowance': 'hint.geminiModel',
-  // **Not funnelled into hint.geminiModel with the three above.** That advice says "change the
-  // model", and here the model is fine — sending someone to edit a correct setting is worse than
-  // saying nothing, and is how a capacity outage gets misread as a stale model for the third time
-  'gemini-unavailable': 'hint.geminiUnavailable',
-  'gemini-429-no-detail': 'hint.gemini429NoDetail',
-  'gemini-tool-rejected': 'hint.geminiToolRejected',
   'bad-api-key': 'hint.badApiKey',
   'deepseek-length': 'hint.deepseekLength',
   'ai-timeout': 'hint.aiTimeout',

@@ -18,7 +18,7 @@
  *
  *  - **`reasoning_content` mixed into the prose**. deepseek-reasoner puts the chain of
  *    thought and the prose in two fields of the same delta, and missing it once writes the
- *    reasoning into the user's guide file (the same kind as Gemini's thought)
+ *    reasoning into the user's guide file
  *  - **usage field mapping**, and cache-hit tokens not being counted twice with the input
  *  - **an unrecognised finish_reason falling to other** rather than counting as success
  *  - **a 402 insufficient balance is not retryable** — an entirely different thing from a
