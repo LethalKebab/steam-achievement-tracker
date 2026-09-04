@@ -1029,7 +1029,6 @@ describe('the wording in the confirmation dialog', () => {
     return new Function('t', js.slice(at, end) + '; return ' + name + ';')(t);
   };
   const effortChoice = choiceBuilder('effortChoice');
-  const spoilerChoice = choiceBuilder('spoilerChoice');
 
   test('the default is the deep mode, and there are only two tiers', () => {
     assert.equal(effortChoice().value, 'high',
@@ -1045,29 +1044,15 @@ describe('the wording in the confirmation dialog', () => {
     assert.ok(STRINGS['gen.style'] && STRINGS['gen.style'][1], "'gen.style' has no English half");
   });
 
-  test('the tiers carry labels only; the spoiler guard keeps its one note, about the cost', () => {
-    // **Pinned so both halves stay decisions.** The tiers used to carry a sentence each, and the
-    // fast one named the measured cost (9 of 16 entries came back as template sentences). With a
-    // third group added, three stacked explanations turned a two-click confirmation into something
-    // to read, and the owner cut them. The difference is not lost, it moved: docs/configuration.md
-    // carries the measured table in full. A dialog is not where someone reads.
-    //
-    // The spoiler guard is the exception and has to stay one: nothing about 「开」 says it is the
-    // only choice here that adds a paid request, so that sentence is the only place the cost is
-    // stated anywhere on screen.
+  test('the tiers carry labels only', () => {
+    // **Pinned so it stays a decision.** The tiers used to carry a sentence each, and the fast one
+    // named the measured cost (9 of 16 entries came back as template sentences). Stacked
+    // explanations turned a two-click confirmation into something to read, and the owner cut them.
+    // The difference is not lost, it moved: docs/configuration.md carries the measured table in
+    // full. A dialog is not where someone reads.
     for (const o of effortChoice().options) {
       assert.equal(o.hint, undefined, `${o.label} grew a note again`);
     }
-    // **On the group, not on either state.** 关 is the default and the screen already shows it, so
-    // there is nothing to explain there; the cost is a fact about the switch rather than about
-    // where it is standing, and hanging it on the group also stops the row changing height on click
-    const guard = spoilerChoice();
-    assert.ok(guard.hint, 'the spoiler guard lost the one line that states its cost');
-    for (const o of guard.options) {
-      assert.equal(o.hint, undefined, `${o.label} grew a per-state note`);
-    }
-    assert.match(guard.hint, /调用/, 'the note has to name the cost, which is the only reason it exists');
-    assert.match(STRINGS['gen.spoilerHint'][1], /call/i, 'and the English half has to say it too');
   });
 
   test('the selected state has to be reported, and written in both places', () => {
@@ -1096,14 +1081,9 @@ describe('the wording in the confirmation dialog', () => {
 
   test('every choice in the dialog really travels with the request', () => {
     // The control is built and the value is not passed down — everything looks fine on screen while
-    // every run still uses the default. **Each control added to these dialogs belongs here**: the
-    // spoiler group was added later and would otherwise have been a switch that silently did nothing
-    assert.match(js, /startGuideGen\(appid, false, choice\.value, null, spoiler\.value === 'on'\)/, 'the generate path');
-    assert.match(
-      js,
-      /startGuideGen\(appid, true, rewriteChoice\.value, scope, rewriteSpoiler\.value === 'on'\)/,
-      'the rewrite path'
-    );
+    // every run still uses the default. **Each control added to these dialogs belongs here**
+    assert.match(js, /startGuideGen\(appid, false, choice\.value, null\)/, 'the generate path');
+    assert.match(js, /startGuideGen\(appid, true, rewriteChoice\.value, scope\)/, 'the rewrite path');
   });
 
   test('the scope of a partial rewrite really travels with the request, and is exclusive with the whole guide', () => {

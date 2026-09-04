@@ -823,44 +823,6 @@ describe('the wiring that decides to run rather than queue', () => {
 });
 
 /**
- * The Dashboard's spoiler choice reaching the job that spends the money.
- *
- * **A source assertion because the orchestration cannot be reached from here**: this file's server
- * is deliberately booted with a provider that cannot be built, so no run ever gets far enough to
- * observe the flag. What it guards is real though — the value crosses four functions
- * (`startGuideGen` → `startGuideGenClaimed` → `runGuideGen` → the job), and each hop was written
- * separately. Three of the four were missed on the way in, each surfacing as a `ReferenceError`
- * only when a request actually arrived.
- *
- * **Comments are stripped first.** The word appears in a comment beside every one of these lines,
- * so a grep over the raw source is satisfied by the prose explaining the code and would stay green
- * with the code deleted.
- */
-describe('the spoiler choice reaches the job', () => {
-  const SRC = readFileSync(new URL('../lib/server.js', import.meta.url), 'utf8')
-    .replace(/\/\*[\s\S]*?\*\//g, '')
-    .split('\n')
-    .filter((l) => !/^\s*\/\//.test(l))
-    .join('\n');
-
-  const hops = [
-    ['the api boundary accepts it', /startGuideGen:\s*\(appid, overwrite, effort, scope, spoilerFold\)/],
-    ['startGuideGen takes it', /async function startGuideGen\([^)]*spoilerFold = false\)/],
-    ['and hands it on', /startGuideGenClaimed\(appid, overwrite, effort, scope, spoilerFold\)/],
-    ['startGuideGenClaimed takes it', /async function startGuideGenClaimed\([^)]*spoilerFold = false\)/],
-    ['a queued job keeps it', /enqueue\(\{ appid, overwrite, effort, scope, spoilerFold, game/],
-    ['a job started now keeps it', /runGuideGen\(\{ appid, overwrite, effort, scope, spoilerFold, game/],
-    ['runGuideGen takes it', /async function runGuideGen\(\{[^}]*spoilerFold = false/],
-  ];
-
-  for (const [what, re] of hops) {
-    test(what, () => {
-      assert.match(SRC, re, 'the choice is dropped here, so the dialog switch silently does nothing');
-    });
-  }
-});
-
-/**
  * The run's history (issue #78).
  *
  * `note` holds one sentence and the next event overwrites it, which is why a run that had been

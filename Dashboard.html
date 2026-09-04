@@ -2982,10 +2982,6 @@
       'gen.style':            ['写法', 'How to write it'],
       'gen.fast':             ['极速模式', 'Fast'],
       'gen.deep':             ['深度模式', 'Thorough'],
-      'gen.spoiler':          ['防剧透', 'Spoiler guard'],
-      'gen.spoilerOff':       ['关', 'Off'],
-      'gen.spoilerOn':        ['开', 'On'],
-      'gen.spoilerHint':      ['开启后会增加一次 AI 调用。', 'Turning it on adds one more call to the AI.'],
       'mv.checkboxes':        ['{n} 个 checkbox 原样搬过去(含勾选状态)。', '{n} checkboxes move across as they are, ticks included.'],
       'mv.localKept':         ['本地文件挪进 guides/.migrated/,不会删。', 'The local file moves into guides/.migrated/ — nothing is deleted.'],
       'mv.unconverted':       ['{n} 行特殊排版会转为普通段落,文字不会丢失。', '{n} specially formatted lines become ordinary paragraphs. No text is lost.'],
@@ -4984,11 +4980,7 @@
            * `aria-describedby` attaches it to this group, so a screen reader reading these buttons
            * announces the current sentence along with them
            */
-          // **`g.hint` is the group's own note and does not change with the selection**, for a
-          // sentence that is true in both states. Per-option notes describe the state you are in;
-          // this one describes the control. It also keeps the row from changing height when only
-          // one of the two states would have had something to say
-          const hasHints = g.hint || g.options.some(function (o2) { return o2.hint; });
+          const hasHints = g.options.some(function (o2) { return o2.hint; });
           const hintEl = hasHints ? document.createElement('div') : null;
           if (hintEl) {
             hintEl.className = 'ask-hint';
@@ -4997,7 +4989,6 @@
           }
           function paintHint() {
             if (!hintEl) return;
-            if (g.hint) { hintEl.textContent = g.hint; return; }
             const cur = g.options.filter(function (o2) { return o2.value === g.value; })[0];
             hintEl.textContent = (cur && cur.hint) || '';
           }
@@ -5852,7 +5843,6 @@
         ],
       };
       const rewriteChoice = effortChoice();
-      const rewriteSpoiler = spoilerChoice();
       // The one-line requirement. It appears only when a partial scope is chosen — a whole rewrite
       // has no use for it, and leaving it there is an input field nobody reads
       const noteInput = {
@@ -5905,7 +5895,7 @@
          */
         okText: t('rw.ok'),
         danger: true,
-        choices: [scopeChoice, rewriteChoice, rewriteSpoiler],
+        choices: [scopeChoice, rewriteChoice],
         input: noteInput,
         picker: picker,
       });
@@ -5943,7 +5933,7 @@
           setGuideBusy(appid, false);
           showGen(GEN_WARN + ' ' + escapeHtml(err), true, false);
         })
-        .startGuideGen(appid, true, rewriteChoice.value, scope, rewriteSpoiler.value === 'on');
+        .startGuideGen(appid, true, rewriteChoice.value, scope);
     };
 
     /**
@@ -5977,40 +5967,6 @@
      * A segmented control rather than a slider: a slider does not work at all with two tiers, and
      * even with three its shape implied even spacing.
      */
-    /**
-     * **A third group rather than a checkbox.** The dialog already renders a label plus segmented
-     * buttons per group and does it twice; a checkbox would be a second mechanism for the same kind
-     * of question, which is the shape that drifts here.
-     *
-     * 「防剧透」 is the name this feature has in Chinese, so the group is named that and the buttons
-     * are 关/开 — a switch needs no invented state names, and inventing two would also collide with
-     * the 「…模式」 pair sitting directly above it.
-     *
-     * **This is the one group that keeps a note**, and it says one thing: that turning it on costs
-     * another call. The tiers above lost theirs because their names carry the meaning; this one
-     * cannot, since nothing about 开 says it is the only choice in the dialog that adds a request.
-     *
-     * It hangs on the group rather than on either state. 关 is the default and needs no explaining —
-     * the screen already shows it — and the cost is a fact about the switch, not about where it
-     * happens to be standing.
-     *
-     * **Off by default**, and that is not timidity about the feature: a guide is usually written for
-     * a game already finished, where there is nothing left to spoil, so the common case should not
-     * be paying for it.
-     */
-    function spoilerChoice() {
-      return {
-        key: 'spoiler',
-        label: t('gen.spoiler'),
-        hint: t('gen.spoilerHint'),
-        options: [
-          { value: 'off', label: t('gen.spoilerOff') },
-          { value: 'on', label: t('gen.spoilerOn') },
-        ],
-        value: 'off',
-      };
-    }
-
     function effortChoice() {
       return {
         // The group's key. askConfirm collects each group's current value into an object for the body
@@ -6023,11 +5979,10 @@
          * shallow does.
          *
          * **Labels only: no note line.** Each tier used to carry a sentence, and the fast one named
-         * the measured cost (9 of 16 entries came back as template sentences). With a third group
-         * added, three stacked explanations turned a two-click confirmation into something to read.
-         * The difference between the tiers is not lost, it moved: `docs/configuration.md` carries the
-         * whole measured table, which is more than a note line could ever say. **A dialog is not
-         * where someone reads.**
+         * the measured cost (9 of 16 entries came back as template sentences). Stacked explanations
+         * turn a two-click confirmation into something to read. The difference between the tiers is
+         * not lost, it moved: `docs/configuration.md` carries the whole measured table, which is
+         * more than a note line could ever say. **A dialog is not where someone reads.**
          */
         label: t('gen.style'),
         options: [
@@ -6120,8 +6075,7 @@
       // The dialogs that do lose something (rewrite, delete) are not covered by this rule; their
       // bodies are mandatory
       const choice = effortChoice();
-      const spoiler = spoilerChoice();
-      const ok = await askConfirm({ title: t('gen.title', { game: name }), okText: t('gen.ok'), choices: [choice, spoiler] });
+      const ok = await askConfirm({ title: t('gen.title', { game: name }), okText: t('gen.ok'), choices: [choice] });
       if (!ok) return;
       genCollapsed = false; // a generation the user pressed themselves, so the progress bar has to show
       btn.disabled = true;
@@ -6144,7 +6098,7 @@
           btn.disabled = false;
           showGen(GEN_WARN + ' ' + escapeHtml(err), true, false);
         })
-        .startGuideGen(appid, false, choice.value, null, spoiler.value === 'on');
+        .startGuideGen(appid, false, choice.value, null);
     };
 
     /**

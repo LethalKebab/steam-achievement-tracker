@@ -1031,11 +1031,6 @@ async function cmdGuideLint() {
       clog('lint.guide', { mark, name: r.name, appid: r.appid, covered: stats.covered, achievements: stats.achievements, todos: stats.todos })
     );
     if (detail) {
-      // **Only when there are any, and only when it was possible to look.** `spoilerFolds` is null
-      // on the Notion side, where the folds are toggles this validator's inputs cannot see; a 0
-      // there would report "folds nothing" without having looked. A 0 on a local guide is real but
-      // says nothing either — the notation is meant to be rare, so most guides carry none
-      if (stats.spoilerFolds) console.log(clog('lint.spoilerFolds', { n: stats.spoilerFolds }));
       for (const f of findings) console.log(`     ${f.level === 'error' ? '✖' : '·'} ${f.message}`);
       continue;
     }
@@ -1235,8 +1230,6 @@ async function cmdGuideGen() {
   const steam = new SteamClient(config, { log: () => {} });
   const notion = new NotionClient(config);
   const local = flags.has('--local');
-  // Opt in for this run. There is no setting: see the comment on generateGuide's spoilerFold
-  const spoilerFold = flags.has('--spoiler');
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? 3);
   const fileName = flagValue('file') ?? null;
 
@@ -1330,7 +1323,7 @@ async function cmdGuideGen() {
   const started = Date.now();
 
   const r = await generateGuide(db, {
-    config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan, spoilerFold,
+    config, provider, steam, appid, rounds, fileName, notion, local, overwrite, plan,
     onProgress(ev) {
       if (ev.phase === 'plan' && ev.chunks > 1) {
         p.done(clog('gg.sharded', { achievements: ev.achievements, chunks: ev.chunks }));
@@ -1347,12 +1340,6 @@ async function cmdGuideGen() {
         // This is the program **overriding the classification the model gave**, and the finished
         // product does not show who changed it. Say plainly how many places were changed
         p.done(clog('gg.clustered', { clusters: ev.clusters, into: ev.into.join('、'), moved: ev.moved }));
-      } else if (ev.phase === 'spoiler-done') {
-        p.done(clog('gg.spoilerFolded', { n: ev.folded, skipped: ev.skipped }));
-      } else if (ev.phase === 'spoiler-failed') {
-        // A degradation that stays in the finished product: the spoilers are simply written out in
-        // the open. Same rule as regroup-failed — say so rather than letting it read as success
-        p.done(clog('gg.spoilerFailed', { reason: ev.reason }));
       } else if (ev.phase === 'unwrapped-toggles') {
         p.done(clog('gg.unwrapped', { n: ev.titles.length, titles: ev.titles.join('、') }));
       } else if (ev.phase === 'unwrap-failed') {
@@ -1572,9 +1559,6 @@ async function cmdGuidePatch(appid) {
   const r = await patchGuide(db, {
     config, provider: probe, steam, appid, notion,
     selector, instruction, rounds, patchPlan: pp,
-    // Read here rather than passed down from cmdGuideGen: `--only` is dispatched into its own
-    // command, so the flag has to be looked at on this side too or it silently does nothing here
-    spoilerFold: flags.has('--spoiler'),
     onProgress(ev) {
       if (ev.phase === 'write') p.update(clog('gp.write', { round: ev.round, of: ev.of, scope: ev.scope }));
       else if (ev.phase === 'rewrite') p.update(clog('gp.rewrite', { round: ev.round, of: ev.of }));
