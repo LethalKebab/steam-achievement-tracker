@@ -106,6 +106,8 @@ More on what is stored and what Steam does not expose: [data.md](data.md).
 | `guide-status` | Aligns guide page status with completion | Notion |
 | `guide-status --dry-run` | Shows what would change, writes nothing | Notion |
 | `audit [appid]` | Looks for boxes ticked while the achievement is still locked (read-only) | Steam + Notion |
+| `guide-icons` | Swaps guide pages still on the 32×32 square icon to the 460×215 store header | Steam + Notion |
+| `guide-icons --dry-run` | Lists what would be replaced, writes nothing | Steam + Notion |
 | `guide-lint [appid]` | Checks guides for achievements with no checkbox, and formatting that blocks syncing | Notion |
 | `guide-lint --checked` | Also validates tick state; queries Steam per game, so it is slow | Steam + Notion |
 | `guide-to-notion <appid>` | Moves a local `.md` guide into Notion, verifying it arrived intact | Notion |

@@ -51,6 +51,7 @@ import {
 } from './lib/notion.js';
 import { checkboxSync, syncGuidesFromNotion, syncGuidesFromMarkdown, auditGuideTicks, syncGuideStatuses } from './lib/guides.js';
 import { lintAllGuides } from './lib/guidelint.js';
+import { refreshGuideIcons } from './lib/guideicons.js';
 import { createProvider, createSession, checkResult, formatUsage } from './lib/ai.js';
 import {
   generateGuide, planGuide, systemPromptFor, buildPatchMessage, DRAFTS_DIR,
@@ -843,6 +844,44 @@ async function cmdGuideStatus() {
   for (const l of r.logs) console.log(`  ${l.gameName} — ${l.result}`);
   if (!r.updates.length) console.log(clog('gs.nothing'));
   else if (dryRun) console.log(clog('gs.rerun'));
+}
+
+/**
+ * Re-icon guide pages still carrying the 32×32 square icon.
+ *
+ * A separate command rather than something folded into a sync, because it **writes to pages the
+ * user owns for a cosmetic reason**. That is worth typing on purpose, and worth being able to
+ * rehearse with --dry-run first.
+ */
+async function cmdGuideIcons() {
+  const { config, db, steam } = withSteam();
+  const notion = new NotionClient(config);
+  if (!notion.configured) {
+    return console.log(clog('gi.noToken'));
+  }
+  const dryRun = flags.has('--dry-run');
+  if (dryRun) console.log(clog('gi.dryRun'));
+  const p = progressPrinter();
+
+  const r = await refreshGuideIcons(db, steam, {
+    notion,
+    dryRun,
+    onProgress: (ev) => p.update(`  ${ev.done}/${ev.total} ${ev.name}`),
+  });
+  p.done(clog('gi.summary', { pages: r.pages, replaced: r.replaced }));
+
+  const LABEL = {
+    replaced: 'gi.res.replaced',
+    'would-replace': 'gi.res.wouldReplace',
+    'no-source': 'gi.res.noSource',
+    'no-better-source': 'gi.res.noBetter',
+    unreadable: 'gi.res.unreadable',
+    'bad-url': 'gi.res.badUrl',
+    'write-failed': 'gi.res.writeFailed',
+  };
+  for (const l of r.logs) console.log(`  ${l.gameName} — ${clog(LABEL[l.result] ?? l.result)}`);
+  if (!r.logs.length) console.log(clog('gi.nothing'));
+  else if (dryRun && r.replaced) console.log(clog('gi.rerun'));
 }
 
 async function cmdCheckboxSync() {
@@ -1849,6 +1888,7 @@ const COMMANDS = {
   'checkbox-sync': cmdCheckboxSync,
   'guide-status': cmdGuideStatus,
   'guide-lint': cmdGuideLint,
+  'guide-icons': cmdGuideIcons,
   'notion-check': cmdNotionCheck,
   'ai-check': cmdAiCheck,
   'guide-gen': cmdGuideGen,

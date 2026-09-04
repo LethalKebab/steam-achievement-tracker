@@ -151,6 +151,101 @@ describe('fetchGameIcon asks when the guess misses', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Which source wins, and why it is not the free one
+// ---------------------------------------------------------------------------
+/**
+ * `GetOwnedGames` carries an `img_icon_url` hash, and using it costs no extra request — which is
+ * exactly why it was the first choice. The asset behind it is **32×32**, and Notion draws a page
+ * icon several times larger, so nearly every generated page carried a visibly soft icon. Measured
+ * on pages already written: four in six were the 32×32; the sharp ones were the games that missed
+ * the owned list and fell through to the 460×215 store header.
+ *
+ * **The failure is silent and looks like a Notion problem**, which is what makes the ordering
+ * worth pinning: no request fails, no branch errors, the icon is simply the wrong one. Swapping
+ * these three lines back turns nothing else in the suite red.
+ */
+describe('fetchGameIcon prefers resolution over the free request', () => {
+  const SQUARE = /steamcommunity\/public\/images\/apps\/2149010\//;
+  const owned = [{ appid: 2149010, img_icon_url: 'abc123' }];
+
+  test('an owned game takes the store header, not the 32×32 square icon it could have for free', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, status: 200 });
+    try {
+      const url = await fetchGameIcon({
+        async fetchOwnedGames() { return owned; },
+        async fetchStoreHeaderImage() { return REAL; },
+      }, '2149010');
+      assert.doesNotMatch(url, SQUARE, 'the square icon is 32×32 and too small for Notion\'s icon slot');
+      assert.match(url, /\/steam\/apps\/2149010\/header\.jpg$/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('the content-hash header also outranks it — the appdetails answer is still a header', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    try {
+      const url = await fetchGameIcon({
+        async fetchOwnedGames() { return owned; },
+        async fetchStoreHeaderImage() { return REAL; },
+      }, '2149010');
+      assert.equal(url, REAL);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('the square icon is still the last resort — a soft icon beats no icon', async () => {
+    // Demoting it must not mean deleting it. This is the family-shared / delisted case inverted:
+    // there the square icon is missing, here the store asset is
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    try {
+      const url = await fetchGameIcon({
+        async fetchOwnedGames() { return owned; },
+        async fetchStoreHeaderImage() { return null; },
+      }, '2149010');
+      assert.match(url, SQUARE, 'with no store asset at all, 32×32 is the only thing left');
+      assert.match(url, /abc123\.jpg$/);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('a steam client without fetchStoreHeaderImage degrades instead of throwing', async () => {
+    // `steam.fetchStoreHeaderImage(appid).catch(...)` throws **synchronously** when the method is
+    // absent — there is no promise yet for `.catch` to attach to, so the whole resolution rejects
+    // rather than falling through. The caller supplies this object, and a client missing a method
+    // must cost an icon, never the call
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: false, status: 404 });
+    try {
+      const url = await fetchGameIcon({ async fetchOwnedGames() { return owned; } }, '2149010');
+      assert.match(url, SQUARE, 'it should have gone on to the last resort');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('a resolved header asks the owned list nothing — the common path got no slower', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, status: 200 });
+    let askedOwned = 0;
+    try {
+      await fetchGameIcon({
+        async fetchOwnedGames() { askedOwned++; return owned; },
+        async fetchStoreHeaderImage() { return REAL; },
+      }, '2149010');
+      assert.equal(askedOwned, 0, 'the owned list is only needed for the fallback, so it is only fetched there');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
 describe('a new column has to be declared in both places', () => {
   /**
    * `SCHEMA` is `CREATE TABLE IF NOT EXISTS`, so it does nothing at all to a table that already
