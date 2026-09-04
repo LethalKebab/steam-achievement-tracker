@@ -92,6 +92,8 @@ The number of steps is fixed before the run starts and does not change while you
 
 A partial rewrite (**自选**, or `--only`) reports the same way, over its own three steps: write, back up, land. It is one request covering every entry you picked, so what moves during the long step there is the count of entries written.
 
+**Before it lands, the sections are tidied.** A long guide is written in several passes that cannot see one another, so the same section can be opened more than once — those are folded together, and the bar says how many were. The pass that reconciles differently-*worded* sections is an AI one and can fail; when it does, the finished card says so and now names which check rejected it, and the guide lands with its sections as written rather than not at all.
+
 `node tracker.js guide-gen <appid>` has an AI research the game online and write the guide, then validates the result against your actual achievement data and registers it. Set it up once:
 
 ```bash

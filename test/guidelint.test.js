@@ -446,3 +446,96 @@ describe('duplicate names: either language\'s description distinguishes them', (
     assert.equal(r.findings.filter((f) => f.code === 'ambiguous-empty-description').length, 2);
   });
 });
+
+describe('a section title used twice', () => {
+  const withText = (text) => lintGuide({
+    defs: [def('A', 'X')],
+    todos: [todo(1, '**X**')],
+    text,
+    kind: 'local',
+  });
+
+  test('→ warn, never blocking', () => {
+    // The mechanical merge fixes this at generation time, so one reaching here is a hand-written
+    // guide or that pass rolled back. Refusing a finished guide over its headings would be worse
+    const r = withText('# 游戏\n\n## 购买内容\n\n- [ ] **X**\n\n## 战斗\n\n## 购买内容\n');
+    const hit = r.findings.filter((f) => f.code === 'duplicate-heading');
+    assert.equal(hit.length, 1);
+    assert.equal(hit[0].level, 'warn');
+    assert.ok(r.ok, 'a repeated heading does not make a guide unusable');
+  });
+
+  test('is reported once, however many times it repeats', () => {
+    const r = withText('# 游戏\n\n## 购买内容\n\n- [ ] **X**\n\n## 战斗\n\n## 购买内容\n\n## 别的\n\n## 购买内容\n');
+    assert.equal(r.findings.filter((f) => f.code === 'duplicate-heading').length, 1,
+      'one line per title; one per repeat is how a rule stops being read');
+  });
+
+  test('a title at two different levels is two different sections', () => {
+    const r = withText('# 游戏\n\n## 收集\n\n- [ ] **X**\n\n### 收集\n');
+    assert.equal(r.findings.some((f) => f.code === 'duplicate-heading'), false);
+  });
+
+  test('and two wordings of one topic are not the same title', () => {
+    // The same line mergeDuplicateSections draws: reconciling these is a judgement, not a match
+    const r = withText('# 游戏\n\n## 经典模式:通用挑战成就\n\n- [ ] **X**\n\n## 经典模式·通用挑战\n');
+    assert.equal(r.findings.some((f) => f.code === 'duplicate-heading'), false);
+  });
+
+  test('a guide with one heading per section says nothing', () => {
+    const r = withText('# 游戏\n\n## 主线\n\n- [ ] **X**\n\n## 支线\n');
+    assert.equal(r.findings.some((f) => f.code === 'duplicate-heading'), false);
+  });
+});
+
+describe('the heading structure a concurrently-written guide gets wrong', () => {
+  const lint = (text) => lintGuide({
+    defs: [def('A', 'X')],
+    todos: [todo(1, '**X**')],
+    text,
+    kind: 'local',
+  });
+  const codes = (text) => lint(text).findings.map((f) => f.code);
+
+  test('a section listing achievements **and** holding subsections that list more', () => {
+    // 月圆之夜's shape: shard 1 opened its sections with `##`, shard 2 with `###`, so twenty topics
+    // of their own rendered as subsections of whichever `##` came before them
+    const text = [
+      '# 游戏', '',
+      '## 战斗', '', '- [ ] **X**<br>做 X。', '',
+      '### 小红帽日记 · 起始装备', '', '- [ ] **Y**<br>做 Y。',
+    ].join('\n');
+    const r = lint(text);
+    assert.ok(r.findings.some((f) => f.code === 'mixed-section-depth'));
+    assert.equal(r.findings.find((f) => f.code === 'mixed-section-depth').level, 'warn');
+    assert.ok(r.ok, 'a heading structure problem must not refuse a finished guide');
+  });
+
+  test('but a section deliberately divided into subsections holds none of its own', () => {
+    // Which is exactly what tells the two apart, with no judgement involved
+    const text = [
+      '# 游戏', '',
+      '## 镜中的记忆', '',
+      '### 精通', '', '- [ ] **X**<br>做 X。', '',
+      '### 难度', '', '- [ ] **Y**<br>做 Y。',
+    ].join('\n');
+    assert.equal(codes(text).includes('mixed-section-depth'), false);
+  });
+
+  test('a level skipped leaves the one in between with no heading', () => {
+    const text = ['# 游戏', '', '## 战斗', '', '- [ ] **X**<br>做 X。', '', '#### 太深了', '', '- [ ] **Y**<br>做 Y。'].join('\n');
+    assert.ok(codes(text).includes('heading-level-jump'));
+  });
+
+  test('and a guide opening at `###` hangs its first section off nothing', () => {
+    const text = ['# 游戏', '', '### 战斗', '', '- [ ] **X**<br>做 X。'].join('\n');
+    assert.ok(codes(text).includes('heading-level-jump'));
+  });
+
+  test('a guide whose sections are all at one level says nothing', () => {
+    const text = ['# 游戏', '', '## 主线', '', '- [ ] **X**<br>做 X。', '', '## 支线', '', '- [ ] **Y**<br>做 Y。'].join('\n');
+    const found = codes(text);
+    assert.equal(found.includes('heading-level-jump'), false);
+    assert.equal(found.includes('mixed-section-depth'), false);
+  });
+});

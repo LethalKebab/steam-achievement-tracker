@@ -59,7 +59,10 @@ import {
   PROMPT_SECTIONS,
   DRAFTS_DIR,
   unwrapAchievementToggles,
+  mergeDuplicateSections,
+  REGROUP_ATTEMPTS,
 } from '../lib/guidegen.js';
+import { msg } from '../lib/messages.js';
 
 // ---------------------------------------------------------------------------
 // Scaffolding
@@ -140,7 +143,7 @@ function regroupReply(system, sections = REGROUP_SECTIONS, count = 5) {
  * Passing null for `sections` models "classification did not succeed" and takes the degraded path
  * (equivalent to the behaviour before this pass was added).
  */
-function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'] } = {}) {
+function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂项'], badRegroups = 0 } = {}) {
   return {
     model: 'claude-opus-5',
     asked: [],
@@ -150,7 +153,10 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
     // them. A test needs no real tools
     webTools: () => [],
     async send({ system, messages, onEvent }) {
-      const planned = regroupReply(system, sections, replies.count ?? 5);
+      // The first `badRegroups` classification asks come back with nothing a grouping can be read
+      // out of — which is the subject of the retry, and the shape a real one takes most often
+      const usable = this.regroupAsks >= badRegroups;
+      const planned = regroupReply(system, usable ? sections : null, replies.count ?? 5);
       if (planned) {
         this.regroupAsks++;
         this.regroupPrompt = messages.at(-1).content;
@@ -2373,6 +2379,39 @@ describe('sharded writing', () => {
     assert.equal(new Set(ns).size, ns.length, 'and no step is announced twice');
   });
 
+  test('a classification pass that comes back unusable is asked once more', async () => {
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const provider = fakeProvider(chunks.map(seg), { badRegroups: 1 });
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider, steam: bigSteam(), appid: '1', onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+    assert.equal(provider.regroupAsks, 2, 'the first reply was unusable, so it has to be asked again');
+    assert.ok(events.some((e) => e.phase === 'regroup-retry'), 'and the retry has to be reported');
+    assert.ok(events.some((e) => e.phase === 'regroup-done'), 'the second answer is the one that lands');
+    assert.ok(!events.some((e) => e.phase === 'regroup-failed'));
+  });
+
+  test('and after the second it degrades, **carrying which gate rejected it**', async () => {
+    const { db, config } = envFor(2);
+    const chunks = chunkDefs(BIG, 2);
+    const provider = fakeProvider(chunks.map(seg), { badRegroups: REGROUP_ATTEMPTS });
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider, steam: bigSteam(), appid: '1', onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, 'a cosmetic pass failing must never cost the guide');
+    assert.equal(provider.regroupAsks, REGROUP_ATTEMPTS, 'asked twice, not more');
+
+    const failed = events.find((e) => e.phase === 'regroup-failed');
+    assert.ok(failed, 'the degradation has to speak up');
+    // Five different failures produce that one sentence on screen. Without the reason travelling
+    // with it, a guide landing with its shards own headings leaves nothing to diagnose from
+    assert.equal(failed.reason, msg('gen.noGroups'));
+  });
+
   test('when only one shard has a problem, round two re-asks only that shard', async () => {
     const { db, config } = envFor(2);
     const chunks = chunkDefs(BIG, 2);
@@ -2406,6 +2445,18 @@ describe('sharded writing', () => {
 // dry run was missing `rarity` and `target`, so one game's dry run printed the checkbox label
 // version while a real run would send the collapsible version. **Structurally there is only one
 // entry point**, so the fork has nowhere to happen.
+// A shard is written with no sight of the others, and nothing in the prompt said which heading
+// level a section opens at — so on 月圆之夜 one shard used `##`, the next `###`, and twenty topics
+// of their own rendered as subsections of whichever section happened to precede them. Both forks
+// have to carry the rule; a rule in one language only is the shape #121 already cost a release
+test('both prompt languages pin the heading level a section opens at', () => {
+  const plan = { game: '测试游戏', defs: [def('A', '第一步', '完成第一关。')], rarity: null, target: 'notion' };
+  const zh = systemPromptFor({ ...plan, lang: 'zh' }, '1', { canSearch: true });
+  const en = systemPromptFor({ ...plan, lang: 'en' }, '1', { canSearch: true });
+  assert.match(zh, /小节标题一律用 `##`/);
+  assert.match(en, /Section headings are `##`/);
+});
+
 test('the prompt has one entry point, so a dry run and a real send cannot fork', () => {
   const plan = {
     game: '测试游戏',
@@ -2500,6 +2551,31 @@ describe('regroupByAssignment (the rearrangement after classification moved to a
     const out = regroupByAssignment(body, { defs: D, assignment: map([['A', '商店']]), sections: ['商店'] });
     assert.match(out, /开盒/, 'an entry with no mapping must not be dropped');
     assert.equal((out.match(/开盒/g) ?? []).length, 1, 'nor duplicated');
+  });
+
+  /**
+   * **Two spellings of one section title must not emit that section twice.**
+   *
+   * `parseRegroupReply` drops a repeated `== 标题` only when the two are the same string to the
+   * character, so a trailing space, a full-width space or a difference in case gets through and
+   * both resolve to one bucket here. Emitted once per spelling, every entry in that section is
+   * written twice — assertion 2 catches the duplication and throws, and the cost of that throw is
+   * the **whole** classification: the guide lands with each shard's own headings instead.
+   *
+   * Measured on 月圆之夜 twice in a row, then reproduced offline with exactly this input.
+   */
+  test('a section title arriving in two spellings is emitted once, not twice', () => {
+    const body = ['## 商店', '- [ ] **喵界图鉴**<br>解锁所有吉祥物。', '- [ ] **开盒**<br>使用各式钥匙打开30个宝箱。'].join('\n');
+    for (const sections of [['商店', '商店 '], ['商店', '商店']]) {
+      const out = regroupByAssignment(body, {
+        defs: D,
+        assignment: map([['A', '商店'], ['B', '商店']]),
+        sections,
+      });
+      assert.equal((out.match(/^## 商店/gm) ?? []).length, 1, `${JSON.stringify(sections)}: one heading`);
+      assert.equal((out.match(/喵界图鉴/g) ?? []).length, 1, `${JSON.stringify(sections)}: no entry written twice`);
+      assert.equal((out.match(/开盒/g) ?? []).length, 1);
+    }
   });
 
   // With a Notion target, one achievement's body is "its own line plus a few `<details>` groups".
@@ -3254,4 +3330,149 @@ describe('how far along a run says it is', () => {
     assert.equal(written.at(-1).done, 2, 'GOOD writes two entries');
     assert.equal(written.at(-1).of, 2, 'and the shard was asked for two');
   });
+});
+
+// ---------------------------------------------------------------------------
+// One title, one section
+// ---------------------------------------------------------------------------
+
+describe('mergeDuplicateSections', () => {
+  const doc = (...lines) => lines.join('\n');
+  const countOf = (text, re) => (text.match(re) ?? []).length;
+
+  test('a document that does not repeat a title comes back byte for byte', () => {
+    const src = doc('## 主线', '', '- [ ] **甲**<br>做甲。', '', '## 支线', '', '- [ ] **乙**<br>做乙。', '');
+    const { text, merged } = mergeDuplicateSections(src);
+    assert.equal(text, src, 'this pass has no opinion about a document that is already fine');
+    assert.deepEqual(merged, []);
+  });
+
+  test('a title used again later folds into the first, in the order the entries were written', () => {
+    const src = doc(
+      '## 购买内容', '', '- [ ] **甲**<br>做甲。', '',
+      '## 战斗', '', '- [ ] **乙**<br>做乙。', '',
+      '## 购买内容', '', '- [ ] **丙**<br>做丙。', ''
+    );
+    const { text, merged } = mergeDuplicateSections(src);
+    assert.equal(countOf(text, /^## 购买内容$/gm), 1, 'one title, one section');
+    assert.deepEqual(merged, [{ title: '购买内容', folded: 1 }]);
+    assert.ok(text.indexOf('**甲**') < text.indexOf('**丙**'), 'what was folded in goes after what was already there');
+    assert.ok(text.indexOf('**丙**') < text.indexOf('## 战斗'), 'and lands inside the section it was folded into');
+  });
+
+  test('a subsection repeating its parent title is not a repeat of it', () => {
+    const src = doc('## 收集', '', '- [ ] **甲**<br>做甲。', '', '### 收集', '', '- [ ] **乙**<br>做乙。', '');
+    const { text, merged } = mergeDuplicateSections(src);
+    assert.equal(text, src, 'the deeper one is inside the first, not another opening of it');
+    assert.deepEqual(merged, []);
+  });
+
+  test('and two siblings sharing a title at different levels stay two sections', () => {
+    // Merging them would flatten a level away, which is the rule joinBodies already holds at a seam
+    const src = doc(
+      '## 主线', '',
+      '#### 收集', '', '- [ ] **甲**<br>做甲。', '',
+      '### 收集', '', '- [ ] **乙**<br>做乙。', ''
+    );
+    const { text, merged } = mergeDuplicateSections(src);
+    assert.equal(text, src);
+    assert.deepEqual(merged, []);
+  });
+
+  test('**the same subtitle under two different parents is two different sections**', () => {
+    // 「角色通关」 under 「镜中的记忆」 and under 「愿望之夜」 are two game modes. Merging those would
+    // move entries into the wrong one — the failure this rule exists to refuse
+    const src = doc(
+      '## 镜中的记忆', '', '### 角色通关', '', '- [ ] **甲**<br>做甲。', '',
+      '## 愿望之夜', '', '### 角色通关', '', '- [ ] **乙**<br>做乙。', ''
+    );
+    const { text, merged } = mergeDuplicateSections(src);
+    assert.equal(text, src);
+    assert.deepEqual(merged, []);
+  });
+
+  test('a folded section brings its subsections with it', () => {
+    const src = doc(
+      '## 镜中的记忆', '', '### 精通', '', '- [ ] **甲**<br>做甲。', '',
+      '## 别的', '', '- [ ] **丙**<br>做丙。', '',
+      '## 镜中的记忆', '', '### 难度', '', '- [ ] **乙**<br>做乙。', ''
+    );
+    const { text } = mergeDuplicateSections(src);
+    const at = (s) => text.indexOf(s);
+    assert.equal(countOf(text, /^## 镜中的记忆$/gm), 1);
+    assert.ok(at('### 精通') < at('### 难度'), 'both subsections end up under the one heading');
+    assert.ok(at('### 难度') < at('## 别的'), 'and neither is left behind under a section it does not belong to');
+  });
+
+  test('punctuation is not folded away — reconciling two wordings is the classification pass job', () => {
+    const src = doc(
+      '## 经典模式:通用挑战成就', '', '- [ ] **甲**<br>做甲。', '',
+      '## 经典模式·通用挑战', '', '- [ ] **乙**<br>做乙。', ''
+    );
+    const { text, merged } = mergeDuplicateSections(src);
+    assert.equal(text, src, 'one topic to a reader, two different strings here, and a guess is not free');
+    assert.deepEqual(merged, []);
+  });
+
+  test('spacing and case are folded away, because those are two spellings of one title', () => {
+    const src = doc('## Story', '', '- [ ] **甲**<br>做甲。', '', '##  story ', '', '- [ ] **乙**<br>做乙。', '');
+    const { merged } = mergeDuplicateSections(src);
+    assert.equal(merged.length, 1);
+  });
+
+  test('the guide title and everything before the first heading stay where they are', () => {
+    const src = doc('# 游戏名', '', 'appid: 1', '', '## 主线', '', '- [ ] **甲**<br>做甲。', '');
+    assert.equal(mergeDuplicateSections(src).text, src, '`#` is the program own title line, never a section');
+  });
+
+  test('not one line of prose is lost or duplicated when sections fold', () => {
+    const src = doc(
+      '## 购买内容', '', '这一节讲的是买东西。', '', '- [ ] **甲**<br>做甲。', '',
+      '## 战斗', '', '- [ ] **乙**<br>做乙。', '',
+      '## 购买内容', '', '还有一句。', '', '- [ ] **丙**<br>做丙。', ''
+    );
+    const lines = mergeDuplicateSections(src).text.split('\n');
+    for (const line of ['这一节讲的是买东西。', '还有一句。', '- [ ] **甲**<br>做甲。', '- [ ] **丙**<br>做丙。']) {
+      assert.equal(lines.filter((l) => l.trim() === line).length, 1, `${line} should be there exactly once`);
+    }
+  });
+});
+
+describe('the passes that tidy a finished guide up', () => {
+  const REPEATED = [
+    '```markdown',
+    '## 主线',
+    '',
+    '- [ ] **第一步**<br>完成第一关。<br>开局就能拿',
+    '',
+    '## 支线',
+    '',
+    '这一节先放着。',
+    '',
+    '## 主线',
+    '',
+    '- [ ] **第二步**<br>完成第二关。<br>接着打',
+    '```',
+  ].join('\n');
+
+  test('a guide that opens the same section twice lands with one of it', async () => {
+    const { db, config } = freshEnv();
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider: fakeProvider([REPEATED]), steam: fakeSteam(['A']), appid: '1',
+      onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+
+    const text = readFileSync(r.path, 'utf8');
+    assert.equal((text.match(/^## 主线$/gm) ?? []).length, 1, 'the repeated heading has to be gone');
+    assert.ok(text.includes('**第一步**') && text.includes('**第二步**'), 'and both entries have to survive it');
+    assert.ok(text.indexOf('**第二步**') < text.indexOf('## 支线'),
+      'the folded entry belongs inside the section it was folded into, not after the next one');
+
+    const said = events.find((e) => e.phase === 'merged-sections');
+    assert.ok(said, 'a change to the sectioning has to be reported');
+    assert.equal(said.folded, 1);
+  });
+
 });
