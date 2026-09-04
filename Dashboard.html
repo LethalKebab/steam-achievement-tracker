@@ -1698,10 +1698,10 @@
       max-width: min(420px, calc(100vw - var(--s6)));
       max-height: 60vh;
       overflow-y: auto;
-      /* Room reserved on the right for the corner buttons — two side by side while live
-         (cancel + collapse), one while finished (close), so this has to fit the wider pair.
-         76px, not 60: the buttons themselves grew (see .gen-close's padding below) */
-      padding: var(--s3) 76px var(--s3) var(--s4);
+      /* Room reserved on the right for the one corner button — cancel while live, close once
+         finished, never both. 42px is its 31px (see .gen-close's padding below) plus the 4px it
+         is inset by, plus room to breathe */
+      padding: var(--s3) 42px var(--s3) var(--s4);
       border: 1px solid rgba(140, 198, 63, 0.5);
       border-left: 3px solid var(--ok);
       border-radius: var(--r-md);
@@ -1735,21 +1735,9 @@
     #gen-bar .gen-link.danger { color: var(--text-2); }
     #gen-bar .gen-link.danger:hover:not(:disabled) { color: var(--danger); }
     #gen-bar .gen-link.armed { color: var(--danger); font-weight: 600; }
-    /* A job running = it can be collapsed (and cancelled); finished = it can only be closed.
-       genCancel and genToggle always show together, genClose only on its own */
+    /* A job running = it can be cancelled; finished = it can only be closed */
     #gen-bar.live #genClose,
-    #gen-bar:not(.live) #genToggle,
     #gen-bar:not(.live) #genCancel { display: none; }
-    /* Collapsed = one line only. **The height is capped with max-height rather than
-       giving the text nowrap** — the progress is several lines joined with <br>, and
-       nowrap does not stop a <br>, which expands it regardless */
-    #gen-bar.collapsed {
-      max-height: calc(1.6em + var(--s3) * 2);
-      overflow: hidden;
-      cursor: pointer;
-    }
-    /* While collapsed the whole strip is clickable to bring it back. The arrow flips to say "clicking again expands" */
-    #gen-bar.collapsed #genToggle .ic { transform: rotate(180deg); }
     #gen-bar .gen-close {
       position: absolute;
       /* Centred on the first line of #gen-msg, not on the container's own top edge — those are
@@ -1781,7 +1769,6 @@
     /* genCancel sits immediately left of the toggle/close corner rather than stacked on it —
        while live the two are shown together, so they need two positions, not one.
        34px = the sibling's own 31px width plus a 3px gap, both measured from the 31×31 size above */
-    #gen-bar #genCancel { right: calc(var(--s1) + 34px); }
     #gen-bar #genCancel:hover { color: var(--danger); background: rgba(255, 255, 255, 0.08); }
     /* On a narrow screen the two corners crowd each other, so it spans a row and yields to the sync status bar below */
     @media (max-width: 720px) {
@@ -2372,10 +2359,6 @@
     <symbol id="i-chevron-up" viewBox="0 0 24 24">
       <path d="m6 14.5 6-6 6 6"/>
     </symbol>
-    <!-- Collapse/expand. The same glyph rotated 180° serves as expand — drawing an up and a down version means only one of them gets updated sooner or later -->
-    <symbol id="i-chevron" viewBox="0 0 24 24">
-      <path d="m6 9.5 6 6 6-6"/>
-    </symbol>
     <symbol id="i-warn" viewBox="0 0 24 24">
       <path d="M12 3.8 21.2 20H2.8z"/>
       <path d="M12 10v4.2M12 17.4h.01"/>
@@ -2594,20 +2577,19 @@
   </div>
 
   <!--
-    Two buttons rather than one that transforms: **「收起」 and 「关掉」 are not the same
-    thing**, and which is available is decided by whether the job has finished (see genLive
-    in the JS). Making one button change its icon and behaviour by state means anyone
-    reading the code has to first work out which face it is wearing; two, each doing one
-    thing, with CSS deciding which shows.
+    Two buttons rather than one that transforms: **stopping a run and dismissing a finished
+    result are not the same request**, and which is available is decided by whether the job has
+    finished (see genLive in the JS). Making one button change its icon and behaviour by state
+    means anyone reading the code has to first work out which face it is wearing; two, each doing
+    one thing, with CSS deciding which shows.
 
-    genCancel is a third, sitting beside genToggle rather than replacing it — collapsing and
-    stopping the run are two different requests, and the run is still worth collapsing while
-    it goes on (or cancelling, while collapsed). It shares genToggle's visibility rule
-    (**live only**): a finished job has nothing left to cancel.
+    The strip is never hidden while a job runs. It is a handful of lines — one for what is
+    happening now, and the step history behind its own disclosure — so there is nothing to get
+    out of the way, and a progress bar that can be dismissed mid-run is one somebody has to
+    remember to bring back.
   -->
   <div id="gen-bar" role="status">
     <button type="button" class="gen-close" id="genCancel" title="取消生成" data-t-title="gen.cancelOk" aria-label="取消生成" data-t-aria-label="gen.cancelOk"><svg class="ic filled"><use href="#i-stop"/></svg></button>
-    <button type="button" class="gen-close" id="genToggle" title="收起(任务仍在进行)" data-t-title="gen.collapseTitle" aria-label="收起" data-t-aria-label="gen.collapse"><svg class="ic"><use href="#i-chevron"/></svg></button>
     <button type="button" class="gen-close" id="genClose" title="关闭" data-t-title="ui.close" aria-label="关闭" data-t-aria-label="ui.close"><svg class="ic"><use href="#i-close"/></svg></button>
     <span id="gen-msg"></span>
   </div>
@@ -2796,12 +2778,10 @@
       'ui.cancel':            ['取消', 'Cancel'],
       'ui.toTop':             ['回到顶部', 'Back to top'],
       'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but excluded from the average completion rate above — the same as Steam’s own method.'],
-      'gen.collapse':         ['收起', 'Collapse'],
       'gen.stepOf':           ['第 {n} / {of} 步', 'step {n} of {of}'],
       'gen.written':          ['已写 {done} / {of} 条', '{done} of {of} written'],
       'gen.showLog':          ['查看步骤', 'Show steps'],
       'gen.hideLog':          ['收起步骤', 'Hide steps'],
-      'gen.collapseTitle':    ['收起(任务仍在进行)', 'Collapse — the task keeps running'],
       'addc.title':           ['将这款游戏添加到列表？', 'Add this game to the list?'],
       'addc.family':          ['家庭组游戏', 'Family-shared game'],
       'pick.filter':          ['筛选', 'Filter'],
@@ -5564,26 +5544,13 @@
     const genMsg = document.getElementById('gen-msg');
 
     /**
-     * **Collapsing is not closing, and while a job is running it can only be collapsed.**
+     * **A running job's progress cannot be dismissed; a finished one's result can.**
      *
-     * This block used to hold only a `genDismissed`: pressing that button set it true and `showGen`
-     * returned outright. The button's title read 「收起」 while the behaviour was permanent
-     * discarding — one generation takes several minutes, and after pressing it this run's progress
-     * was **unrecoverable**, the only remedy being to start another generation (those three entry
-     * points are the only places that clear the flag). The label and the behaviour were two
-     * different things.
-     *
-     * They are now separated by state:
-     *   running  → 「收起」 only. One line is left and one click brings the whole strip back. Not
-     *              being able to see the progress should not happen
-     *   finished → 「关闭」. The result has been read, and letting it occupy the screen is the
-     *              intrusion
-     *
-     * The poll calls showGen every 3 seconds, and the collapsed state is expressed as a class rather
-     * than by blocking showGen — blocking it would freeze the progress at the moment of the press,
-     * so expanding again would show a stale message
+     * There is one control, and which one it is comes from state: while live, 「取消生成」 and
+     * nothing else; once finished, 「关闭」. The strip itself stays put for the length of the run —
+     * it is a few lines, and the one part that grows, the step history, is behind its own
+     * disclosure and closed by default.
      */
-    let genCollapsed = false;
     let genLive = false;
     /**
      * The job the Cancel button targets — set from `guideGenStatus`'s own `appid`/`game` each time
@@ -5598,27 +5565,17 @@
     function syncGenChrome() {
       // **Boolean() cannot be dropped**, for the same reason as the two on the sync button:
       // classList.toggle's second argument being undefined makes it **flip** rather than clear. It
-      // is nastier here — the poll comes every 3 seconds, so once one of them arrives with a missing
-      // field, the progress bar collapses, expands and collapses every 3 seconds
-      genBar.classList.toggle('collapsed', Boolean(genCollapsed));
+      // is nastier here — the poll comes every 3 seconds, so once one arrives with a missing field,
+      // the bar swaps its buttons every 3 seconds
       genBar.classList.toggle('live', Boolean(genLive));
     }
 
-    document.getElementById('genToggle').addEventListener('click', function (e) {
-      e.stopPropagation();
-      genCollapsed = !genCollapsed;
-      syncGenChrome();
-    });
-    document.getElementById('genClose').addEventListener('click', function (e) {
-      e.stopPropagation();
+    document.getElementById('genClose').addEventListener('click', function () {
       genBar.style.display = 'none';
     });
 
     const genCancelBtn = document.getElementById('genCancel');
-    genCancelBtn.addEventListener('click', async function (e) {
-      // Same reason as the other two buttons: while collapsed the bar itself is a "click to
-      // expand" target, and bubbling up would fold it in passing
-      e.stopPropagation();
+    genCancelBtn.addEventListener('click', async function () {
       if (!genRunningAppid) return;
       const appid = genRunningAppid;
       const name = genRunningGame || appid;
@@ -5658,15 +5615,6 @@
         })
         .cancelGuideGen(appid);
     });
-    // Collapsed, the whole strip means "click me to expand". **Only while collapsed** — expanded it
-    // contains links (open the guide), and a fully clickable strip would swallow a link click as a
-    // collapse
-    genBar.addEventListener('click', function () {
-      if (!genCollapsed) return;
-      genCollapsed = false;
-      syncGenChrome();
-    });
-
     let aiReady = false;
     let notionReady = false;
 
@@ -5714,7 +5662,6 @@
      * formatPreflight, the same wording as on the CLI side.
      */
     window.rewriteGuide = async function (appid, name) {
-      genCollapsed = false;
       setGuideBusy(appid, true);
       showGen(escapeHtml(t('gen.checking', { game: name })), false, true);
 
@@ -5994,7 +5941,6 @@
     }
 
     window.migrateGuide = function (appid, name) {
-      genCollapsed = false; // a migration the user pressed themselves, so the progress bar has to show
       setGuideBusy(appid, true);
       showGen(escapeHtml(t('gen.checking', { game: name })), false, true);
       rpc
@@ -6077,7 +6023,6 @@
       const choice = effortChoice();
       const ok = await askConfirm({ title: t('gen.title', { game: name }), okText: t('gen.ok'), choices: [choice] });
       if (!ok) return;
-      genCollapsed = false; // a generation the user pressed themselves, so the progress bar has to show
       btn.disabled = true;
       rpc
         .withSuccessHandler(function (r) {
@@ -6154,20 +6099,12 @@
 
     function showGen(html, dim, live) {
       genBar.style.display = 'block';
-      if (live !== undefined) {
-        // Going from "running" to "finished" expands it once automatically. The reason for
-        // collapsing is that the long run of progress takes too much space, while the result is one
-        // line — and it carries where the guide landed, which is the very thing those minutes were
-        // spent waiting for
-        if (genLive && !live) genCollapsed = false;
-        genLive = live;
-      }
+      if (live !== undefined) genLive = live;
       // Written into the inner span rather than overwriting genBar itself — the two buttons are its
       // siblings, and overwriting innerHTML would wash them away with it
       genMsg.innerHTML = dim ? '<span class="warn">' + html + '</span>' : html;
-      // 「打开文件夹」 is a node created afresh every time the content is rewritten, so it is bound
-      // here in one place — event delegation cannot be used: while collapsed, the whole #gen-bar is
-      // itself a "click to expand" button, and bubbling up would fold the floater in passing
+      // 「打开文件夹」 is a node created afresh every time the content is rewritten, so every
+      // handler below is bound here, on the nodes this repaint just made
       // Deleting a backup is **irreversible**, so it uses the same gesture as the backup panel: the
       // first click turns the button into the consequence and only the second deletes. This one
       // opens no dialog — the progress bar is already a floater, and stacking another would push

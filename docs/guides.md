@@ -88,7 +88,9 @@ This is not a quality check. Your guide is your guide — it is moved as written
 
 **While it runs, the bar says where it is.** A generation on a large game takes many minutes, so the floating bar carries which step it is on out of how many, what is happening right now — the actual search query, not the name of the tool — and, while a batch of entries is being written, how many of them are done. **Show steps** (「查看步骤」) opens a timestamped history of everything so far; the times are the point, since a line stamped four minutes ago and one stamped four seconds ago mean very different things.
 
-The number of steps is fixed before the run starts and does not change while you watch. Rewrite rounds are not extra steps — they are the writing step going round again, and are shown separately as a round count.
+The number of steps is fixed before the run starts and does not change while you watch. A guide long enough to be written in parts counts **each part as a step**, so on a large game the number moves as parts land rather than sitting still for the whole of the writing. Rewrite rounds are not extra steps — they are the writing step going round again, and are shown separately as a round count.
+
+A partial rewrite (**自选**, or `--only`) reports the same way, over its own three steps: write, back up, land. It is one request covering every entry you picked, so what moves during the long step there is the count of entries written.
 
 `node tracker.js guide-gen <appid>` has an AI research the game online and write the guide, then validates the result against your actual achievement data and registers it. Set it up once:
 

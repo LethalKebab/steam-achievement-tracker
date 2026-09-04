@@ -427,7 +427,9 @@ Generation runs for minutes — measured between 35 s and 11 min on real games, 
 
 Anything floating needs an opaque background or it renders on top of table text. `#gen-bar` sits at 9990 so the sync bar wins any collision, and a `max-width: 720px` media query stacks them instead.
 
-While a job runs the bar can only be **collapsed** (`genCollapsed`), never closed — one line stays and one click brings the strip back, since losing sight of a paid multi-minute run is not allowed to happen. Only a **finished** bar offers 关闭. The old single `genDismissed` flag conflated the two (its button said 收起 while the behaviour was permanent discarding of a running job's progress) and was split; finishing a run auto-expands the bar once, because the result line carries where the guide landed. Starting a new generation/migration clears the collapse.
+**While a job runs the bar cannot be put away at all**; only a **finished** one offers 关闭. Losing sight of a paid multi-minute run is not allowed to happen, and there is nothing to get out of the way: the bar is a handful of lines, and the one part that grows with the run — the timestamped step history — is behind its own 「查看步骤」 disclosure and closed by default.
+
+There used to be a second control for that, a chevron collapsing the whole strip to one line. Two collapse affordances on one small panel, labelled 「收起」 and 「收起步骤」, read as one thing pressed twice; the strip-level one went. The corner is therefore one button wide — cancel while live, close once finished, never both — which is what `#gen-bar`'s 42px right padding reserves.
 
 ---
 
