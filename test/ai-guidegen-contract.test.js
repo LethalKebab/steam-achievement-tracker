@@ -203,25 +203,21 @@ describe('a real provider driving the whole pipeline', () => {
    * behavioural differences among the three vendors.**
    *
    * The top of `ai.js` says progress events are normalised too (text / tool / tool-result /
-   * search), so the CLI's live output and guidegen's progress bar know no vendor's raw format.
-   * The `search` case is **emitted only by Gemini**: its
-   * `groundingMetadata.webSearchQueries` repeats in every chunk, so the query can be reported
-   * while streaming. On Anthropic the query lives in the `server_tool_use` block's **streaming
-   * JSON input**, which has not arrived at `content_block_start`, so `emitProgress` can only
-   * emit `{type:'tool', name:'web_search'}` — a raw, English, wire-format tool name that goes
-   * straight into the progress bar.
+   * search), and this is the case that used not to hold. Gemini repeats
+   * `groundingMetadata.webSearchQueries` in every chunk, so it could always report the query while
+   * streaming. On Anthropic the query lives in the `server_tool_use` block's **streaming JSON
+   * input**, which has not arrived at `content_block_start` — so for as long as `emitProgress` ran
+   * ahead of the accumulator, the only thing it could say was the tool's wire name.
    *
-   * Two consequences, neither of which raises an error: running Claude / DeepSeek scrolls
-   * `web_search` past the progress bar rather than a searching-for line, **and gives no way to
-   * see what the model is searching for**; while the same interface on Gemini shows the query.
-   * The closing `searchQueries` is consistent across all three, so an after-the-fact report
-   * cannot reveal this difference.
+   * That is what issue #78 was actually reporting. On a large game the research phase runs for
+   * minutes with one unchanging word on screen, which cannot be told apart from being stuck, and
+   * the reporter fell back to watching the API console for spend.
    *
-   * What is pinned here is **current real behaviour**, not what it ought to be — changing
-   * `emitProgress` so Anthropic also emits a `search` event at `content_block_stop` is a
-   * separate matter, and this test gets inverted when that happens.
+   * The accumulator now runs first and the query is emitted at `content_block_stop`, so **all three
+   * vendors report the same sentence** — which is what this file exists to check. Inverting this
+   * assertion was named in advance as the thing that would happen when it was fixed.
    */
-  test('only gemini can report a live search query; the anthropic family reports the raw tool name', async () => {
+  test('every vendor reports the live search query, in the same words', async () => {
     const seen = {};
     for (const c of CASES) {
       const { db, config } = freshEnv(c.ai);
@@ -232,9 +228,16 @@ describe('a real provider driving the whole pipeline', () => {
       });
       seen[c.ai.provider] = events.filter((e) => e.phase === 'tool').map((e) => e.name);
     }
-    assert.deepEqual(seen.gemini, ['搜索「测试游戏 成就」']);
-    assert.deepEqual(seen.anthropic, ['web_search'], 'a wire-format tool name leaked into the progress bar');
-    assert.deepEqual(seen.deepseek, ['web_search'], 'the same class as anthropic, so the same behaviour');
+    // The fakes issue the same query, so agreement here is agreement about the whole path from
+    // wire format to progress bar — not merely that each vendor said something
+    assert.ok(seen.gemini.includes('搜索「测试游戏 成就」'), JSON.stringify(seen.gemini));
+    assert.ok(seen.anthropic.includes('搜索「测试游戏 成就」'), JSON.stringify(seen.anthropic));
+    assert.ok(seen.deepseek.includes('搜索「测试游戏 成就」'), JSON.stringify(seen.deepseek));
+    // **And no wire name survives anywhere.** Dropping this is how `web_search_20260209` comes back
+    // the next time the tool is revised, since the name is matched by prefix precisely so it can be
+    for (const [vendor, names] of Object.entries(seen)) {
+      assert.ok(!names.some((n) => /web_(search|fetch)/.test(n)), `${vendor} still leaks a wire tool name: ${JSON.stringify(names)}`);
+    }
   });
 
   test('the guide body the three vendors produce is byte-identical', async () => {

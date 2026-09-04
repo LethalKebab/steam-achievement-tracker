@@ -1916,6 +1916,10 @@ const CLI_HINTS = {
   'gemini-model-retired': 'hint.geminiModel',
   'gemini-model-unknown': 'hint.geminiModel',
   'gemini-no-allowance': 'hint.geminiModel',
+  // **Not funnelled into hint.geminiModel with the three above.** That advice says "change the
+  // model", and here the model is fine — sending someone to edit a correct setting is worse than
+  // saying nothing, and is how a capacity outage gets misread as a stale model for the third time
+  'gemini-unavailable': 'hint.geminiUnavailable',
   'gemini-429-no-detail': 'hint.gemini429NoDetail',
   'gemini-tool-rejected': 'hint.geminiToolRejected',
   'bad-api-key': 'hint.badApiKey',

@@ -2187,6 +2187,10 @@ describe('the progress bar is an innerHTML sink, so everything reaching it is es
     'GEN_WARN', 'GEN_OK', 'GEN_QUEUE',
     // warnLines() / renderFinished() escape everything dynamic inside themselves
     'warns', 'doneTail', 'genDoneHtml', 'join',
+    // genLogHtml() — same rule: the timestamp and every log line are escaped inside it, and the
+    // only markup it emits is its own. **Being on this list is a claim that has to stay true**;
+    // the test below re-reads that function and checks it
+    'genLogHtml', 's',
   ]);
 
   // Written this way rather than as a literal: the escape would have to survive every layer between
@@ -2280,6 +2284,24 @@ describe('the progress bar is an innerHTML sink, so everything reaching it is es
     }
     return out;
   }
+
+  test('the functions on the by-construction list really do escape what they interpolate', () => {
+    // **The list is an assertion, not an exemption.** A name added to it and then edited to
+    // interpolate something raw is exactly the hole the scan above exists to close, and nothing
+    // else would notice — the scan would keep waving the name through
+    const js = inlineScripts(read('Dashboard.html')).join(SEP);
+    const at = js.indexOf('function genLogHtml');
+    assert.ok(at !== -1, 'genLogHtml is on the by-construction list but no longer exists');
+    const body = js.slice(at, js.indexOf(SEP + '    }', at));
+    // Everything reaching the markup from the state goes through escapeHtml on the way in. Written
+    // as the exact expressions rather than as a pattern: a pattern here would be one more thing that
+    // can be loosened until it matches anything, which is the failure this test exists to prevent
+    for (const call of ['escapeHtml(logTime(e.at))', 'escapeHtml(e.text)']) {
+      assert.ok(body.includes(call), `genLogHtml no longer builds its markup with ${call}`);
+    }
+    // …and nothing else from the log is interpolated raw
+    assert.ok(!/\+\s*e\.(at|text)/.test(body), 'a log field reaches the markup without escapeHtml');
+  });
 
   test('every value handed to showGen is escaped, or is HTML this file built itself', () => {
     const js = inlineScripts(read('Dashboard.html')).join(SEP);

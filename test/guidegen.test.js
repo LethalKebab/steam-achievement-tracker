@@ -33,6 +33,7 @@ import {
 } from '../lib/db.js';
 import { unnameableApiNames } from '../lib/guidelint.js';
 import { spoilerSystemFor, ASIDE_EFFORT } from '../lib/guidespoiler.js';
+import { countStreamedEntries, generationSteps } from '../lib/guidegen.js';
 import { syncGuidesFromMarkdown } from '../lib/guides.js';
 import {
   generateGuide,
@@ -171,7 +172,7 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
     // Web tools are declared by the provider itself and the orchestration layer only forwards
     // them. A test needs no real tools
     webTools: () => [],
-    async send({ system, messages }) {
+    async send({ system, messages, onEvent }) {
       const planned = regroupReply(system, sections, replies.count ?? 5);
       if (planned) {
         this.regroupAsks++;
@@ -187,6 +188,10 @@ function fakeProvider(replies, { sections = ['主线', '支线', '收集', '杂�
       this.asked.push(messages.at(-1).content);
       const text = replies[this.asked.length - 1];
       if (text === undefined) throw new Error('fakeProvider ran out of replies');
+      // **Every real provider streams the prose out as `text` events**, and the entry counter that
+      // reports "12 of 25 written" is fed by them. Returning the reply without them made the fake
+      // the one provider whose writing nothing could observe
+      if (onEvent) onEvent({ type: 'text', text });
       return this.reply(text);
     },
     reply(text) {
@@ -3250,5 +3255,90 @@ describe('paying for the spoiler pass, or not', () => {
       efforts.find((e) => e[0] === 'writing'), ['writing', null],
       'the writing rounds must keep taking the depth the run was configured with'
     );
+  });
+});
+
+/**
+ * Progress detail (issue #78). What a person watching a twenty-minute run needs is not more
+ * phases — it is a number that moves and a total that does not.
+ */
+describe('how far along a run says it is', () => {
+  describe('countStreamedEntries', () => {
+    test('counts top-level entries only, never the sub-steps inside them', () => {
+      // Sub-steps are lines within an entry; counting them reports more written than were asked for
+      const text = '## 主线\n- [ ] **甲**<br>d<br>心得\n  - [ ] 第一步\n  - [ ] 第二步\n- [ ] **乙**<br>d\n';
+      assert.equal(countStreamedEntries(text), 2);
+    });
+
+    test('a line counts as soon as its bracket arrives, and the number only goes up', () => {
+      // The point of the figure is that it moves while the prose is still streaming; waiting for
+      // the line to end would leave it at 0 for the whole of a slow entry
+      const parts = ['- [ ] **甲**<br>', '完成第一关。<br>心得\n', '- [ ', '] **乙**'];
+      const counts = [];
+      let acc = '';
+      for (const p of parts) { acc += p; counts.push(countStreamedEntries(acc)); }
+      assert.deepEqual(counts, [1, 1, 1, 2]);
+    });
+
+    test('prose that is not an entry does not count', () => {
+      assert.equal(countStreamedEntries('## 主线\n\n这一节讲的是主线剧情。\n'), 0);
+    });
+  });
+
+  describe('generationSteps', () => {
+    test('the smallest run is write then land', () => {
+      assert.deepEqual(generationSteps({ chunks: 1 }), ['write', 'land']);
+    });
+
+    test('each conditional stage is counted only when it will actually run', () => {
+      assert.deepEqual(generationSteps({ chunks: 4 }), ['write', 'regroup', 'land']);
+      assert.deepEqual(generationSteps({ chunks: 1, spoilerFold: true }), ['write', 'spoiler', 'land']);
+      assert.deepEqual(generationSteps({ chunks: 1, existing: true }), ['write', 'backup', 'land']);
+      assert.deepEqual(
+        generationSteps({ chunks: 4, spoilerFold: true, existing: true }),
+        ['write', 'spoiler', 'regroup', 'backup', 'land']
+      );
+    });
+
+    test('**rewrite rounds are never steps**', () => {
+      // The one thing about a run that cannot be known in advance. Counted as steps, the total would
+      // grow while somebody watched it, which is worse than having no total at all
+      const before = generationSteps({ chunks: 2, spoilerFold: true, existing: true }).length;
+      for (const rounds of [1, 2, 3]) {
+        assert.equal(generationSteps({ chunks: 2, spoilerFold: true, existing: true, rounds }).length, before);
+      }
+    });
+  });
+
+  test('a real run reports its steps with a total that never moves', async () => {
+    const { db, config } = freshEnv();
+    const provider = fakeProvider([GOOD]);
+    const events = [];
+    const r = await generateGuide(db, {
+      config, provider, steam: fakeSteam(['A']), appid: '1', onProgress: (e) => events.push(e),
+    });
+    assert.equal(r.ok, true, r.reason ?? '');
+
+    const steps = events.filter((e) => e.phase === 'step');
+    assert.deepEqual(steps.map((e) => e.key), ['write', 'land']);
+    assert.deepEqual(steps.map((e) => e.n), [1, 2]);
+    assert.deepEqual([...new Set(steps.map((e) => e.of))], [2], 'the total has to be one number for the whole run');
+    assert.deepEqual(events.find((e) => e.phase === 'plan').steps, ['write', 'land'],
+      'the plan announces the list up front, so the interface can draw it before anything happens');
+  });
+
+  test('and reports the entries as the prose arrives', async () => {
+    // The provider fake replies in one lump, so this sees the end state rather than the ramp; what
+    // it pins is that the figure is reported at all and is measured against the shard's real size
+    const { db, config } = freshEnv();
+    const events = [];
+    await generateGuide(db, {
+      config, provider: fakeProvider([GOOD]), steam: fakeSteam(['A']), appid: '1',
+      onProgress: (e) => events.push(e),
+    });
+    const written = events.filter((e) => e.phase === 'written');
+    assert.ok(written.length, 'nothing reported how much of the shard was written');
+    assert.equal(written.at(-1).done, 2, 'GOOD writes two entries');
+    assert.equal(written.at(-1).of, 2, 'and the shard was asked for two');
   });
 });

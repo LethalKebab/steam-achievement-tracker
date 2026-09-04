@@ -86,6 +86,10 @@ This is not a quality check. Your guide is your guide — it is moved as written
 
 ### Having one written for you
 
+**While it runs, the bar says where it is.** A generation on a large game takes many minutes, so the floating bar carries which step it is on out of how many, what is happening right now — the actual search query, not the name of the tool — and, while a batch of entries is being written, how many of them are done. **Show steps** (「查看步骤」) opens a timestamped history of everything so far; the times are the point, since a line stamped four minutes ago and one stamped four seconds ago mean very different things.
+
+The number of steps is fixed before the run starts and does not change while you watch. Rewrite rounds are not extra steps — they are the writing step going round again, and are shown separately as a round count.
+
 **Hiding spoilers is asked each time, not configured.** The confirmation dialog carries a **Spoiler guard** (「防剧透」) switch beside the treatment, off by default. Turn it on and the program asks, once the guide is written, which sentences give the story away, and moves those into a fold you click to open — endings, twists, who somebody turns out to be, and what a hidden achievement actually asks of you, since Steam publishes no description for those and your guide is the only place that condition appears.
 
 Turning it on costs one more call to the AI, which the dialog says beside the switch; that is why it is a choice at the moment you confirm the spend rather than a setting in a file. It is off by default because a guide is usually written for a game you have already finished, where there is nothing left to spoil. On the command line it is `--spoiler`; the same choice applies to **Rewrite** (「重写」) and to a partial rewrite, and on a partial rewrite only the entries you named are looked at.
