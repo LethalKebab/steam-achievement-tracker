@@ -379,7 +379,18 @@ Rule 五 only says "fold content once it reaches 10 lines"; it never said "but n
 
 `computeCheckedKeys` skips any achievement whose name collides (it cannot tell which is which, and a missed tick beats a wrong one), so those achievements **stay unticked even when unlocked**, while `checked-mismatch` keeps reporting — three rewrite rounds burned on an error **the model cannot possibly fix** (it isn't allowed to write checkboxes at all).
 
-`unnameableApiNames(defs)` handles it: when neither of an achievement's names is unique in this game, its `checked-mismatch` counts as **expected** and does not block. The exemption must be computed **per name** — a colliding Chinese name with a unique English one still ticks fine (most collisions are Steam single-language localization bugs), and over-exempting hides real defects.
+`unnameableApiNames(defs, lang)` handles it: when the name a guide in `lang` would write is not unique in this game, its `checked-mismatch` counts as **expected** and does not block.
+
+**The language is the whole of it, and leaving it out was a real bug for a year.** The predicate first asked "does this achievement have a unique name *somewhere*", which reads as the same question and is not: a guide is written in one language, so the other language's name is not on the page and its uniqueness cannot help ticking. The two readings differ on the most common collision there is — a Steam localization duplication in one language only. 文明VI ships 亦敌亦友 twice, under `Frenemy` and `Frenemies`: a Chinese guide carries 亦敌亦友 on both entries and can tick neither, an English guide ticks both. Measured on a 318-game library, **18 achievements across 9 games** were classified reachable while being unreachable in Chinese; the exempt set went from 52 to 70 with no achievement losing an exemption. The cost was a **complete** draft thrown away with 「校验没过,但没有一条是模型能改的」 — reported on Warframe's 格斗精通II and 特工 ([#81](https://github.com/LethalKebab/steam-achievement-tracker/issues/81)).
+
+Two rules hold it up, and both are pinned:
+
+- **A missing name falls back to the other language**, because an achievement with no Chinese name has to be written under its English one. Reading an absent name as "not unique" would exempt every achievement in such a game and hide a genuinely broken ticker.
+- **The name index stays over both languages.** `computeCheckedKeys` looks candidates up in the combined index, so a Chinese name equal to another achievement's English name really does collide there; a per-language index would disagree with the very code this predicate exists to predict.
+
+Over-exempting is still the failure to avoid: a `checked-mismatch` on a name that *is* unique in the guide's language means **our** ticking broke, and it has to keep blocking. That is why this is not simply "exempt anything that collides in either language".
+
+**Do not copy the matching side's rule here.** `findAmbiguousNames` genuinely does close **per name, not per achievement** — a colliding Chinese name does not disqualify a unique English one — because it is deciding whether a specific candidate string may tick, with the guide's text in hand. This predicate is *predicting* reachability before the guide exists, so it has only the language to go on. Same words, different question.
 
 **The same shape has a second exit.** `ambiguous-no-description` requires same-named achievements to quote the description verbatim — in **either** language, matching the reverse lookup and the `paraphrased-description` rule, so an English guide quoting the English description satisfies it. But **when Steam carries no description in either language there is nothing to quote** — nobody can fix it. A guide with 197/197 coverage can be held at the door by 15 such findings, with all three rounds spent asking the model to copy a description that does not exist.
 

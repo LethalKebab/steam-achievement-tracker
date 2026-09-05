@@ -231,23 +231,61 @@ const MISSING_B = '```markdown\n## 主线\n\n- [ ] **第一步**<br>完成第一
 // ---------------------------------------------------------------------------
 
 describe('unnameableApiNames', () => {
-  test('both the Chinese and the English collide → both are out of reach', () => {
+  test('both the Chinese and the English collide → out of reach whichever language the guide is in', () => {
     const defs = [def('A', '妙手空空', '偷 10 次', 'Skilled Thief'), def('B', '妙手空空', '偷 100 次', 'Skilled Thief')];
-    assert.deepEqual([...unnameableApiNames(defs)].sort(), ['A', 'B']);
+    assert.deepEqual([...unnameableApiNames(defs, 'zh')].sort(), ['A', 'B']);
+    assert.deepEqual([...unnameableApiNames(defs, 'en')].sort(), ['A', 'B']);
   });
 
-  test('only the Chinese collides while the English is unique → still tickable, so no exemption', () => {
-    // 9 of the 12 games with colliding names are this kind (a Steam localisation bug). A wrong
-    // exemption hides a real problem
+  /**
+   * **A guide is written in one language, so only that language's names are on the page.** This
+   * pair is 文明VI's 亦敌亦友 / Frenemy + Frenemies, one of the 18 in a 318-game library shaped this
+   * way — a Steam localisation duplication that exists in Chinese only.
+   *
+   * A Chinese guide writes 亦敌亦友 on both entries, `computeCheckedKeys` refuses a candidate
+   * matching two achievements, and the unlocked one therefore stays unticked forever. Answering
+   * "is it reachable" with "it has *a* unique name somewhere" said yes, so the resulting
+   * `checked-mismatch` went to blocking, where nothing is model-fixable — the run died on a
+   * complete draft (issue #81, reported on Warframe's 格斗精通II / 特工).
+   */
+  test('a collision in the guide’s own language is out of reach, however unique the other language is', () => {
     const defs = [
       def('A', '亦敌亦友', '描述一', 'Frenemy'),
       def('B', '亦敌亦友', '描述二', 'Frenemies'),
     ];
-    assert.equal(unnameableApiNames(defs).size, 0);
+    assert.deepEqual([...unnameableApiNames(defs, 'zh')].sort(), ['A', 'B'],
+      'a Chinese guide carries 亦敌亦友 twice, and no English name on the page can resolve that');
+    assert.equal(unnameableApiNames(defs, 'en').size, 0,
+      'an English guide carries Frenemy and Frenemies, which tick — exempting them there would hide a genuinely broken ticker');
+  });
+
+  test('and the same the other way round, so neither language is the special one', () => {
+    const defs = [
+      def('A', '双倍麻烦甲', '描述一', 'Double Trouble'),
+      def('B', '双倍麻烦乙', '描述二', 'Double Trouble'),
+    ];
+    assert.equal(unnameableApiNames(defs, 'zh').size, 0);
+    assert.deepEqual([...unnameableApiNames(defs, 'en')].sort(), ['A', 'B']);
+  });
+
+  test('with no name in the guide’s language the entry has to carry the other one, so that one decides', () => {
+    // Steam does return achievements with one language missing. Reading the absent name as
+    // "not unique" would exempt every one of them and hide a broken ticker across a whole game
+    const defs = [
+      def('A', '', '描述一', 'Frenemy'),
+      def('B', '', '描述二', 'Frenemies'),
+    ];
+    assert.equal(unnameableApiNames(defs, 'zh').size, 0,
+      'with no Chinese name the entry is written under the English one, which is unique here');
   });
 
   test('every name unique → an empty set', () => {
     assert.equal(unnameableApiNames(DEFS).size, 0);
+  });
+
+  test('the language defaults to Chinese, so a call site that forgets to pass one lands on what this project has always spoken', () => {
+    const defs = [def('A', '亦敌亦友', '一', 'Frenemy'), def('B', '亦敌亦友', '二', 'Frenemies')];
+    assert.deepEqual([...unnameableApiNames(defs)].sort(), ['A', 'B']);
   });
 });
 
@@ -551,6 +589,28 @@ describe('the planGuide gates', () => {
         return true;
       }
     );
+  });
+
+  /**
+   * **The call site is the half that goes missing.** `unnameableApiNames` answers "which language
+   * is this guide written in", and the only place that knows is the plan — so a correct predicate
+   * called without the language is the same bug with an extra function in front of it. Asserted
+   * through `planGuide` rather than by reading the source, so it stays true however the plan is
+   * assembled.
+   */
+  test('the unnameable set is computed for the language the guide will be written in', async () => {
+    const collidesInChineseOnly = [
+      def('A', '亦敌亦友', '描述一', 'Frenemy'),
+      def('B', '亦敌亦友', '描述二', 'Frenemies'),
+    ];
+    const planIn = (uiLanguage) => {
+      const { db, config } = freshEnv({ defs: collidesInChineseOnly });
+      return planGuide(db, { config: { ...config, uiLanguage }, steam: fakeSteam(), appid: '1' });
+    };
+    assert.deepEqual([...(await planIn('zh')).unnameable].sort(), ['A', 'B'],
+      'a Chinese guide writes 亦敌亦友 on both entries and can tick neither');
+    assert.equal((await planIn('en')).unnameable.size, 0,
+      'an English guide writes Frenemy and Frenemies, which tick — exempting them would hide a broken ticker');
   });
 
   test('a Notion guide page already exists → refused (one appid, one backend)', async () => {
