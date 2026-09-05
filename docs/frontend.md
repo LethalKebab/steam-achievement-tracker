@@ -246,7 +246,7 @@ One asymmetry worth keeping: the 「被…挡住了,点这里查看」 jump rese
 
 ## 8. The search boxes
 
-The Dashboard's 搜索游戏名… and the rewrite dialog's 搜索成就 share one shape: `.search-field` wraps the input, `.field-clear` is absolutely positioned over its right inset, and Esc is the keyboard equivalent.
+The Dashboard's 搜索游戏名… and the rewrite dialog's 搜索成就 share one shape: `.search-field` wraps the input, `.field-clear` is absolutely positioned over its right inset — centred by `top/bottom: 0` + `margin: auto`, never by a transform, for the reason in §12 — and Esc is the keyboard equivalent.
 
 **Three things are load-bearing and each fails silently:**
 
@@ -444,6 +444,12 @@ Two defects the rebuild left behind.
 Separately, **the file contained zero `:active` rules** — every button had hover, none had press feedback, in a tool whose rows get clicked dozens of times a day. There is now one global press rule next to the global `:focus-visible`, for the same reason that one exists: **per-component interaction states get forgotten one component at a time.**
 
 It uses `translateY(1px)` (compositor-only — a padding/margin nudge would reflow a 300-row table on every click) and deliberately excludes `.g-card`, whose hover already owns `translateY(-3px)`.
+
+**So `transform` is spoken for, and this rule replaces rather than adds to it.** There is one such property and no way to compose two declarations of it, so a press does not offset an element's resting transform — it overwrites it. A control centred by `translateY(-50%)` therefore drops half its own height the moment it is pressed, and **the damage is not that it moves**: the pointer ends up outside the button, the `mouseup` lands on whatever is underneath, and the browser produces **no click event at all**. A press in the affected half silently does nothing.
+
+That was the search box's ✕ ([#139](https://github.com/LethalKebab/steam-achievement-tracker/issues/139)), and the shape of the report is the point: 12px of lost centring plus the 1px press put the top half of a 24×24 target out of reach, so it was described as a cross that wandered under the cursor and would not respond — not as a control that had moved. Measured in a browser: pressing 3px inside the top edge produced zero `click` events and left the field untouched.
+
+Anything this rule reaches is therefore centred with `top/bottom: 0` + `margin: auto` and leaves `transform` alone. `html-smoke.test.js` pins that no class the rule reaches carries a `transform` in its resting rule — mutation-tested in both directions, since a check that has never been seen failing proves nothing.
 
 ### Every `.armed` rule needs a `:hover` twin
 
