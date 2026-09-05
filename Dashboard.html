@@ -245,7 +245,16 @@
        the compositor and triggers no reflow — in a table of several hundred rows,
        reflowing the whole page on a click is visible.
        `.g-card` is excluded: its hover is already translateY(-3px), and stacking
-       another would fight it. */
+       another would fight it.
+
+       **Nothing this rule reaches may hold its position with `transform`.** There is
+       one `transform` property and no way to add to it, so a press does not offset a
+       base transform, it **replaces** it — a button centred by `translateY(-50%)`
+       drops half its own height the instant it is pressed, out from under the cursor,
+       and a mouseup landing off the button is not a click at all: the press does
+       nothing and the control reads as broken rather than as moving. Centre with
+       `top/bottom: 0` + `margin: auto` (see `.field-clear`) and leave `transform` to
+       this rule. */
     button:active:not(:disabled),
     .icon-btn:active,
     .guide-btn:active:not(:disabled),
@@ -873,8 +882,16 @@
     .field-clear {
       position: absolute;
       right: 4px;
-      top: 50%;
-      transform: translateY(-50%);
+      /* **Centred by `top/bottom: 0` + `margin: auto`, deliberately not by
+         `translateY(-50%)`.** `transform` here belongs to the global `:active` press
+         rule, which replaces rather than adds to whatever it finds — so a cross
+         centred by transform jumps 13px down the moment it is pressed (12px of lost
+         centring plus the 1px press), leaving the pointer outside it. Releasing off
+         the button produces no click at all, so roughly the top half of the target is
+         dead and the cross reads as unresponsive. See the note on that rule. */
+      top: 0;
+      bottom: 0;
+      margin: auto 0;
       /* 24×24 is WCAG 2.2's floor for a pointer target, while the cross inside it is
          --fs-lg (the same size as #gen-bar's close cross) — the stage being larger
          than the marker is deliberate: drawing the cross larger to match would

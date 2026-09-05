@@ -835,6 +835,66 @@ describe('the clear cross in the search box', () => {
   });
 });
 
+/**
+ * **A press does not offset a base transform, it replaces it.** `transform` is one property with
+ * no way to add to it, so the global `:active` rule overwrites whatever an element was using
+ * `transform` for at rest. On the clear cross — centred by `translateY(-50%)` — that was a 13px
+ * drop the instant it was pressed: the cross left the pointer, the mouseup landed on the input,
+ * and **the browser produced no click event at all**. So roughly the top half of a 24×24 target
+ * silently did nothing, which is why it was reported as an unresponsive, wandering cross rather
+ * than as anything visibly moving.
+ *
+ * The cascade itself cannot be evaluated here (see this file's header), so what is pinned is the
+ * shape that makes the collision possible: a class the press rule reaches must not hold its
+ * position with `transform`. Centre with `top/bottom: 0` + `margin: auto` instead.
+ */
+describe('the press rule owns transform, so nothing it reaches may hold its place with one', () => {
+  const page = () => read('Dashboard.html');
+  /** @media is unwrapped rather than skipped, so the rules inside it are read like any other */
+  const css = () => styleBlocks(page()).join(SEP)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/@media[^{]*\{/g, '');
+
+  /** `text-transform:` is a different property; and `transform: none` is the resting default, so declaring it collides with nothing */
+  const MOVES = /(?:^|[;{\s])transform\s*:\s*(?!none[\s;}])/;
+  const rules = () => [...css().matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => [m[1].trim(), m[2]]);
+  const pressRule = () => rules().find(([sel, body]) => sel.includes(':active') && MOVES.test(body));
+
+  test('the press rule is still there, and still works through transform', () => {
+    assert.ok(pressRule(), 'cannot find the global :active transform rule — this check has lost its target rather than passed');
+  });
+
+  test('no class it reaches carries a transform in its resting rule', () => {
+    const press = pressRule();
+    assert.ok(press, 'cannot find the global :active transform rule — this check has lost its target rather than passed');
+
+    // **Two sources, because the rule reaches by tag as well as by class.** Every class this page
+    // puts on a <button> — the static markup and the innerHTML strings the JS builds alike — plus
+    // the classes the rule names outright
+    const reached = new Set();
+    const buttons = markupNoComments(page()) + SEP + inlineScripts(page()).join(SEP);
+    for (const [, list] of buttons.matchAll(/<button[^>]*\sclass="([^"]+)"/g)) {
+      for (const c of list.split(/\s+/)) if (c) reached.add(c);
+    }
+    for (const [, c] of press[0].matchAll(/\.([\w-]+):active/g)) reached.add(c);
+    assert.ok(reached.size > 5, 'cannot find the buttons this rule reaches — this check has lost its target rather than passed');
+
+    const offenders = [];
+    for (const [selectors, body] of rules()) {
+      if (!MOVES.test(body)) continue;
+      for (const one of selectors.split(',')) {
+        // Only the **subject** of the selector, and only in its resting state: a pseudo-class or
+        // pseudo-element on it means the rule is not what the element looks like before it is touched
+        const subject = one.trim().split(/[\s>+~]+/).pop() || '';
+        if (subject.includes(':')) continue;
+        for (const [, c] of subject.matchAll(/\.([\w-]+)/g)) if (reached.has(c)) offenders.push(one.trim());
+      }
+    }
+    assert.deepEqual(offenders, [],
+      'a press replaces this transform rather than adding to it, so the control jumps out from under the pointer and the click is never produced');
+  });
+});
+
 describe('recently played: the badge and the pin share one window', () => {
   // **Each writing its own day count is a kind of broken that raises no error.** It presents as a
   // row sorting to the top with nothing on the row saying why — the user only thinks the sorting
