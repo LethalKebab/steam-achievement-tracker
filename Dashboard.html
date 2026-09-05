@@ -193,8 +193,16 @@
        **It is not inside the :root block**, because that block is the design tokens
        kept word-for-word identical with Setup.html; this is a runtime measurement
        for this page and no part of the design system. The default below is used
-       only for the one frame before JS gets to it */
-    html { --topbar-h: 88px; }
+       only for the one frame before JS gets to it.
+
+       **`overflow-anchor: none` sits on the same rule.** Both `.topbar` and the table
+       header are `position: sticky`, and content above the scroll position (the search
+       dropdown) changes height as part of normal use — exactly the shape the CSS Scroll
+       Anchoring spec exists for, and exactly the shape browsers are known to mis-anchor
+       against a sticky element (a scroll compensation applied against the wrong node
+       reads as a stray downward jump, nothing to do with the app's own JS). Nothing here
+       relies on scroll anchoring, so there is nothing to trade away by turning it off */
+    html { --topbar-h: 88px; overflow-anchor: none; }
 
     * { box-sizing: border-box; }
 
@@ -4202,6 +4210,19 @@
      * text.** In the dialog's field, Esc also means closing the whole dialog: with text it
      * clears the text and only without it closes the dialog, the same rule as the archive
      * dialog's 「先撤销待确认的那一下,再按才关框」.
+     *
+     * **The mouse path fires on `pointerdown`, not `click`.** A native `click` only fires
+     * when `pointerdown` and the matching release land on the same element — this button is
+     * the WCAG-floor 24×24, and anything that reflows in that window (a debounced search
+     * result arriving, the topbar re-measuring after `#searchExtra` changes size) can put the
+     * release a pixel outside it, and the whole click is silently dropped. That presented as
+     * 「点了没反应,得再点一次」. `pointerdown` fires the instant the button is pressed and
+     * needs no matching release, so it cannot be lost that way. `e.preventDefault()` only
+     * stops the button from taking focus first — `clearField` already sends it to the input.
+     * `clearField` is idempotent (clearing an already-empty field, refocusing an
+     * already-focused input), so the plain `click` kept below for keyboard activation
+     * (Space/Enter on a focused button, which fires `click` and never `pointerdown`) is safe
+     * to also fire on the same mouse press without double-applying anything visible.
      */
     document.querySelectorAll('.search-field').forEach(function(field) {
       const input = field.querySelector('input');
@@ -4211,7 +4232,12 @@
         // Typing the next term straight after clearing is the most common use, so focus should not fall back to the page
         input.focus();
       }
-      field.querySelector('.field-clear').addEventListener('click', clearField);
+      const clearBtn = field.querySelector('.field-clear');
+      clearBtn.addEventListener('pointerdown', function(e) {
+        e.preventDefault();
+        clearField();
+      });
+      clearBtn.addEventListener('click', clearField);
       input.addEventListener('keydown', function(e) {
         if (e.key !== 'Escape' || input.value === '') return;
         e.stopPropagation();
