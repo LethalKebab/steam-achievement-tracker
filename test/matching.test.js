@@ -1002,3 +1002,112 @@ describe('resolveTodoToAchievement stage 1 — evidence that only looks like evi
   });
 });
 
+/**
+ * **A description quoted in the notes is a citation, not the subject.**
+ *
+ * Measured over the whole corpus: 7 boxes of 4,133 were filed under an achievement the entry merely
+ * mentioned — 神界：原罪2 (4), 月圆之夜 (2), KINGDOM HEARTS (1). The shape is always the same: the
+ * notes cite another achievement, that citation contains the cited achievement's complete
+ * description, and it is longer than this entry's own — so the description stage claimed it before
+ * the name stage could say what the entry is called.
+ */
+describe('which part of an entry a description has to be quoted in', () => {
+  const def = (api, cn, en, desc) => ({ api_name: api, name_cn: cn, name_en: en, description: desc });
+  // 「购买了愿望之夜-女巫」's official description *is* its name, so a cross-reference to it carries
+  // the whole description with it. That is 月圆之夜's real data
+  const DEFS = [
+    def('BUY', '购买了愿望之夜-女巫', 'Bought the Witch', '购买了愿望之夜-女巫'),
+    def('HOME', '温暖的家', 'A Warm Home', '女巫，通关任意难度'),
+  ];
+  const ENTRY = [
+    '温暖的家',
+    '女巫，通关任意难度',
+    '前置:先购买「愿望之夜-女巫」角色包(见成就「购买了愿望之夜-女巫」)。',
+  ].join('\n');
+
+  test('an entry is about what its head says, not what its notes cite', () => {
+    const hit = resolveTodoToAchievement(ENTRY, DEFS);
+    assert.equal(hit?.def.api_name, 'HOME', 'the cited achievement is longer, and used to win');
+  });
+
+  test('the cited achievement still resolves from its own entry', () => {
+    const hit = resolveTodoToAchievement('购买了愿望之夜-女巫\n购买了愿望之夜-女巫\n在商店买这个角色包', DEFS);
+    assert.equal(hit?.def.api_name, 'BUY');
+  });
+
+  /**
+   * **The ambiguous-name rescue depends on this staying head-first.** `matchAchievements` resolves a
+   * same-named achievement only through a box that resolves to it **by description** — a rule that
+   * simply preferred the name would take that path away, and the cost is a checkbox that can never
+   * be ticked.
+   */
+  test('a same-named achievement is still rescued by the description at the head', () => {
+    const defs = [
+      def('A', '妙手空空', 'Skilled Thief', '偷窃10次'),
+      def('B', '妙手空空', 'Skilled Thief', '通关且偷窃100次'),
+    ];
+    const hit = resolveTodoToAchievement('妙手空空\n通关且偷窃100次\n提示:先做完主线', defs);
+    assert.equal(hit?.def.api_name, 'B');
+    assert.equal(hit?.via, 'description', 'matchAchievements looks for exactly this');
+  });
+
+  /**
+   * **An achievement Steam ships with no description cannot be quoted**, so a guide writing an
+   * entry for one quotes the nearest thing — a sibling's. Measured on KINGDOM HEARTS -HD 1.5+2.5
+   * ReMIX-, a four-in-one collection: 「Record Keeper Sora」 carries an empty description and its
+   * entry quotes 「Record Keeper」's, at the head, where the head tier trusts it.
+   *
+   * The title breaks that tie and nothing else: over the whole corpus this moved **one** box of
+   * 4,133, and left every other answer exactly where it was.
+   */
+  test('a title that names one achievement outranks a head description naming another', () => {
+    const defs = [
+      def('KEEPER', 'Record Keeper', 'Record Keeper', "Collect all Jiminy's Journal entries."),
+      def('SORA', 'Record Keeper Sora', 'Record Keeper Sora', ''),
+    ];
+    const entry = "Record Keeper Sora\nCollect all Jiminy's Journal entries.\n索拉篇日志全收集";
+    assert.equal(resolveTodoToAchievement(entry, defs)?.def.api_name, 'SORA');
+    // and the achievement whose description it is still resolves from its own entry
+    assert.equal(
+      resolveTodoToAchievement("Record Keeper\nCollect all Jiminy's Journal entries.", defs)?.def.api_name,
+      'KEEPER'
+    );
+  });
+
+  /**
+   * **The tie-break reads the title line and nothing else, and that is what keeps the rescue safe.**
+   *
+   * Candidates come out of every line, so widening it to the whole entry would let a name cited in
+   * the notes stand in for the title. Here the title is a same-named achievement — the one shape
+   * that *must* fall through to the description — and the notes name a different, unique one. Read
+   * whole-entry, the tie-break would hand the box to the achievement the notes merely mention and
+   * `matchAchievements` would lose its only way to place the real one.
+   */
+  test('the tie-break reads the title line only, never a name cited further down', () => {
+    const defs = [
+      def('A', '妙手空空', 'Skilled Thief', '偷窃10次'),
+      def('B', '妙手空空', 'Skilled Thief2', '通关且偷窃100次'),
+      def('C', '开锁大师', 'Lockpick', '开锁50次'),
+    ];
+    const hit = resolveTodoToAchievement('妙手空空\n通关且偷窃100次\n开锁大师', defs);
+    assert.equal(hit?.def.api_name, 'B');
+    assert.equal(hit?.via, 'description', 'a same-named achievement has no other way through');
+  });
+
+  test('where the title and the head description agree, the description still answers', () => {
+    // 2,836 boxes of the corpus resolve this way, and the tie-break must not disturb any of them
+    const defs = [def('A', '新年快乐', 'Happy New Year', '投掷爆竹作为最后一击。')];
+    const hit = resolveTodoToAchievement('新年快乐\n投掷爆竹作为最后一击。\n补充说明', defs);
+    assert.equal(hit?.def.api_name, 'A');
+    assert.equal(hit?.via, 'description', 'the description stays the primary evidence');
+  });
+
+  test('and a description below the head still resolves when the entry names nothing unique', () => {
+    // The last tier, and it costs nothing to keep: the one box in the corpus that quotes its
+    // description below the head, and has no unique name of its own, resolves exactly as before
+    const defs = [def('A', '妙手空空', 'Skilled Thief', '偷窃10次'), def('B', '妙手空空', 'Skilled Thief', '通关且偷窃100次')];
+    const hit = resolveTodoToAchievement('妙手空空\n(Skilled Thief)\n通关且偷窃100次', defs);
+    assert.equal(hit?.def.api_name, 'B');
+    assert.equal(hit?.via, 'description');
+  });
+});
