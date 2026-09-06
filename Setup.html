@@ -805,8 +805,6 @@
            for two of the three, and in the instant before JS starts it is better
            to be empty than to be wrong -->
       <input id="ai-key" name="ai-key" type="password" autocomplete="off">
-      <label for="ai-model" data-t="step2.model">模型(可选)</label>
-      <input id="ai-model" name="ai-model" type="text" autocomplete="off" placeholder="留空 = 用默认模型" data-t-placeholder="step2.model.ph">
       <label for="ai-timeout" data-t="step2.timeout">请求超时(分钟)</label>
       <!-- High effort + web research legitimately takes minutes — this is not an ordinary HTTP
            timeout, and turning it down "to fail faster" throws away a run that was still working.
@@ -1119,8 +1117,6 @@
       'step2.hint.warn':      ['内容准不准没法自动检查,生成完自己读一遍。', 'Nothing can check whether it is right — read it once it is written.'],
       'step2.provider':       ['供应商', 'Provider'],
       'step2.off':            ['不启用', 'Off'],
-      'step2.model':          ['模型(可选)', 'Model (optional)'],
-      'step2.model.ph':       ['留空 = 用默认模型', 'Blank = the default model'],
       'step2.timeout':        ['请求超时(分钟)', 'Request timeout (minutes)'],
       'step2.timeout.ph':     ['默认 10', 'Default 10'],
       'step2.timeout.range':  ['请求超时要是 1 到 60 之间的整数分钟。', 'Request timeout must be a whole number of minutes, from 1 to 60.'],
@@ -1378,7 +1374,6 @@
     // than being two pages.
     let isEditMode = false;
     let loadedAiProvider = '';
-    let loadedAiModel = '';
     let loadedAiTimeoutMin = 10;
     // Each vendor's own state: `{ hasKey, model }`. **The key itself never
     // reaches here** — getSettings answers only "is it configured", and nowhere
@@ -1425,7 +1420,6 @@
       if (s.notionDbId) $('notion-make').hidden = true;
       $('ai-provider').value = s.aiProvider || '';
       loadedAiProvider = s.aiProvider || '';
-      loadedAiModel = s.aiModel || '';
       $('ai-timeout').value = s.aiTimeoutMin;
       loadedAiTimeoutMin = s.aiTimeoutMin;
       aiProviders = s.aiProviders || {};
@@ -1472,7 +1466,7 @@
     // The secret fields are **always empty** in settings mode (they only carry a
     // placeholder), so blank means 「没动过」.
     const DIRTY_FIELDS =
-      ['key', 'id', 'ai-provider', 'ai-key', 'ai-model', 'ai-timeout', 'notion-token', 'notion-db'];
+      ['key', 'id', 'ai-provider', 'ai-key', 'ai-timeout', 'notion-token', 'notion-db'];
     /** Each field's "value as saved". With no argument it re-syncs the whole set */
     const saved = {};
     const markSaved = (...ids) => {
@@ -1498,13 +1492,23 @@
       };
     }
 
-    // ---- AI: each vendor remembers its own key and model --------------------
+    // ---- AI: each vendor remembers its own key -----------------------------
     //
     // **Switching vendor should not require typing the key in again.** With the
     // three controls sharing one config, "try another one" necessarily means
     // pasting the secret again, and switching back means pasting again.
     // `ai.providers` stores one set per vendor (see lib/config.js), and this
     // function only paints the selected one's state.
+    //
+    // **There is deliberately no model field here.** A vendor's model id is not
+    // something this page's audience should be typing — a stale or cross-vendor
+    // value produces a vendor 404 or `assertModelMatchesProvider`'s mismatch
+    // error, neither of which means anything to someone who just wanted AI
+    // guides turned on. Pinning a model is still possible, just not from here:
+    // `ai.model` / `ai.providers.<vendor>.model` in config.json, or `--model` on
+    // the CLI. The submit handler below reads whatever is already stored for the
+    // selected vendor and writes it back unchanged, so that escape hatch survives
+    // a save made from this page.
     //
     // The option is suffixed with 「· 已配置」 rather than prefixed with a marker:
     // the conclusion from the filter-chip round was "put the state in a leading
@@ -1542,7 +1546,6 @@
       $('ai-key-set').hidden = !cur?.hasKey;
       // An unrecognised provider (a self-hosted endpoint, a proxy) gets an empty one; no shape is guessed
       $('ai-key').placeholder = AI_KEY_HINT[sel.value] ?? '';
-      $('ai-model').value = cur?.model ?? '';
       // The 「已配置」 on the step title answers "is this step done", not "is the
       // current vendor configured" — with Anthropic configured but the selection
       // sitting on another vendor, this step has plainly been done
@@ -1589,12 +1592,12 @@
      * submit reads hidden nodes. But a button permanently reading 「跳过」 conveys
      * exactly the opposite, so the label follows the content.
      */
-    // **`ai-timeout` is deliberately not listed for step 2.** Unlike the other three it is never
+    // **`ai-timeout` is deliberately not listed for step 2.** Unlike the other two it is never
     // blank — it is pre-filled with the real default the second the page loads — so including it
     // here would make stepHasInput(2) always true and 「跳过」 would never show for someone who
     // has not touched AI at all
     const STEP_INPUTS = {
-      2: ['ai-provider', 'ai-key', 'ai-model'],
+      2: ['ai-provider', 'ai-key'],
       3: ['notion-token', 'notion-db'],
     };
     const stepHasInput = (n) => (STEP_INPUTS[n] ?? []).some((id) => $(id).value.trim() !== '');
@@ -2223,7 +2226,10 @@
       const notionDb = $('notion-db').value.trim();
       const aiProvider = $('ai-provider').value.trim();
       const aiKey = $('ai-key').value.trim();
-      const aiModel = $('ai-model').value.trim();
+      // Not read from a field — there is none. Whatever is already pinned for the selected vendor
+      // (config.json's ai.providers.<vendor>.model, or the flat legacy ai.model) travels through
+      // unchanged; this page can save AI settings without ever touching that value
+      const aiModel = aiProviders[aiProvider]?.model || '';
       // Blank means "keep the current value", same reasoning as the secret fields — the field
       // is pre-filled with the real number, so blank only happens if someone deliberately clears it
       const aiTimeoutRaw = $('ai-timeout').value.trim();
@@ -2280,9 +2286,9 @@
         // step **sends a real request**, and without a comparison somebody who came
         // in only to change their SteamID would wait several seconds for nothing and
         // could have a successful save reported as a failure by a transient AI-side
-        // fault
-        const aiChanged =
-          Boolean(aiKey) || aiProvider !== loadedAiProvider || aiModel !== loadedAiModel;
+        // fault. `aiModel` is never user-edited on this page, so it cannot itself be
+        // the reason to revalidate
+        const aiChanged = Boolean(aiKey) || aiProvider !== loadedAiProvider;
         if (aiChanged && aiProvider) {
           const r = await call('saveAiConfig', [aiProvider, aiKey, aiModel]);
           if (r.error) throw new Error('AI:' + r.error);
