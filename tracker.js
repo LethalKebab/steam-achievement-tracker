@@ -713,8 +713,11 @@ async function cmdSync() {
         // 「补英文名 0 款」 is noise on the one line that has to stay readable
         (r.library.namedEn ? clog('sync.namedEn', { n: r.library.namedEn }) : '')
         + (r.library.familyCleared ? clog('sync.familyCleared', { n: r.library.familyCleared }) : '')
+        + (r.library.familyAdded.length ? clog('sync.familyAdded', { n: r.library.familyAdded.length }) : '')
+        + (r.library.familyChecked ? '' : clog('sync.familySkipped'))
     );
     if (r.library.added.length) console.log(clog('sync.added', { names: r.library.added.map((a) => a.name).join('、') }));
+    if (r.library.familyAdded.length) console.log(clog('sync.familyNames', { names: r.library.familyAdded.map((a) => a.name).join('、') }));
     console.log(clog('sync.stats', { updated: r.stats.updated, noSystem: r.stats.noSystem, retried: r.stats.retried }));
     const s = r.stats.selection;
     if (s.gated) {
@@ -732,6 +735,8 @@ async function cmdSync() {
         clog('sync.libraryShort', { added: r.added.length, restamped: r.restamped })
           + (r.namedEn ? clog('sync.namedEn', { n: r.namedEn }) : '')
           + (r.familyCleared ? clog('sync.familyCleared', { n: r.familyCleared }) : '')
+          + (r.familyAdded.length ? clog('sync.familyAdded', { n: r.familyAdded.length }) : '')
+          + (r.familyChecked ? '' : clog('sync.familySkipped'))
       );
     }
     if (only.includes('achievements')) {
