@@ -557,6 +557,15 @@
      were still hanging off <details>, so the Notion and AI instructions reverted
      to browser defaults overnight with nothing raising an error */
   .step .hint { margin: var(--s3) 0 0; }
+  /* A hint belonging to **one field** rather than to the step. The rule above spaces a
+     hint away from what precedes it and leaves it touching what follows, which is right
+     for a block introducing a step and backwards for a line explaining the input directly
+     under it. **It must out-rank that selector, not merely follow it** — `.step .hint` is
+     two classes, so a bare `label + .hint` loses and the change is invisible.
+     The top margin is negative so the pair reads as attached: adjacent margins resolve to
+     6 + (-2), leaving 4px to the label against 8px to the input. Keyed on the adjacency
+     rather than a class, so a field added later cannot forget it */
+  .step label + .hint { margin: -2px 0 8px; }
   .step ol {
     margin: var(--s3) 0 0;
     padding-left: var(--s5);
@@ -780,19 +789,22 @@
 
     <section class="step" data-step="1">
       <h2 class="step-title"><span data-t="step1.title">第 1 步 · Steam</span><span class="tag req" data-t="tag.req">必填</span></h2>
-      <div class="hint">
-        ① Steam Web API Key → <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a><br>
-        ② SteamID64 → <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a><span data-t="step1.id.hint">(把你的个人资料链接粘进去查)</span>
-      </div>
-      <!-- The absence of a required attribute is **deliberate**: only one section
+      <!-- **Every field carries its own instruction, under its own number.** The two
+           above used to share one block at the top of the step while the third
+           explained itself in place, so one screen held two arrangements and the
+           reader had to look in two directions. `label + .hint` is what closes the
+           gap that a `.hint` opens when it sits at the top of a step instead.
+           The absence of a required attribute is **deliberate**: only one section
            is shown at a time, and the browser refuses to validate a required
            control that is display:none — it silently blocks the submit and
            reports "not focusable". The required check is handled by the manual
            check in the submit handler below, which jumps back to this step and
            explains why -->
       <label for="key">① Steam Web API Key<span class="configured" id="key-set" data-t="tag.set.keep" hidden>已配置,留空就不改</span></label>
+      <div class="hint">→ <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noopener">steamcommunity.com/dev/apikey</a></div>
       <input id="key" name="key" type="text" autocomplete="off">
       <label for="id">② SteamID64</label>
+      <div class="hint">→ <a href="https://steamid.io" target="_blank" rel="noopener">steamid.io</a><span data-t="step1.id.hint">(把你的个人资料链接粘进去查)</span></div>
       <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字" data-t-placeholder="step1.id.ph">
 
       <!-- **The family library is Steam data, so it is asked for here** rather than
