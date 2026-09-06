@@ -181,6 +181,57 @@ describe('syncLibrary picks up shared games from the recently-played list', () =
     assert.equal(third.familyPlayed, 0);
   });
 
+  test('a row that becomes owned gives up the stand-in timestamp along with the badge', async () => {
+    const db = openDb(':memory:');
+    insertGame(db, { appid: '3117820', name: '苏丹的游戏', nameEn: "Sultan's Game", family: 1 });
+    const shared = { owned: [], recent: [{ appid: 3117820, name: "Sultan's Game", playtime_forever: 100 }] };
+
+    // Two shared runs, so the row ends up carrying both a playtime and a derived date
+    await syncLibrary(db, fakeSteam(shared));
+    await syncLibrary(db, fakeSteam({ ...shared, recent: [{ appid: 3117820, name: "Sultan's Game", playtime_forever: 160 }] }));
+    assert.equal(getGame(db, '3117820').playtime_forever, 160, 'precondition: the row was dated the derived way');
+
+    await syncLibrary(db, fakeSteam({ owned: [{ appid: 3117820, name: "Sultan's Game" }] }));
+
+    const row = getGame(db, '3117820');
+    assert.equal(row.family, 0);
+    assert.equal(row.playtime_forever, null,
+      '"there is no rtime here" must not stay on a row where there now is — the same defect the badge just lost');
+  });
+
+  test('a row that never had one is not written to, so updated_at does not move', async () => {
+    const db = openDb(':memory:');
+    insertGame(db, { appid: '1366540', name: '戴森球计划', nameEn: 'Dyson Sphere Program' });
+    const steam = fakeSteam({ owned: [{ appid: 1366540, name: 'Dyson Sphere Program' }] });
+
+    // **Pinned to an old value, not read back after a first sync.** `setGameField` stamps
+    // `updated_at` with a millisecond ISO string, and two syncs inside one test land in the same
+    // millisecond — so comparing two live stamps cannot tell a write from no write at all.
+    db.prepare("UPDATE games SET updated_at = ? WHERE appid = ?").run('2020-01-01T00:00:00.000Z', '1366540');
+
+    await syncLibrary(db, steam);
+
+    // There is no counter on this clear, so updated_at is the only thing that separates an
+    // unconditional write from a guarded one — and an unconditional one touches every owned row
+    // on every sync, forever
+    assert.equal(getGame(db, '1366540').updated_at, '2020-01-01T00:00:00.000Z');
+  });
+
+  test('a response with no playtime field records nothing, so the next real one is not read as a play', async () => {
+    const db = openDb(':memory:');
+
+    // Steam omits the field: not a reading of zero, and not a baseline
+    await syncLibrary(db, fakeSteam({ owned: [], recent: [{ appid: 2624670, name: "Find Matt's Cats" }] }));
+    assert.equal(getGame(db, '2624670').playtime_forever, null, 'absence is not zero');
+
+    const r = await syncLibrary(db, fakeSteam({ owned: [], recent: [{ appid: 2624670, name: "Find Matt's Cats", playtime_forever: 90 }] }));
+
+    assert.equal(getGame(db, '2624670').playtime_forever, 90, 'the first real number is the baseline');
+    assert.equal(getGame(db, '2624670').last_played, null,
+      'a first observation never stamps — recording 0 earlier would have made this look like 0 → 90');
+    assert.equal(r.familyPlayed, 0);
+  });
+
   test('the endpoint failing costs the family check and not the sync', async () => {
     const db = openDb(':memory:');
     const steam = fakeSteam({ owned: [{ appid: 1366540, name: 'Dyson Sphere Program' }] });
