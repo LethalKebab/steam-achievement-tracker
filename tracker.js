@@ -36,6 +36,7 @@ import {
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
+import { runFamilyImport } from './lib/family.js';
 import { setMessageLanguage, messageLanguage, achName } from './lib/messages.js';
 import { serve } from './lib/server.js';
 import { clog } from './lib/cli-messages.js';
@@ -1738,6 +1739,45 @@ function cmdDrafts() {
   console.log(clog('drafts.deleted', { n: doomed.length, left: files.length - doomed.length }));
 }
 
+/**
+ * `family-import` — the one-time backfill of family-library games.
+ *
+ * **Deliberately a command you run, not a phase of `sync`.** The family interface refuses the Web
+ * API key and takes a browser `access_token` that lasts about a day, so nothing on a timer can use
+ * it; `syncLibrary` covers the ongoing case through `GetRecentlyPlayedGames` instead, and this
+ * covers everything older than that endpoint's fortnight.
+ *
+ * The token is read without echo and never stored — see `lib/family.js` for why it must not go
+ * into `config.json`.
+ */
+async function cmdFamilyImport() {
+  const { config, db, steam } = withSteam();
+  const io = makeSecretReader();
+  try {
+    console.log(clog('family.how'));
+    const token = process.env.STEAM_FAMILY_TOKEN?.trim()
+      || (await io.askSecret(clog('family.prompt')));
+    if (!token) {
+      console.error(clog('family.noToken'));
+      process.exitCode = 1;
+      return;
+    }
+    const r = await runFamilyImport({ db, steam, config, token });
+    if (r.error) {
+      console.error(clog('family.failedLine', { reason: r.error }));
+      process.exitCode = 1;
+      return;
+    }
+    console.log(clog('family.scanned', { n: r.scanned, members: r.members, excluded: r.excluded }));
+    console.log(clog('family.addedN', { n: r.added.length }));
+    if (r.added.length) console.log(clog('sync.added', { names: r.added.map((a) => a.name).join('、') }));
+    console.log(clog('family.filledN', { n: r.backfilled.length }));
+    if (!r.added.length && !r.backfilled.length) console.log(clog('family.nothing'));
+  } finally {
+    io.close();
+  }
+}
+
 function cmdExport() {
   const dir = positional[0] ?? join(ROOT, 'exports');
   mkdirSync(dir, { recursive: true });
@@ -1886,6 +1926,7 @@ const COMMANDS = {
   'guide-to-notion': cmdGuideToNotion,
   drafts: cmdDrafts,
   audit: cmdAudit,
+  'family-import': cmdFamilyImport,
   export: cmdExport,
   backup: cmdBackup,
   restore: cmdRestore,

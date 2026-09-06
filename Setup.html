@@ -668,7 +668,12 @@
     flex-wrap: wrap;
     gap: 6px;
   }
-  .step-title .tag {
+  /* Also on a `label`: an optional field inside a required step needs the same
+     pill the step titles use, and a second look for one word would be a second
+     vocabulary. **The margin stays 0 here** — `.step-title` is a flex row with its
+     own `gap`, so a margin would be added on top of it; a `label` is not, which is
+     why the spacing is given to that selector alone below */
+  .step-title .tag, label .tag {
     font-size: var(--fs-xs);
     font-weight: 500;
     margin-left: 0;
@@ -676,11 +681,12 @@
     border-radius: var(--r-full);
     border: 1px solid transparent;
   }
+  label .tag { margin-left: var(--s2); }
   /* 「必填」 does not use red text. Red is the colour of an error, and this step
      has not gone wrong — it simply cannot be skipped. A pale accent fill says
      "this step is the main line" and keeps red for genuine errors */
-  .step-title .tag.req { color: var(--accent); background: var(--accent-soft); }
-  .step-title .tag.opt { color: var(--text-3); border-color: var(--line-2); }
+  .step-title .tag.req, label .tag.req { color: var(--accent); background: var(--accent-soft); }
+  .step-title .tag.opt, label .tag.opt { color: var(--text-3); border-color: var(--line-2); }
 
   /* One button per step, so whichever appears takes the full width. 「跳过」 keeps
      the secondary palette — it is an exit rather than a recommended action, and
@@ -788,6 +794,26 @@
       <input id="key" name="key" type="text" autocomplete="off">
       <label for="id">② SteamID64</label>
       <input id="id" name="id" type="text" autocomplete="off" placeholder="17 位数字" data-t-placeholder="step1.id.ph">
+
+      <!-- **The family library is Steam data, so it is asked for here** rather than
+           in a step of its own. It is the third field and it is optional, which the
+           label says outright: the step's 必填 tag covers the two above it.
+           The submit handler treats it as its own independent block — same rule as
+           Notion and AI — so it runs only when the field was filled, and running it
+           after completeSetup is what makes it work on first run, where the
+           credentials it needs are only saved a moment earlier.
+           **The address has to be on the page.** Nobody can act on this without
+           knowing where the token comes from. It is a <code> and not a link: the
+           page it names is raw JSON, and opening that inside the app's own window
+           would strand the user with no way back. -->
+      <label for="fam-token">③ <span data-t="step1.fam.label">家庭库 access_token</span><span class="tag opt" data-t="tag.opt">可选</span></label>
+      <div class="hint">
+        <span data-t="step1.fam.what">一次性加入你玩过的家庭共享游戏。日常同步只覆盖最近两周。</span><br>
+        <span data-t="step1.fam.where">登录 Steam 后打开这个地址,复制 webapi_token:</span>
+      </div>
+      <code class="bk-path">https://store.steampowered.com/pointssummary/ajaxgetasyncconfig</code>
+      <input id="fam-token" name="fam-token" type="password" autocomplete="off" spellcheck="false" style="margin-top: var(--s3)" data-t-placeholder="step1.fam.ph" placeholder="留空就跳过">
+      <div class="hint" data-t="step1.fam.drop">token 用完即弃,不会保存。</div>
     </section>
 
     <section class="step" data-step="2" hidden>
@@ -1101,6 +1127,12 @@
       'gate.restore.sub':     ['手上有以前的备份文件', 'I have a backup file'],
 
       'nav.backup':           ['备份', 'Backup'],
+      'step1.fam.label':      ['家庭库 access_token', 'Family library access_token'],
+      'step1.fam.what':       ['一次性加入你玩过的家庭共享游戏。日常同步只覆盖最近两周。', 'Adds the family-shared games you have played, in one pass. The everyday sync covers only the last fortnight.'],
+      'step1.fam.where':      ['登录 Steam 后打开这个地址,复制 webapi_token:', 'Open this while signed in to Steam, and copy webapi_token:'],
+      'step1.fam.ph':         ['留空就跳过', 'Leave blank to skip'],
+      'step1.fam.drop':       ['token 用完即弃,不会保存。', 'The token is used once and never saved.'],
+      'msg.family.ok':        ['家庭库:新增 {added} 款,补上游玩记录 {filled} 款', 'Family library: {added} added, {filled} given their play history'],
       'tag.req':              ['必填', 'Required'],
       'tag.opt':              ['可选', 'Optional'],
       'tag.set':              ['已配置', 'Configured'],
@@ -2267,6 +2299,22 @@
           const r = await call('completeSetup', [key, id]);
           if (r.error) throw new Error(r.error);
           done.push(t('msg.steam.ok', { n: r.gameCount }));
+        }
+
+        // The family library, as its own block for the same reason Notion and AI are:
+        // **only when the field was filled**, so somebody who came in to change a SteamID
+        // does not wait on two Steam requests for nothing.
+        // **It has to run after the block above.** On first run the credentials it needs are
+        // saved by completeSetup a moment earlier; before that call there is no steamId on the
+        // server and this would be refused.
+        // The field is cleared either way — it holds a bearer credential, and a token that
+        // failed is one there is no point keeping around to retry with.
+        const famToken = $('fam-token').value.trim();
+        if (famToken) {
+          $('fam-token').value = '';
+          const r = await call('importFamilyLibrary', [famToken]);
+          if (r.error) throw new Error(r.error);
+          done.push(t('msg.family.ok', { added: r.added.length, filled: r.backfilled.length }));
         }
 
         // Notion is an independent step: its failure must not make an

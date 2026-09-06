@@ -85,12 +85,19 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 
 | Command | What it does | Network |
 |---|---|---|
+| `family-import` | One-off: adds the family-shared games you have played, and gives the ones already tracked their play history. Asks for a token; see below | Steam |
 | `export [dir]` | Three tables to CSV for spreadsheets (default `exports/`). One-way — this is not a backup | — |
 | `backup [dir]` | One zip: database, guides, `config.json` (default `backups/`) | — |
 | `backup --no-config` | Leaves `config.json` out, so the zip holds no plaintext keys | — |
 | `restore <file.zip>` | Restores from a backup. **Overwrites existing data**, asks once first | — |
 | `restore --keep-config` | Moves data only; leaves this machine's credentials alone | — |
 | `restore --yes` | Skips the confirmation | — |
+
+**`family-import` and the token.** Every sync already notices a shared game the moment you play it, but only inside Steam's two-week recently-played window — so anything you last played before that is invisible to it. This command reads the family library directly and covers the rest.
+
+It cannot use your API key: Steam serves the family endpoints only to a browser session token. Sign in to Steam, open `https://store.steampowered.com/pointssummary/ajaxgetasyncconfig`, and copy `webapi_token` from the reply. The prompt does not echo what you paste, and the token is never written to `config.json` — it expires after about a day, which is also why this is a command you run rather than part of the sync. The settings page asks for the same token as the third field of step 1.
+
+Games you own yourself are skipped: Steam already reports those normally.
 
 More on what is stored and what Steam does not expose: [data.md](data.md).
 

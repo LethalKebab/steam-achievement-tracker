@@ -28,7 +28,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `hidden` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
+`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `hidden` / `new_ach_date` / `updated_at` / `last_played` / `playtime_forever` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
 
 Six decisions worth knowing before you write queries:
 
@@ -41,7 +41,9 @@ Six decisions worth knowing before you write queries:
 
   If a row stubbornly won't update, check `sync_locked` first — that's almost always why.
 
-- **`last_played` and `stats_checked_at` drive which rows the automatic sync bothers to check** (see `sweepBudget` in [configuration.md](configuration.md)). `last_played` is Steam's `rtime_last_played` as it stood the last time we successfully read that game; `stats_checked_at` is when that read happened. Both are written **only after a real answer from Steam** — a rate-limited game leaves them alone, so it stays first in line next time rather than being recorded as "already checked".
+- **`last_played` and `stats_checked_at` drive which rows the automatic sync bothers to check** (see `sweepBudget` in [configuration.md](configuration.md)). `last_played` is Steam's `rtime_last_played` as it stood the last time we successfully read that game; `stats_checked_at` is when that read happened.
+
+  For a family-shared game there is no such field anywhere in Steam's API, so `last_played` is **worked out** instead: `playtime_forever` holds the minutes as of the previous sync, and when the number goes up the game was played somewhere in between — the moment that is noticed becomes the date. It is only ever set for rows the owned list does not mention, and the first sighting of one records the minutes without a date, since a single reading shows no change. That is why a shared game has to be seen twice before its 🎮 badge can appear, and why the one-off import above fills both columns in directly. Both are written **only after a real answer from Steam** — a rate-limited game leaves them alone, so it stays first in line next time rather than being recorded as "already checked".
 
   `stats_checked_at` is deliberately not `updated_at`: `updated_at` moves whenever the row changes at all, including when you toggle ♥ or ★ from the Dashboard, so it can't answer "when did we last ask Steam about this". To force a game back to the front of the queue:
 
@@ -116,6 +118,8 @@ On the Dashboard this is **the 🔒 lock on each row**, not the word "Manual" �
 **The sync puts the flag on by itself, too.** `GetRecentlyPlayedGames` is the one endpoint that lists a family-shared title, so each sync asks it: anything you played in the last fortnight that isn't in your owned list and isn't in the table yet is added on the spot, flagged family, and named in a Dashboard notice. Nothing is asked first — the row is local and one click from deleted, and a prompt nobody reads is a game that never gets tracked. **A row you delete and keep playing comes back**; use 已隐藏 rather than delete if you want it gone from the table but not re-added. Games you last played more than a fortnight ago are outside that window and still need adding by hand.
 
 That same reading is what gives these rows a play date at all. Steam publishes no "last played" timestamp for a shared game, so the tracker watches the playtime instead: when it is higher than last sync's, the game was played in between, and that moment becomes the date. The consequence is that **a shared game has to be seen twice before its 🎮 badge can appear** — the first sync only records a starting number.
+
+**Games you played before all this can be fetched once.** The window above is two weeks wide, so a shared game you last played months ago is invisible to the sync and always will be. `node tracker.js family-import`, or the third field of step 1 on the settings page, reads the family library directly and adds them — and gives the ones already tracked the play dates the sync could not work out on its own. It needs a browser token rather than your API key, which is why it is something you run rather than something that happens; [cli.md](cli.md) has the details.
 
 **The sync takes the flag off once you own the game.** A title you bought after playing it through the family library turns up in `GetOwnedGames`, which settles the question the badge was answering, and the next sync clears it — the count appears on the library line as 「清除家庭标记 N 款」. Nothing else removes it, so a row Steam never lists keeps its badge indefinitely. The one case this gets wrong is a **gift**: it is owned too, so it loses the badge and needs marking again by hand. Steam reports the licence, not how it was acquired, and the two cannot be told apart.
 
