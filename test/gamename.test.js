@@ -102,7 +102,7 @@ describe('games.name_en', () => {
 // ---------------------------------------------------------------------------
 
 /** A Steam stub for syncLibrary. storeDelay is 0 so the pacing does not slow the suite down */
-function fakeSteam({ owned = [], vetted = null, appNames = {}, enNames = {} } = {}) {
+function fakeSteam({ owned = [], vetted = null, appNames = {}, enNames = {}, recent = [] } = {}) {
   const calls = { fetchAppName: [], fetchAppNameEn: [] };
   return {
     calls,
@@ -115,6 +115,9 @@ function fakeSteam({ owned = [], vetted = null, appNames = {}, enNames = {} } = 
         unvettedAppIds: new Set(owned.map((g) => String(g.appid)).filter((a) => !ids.has(a))),
         playSnapshot: new Map(owned.map((g) => [String(g.appid), 0])),
       };
+    },
+    async fetchRecentlyPlayedGames() {
+      return recent;
     },
     async fetchAppName(appid) {
       calls.fetchAppName.push(String(appid));
