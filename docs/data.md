@@ -113,6 +113,8 @@ On the Dashboard this is **the 🔒 lock on each row**, not the word "Manual" �
 
 **The family flag** (the Dashboard's 家庭 badge) — purely informational, and a different situation from `Manual`: a shared or gifted game that *you* actually play, so Steam does return your real progress even though it isn't in your owned-games list. Use this rather than the lock so the game keeps syncing automatically; the flag just reminds you it wasn't self-purchased.
 
+**The sync takes the flag off once you own the game.** A title you bought after playing it through the family library turns up in `GetOwnedGames`, which settles the question the badge was answering, and the next sync clears it — the count appears on the library line as 「清除家庭标记 N 款」. Nothing else removes it, so a row Steam never lists keeps its badge indefinitely. The one case this gets wrong is a **gift**: it is owned too, so it loses the badge and needs marking again by hand. Steam reports the licence, not how it was acquired, and the two cannot be told apart.
+
 Adding a game by hand asks whether it's a family-library title, **defaulting to yes** — anything you bought yourself is already in `GetOwnedGames` and never needed adding. Added rows are **not** locked: family sharing is precisely the case where Steam does return your progress, so locking them would freeze the numbers at whatever they were the moment you added the row. Lock a row later if it turns out Steam has nothing for it.
 
 Two more things that look like bugs and aren't:

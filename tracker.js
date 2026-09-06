@@ -712,6 +712,7 @@ async function cmdSync() {
         // Only when something moved: after the first run this is 0 on every sync, and a permanent
         // 「补英文名 0 款」 is noise on the one line that has to stay readable
         (r.library.namedEn ? clog('sync.namedEn', { n: r.library.namedEn }) : '')
+        + (r.library.familyCleared ? clog('sync.familyCleared', { n: r.library.familyCleared }) : '')
     );
     if (r.library.added.length) console.log(clog('sync.added', { names: r.library.added.map((a) => a.name).join('、') }));
     console.log(clog('sync.stats', { updated: r.stats.updated, noSystem: r.stats.noSystem, retried: r.stats.retried }));
@@ -730,6 +731,7 @@ async function cmdSync() {
       p.done(
         clog('sync.libraryShort', { added: r.added.length, restamped: r.restamped })
           + (r.namedEn ? clog('sync.namedEn', { n: r.namedEn }) : '')
+          + (r.familyCleared ? clog('sync.familyCleared', { n: r.familyCleared }) : '')
       );
     }
     if (only.includes('achievements')) {
