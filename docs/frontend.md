@@ -597,7 +597,9 @@ They were one constant, and reusing it meant `showStep(4)` clamped straight back
 
 ### The AI step shows the selected vendor's state, not the file's
 
-`ai.providers` stores a key and model per vendor, so 「换一家试试」 stopped meaning 「把密钥再粘一遍」 — but only if the form follows the dropdown. `paintAiProvider()` repaints three things on every `change`: the 已配置 badge, the key placeholder, and the model field.
+`ai.providers` stores a key and model per vendor, so 「换一家试试」 stopped meaning 「把密钥再粘一遍」 — but only if the form follows the dropdown. `paintAiProvider()` repaints two things on every `change`: the 已配置 badge and the key placeholder.
+
+**There is deliberately no model field to repaint.** A vendor's model id is not something this page's audience — someone who double-clicked an exe — should be typing, and a stale or cross-vendor value is precisely what `assertModelMatchesProvider` exists to catch, because otherwise the failure is the vendor's own 404 with nothing pointing at the box it came from. Pinning a model is still supported, just not from here: `ai.model` / `ai.providers.<vendor>.model` in `config.json`, or `--model` for a single run. The submit handler therefore reads whatever is already stored for the selected vendor and writes it back **unchanged** — an unrelated save made on this page (changing the key, say) must not quietly clear a model pinned in the file.
 
 Three details are load-bearing and none of them errors when wrong:
 

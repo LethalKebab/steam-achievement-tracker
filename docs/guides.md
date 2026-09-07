@@ -402,7 +402,7 @@ Opening the Dashboard, and the **Sync now** (「立即同步」) button on it, b
 - **No sub-step cascade.** Nested boxes under an achievement are only ticked by the manual command, where a dry-run is available first. See the cascade section below for why.
 - **Failures are soft.** An expired Notion token shows a notice on the Dashboard; it doesn't fail the achievement sync or take the page down.
 
-Every tick lands in `sync_log` exactly as the manual command's do, so `node tracker.js log 30` is the review path. The Dashboard also shows a notice naming the first few boxes it ticked, and that notice does not auto-dismiss.
+Every tick lands in `sync_log` exactly as the manual command's do, so `node tracker.js log 30` is the review path. The Dashboard also shows a notice naming the first few boxes it ticked. That notice does not auto-dismiss, and stays until you close it with the × in its corner.
 
 Both halves can be turned off in `config.json`:
 

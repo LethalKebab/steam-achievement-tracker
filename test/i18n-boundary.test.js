@@ -784,6 +784,56 @@ describe('UI labels quoted in the walkthrough docs', () => {
   });
 
   /**
+   * Every `[zh, en]` pair the program can show, as a zh → en map.
+   *
+   * The two HTML tables are parsed with a **quote-aware** pattern rather than by splitting on the
+   * comma between the halves: 「已配置,留空就不改」 contains a halfwidth comma of its own, and a
+   * naive split silently truncated it — the checker then found nothing and the zero was mistaken
+   * for a pass. An extraction that cannot see the one label the rule is about is worth nothing,
+   * which is what the size floor below exists to catch.
+   */
+  const zhToEn = () => {
+    const out = new Map();
+    const add = (zh, en) => { if (zh && en && !out.has(zh)) out.set(zh, en); };
+    for (const table of [MESSAGES, CLI_MESSAGES, TRACKER_MESSAGES]) {
+      for (const v of Object.values(table)) if (Array.isArray(v) && v.length === 2) add(v[0], v[1]);
+    }
+    for (const f of ['Setup.html', 'Dashboard.html']) {
+      for (const m of stripComments(read(f)).matchAll(/'((?:[^'\\]|\\.)*)',\s*'((?:[^'\\]|\\.)*)'/g)) add(m[1], m[2]);
+    }
+    return out;
+  };
+
+  /**
+   * The docs write a control as `**English** (「中文」)`, and until this existed only the Chinese
+   * half was ever checked. So a label whose English half was reworded left every walkthrough
+   * quoting the old wording, with the whole suite green — the Chinese half had not moved, and it
+   * was the only half anything looked at. Measured when this was written: one had already drifted
+   * (`Configured — blank keeps it`, by then `Configured — leave blank to keep`).
+   */
+  test('the English half of a quoted label matches the table too, not just the Chinese', () => {
+    const table = zhToEn();
+    assert.ok(table.size >= 200,
+      `only ${table.size} label pairs were parsed — the extraction is broken, not the rule satisfied`);
+
+    const drifted = [];
+    let checked = 0;
+    for (const f of WALKTHROUGHS) {
+      read(f).split('\n').forEach((line, i) => {
+        for (const m of line.matchAll(/\*\*([^*]+?)\*\*\s*\(\s*「([^」]+)」/g)) {
+          const [, en, zh] = m;
+          // Only pairs the program actually defines: a doc may bold prose beside an unrelated quote
+          if (!table.has(zh)) continue;
+          checked++;
+          if (table.get(zh) !== en) drifted.push(`${f}:${i + 1} says "${en}", table has "${table.get(zh)}" for 「${zh}」`);
+        }
+      });
+    }
+    assert.ok(checked >= 5, `only ${checked} bilingual pairs were compared — the pattern stopped matching the docs' shape`);
+    assert.deepEqual(drifted, [], 'these docs quote an English label the program no longer shows');
+  });
+
+  /**
    * The contiguous run of `>` lines that line `i` belongs to, or null when it is not in one.
    */
   const quoteBlock = (lines, i) => {

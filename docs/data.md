@@ -95,6 +95,16 @@ Six decisions worth knowing before you write queries:
 
 - **`game_name` is a denormalised copy of `games.name`,** used only as a fallback when the `games` row is gone. It is not a second name to keep bilingual — resolve a display name from `games.name_en || games.name` instead.
 
+### `guides` columns
+
+`appid` (primary key) / `name` / `url` / `kind` / `updated` / `lang` / `gen_prose`
+
+`kind` is `notion` or `local`, and `url` means different things in each: a Notion page URL, or a **bare filename** inside `guidesDir`. The filename is not usable as a link — a browser would resolve it against the server's own address and get a 404 — so the Dashboard is served `/guide/<appid>` instead, which the server resolves through the table.
+
+- **`gen_prose` holds the section intros this program wrote last time**, as a JSON array. It exists for one job: on an overwrite, an intro found on the page that also appears here was written by us and may be replaced, while one that is not found was written or edited by you and is kept. Without the column the only alternative is a heuristic, and the cost of guessing wrong is deleting your own writing.
+
+- **The guide's text is never in this table.** Only a pointer to where it lives, because a guide has to stay human-editable and tickable where it is. This table records *where*, never *what*.
+
 ### `guides.lang`
 
 Which language a guide is written in — `'zh'` or `'en'`, defaulting to `'zh'`. It is written after a guide is successfully generated or rewritten, and never by guide *discovery*, which registers pages it found and knows nothing about their contents.
