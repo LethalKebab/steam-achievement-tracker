@@ -720,6 +720,7 @@ async function cmdSync() {
     if (r.library.added.length) console.log(clog('sync.added', { names: r.library.added.map((a) => a.name).join('、') }));
     if (r.library.familyAdded.length) console.log(clog('sync.familyNames', { names: r.library.familyAdded.map((a) => a.name).join('、') }));
     console.log(clog('sync.stats', { updated: r.stats.updated, noSystem: r.stats.noSystem, retried: r.stats.retried }));
+    if (r.stats.forbidden.length) console.log(clog('sync.forbidden', { n: r.stats.forbidden.length, names: r.stats.forbidden.join('、') }));
     const s = r.stats.selection;
     if (s.gated) {
       console.log(
