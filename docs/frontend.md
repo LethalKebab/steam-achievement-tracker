@@ -431,6 +431,16 @@ Anything floating needs an opaque background or it renders on top of table text.
 
 There used to be a second control for that, a chevron collapsing the whole strip to one line. Two collapse affordances on one small panel, labelled 「收起」 and 「收起步骤」, read as one thing pressed twice; the strip-level one went. The corner is therefore one button wide — cancel while live, close once finished, never both — which is what `#gen-bar`'s 42px right padding reserves.
 
+### The sync bar splits the same way, from the other end
+
+Its notices report something **already done** — an achievement a developer added to a finished game, a checkbox ticked automatically inside the user's own Notion notes — so they do not auto-dismiss, and that is carried by `show()`'s `sticky` flag rather than by the comments that used to claim it.
+
+What "does not auto-dismiss" costs is the corner. The only thing that replaces a sticky bar is the **next sync**, and with `syncStaleHours` at 12 and the app living in the tray that is hours, not minutes. `.rpc-close` is the way out, and it is drawn **only for a sticky bar**: progress is replaced by the next 3-second tick, and the plain completion line removes itself on a timer, so a button on either would either come straight back or undo something already leaving — both read as a control that ignores you. A longer timer is not the alternative; it fails for exactly the person the notice exists for, the one who was not at the screen.
+
+**That corner is shared with `#toTop`**, which steps up to `bottom: 76px` for as long as the sync bar is displayed — its `MutationObserver` watches the bar's `style` attribute, so dismissing puts it back. Until the bar could be dismissed, one finished sync displaced the back-to-top button indefinitely.
+
+The × is **drawn inline in `lib/rpc.js`, not `<use href="#i-close">`**, for the same reason the status dot is: that id lives in `Dashboard.html`, and renaming it would leave a button containing nothing, with no error anywhere. The duplication is deliberate — do not consolidate it.
+
 ---
 
 ## 12. Shared interaction rules
