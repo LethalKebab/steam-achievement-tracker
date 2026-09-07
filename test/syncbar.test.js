@@ -54,6 +54,27 @@ function showCalls(src) {
   return out;
 }
 
+/**
+ * One CSS rule block, sliced between its own selector and its closing brace. `'.rpc-close'`
+ * cannot collide with `.rpc-close:hover` or `.rpc-close svg`, because the anchor carries the
+ * ` {` — and slicing to a real delimiter is what keeps this from drifting the way a fixed
+ * byte window does as the block grows.
+ */
+function cssRule(selector) {
+  const at = SRC.indexOf(`${selector} {`);
+  if (at === -1) return null;
+  const end = SRC.indexOf('}', at);
+  return end === -1 ? null : SRC.slice(at, end + 1);
+}
+
+/** The body of the close button's click listener, between its two real anchors */
+function clickBody() {
+  const at = SRC.indexOf("closeBtn.addEventListener('click'");
+  if (at === -1) return null;
+  const end = SRC.indexOf('});', at);
+  return end === -1 ? null : SRC.slice(at, end + 3);
+}
+
 describe('the sync status bar keeps what it says it keeps', () => {
   test('every show() that returns straight afterwards is sticky', () => {
     const calls = showCalls(SRC);
@@ -95,5 +116,81 @@ describe('the sync status bar keeps what it says it keeps', () => {
     // text. Every `rpc-sub` explanation rendered as a right-hand column until the wrapper existed
     assert.match(SRC, /class="rpc-line" data-kind="\$\{kind\}"><div>\$\{html\}<\/div>/);
     assert.ok(SRC.includes('rpc-sub'), 'the sub-line style is what needs the wrapper');
+  });
+});
+
+/**
+ * The other half of "does not auto-dismiss": a notice that never leaves on its own has to be
+ * able to leave when told. Until it could, the corner stayed occupied until the *next* sync —
+ * hours, with `syncStaleHours` at 12 and the app living in the tray — and `#toTop` sat 60px
+ * up the whole time, since its observer keys off this bar being displayed.
+ */
+describe('a sticky notice can be dismissed', () => {
+  test('the content goes in a child, or show() would delete the button', () => {
+    // This is the one that fails silently: append a button to `bar` itself and it survives
+    // exactly until the next notice, with nothing erroring and nothing looking wrong in the
+    // source. The two assertions are not the same one twice — the second is what catches a
+    // later edit "simplifying" the child away again
+    assert.match(SRC, /barBody\.innerHTML = Array\.isArray\(lines\)/,
+      'show() must write into the body child');
+    assert.doesNotMatch(SRC, /\bbar\.innerHTML\s*=/,
+      'writing the bar itself wipes every child, the close button included');
+    assert.match(SRC, /bar\.appendChild\(barBody\);\s*bar\.appendChild\(closeBtn\);/,
+      'both children have to actually be attached');
+  });
+
+  test('only a sticky bar draws one', () => {
+    // Progress is replaced by the next tick and the plain completion line removes itself after
+    // 3s. A button on progress would come back on the next poll, which reads as a dead control
+    const base = cssRule('.rpc-close');
+    assert.ok(base, 'the close button needs its own rule block');
+    assert.match(base, /display: none;/, 'hidden by default');
+    assert.match(SRC, /\.rpc-bar\[data-sticky="1"\] \.rpc-close \{ display: inline-flex; \}/,
+      'and revealed only by the sticky flag — the same flag that decides it will not leave on its own');
+  });
+
+  test('room for it is reserved only when there is one', () => {
+    assert.match(SRC, /\.rpc-bar\[data-sticky="1"\] \{ padding-right: 38px; \}/,
+      'an unconditional padding puts a right margin on every progress line against nothing');
+  });
+
+  test('the pointer target clears WCAG 2.2 SC 2.5.8, computed rather than eyeballed', () => {
+    // .gen-close shipped at 23×23 — one pixel under — and that was found by measuring, not by
+    // reading. Asserting the arithmetic instead of the literals means the numbers can change
+    // and this still answers the question that matters
+    const rule = cssRule('.rpc-close');
+    const svg = cssRule('.rpc-close svg');
+    assert.ok(rule && svg, 'both blocks have to exist for the size to be decidable');
+    const pad = Number(/padding: (\d+)px/.exec(rule)?.[1]);
+    const w = Number(/width: (\d+)px/.exec(svg)?.[1]);
+    const h = Number(/height: (\d+)px/.exec(svg)?.[1]);
+    assert.ok([pad, w, h].every(Number.isFinite), `could not read the sizes: pad=${pad} w=${w} h=${h}`);
+    assert.ok(w + pad * 2 >= 24 && h + pad * 2 >= 24,
+      `${w + pad * 2}×${h + pad * 2} is under SC 2.5.8's 24×24 minimum`);
+  });
+
+  test('dismissing clears the flag as well as hiding', () => {
+    const body = clickBody();
+    assert.ok(body, 'the click listener should still be here');
+    assert.match(body, /bar\.dataset\.sticky = '';/,
+      'a bar left flagged sticky keeps guarding the poll hide for something already gone');
+    assert.match(body, /bar\.style\.display = 'none';/,
+      "and it is the style attribute the Dashboard's #toTop observer watches — without it "
+      + 'the back-to-top button stays displaced after the notice is gone');
+  });
+
+  test('the icon is drawn here, not pulled from the Dashboard sprite', () => {
+    // Same rule the file states for its dot: those ids live in another file, and renaming one
+    // would leave a button containing nothing — a blank space, with no error anywhere
+    assert.doesNotMatch(SRC, /<use\s+href=/, 'no reference into another file\'s sprite');
+    assert.match(SRC, /<path d="M6 6l12 12M18 6L6 18"\/>/, 'the cross is drawn inline');
+  });
+
+  test('an icon-only control still carries a name', () => {
+    assert.match(SRC, /closeBtn\.setAttribute\('aria-label', '关闭'\)/,
+      'nothing in the button is text, so the accessible name has to be supplied');
+    assert.match(SRC, /closeBtn\.type = 'button';/,
+      'a bare <button> defaults to submit');
+    assert.match(SRC, /aria-hidden="true"/, 'and the svg inside it must not be announced twice');
   });
 });
