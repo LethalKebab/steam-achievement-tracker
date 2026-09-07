@@ -12,6 +12,10 @@
 
 The dashboard lists your games and how complete each one is, floating anything you have played in the last five days to the top. **Sync now** pulls fresh data from Steam whenever you want it.
 
+* **Family-shared games count too**: a game you played out of a family member's library is picked up on the next sync and marked **Family**, even though Steam does not list it as one of yours.
+* **Refunded games have to be put back by hand**: Steam stops counting one as yours the moment it is refunded, so nothing brings it in for you. Search its name in the dashboard and matches from the Steam store appear under your own games; pick one to add the row.
+* **Games Steam stops answering for**: the sync names them. A refunded game nobody else in the family owns keeps the last figures it managed to read, and you maintain that row by hand from then on.
+
 ```mermaid
 graph TD
     A["Open the program"] --> B{"Last sync over 12 hours ago?"}
