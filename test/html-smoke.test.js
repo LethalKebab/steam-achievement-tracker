@@ -1364,13 +1364,21 @@ describe('switching AI vendor', () => {
     assert.doesNotMatch(block, /textContent\s*\+=/, 'appending stacks the marker up one repaint at a time');
   });
 
-  test('each vendor own model is painted back into the input', () => {
-    // Like the key, model is one value per vendor (see ai.providers in lib/config.js). Without
-    // painting it, switching back leaves the previous vendor's model name in the box, and
-    // submitting writes it into this vendor's slot — where a claude-* sent to DeepSeek is stopped
-    // by assertModelMatchesProvider, reporting "the model and the vendor do not match", which points
-    // nowhere near "this value was left behind by the switch"
-    assert.match(paintBlock(), /\$\('ai-model'\)\.value = cur\?\.model/);
+  test('there is no user-facing model field, and its escape hatch is not one this page can wipe', () => {
+    // Removed as a GUI control: a vendor's model id is not something this page's audience should
+    // be typing, and a stale or cross-vendor value is exactly what assertModelMatchesProvider
+    // exists to catch. Pinning a model is still possible via config.json / --model, and that value
+    // must survive a save made from here — so the submit handler still has to forward *something*
+    // into saveAiConfig's model argument, just not one read off an input.
+    assert.doesNotMatch(read('Setup.html'), /id="ai-model"/, 'the input should be gone entirely');
+    const js = setupJs();
+    assert.match(
+      js,
+      /const aiModel = aiProviders\[aiProvider\]\?\.model/,
+      'submit must read the already-stored model back rather than a field — the only way an ' +
+      'unrelated save (switching the key, say) does not quietly clear a model pinned in config.json'
+    );
+    assert.match(js, /saveAiConfig', \[aiProvider, aiKey, aiModel\]/, 'and must still pass it through');
   });
 
   test('switching vendor first clears the key already typed in', () => {
