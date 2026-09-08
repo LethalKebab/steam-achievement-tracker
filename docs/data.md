@@ -124,13 +124,16 @@ How long a game takes to finish at 100%, from HowLongToBeat's **Completionist** 
 
 ### `guides` columns
 
-`appid` (primary key) / `name` / `url` / `kind` / `updated` / `lang` / `gen_prose`
+`appid` (primary key) / `name` / `url` / `kind` / `updated` / `lang` / `gen_prose` / `status_seen_at`
 
 `kind` is `notion` or `local`, and `url` means different things in each: a Notion page URL, or a **bare filename** inside `guidesDir`. The filename is not usable as a link — a browser would resolve it against the server's own address and get a 404 — so the Dashboard is served `/guide/<appid>` instead, which the server resolves through the table.
 
 - **`gen_prose` holds the section intros this program wrote last time**, as a JSON array. It exists for one job: on an overwrite, an intro found on the page that also appears here was written by us and may be replaced, while one that is not found was written or edited by you and is kept. Without the column the only alternative is a heuristic, and the cost of guessing wrong is deleting your own writing.
 
 - **The guide's text is never in this table.** Only a pointer to where it lives, because a guide has to stay human-editable and tickable where it is. This table records *where*, never *what*.
+- **`status_seen_at` is when this page's status was last settled against play.** The guide status pass promotes a part-finished game to `In progress` when its `last_played` is newer than this stamp — never on a fixed recency window, which would move a hand-set `Paused` back on every Dashboard open for as long as the window lasted. Setting a status by hand does not move `last_played`, so nothing re-triggers; playing the game again does, which is what lifts it back out of `Paused`.
+
+  A page the pass left alone is stamped too, or one set by hand would keep a null stamp forever and could never be promoted. A page whose write failed is not, so the next run retries. `NULL` means never looked at. On that first sight the test is not play at all but whether the page's own claim still holds: only `Not started` is promoted, and only when something is unlocked — a game can carry unlocks and no `last_played` whatsoever, so requiring play evidence there would strand those pages for good.
 
 ### `guides.lang`
 

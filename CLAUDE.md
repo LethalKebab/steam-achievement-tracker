@@ -204,7 +204,7 @@ The other two tables, since three columns arrived late and none of them is obvio
 
 - `achievements`: `appid` / `api_name` / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon` / `unlocked` / `rarity` / `rarity_checked_at`
 - `hltb`: `appid` / `hltb_id` / `verified` / `manual` / `comp_100` / `comp_100_med` / `comp_100_lo` / `comp_100_hi` / `comp_100_count` / `checked_at`
-- `guides`: `appid` / `name` / `url` / `kind` / `updated` / `lang` / `gen_prose`
+- `guides`: `appid` / `name` / `url` / `kind` / `updated` / `lang` / `gen_prose` / `status_seen_at`
 
 - `status`: `''` (normal), `'Unvetted'` (Steam Profile Features Limited), `'Manual'` (hand-maintained).
 - **`Manual` is the 🔒 lock in the UI — same column, different vocabulary.** Do not rename the column to match: `status` values reach CSV export and the user's spreadsheet, so the storage name is a compatibility surface. **`addGame` does not force `Manual`** — a family-shared game *is* the case where Steam returns real progress, so locking it on add would freeze the numbers at that moment.
@@ -319,16 +319,21 @@ Two rules about *how* to add one:
 
 Review is `sync_log` + `node tracker.js log`. The Dashboard raises a notice naming the first few ticks, and like `bumped` it **does not auto-dismiss**: it is reporting a write to the user's own notes.
 
-### Guide page status (`Done` ⇄ `Staged`)
+### Guide page status (`Not started` → `In progress` → `Done` ⇄ `Staged`)
 
 Kept in step with completion, **both directions** — `syncGuideStatuses`, run by `guide-status` and, on the serve path, right after the tick pass.
 
 - 100% and not `Done` → **`Done`**.
 - Below 100% and currently `Done` → **`Staged`**. Effectively always a developer patch adding achievements.
+- Below 100%, not already `In progress`, and **played since this page's status was last looked at** → **`In progress`**.
 
 Load-bearing:
 
-- **It converges on state; it does not watch for the transition.** Crossing 100% exists only for the instant `updateGameStats` writes it, so any run that observes it but cannot write loses it permanently. The rules are stated over current state, which is idempotent, self-healing and re-runnable. **Do not "optimise" this into transition detection.** (The 🔔 columns *do* detect transitions, and that is not a contradiction — they answer "what changed recently", which current state genuinely cannot answer, and they pay the matching price. This rule applies where current state *is* sufficient, and there it always wins.) Measured proof: the one page that needed demoting has `new_ach_date = NULL`, so a rule gated on "we saw `total` grow" would never have fired.
+- **The first two converge on state; the third is the one transition this layer detects, and it needs to be.** Crossing 100% exists only for the instant `updateGameStats` writes it, so any run that observes it but cannot write loses it permanently — the rules are stated over current state, which is idempotent and self-healing. **Do not "optimise" the first two into transition detection.** "Has this been played since we last looked" is a different question, and current state cannot answer it at all: the status alone cannot say whether a session happened. `guides.status_seen_at` is the stamp it compares against, and the price is the documented one — a promotion observed by a run that fails to write is lost until the next stretch of play.
+- **The comparison is against that stamp, never a fixed recency window.** "Played in the last five days" reads as the obvious test and fights the reader: park a game you played yesterday at `Paused`, and every Dashboard open for five days moves it back. Against the stamp the promotion happens once per stretch of play, and setting a status by hand does not move `last_played`, so nothing re-triggers — while genuinely playing it again is exactly what lifts it back out of `Paused`.
+- **Pages the run left alone are stamped too.** Without that a page the reader set by hand keeps a null stamp forever, stays in the first-sight branch, and can never be promoted by play. A page whose write *failed* is not stamped, so the next run retries.
+- **An unstamped page is judged on the claim its status makes, not on play.** `Not started` is an assertion about the game and one unlocked achievement falsifies it — no timing involved, and none wanted: a family-shared row is dated only by its playtime moving between two syncs, so one never seen twice carries unlocks and no `last_played` at all, and requiring play evidence would strand those pages permanently. Anything other than `Not started` on an unstamped page was chosen by the reader and is adopted as it stands. This is also what clears the backlog of guides made before their game was touched.
+- **`In progress` is offered only when the database defines it.** Unlike `Done` and `Staged` it is not required — a reader who never added the option is not using that state, and writing it would be a 400 on every played game.
 - Convergence is nearly free — `queryGuideDatabase` already pages through the whole database and only has to stop throwing `Status` away. ~3 API calls per run total, not per game.
 - **The two directions are deliberately asymmetric.** Promotion overwrites *everything* except `Done`. Demotion touches *only* `Done` — a sub-100% page at `Paused`/`In progress`/`Not started` is a state you chose, and rewriting it on every Dashboard open would put you and the tool in a loop. `guide-status.test.js`
 - The two rules are mutually exclusive by construction, so a page can never oscillate.

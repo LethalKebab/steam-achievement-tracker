@@ -143,13 +143,32 @@ describe('selectGuideStatusUpdates — dropping below 100% goes back to Staged',
   // The demotion direction **only touches Done**. Every other status below 100% is a
   // workflow the person arranged themselves, and overwriting it on every Dashboard open
   // would put them and the machine in a loop.
-  for (const from of ['Not started', 'Staged', 'In progress', 'Paused', 'Differed']) {
+  //
+  // `Not started` is the one exception and is tested below instead: it is the value this
+  // program writes at creation rather than one the reader chose, and a single unlocked
+  // achievement falsifies the claim it makes.
+  for (const from of ['Staged', 'In progress', 'Paused', 'Differed']) {
     test(`below 100% with status ${from} → untouched`, () => {
       const db = freshDb();
       seed(db, { appid: '1', achieved: 5, total: 10 });
       assert.deepEqual(targets(db, [pageRow('1', from)]), []);
     });
   }
+
+  test('below 100% with status Not started and something unlocked → In progress', () => {
+    const db = freshDb();
+    seed(db, { appid: '1', achieved: 5, total: 10 });
+    const r = selectGuideStatusUpdates(db, [pageRow('1', 'Not started')]);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].to, 'In progress');
+  });
+
+  test('below 100% with status Not started and nothing unlocked → untouched', () => {
+    // Nothing has falsified the claim, so it stands
+    const db = freshDb();
+    seed(db, { appid: '1', achieved: 0, total: 10 });
+    assert.deepEqual(targets(db, [pageRow('1', 'Not started')]), []);
+  });
 
   test('total cleared to NULL (Steam says there is no achievement system) → untouched, and not counted as dropping below 100%', () => {
     const db = freshDb();
@@ -252,5 +271,125 @@ describe('syncGuideStatuses — a missing option has to be blocked before writin
     const notion = stubNotion(['Not started', 'In progress', 'Staged', 'Done']);
     await syncGuideStatuses(dbWithPendingWrite(), { notion, dryRun: true });
     assert.deepEqual(notion.writes, []);
+  });
+});
+
+describe('a guide follows play, not only completion', () => {
+  const HOUR = 3600;
+  const secondsAgo = (s) => Math.floor(Date.now() / 1000) - s;
+  const isoAgo = (s) => new Date(Date.now() - s * 1000).toISOString();
+
+  /** A part-finished game with a guide page, plus whatever play and stamp the case needs */
+  function played(db, { appid = '1', lastPlayed = null, seenAt = null, achieved = 3, total = 10 } = {}) {
+    seed(db, { appid, achieved, total });
+    if (lastPlayed !== null) db.prepare('UPDATE games SET last_played = ? WHERE appid = ?').run(lastPlayed, appid);
+    if (seenAt !== null) db.prepare('UPDATE guides SET status_seen_at = ? WHERE appid = ?').run(seenAt, appid);
+  }
+
+  test('played since the last look, and not already there → In progress', () => {
+    const db = freshDb();
+    played(db, { lastPlayed: secondsAgo(HOUR), seenAt: isoAgo(48 * HOUR) });
+    const r = selectGuideStatusUpdates(db, [pageRow('1', 'Not started')]);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].to, 'In progress');
+    assert.equal(r[0].reason, 'played');
+  });
+
+  test('**a fixed recency window is the wrong test** — a hand-set status must survive it', () => {
+    // The loop this exists to prevent: park a game played an hour ago at `Paused`, and a
+    // "played in the last N days" rule moves it back on every Dashboard open for N days.
+    // Comparing against our own last look instead makes the promotion happen once per stretch
+    // of play, and setting a status by hand does not move `last_played`
+    const db = freshDb();
+    played(db, { lastPlayed: secondsAgo(HOUR), seenAt: isoAgo(HOUR / 2) });
+    assert.deepEqual(selectGuideStatusUpdates(db, [pageRow('1', 'Paused')]), []);
+  });
+
+  test('playing it again is what lifts it back out of Paused', () => {
+    const db = freshDb();
+    played(db, { lastPlayed: secondsAgo(HOUR), seenAt: isoAgo(48 * HOUR) });
+    const r = selectGuideStatusUpdates(db, [pageRow('1', 'Paused')]);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].to, 'In progress');
+  });
+
+  test('a page never looked at is adopted, and only Not started is promoted on that first sight', () => {
+    // With no stamp there is nothing to compare. Promoting from `Not started` clears the backlog
+    // of guides created before their game was touched; promoting from anything else would
+    // overwrite a value the reader chose, once, on the run this ships
+    const db = freshDb();
+    played(db, { appid: '1', lastPlayed: secondsAgo(90 * 86400) });
+    played(db, { appid: '2', lastPlayed: secondsAgo(90 * 86400) });
+    assert.deepEqual(
+      selectGuideStatusUpdates(db, [pageRow('1', 'Not started')]).map((u) => u.to),
+      ['In progress']
+    );
+    assert.deepEqual(selectGuideStatusUpdates(db, [pageRow('2', 'Paused')]), []);
+  });
+
+  test('completion outranks play', () => {
+    const db = freshDb();
+    played(db, { achieved: 10, total: 10, lastPlayed: secondsAgo(HOUR), seenAt: isoAgo(48 * HOUR) });
+    const r = selectGuideStatusUpdates(db, [pageRow('1', 'Not started')]);
+    assert.equal(r[0].to, GUIDE_STATUS_DONE);
+  });
+
+  test('a game never played is never promoted', () => {
+    const db = freshDb();
+    played(db, { lastPlayed: 0, seenAt: isoAgo(48 * HOUR) });
+    assert.deepEqual(selectGuideStatusUpdates(db, [pageRow('1', 'Not started')]), []);
+  });
+
+  test('already In progress means nothing to do, however recently it was played', () => {
+    const db = freshDb();
+    played(db, { lastPlayed: secondsAgo(HOUR), seenAt: isoAgo(48 * HOUR) });
+    assert.deepEqual(selectGuideStatusUpdates(db, [pageRow('1', 'In progress')]), []);
+  });
+
+  test('a page left alone is still stamped, or a hand-set status could never be lifted', async () => {
+    // The one that is easy to miss. Without stamping the untouched pages, a page at `Paused` keeps
+    // a null `status_seen_at` forever, stays in the first-sight branch, and playing the game can
+    // never promote it — the feature silently does not work for exactly the reader who uses
+    // statuses by hand
+    const db = freshDb();
+    played(db, { lastPlayed: secondsAgo(90 * 86400) });
+    const notion = {
+      fetchGuideStatusSchema: async () => ({ property: 'Status', type: 'status', options: ['Not started', 'In progress', 'Staged', 'Done'] }),
+      queryGuideDatabase: async () => [pageRow('1', 'Paused')],
+      setPageStatus: async () => {},
+    };
+    await syncGuideStatuses(db, { notion });
+    const stamp = db.prepare('SELECT status_seen_at FROM guides WHERE appid = ?').get('1').status_seen_at;
+    assert.ok(stamp, 'the untouched page was never stamped');
+  });
+
+  test('a failed write is not stamped, so the next run tries again', async () => {
+    const db = freshDb();
+    // Captured once — recomputing it for the assertion compares two different milliseconds
+    const before = isoAgo(48 * HOUR);
+    played(db, { lastPlayed: secondsAgo(HOUR), seenAt: before });
+    const notion = {
+      fetchGuideStatusSchema: async () => ({ property: 'Status', type: 'status', options: ['Not started', 'In progress', 'Staged', 'Done'] }),
+      queryGuideDatabase: async () => [pageRow('1', 'Not started')],
+      setPageStatus: async () => { throw new Error('Notion is down'); },
+    };
+    await syncGuideStatuses(db, { notion });
+    const stamp = db.prepare('SELECT status_seen_at FROM guides WHERE appid = ?').get('1').status_seen_at;
+    assert.equal(stamp, before, 'the stamp moved despite the write failing, losing the promotion');
+  });
+
+  test('a database without the In progress option is never offered one', async () => {
+    // Writing a status the database does not define is a 400 on every played game. Done and Staged
+    // are required; this one is not, because a reader who never added it is not using that state
+    const db = freshDb();
+    played(db, { lastPlayed: secondsAgo(HOUR), seenAt: isoAgo(48 * HOUR) });
+    const wrote = [];
+    const notion = {
+      fetchGuideStatusSchema: async () => ({ property: 'Status', type: 'status', options: ['Not started', 'Staged', 'Done'] }),
+      queryGuideDatabase: async () => [pageRow('1', 'Not started')],
+      setPageStatus: async (id, v) => { wrote.push(v.value); },
+    };
+    await syncGuideStatuses(db, { notion });
+    assert.deepEqual(wrote, [], 'wrote a status the database has no option for');
   });
 });
