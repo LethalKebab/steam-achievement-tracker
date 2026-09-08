@@ -19,6 +19,8 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "guideStatusOnServe": true,         // guide page Status ⇄ completion (Done / Staged)
   "requestDelayMs": 100,      // pause between official Web API calls
   "storeRequestDelayMs": 300, // pause between store calls (name lookup, cover art, search)
+  "hltbEnabled": true,        // look up how long each unfinished game takes to finish at 100%
+  "hltbRequestDelayMs": 800,  // pause between HowLongToBeat calls
   "sweepBudget": 120,         // how many "not played, but check anyway" games per auto-sync; 0 = off
   "maxStatsAgeDays": 7,       // re-verify a game at least this often even if untouched
   "perfectGameMaxAgeDays": 3, // 100% games re-verified sooner — they're the ones that can drop
@@ -126,6 +128,14 @@ Notion-kind guides only; local markdown has no status property. Set to `false` t
 `storeRequestDelayMs` (300 ms) paces the store at `store.steampowered.com`, used only for looking up a game's Chinese name, fetching cover art, and searching. It is deliberately slower and **should not be lowered to match the other one**: the store is far more strictly limited, and exceeding it can get your IP blocked rather than merely throttling your API key. It is also a small share of any sync, so keeping it slow costs almost nothing.
 
 If a sync reports games as "留待重试" (left for retry) you are being rate-limited: raise `requestDelayMs` to 300–800 and run again.
+
+**`hltbEnabled` / `hltbRequestDelayMs`** — how long each unfinished game takes to finish at 100%, from HowLongToBeat.
+
+The tracker can tell you how many achievements are left but nothing about what they cost, and "4 left" is not a smaller job than "40 left" if the 4 are a multi-playthrough grind. No Steam endpoint answers that question, so this one is asked elsewhere — which is why it can be turned off. Set `hltbEnabled` to `false` and the phase is skipped entirely, leaving every other part of the sync untouched and the To 100% (通关时长) column empty.
+
+`hltbRequestDelayMs` (800 ms) is **its own setting and not the Steam one**. HowLongToBeat is not an API vendor with a published allowance; it is a website being asked a favour, and the same reasoning that keeps the store endpoint slow applies more strongly here. The work is bounded anyway: a game is matched to its entry once and for as long as the game exists, and the hours behind it are re-read monthly, so after the first sync this phase usually has nothing to do.
+
+A game HowLongToBeat has never heard of is recorded as such and not searched for again. Titles that are Chinese in every language are the usual case — there is no English string to search with — and those can only be pointed at an entry by hand.
 
 **`sweepBudget` / `maxStatsAgeDays` / `perfectGameMaxAgeDays`** — these three control how much work the *automatic* sync does when you open the Dashboard. (`node tracker.js sync` ignores them and always checks everything; `sync --fast` uses them.)
 

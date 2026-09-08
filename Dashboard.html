@@ -1312,6 +1312,18 @@
     }
     .bar-fill.done { box-shadow: 0 0 8px rgba(102, 192, 244, 0.55); }
     .rate-text { width: 46px; text-align: right; color: var(--text-2); font-size: var(--fs-sm); }
+    /* The completion-time cell. Two lines, and the second is deliberately quieter: the median
+       is the figure to read, the range is there to say how much to trust it */
+    .cost-cell { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+    .cost-line { display: flex; align-items: baseline; }
+    .cost-mid { color: var(--text-1); font-variant-numeric: tabular-nums; }
+    .cost-range { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+    /* A thin sample is not a wrong figure, it is an unsupported one — so the number is dimmed
+       rather than hidden or flagged, which is what 'treat this as a hint' looks like */
+    .cost-thin .cost-mid { color: var(--text-3); }
+    /* The rarity wall rides on the first line beside the hours, because it qualifies them */
+    .cost-wall { margin-left: 6px; color: var(--warn); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+    .cost-none { color: var(--text-3); }
 
     /* ---- Badges ----------------------------------------------------------
        There used to be four sets — .badge / .badge-new / .badge-played / .badge-btn —
@@ -2729,10 +2741,11 @@
         <th data-key="achieved" data-t="th.achieved">完成数</th>
         <th data-key="total" data-t="th.total">成就总数</th>
         <th data-key="rate" data-t="th.rate">完成率</th>
+        <th data-key="cost" data-t="th.cost">通关时长</th>
       </tr>
     </thead>
     <tbody id="gameTableBody">
-      <tr><td colspan="4" class="loading" data-t="table.loading">正在读取数据…</td></tr>
+      <tr><td colspan="5" class="loading" data-t="table.loading">正在读取数据…</td></tr>
     </tbody>
   </table>
   <div id="gallery" class="gallery" hidden></div>
@@ -2810,6 +2823,8 @@
       'th.achieved':          ['完成数', 'Unlocked'],
       'th.total':             ['成就总数', 'Total'],
       'th.rate':              ['完成率', 'Rate'],
+      'th.cost':              ['通关时长', 'To 100%'],
+      'table.wallTitle':      ['剩余成就里最稀有的一个,全球解锁率', 'Global unlock rate of the rarest achievement still locked'],
       'table.loading':        ['正在读取数据…', 'Loading…'],
 
       // ---- Filter chips and the search box ------------------------------------
@@ -3345,9 +3360,74 @@
      * what has to be held while editing.
      */
     function updateRateCell(tr, rate) {
-      const cell = tr.lastElementChild;
+      // **Found by class, not by position.** This was `tr.lastElementChild`, which is the same
+      // cell only for as long as the progress bar is the final column — adding one after it
+      // silently retargets every edit onto the new column, with nothing erroring and the bar
+      // simply never moving while a number is typed
+      const cell = tr.querySelector('.rate-cell');
       if (!cell) return;
       cell.innerHTML = barCell(rate);
+    }
+
+    /**
+     * Below this global unlock rate, an achievement is a wall rather than a task, and the hour
+     * figure beside it stops being the whole answer. 5% is where this library's own distribution
+     * turns: above it a remaining achievement is something to go and do, below it the guides stop
+     * agreeing on how.
+     */
+    const WALL_RARITY_PCT = 5;
+    /** Fewer completionist reports than this and the figure is an anecdote, not a measurement */
+    const MIN_HLTB_SAMPLE = 10;
+
+    /** Hours, with the decimal only where it carries information — 7h reads faster than 7.0h */
+    function fmtHours(h) {
+      if (typeof h !== 'number') return '';
+      return (h >= 10 ? Math.round(h) : Math.round(h * 10) / 10) + 'h';
+    }
+
+    /** A global unlock rate. Under 1% the first decimal is the whole signal, so it is kept there only */
+    function fmtRarity(pct) {
+      return (pct < 1 ? pct.toFixed(1) : Math.round(pct)) + '%';
+    }
+
+    /**
+     * How long finishing this game takes, from HowLongToBeat's Completionist figure.
+     *
+     * **The median, and a range under it.** A point estimate lands within ±30% of the truth about
+     * seven times in ten (measured over 101 of this library's own finished games), so a lone
+     * number would be claiming a precision it does not have; `lo`–`hi` are HowLongToBeat's own
+     * rushed and leisurely ends and say how wide the real answer is.
+     *
+     * **Sorting this column ascending is the best-value order, and that is not a coincidence.**
+     * Raising the library's average completion rate by finishing a game gains `(1 − rate) / N`,
+     * and the hours that costs are `(1 − rate) ×` this figure — the `(1 − rate)` divides out, so
+     * value per hour is `1 / (N × hours)` and depends on nothing but this column. A game at 5%
+     * and a game at 95% are worth exactly the same per hour spent.
+     *
+     * The rarity marker is the part hours cannot express: a short game can still hold one
+     * achievement almost nobody has, and that is what decides whether "7 hours" means an evening.
+     */
+    function costCell(g) {
+      const c = g.cost;
+      if (!c || c.mid === null) return '<span class="cost-none">—</span>';
+      const range = (c.lo !== null && c.hi !== null && c.hi > c.lo)
+        ? '<span class="cost-range">' + fmtHours(c.lo) + '–' + fmtHours(c.hi) + '</span>'
+        : '';
+      // Drawn only when it is actually low. A marker on every row is a marker nobody reads, and
+      // above this threshold the hour figure already answers the question on its own
+      const wall = (typeof c.wall === 'number' && c.wall < WALL_RARITY_PCT)
+        ? '<span class="cost-wall" title="' + escapeHtml(t('table.wallTitle')) + '">' + fmtRarity(c.wall) + '</span>'
+        : '';
+      // Single-digit samples are one stranger's playthrough rather than a measurement, and the
+      // cell says so instead of letting the number pass as evidence
+      const thin = c.sample > 0 && c.sample < MIN_HLTB_SAMPLE ? ' cost-thin' : '';
+      // **The hours and the marker share a line, so they need a row of their own.** The cell is a
+      // column, and a bare sibling span becomes its own row in it — which put the rarity under
+      // the hours instead of beside them, and left the margin that was meant to separate them
+      // doing nothing at all
+      return '<div class="cost-cell' + thin + '">'
+        + '<span class="cost-line"><span class="cost-mid">' + fmtHours(c.mid) + '</span>' + wall + '</span>'
+        + range + '</div>';
     }
 
     /**
@@ -3760,7 +3840,19 @@
       });
 
       rows = rows.slice().sort(function(a, b) {
-        let av = a[sortKey], bv = b[sortKey];
+        // Every other column is a plain field on the row; this one is a figure inside `cost`, so
+        // the key alone cannot reach it. Kept as one accessor rather than a branch in the
+        // comparison below, where the null handling would then have to be written twice
+        const val = function(g) { return sortKey === 'cost' ? (g.cost ? g.cost.mid : null) : g[sortKey]; };
+        let av = val(a), bv = val(b);
+        // **An unknown cost sinks to the bottom whichever way the column is sorted.** Everywhere
+        // else a null becomes -1 and takes whichever end the direction gives it, which is right
+        // for a count that is genuinely zero-ish. Here it would put the rows carrying no answer
+        // at the top of the one column a reader opens to be told what to play next
+        if (sortKey === 'cost') {
+          if ((av === null) !== (bv === null)) return av === null ? 1 : -1;
+          if (av === null) return 0;
+        }
         if (av === null || av === 'N/A') av = -1;
         if (bv === null || bv === 'N/A') bv = -1;
         // **Sorted in the interface's language, not the browser's.** A bare localeCompare()
@@ -3791,7 +3883,7 @@
 
       const body = document.getElementById('gameTableBody');
       if (rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="4" class="empty">' + escapeHtml(t('table.empty')) + '</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="empty">' + escapeHtml(t('table.empty')) + '</td></tr>';
         return;
       }
 
@@ -3914,7 +4006,8 @@
             + '<td>' + gameCell + '</td>'
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="achieved" data-manual-row-appid="' + g.appid + '" value="' + achievedVal + '" onclick="event.stopPropagation()"></td>'
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="total" data-manual-row-appid="' + g.appid + '" value="' + totalVal + '" onclick="event.stopPropagation()"></td>'
-            + '<td>' + barCell(manualRate) + '</td>'
+            + '<td class="rate-cell">' + barCell(manualRate) + '</td>'
+            + '<td>' + costCell(g) + '</td>'
             + '</tr>';
         // **The three rows without numbers need data-appid too.** It used to hang only off the
         // two branches that have numbers, so "find the row by appid" **happened not to work
@@ -3922,18 +4015,19 @@
         // nine times out of ten. data-appid is this row's identity, not a marker for "does it
         // have numbers"
         } else if (g.total === 'N/A') {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.noAchSystem')) + '</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="4">' + escapeHtml(t('table.noAchSystem')) + '</td></tr>';
         } else if (g.total === null && g.manual) {
           // A locked row is never synced automatically, so 「数据同步中」 would be a lie for it — it is waiting for you to fill it in
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.noNumbers')) + '</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="4">' + escapeHtml(t('table.noNumbers')) + '</td></tr>';
         } else if (g.total === null) {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.syncingRow')) + '</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="4">' + escapeHtml(t('table.syncingRow')) + '</td></tr>';
         } else {
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '">'
             + '<td>' + gameCell + '</td>'
             + '<td>' + g.achieved + '</td>'
             + '<td>' + g.total + '</td>'
-            + '<td>' + barCell(g.rate) + '</td>'
+            + '<td class="rate-cell">' + barCell(g.rate) + '</td>'
+            + '<td>' + costCell(g) + '</td>'
             + '</tr>';
         }
 
@@ -4163,7 +4257,7 @@
               + '</div>';
           }).join('') + '</div>';
       }
-      return '<tr class="missing-row"><td colspan="4">' + inner + '</td></tr>';
+      return '<tr class="missing-row"><td colspan="5">' + inner + '</td></tr>';
     }
 
     function escapeHtml(s) {
@@ -4175,7 +4269,10 @@
     document.querySelectorAll('th[data-key]').forEach(function(th) {
       th.addEventListener('click', function() {
         const key = th.dataset.key;
-        if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = -1; }
+        // A new column opens descending, because for every count on this table the big end is the
+        // interesting one. **Cost is the exception and opens ascending**: it is a price, and the
+        // reason to sort by it is to find what is cheap
+        if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = key === 'cost' ? 1 : -1; }
         render();
       });
     });
@@ -5471,7 +5568,7 @@
         render();
       }).withFailureHandler(function(err) {
         document.getElementById('gameTableBody').innerHTML =
-          '<tr><td colspan="4" class="empty">' + escapeHtml(t('sync.loadFailed', { reason: err.message })) + '</td></tr>';
+          '<tr><td colspan="5" class="empty">' + escapeHtml(t('sync.loadFailed', { reason: err.message })) + '</td></tr>';
       }).getDashboardData();
     }
 

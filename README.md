@@ -26,14 +26,22 @@ graph TD
     D --> E
 ```
 
-### 2. Ticks your guide checkboxes for you
+### 2. Tells you which game is worth finishing next
+
+The dashboard shows how long each unfinished game takes to reach 100%, so "23 achievements left" stops being a number you cannot act on. Sort by that column and the shortest ones come first.
+
+* **A range, not a single number**: a game reads as 7h with 5h–12h under it, because how long a game takes genuinely varies by that much between players. A figure hardly anyone has reported is dimmed rather than presented as fact.
+* **The rarest achievement you are still missing** appears beside the hours when almost nobody has it. A short game can still hold one achievement that is a project on its own, and no hour figure can say so.
+* **The times come from HowLongToBeat**, matched to your games by their Steam ID rather than by title, so a sequel is never mistaken for the game you own. A game it has never heard of simply shows no figure, and is not asked about again.
+
+### 3. Ticks your guide checkboxes for you
 
 If you keep achievement guides as checklists — a Notion page or a local Markdown file — the program ticks off the ones you have actually unlocked on Steam.
 
 * **Notion**: set it up on the settings page (the gear at the top right of the dashboard). It creates the guide database for you, so there is no database ID to copy across by hand.
 * **Local Markdown**: read directly, with nothing to configure.
 
-### 3. Drafts guides with AI
+### 4. Drafts guides with AI
 
 Optional. The AI searches the web and drafts an achievement guide, and what it writes is checked against your real achievement data before it lands.
 
@@ -42,7 +50,7 @@ Optional. The AI searches the web and drafts an achievement guide, and what it w
 * **What the program guarantees**: the shape and the data — one checkbox per achievement, names matching Steam exactly, descriptions quoted as they are, unlock states true to your account.
 * **What it cannot**: whether the advice is any good. It checks format and data, never content. Read the guide through yourself.
 
-### 4. Rewrites in place, and backs out safely
+### 5. Rewrites in place, and backs out safely
 
 * **Only what you picked**: ask the AI to revise a few entries and only those are rewritten. Every other byte survives untouched, including paragraphs you edited by hand.
 * **Backed up twice**: the original is kept behind the backup button at the end of the game's row before anything is overwritten, and again when the new version is written back. You can always change your mind.
@@ -56,7 +64,7 @@ graph LR
     D -.->|"restore at any time"| B
 ```
 
-### 5. English and Chinese
+### 6. English and Chinese
 
 Two buttons at the top of the settings page switch the interface language, and the change takes effect immediately.
 

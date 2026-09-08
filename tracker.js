@@ -36,6 +36,7 @@ import {
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
 import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
+import { HltbClient } from './lib/hltb.js';
 import { runFamilyImport } from './lib/family.js';
 import { setMessageLanguage, messageLanguage, achName } from './lib/messages.js';
 import { serve } from './lib/server.js';
@@ -216,7 +217,7 @@ function progressPrinter() {
 
 // The label is a key now; the text lives in `lib/tracker-messages.js` like everything else the
 // CLI prints. A phase with no entry still falls through to its own raw name below
-const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', achievements: 'phase.achievements', schema: 'phase.schema' };
+const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', hltb: 'phase.hltb' };
 
 function makeProgressHandler(p) {
   return (ev) => {
@@ -703,7 +704,8 @@ async function cmdSync() {
   const t0 = Date.now();
 
   if (only.length === 0) {
-    const r = await fullSync(db, steam, { onProgress, selection });
+    const hltb = config.hltbEnabled === false ? null : new HltbClient(config);
+    const r = await fullSync(db, steam, { onProgress, selection, hltb });
     p.done();
     console.log(
       clog('sync.library', {

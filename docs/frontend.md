@@ -214,6 +214,22 @@ The old `#newAchSection` table listed anything whose `total` had grown. The bell
 
 Opening the panel marks everything read: the dot answers "is there anything new", not "have you dealt with it".
 
+### The 「通关时长」 column
+
+The fifth column, and the only one that answers "what should I play next" rather than "where am I".
+
+**It shows the median, with the range under it.** HowLongToBeat publishes six numbers per play style; the median is the one that survives a handful of people who left the game running for a week, and the site's own headline figure is neither the mean nor the median but a trimmed statistic of its own. Measured against 101 of this library's finished games, a point estimate lands within ±30% of the truth about seven times in ten — so `comp_100_l`–`comp_100_h` is drawn beneath it in `--text-3`. A lone number would be claiming a precision the data does not have.
+
+**Sorting it ascending is the best-value order, and that is arithmetic rather than a coincidence.** Finishing a game raises the library's average completion rate by `(1 − rate) / N`, and the hours that costs are `(1 − rate) ×` the figure in this column — the `(1 − rate)` divides out, leaving `1 / (N × hours)`. A game at 5% and a game at 95% are worth exactly the same per hour spent, so the completion percentage does not enter the ranking at all. This is the one column that **opens ascending** when first clicked; every other one opens descending because for a count the big end is the interesting one, and this is a price.
+
+**An unknown cost sinks to the bottom in both directions.** Everywhere else a null becomes `-1` and takes whichever end the direction gives it, which is right for a count that is genuinely zero-ish. Here it would put the rows carrying no answer at the top of the one column a reader opens to be told what to do next.
+
+**The rarity marker is what hours cannot express.** A short game can still hold one achievement almost nobody has, and the figure beside the hours is the global unlock rate of the rarest one still locked. It is drawn **only below 5%** — a marker on every row is a marker nobody reads, and above that threshold the hour figure already answers the question on its own. It rides on the first line beside the hours because it qualifies them, which needs `.cost-line`: the cell is a column flex container, so a bare sibling span becomes its own row and the margin meant to separate them does nothing.
+
+**A thin sample dims the number rather than hiding it.** Under ten completionist reports the figure is one stranger's playthrough — not wrong, unsupported. Dimming is what "treat this as a hint" looks like; hiding it would throw away the only estimate there is.
+
+**`updateRateCell` finds its cell by `.rate-cell`, not by position.** It was `tr.lastElementChild`, which is the progress bar only for as long as that is the final column. Adding one after it silently retargets every in-place edit onto the new column, with nothing erroring and the bar simply never moving while a number is typed.
+
 ---
 
 ## 7. The filter row
