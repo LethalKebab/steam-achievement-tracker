@@ -214,6 +214,26 @@ The old `#newAchSection` table listed anything whose `total` had grown. The bell
 
 Opening the panel marks everything read: the dot answers "is there anything new", not "have you dealt with it".
 
+### The 「预计还需」 column
+
+The fifth column, and the only one that answers "what should I play next" rather than "where am I".
+
+**Two numbers, and the sort is their ratio.** The top line is hours still to go; the bottom is what finishing this game would add to the average completion rate in the topbar, in percentage points. Clicking the header orders by value per hour, and because both halves are on screen a reader can see *why* one row sits above another instead of taking the order on trust. That was the alternative considered and rejected: sorting by a ratio while showing only one of its terms produces an order that looks arbitrary, and 8.9h sitting above 5.6h reads as a bug.
+
+**The hours are apportioned by rarity, not by how many achievements are left.** The obvious split of a completionist figure is `(1 − rate) × hours`, which assumes every achievement costs the same. What is left in a part-finished game is by definition the tail nobody else finished either, so that spelling understates every unfinished game — measured against this library, all 60 of them, by a median of 1.2× and up to 2.3×, and worst for the nearly-finished ones. Each achievement is weighted by `−log(p)` instead; the derivation and the evidence are in [data.md](data.md).
+
+**Rarity is an input and is deliberately not drawn.** An earlier version put the rarest remaining achievement's unlock rate beside the hours as a small marker. It was removed on the reader's own objection, and the objection was right: it is a term in a formula rather than a fact about the library, and sitting in a row of facts about the library it read as one. Folding it into the hours says the same thing where it belongs.
+
+**The label says "estimated" and says "left".** It was 「通关时长」, a bare noun in a column of columns that are all about the reader's own account — so it read as *their* playtime. Two corrections were needed and only one of them is wording: the number itself changed from the game's length to what remains of it.
+
+**Sorting is descending like every other column.** It was an ascending exception while it sorted by price; sorting by value per hour puts the interesting end back at the top. **A row with nothing known sinks to the bottom in both directions** — everywhere else a null becomes `-1` and takes whichever end the direction gives it, which is right for a count that is genuinely zero-ish, but here it would put the rows carrying no answer at the top of the one column a reader opens to be told what to do next.
+
+**A thin sample dims the hours rather than hiding them.** Under ten completionist reports the figure is one stranger's playthrough — not wrong, unsupported. Dimming is what "treat this as a hint" looks like; hiding would throw away the only estimate there is.
+
+**The range lives in the tooltip, not on a third line.** A point estimate lands within ±30% of the truth about seven times in ten, so the spread is worth having — but it is not what the decision turns on, and the cell already carries the two numbers that are.
+
+**`updateRateCell` finds its cell by `.rate-cell`, not by position.** It was `tr.lastElementChild`, which is the progress bar only for as long as that is the final column. Adding one after it silently retargets every in-place edit onto the new column, with nothing erroring and the bar simply never moving while a number is typed.
+
 ---
 
 ## 7. The filter row

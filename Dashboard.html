@@ -1312,6 +1312,16 @@
     }
     .bar-fill.done { box-shadow: 0 0 8px rgba(102, 192, 244, 0.55); }
     .rate-text { width: 46px; text-align: right; color: var(--text-2); font-size: var(--fs-sm); }
+    /* The completion-time cell. Two lines, and the second is deliberately quieter: the median
+       is the figure to read, the range is there to say how much to trust it */
+    .cost-cell { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+    .cost-mid { color: var(--text-1); font-variant-numeric: tabular-nums; }
+    /* A thin sample is not a wrong figure, it is an unsupported one — so the number is dimmed
+       rather than hidden or flagged, which is what 'treat this as a hint' looks like */
+    .cost-thin .cost-mid { color: var(--text-3); }
+    /* The second number, and quieter than the hours: it is what the hours buy, not what they cost */
+    .cost-gain { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+    .cost-none { color: var(--text-3); }
 
     /* ---- Badges ----------------------------------------------------------
        There used to be four sets — .badge / .badge-new / .badge-played / .badge-btn —
@@ -2729,10 +2739,11 @@
         <th data-key="achieved" data-t="th.achieved">完成数</th>
         <th data-key="total" data-t="th.total">成就总数</th>
         <th data-key="rate" data-t="th.rate">完成率</th>
+        <th data-key="cost" data-t="th.cost">通关时长</th>
       </tr>
     </thead>
     <tbody id="gameTableBody">
-      <tr><td colspan="4" class="loading" data-t="table.loading">正在读取数据…</td></tr>
+      <tr><td colspan="5" class="loading" data-t="table.loading">正在读取数据…</td></tr>
     </tbody>
   </table>
   <div id="gallery" class="gallery" hidden></div>
@@ -2810,6 +2821,8 @@
       'th.achieved':          ['完成数', 'Unlocked'],
       'th.total':             ['成就总数', 'Total'],
       'th.rate':              ['完成率', 'Rate'],
+      'th.cost':              ['预计还需', 'Est. left'],
+      'table.costRange':      ['估算区间 {lo} – {hi}', 'Estimated range {lo} – {hi}'],
       'table.loading':        ['正在读取数据…', 'Loading…'],
 
       // ---- Filter chips and the search box ------------------------------------
@@ -3345,10 +3358,76 @@
      * what has to be held while editing.
      */
     function updateRateCell(tr, rate) {
-      const cell = tr.lastElementChild;
+      // **Found by class, not by position.** This was `tr.lastElementChild`, which is the same
+      // cell only for as long as the progress bar is the final column — adding one after it
+      // silently retargets every edit onto the new column, with nothing erroring and the bar
+      // simply never moving while a number is typed
+      const cell = tr.querySelector('.rate-cell');
       if (!cell) return;
       cell.innerHTML = barCell(rate);
     }
+
+    /** Fewer completionist reports than this and the figure is an anecdote, not a measurement */
+    const MIN_HLTB_SAMPLE = 10;
+
+    /** Hours, with the decimal only where it carries information — 7h reads faster than 7.0h */
+    function fmtHours(h) {
+      if (typeof h !== 'number') return '';
+      return (h >= 10 ? Math.round(h) : Math.round(h * 10) / 10) + 'h';
+    }
+
+    /**
+     * What one hour spent on this game is worth, in percentage points of average completion.
+     *
+     * Both halves are on screen, so the order is checkable rather than something to take on
+     * trust. **It does not simplify.** With the flat apportionment it did — the gain and the
+     * cost both carried a factor of (1 - rate), it cancelled, and the ranking collapsed to
+     * 'shortest game first'. Weighting the cost by rarity breaks that cancellation, which is
+     * why a nearly-finished game no longer ranks as though its last few achievements were
+     * ordinary ones: 学园构想家 has 9.6 hours left and is worth 0.04pp, while Yonder has 23
+     * and is worth 0.44.
+     */
+    function roiOf(g) {
+      const c = g.cost;
+      if (!c || typeof c.gain !== 'number' || !(c.remaining > 0)) return null;
+      return c.gain / c.remaining;
+    }
+
+    /**
+     * How much is left to do, and what doing it is worth.
+     *
+     * **The top number is hours still to go, not the game's length**, and the apportionment is
+     * weighted by how rare each remaining achievement is rather than by how many are left. The flat
+     * spelling understates every unfinished game, worst for the nearly-finished ones, because what
+     * is left there is the tail nobody else finished either. Rarity is an input to this number and
+     * is deliberately **not** drawn beside it: it is not a fact about the reader's library, and on
+     * the page it read as one.
+     *
+     * **The bottom number is percentage points on the average completion rate** in the topbar —
+     * what this game being finished would move it by. It is the other half of the sort, so both
+     * halves are on screen: the column orders by the ratio, and a reader can see why one row sits
+     * above another instead of having to take the order on trust.
+     *
+     * The range goes in the tooltip rather than on a third line. It is worth having — a point
+     * estimate lands within ±30% of the truth about seven times in ten — but it is not what the
+     * decision turns on, and this cell already carries the two numbers that are.
+     */
+    function costCell(g) {
+      const c = g.cost;
+      if (!c || c.remaining === null) return '<span class="cost-none">—</span>';
+      const range = (c.lo !== null && c.hi !== null && c.hi > c.lo)
+        ? t('table.costRange', { lo: fmtHours(c.lo), hi: fmtHours(c.hi) })
+        : '';
+      // A thin sample is not a wrong figure, it is an unsupported one, so the number is dimmed
+      // rather than hidden or flagged — which is what 'treat this as a hint' looks like
+      const thin = c.sample > 0 && c.sample < MIN_HLTB_SAMPLE ? ' cost-thin' : '';
+      const gain = typeof c.gain === 'number'
+        ? '<span class="cost-gain">+' + c.gain.toFixed(2) + 'pp</span>'
+        : '';
+      return '<div class="cost-cell' + thin + '"' + (range ? ' title="' + escapeHtml(range) + '"' : '') + '>'
+        + '<span class="cost-mid">' + fmtHours(c.remaining) + '</span>' + gain + '</div>';
+    }
+
 
     /**
      * The **guessed** address for the landscape header image. 97% of the library sits on
@@ -3760,7 +3839,19 @@
       });
 
       rows = rows.slice().sort(function(a, b) {
-        let av = a[sortKey], bv = b[sortKey];
+        // Every other column is a plain field on the row; this one is a figure inside `cost`, so
+        // the key alone cannot reach it. Kept as one accessor rather than a branch in the
+        // comparison below, where the null handling would then have to be written twice
+        const val = function(g) { return sortKey === 'cost' ? roiOf(g) : g[sortKey]; };
+        let av = val(a), bv = val(b);
+        // **A row with nothing known sinks to the bottom whichever way this column is sorted.**
+        // Everywhere else a null becomes -1 and takes whichever end the direction gives it, which
+        // is right for a count that is genuinely zero-ish. Here it would put the rows carrying no
+        // answer at the top of the one column a reader opens to be told what to play next
+        if (sortKey === 'cost') {
+          if ((av === null) !== (bv === null)) return av === null ? 1 : -1;
+          if (av === null) return 0;
+        }
         if (av === null || av === 'N/A') av = -1;
         if (bv === null || bv === 'N/A') bv = -1;
         // **Sorted in the interface's language, not the browser's.** A bare localeCompare()
@@ -3791,7 +3882,7 @@
 
       const body = document.getElementById('gameTableBody');
       if (rows.length === 0) {
-        body.innerHTML = '<tr><td colspan="4" class="empty">' + escapeHtml(t('table.empty')) + '</td></tr>';
+        body.innerHTML = '<tr><td colspan="5" class="empty">' + escapeHtml(t('table.empty')) + '</td></tr>';
         return;
       }
 
@@ -3914,7 +4005,8 @@
             + '<td>' + gameCell + '</td>'
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="achieved" data-manual-row-appid="' + g.appid + '" value="' + achievedVal + '" onclick="event.stopPropagation()"></td>'
             + '<td><input type="number" min="0" class="manual-input" data-manual-field="total" data-manual-row-appid="' + g.appid + '" value="' + totalVal + '" onclick="event.stopPropagation()"></td>'
-            + '<td>' + barCell(manualRate) + '</td>'
+            + '<td class="rate-cell">' + barCell(manualRate) + '</td>'
+            + '<td>' + costCell(g) + '</td>'
             + '</tr>';
         // **The three rows without numbers need data-appid too.** It used to hang only off the
         // two branches that have numbers, so "find the row by appid" **happened not to work
@@ -3922,18 +4014,19 @@
         // nine times out of ten. data-appid is this row's identity, not a marker for "does it
         // have numbers"
         } else if (g.total === 'N/A') {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.noAchSystem')) + '</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="4">' + escapeHtml(t('table.noAchSystem')) + '</td></tr>';
         } else if (g.total === null && g.manual) {
           // A locked row is never synced automatically, so 「数据同步中」 would be a lie for it — it is waiting for you to fill it in
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.noNumbers')) + '</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="4">' + escapeHtml(t('table.noNumbers')) + '</td></tr>';
         } else if (g.total === null) {
-          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="3">' + escapeHtml(t('table.syncingRow')) + '</td></tr>';
+          html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '"><td>' + gameCell + '</td><td class="na" colspan="4">' + escapeHtml(t('table.syncingRow')) + '</td></tr>';
         } else {
           html += '<tr class="' + rowClass + '" data-appid="' + g.appid + '">'
             + '<td>' + gameCell + '</td>'
             + '<td>' + g.achieved + '</td>'
             + '<td>' + g.total + '</td>'
-            + '<td>' + barCell(g.rate) + '</td>'
+            + '<td class="rate-cell">' + barCell(g.rate) + '</td>'
+            + '<td>' + costCell(g) + '</td>'
             + '</tr>';
         }
 
@@ -4163,7 +4256,7 @@
               + '</div>';
           }).join('') + '</div>';
       }
-      return '<tr class="missing-row"><td colspan="4">' + inner + '</td></tr>';
+      return '<tr class="missing-row"><td colspan="5">' + inner + '</td></tr>';
     }
 
     function escapeHtml(s) {
@@ -4175,6 +4268,8 @@
     document.querySelectorAll('th[data-key]').forEach(function(th) {
       th.addEventListener('click', function() {
         const key = th.dataset.key;
+        // Every column opens descending, this one included: it sorts by value per hour, where the
+        // big end is the interesting one. It was an ascending exception while it sorted by price
         if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = -1; }
         render();
       });
@@ -5471,7 +5566,7 @@
         render();
       }).withFailureHandler(function(err) {
         document.getElementById('gameTableBody').innerHTML =
-          '<tr><td colspan="4" class="empty">' + escapeHtml(t('sync.loadFailed', { reason: err.message })) + '</td></tr>';
+          '<tr><td colspan="5" class="empty">' + escapeHtml(t('sync.loadFailed', { reason: err.message })) + '</td></tr>';
       }).getDashboardData();
     }
 

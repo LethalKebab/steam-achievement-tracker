@@ -23,6 +23,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 | `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
 | `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
+| `hltb` | appid → its HowLongToBeat entry and how many hours finishing it takes |
 | `sync_log` | every checkbox change, skip and failure, for after-the-fact auditing |
 | `meta` | last sync timestamp and other odds and ends |
 
@@ -79,7 +80,7 @@ Six decisions worth knowing before you write queries:
 
 ### `achievements` columns
 
-`appid` + `api_name` (composite primary key) / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon`
+`appid` + `api_name` (composite primary key) / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon` / `unlocked` / `rarity` / `rarity_checked_at`
 
 - **Both languages come from one sync, not two.** `fetchGameSchema` calls `GetSchemaForGame` twice, once per language, because the name has always been stored in both. The English description arrives in the response fetched for the English *name*, so storing it costs no extra request.
 
@@ -94,6 +95,30 @@ Six decisions worth knowing before you write queries:
   The test is per game rather than per row on purpose: an individual achievement can come back without an English description, and asking per row would put its game in the queue on every sync forever.
 
 - **`game_name` is a denormalised copy of `games.name`,** used only as a fallback when the `games` row is gone. It is not a second name to keep bilingual — resolve a display name from `games.name_en || games.name` instead.
+
+- **`unlocked` says whether this account holds the achievement**, and it costs nothing to keep. The achievement sync already receives the whole list with a flag on each entry and used only to count them; recording which ones is what lets the interface say more than a number. `NULL` means never observed, which is a different fact from `0` (observed, still locked) — a game whose detail has never been fetched has no rows to write to, and the sync carries the set forward so the schema pass can apply it the moment it makes them.
+
+- **`rarity` is the share of all owners holding the achievement, 0–100**, from `GetGlobalAchievementPercentagesForApp`. It is **an input to the hours estimate, not something displayed on its own** — see `remainingDifficulty`. Splitting a game's completionist hours by `1 − rate` assumes every achievement costs the same, and what is left in a part-finished game is by definition the tail nobody else finished either; weighting each achievement by `−log(p)` corrects that. `rarity_checked_at` gates the refresh — the figure is computed across every owner and barely moves, so a game asked within the last 30 days is skipped, and a finished game is never asked at all.
+
+- **The weight is evidence-backed rather than chosen for elegance.** Across 101 of this library's finished games, `Σ −log(p)` over a game's achievements predicts its HowLongToBeat completionist hours with R² 0.54, while the achievement *count* manages 0.15 — so rarity carries nearly all of the signal and the count almost none. Applied as an apportionment inside a game it raised the estimate for all 60 unfinished games, by a median of 1.2× and up to 2.3×, and raised the nearly-finished ones most, which is the shape the reasoning predicts. **What is not established is the apportionment step itself**: the cross-game fit says the weight tracks time between games, and using it to divide one game's hours assumes the same law holds within a game. There is no data here that can test that directly — a finished game has nothing left to measure.
+
+- **Neither column survives a schema refresh by accident.** `replaceAchievements` upserts the descriptive columns and deletes only the rows the new schema no longer names; it does *not* clear the game's rows first. The delete-then-insert spelling reads as the tidier one and would discard both columns on every description refresh, which is most syncs, silently.
+
+### `hltb` columns
+
+`appid` (primary key) / `hltb_id` / `verified` / `manual` / `comp_100` / `comp_100_med` / `comp_100_lo` / `comp_100_hi` / `comp_100_count` / `checked_at`
+
+How long a game takes to finish at 100%, from HowLongToBeat's **Completionist** figure. The tracker knows how many achievements are left but nothing about what they cost, and "4 left" is not a smaller job than "40 left" if the 4 are a multi-playthrough grind.
+
+- **The four hour columns are seconds, and there are four because one number would be overclaiming.** `comp_100_med` is the median and the one shown; `comp_100` is the site's own headline figure, which is neither the mean nor the median; `comp_100_lo` and `comp_100_hi` are its rushed and leisurely ends. Measured against 101 of this library's own finished games, a single point estimate lands within ±30% of the truth about seven times in ten — so the range is displayed under the median rather than left in the table.
+
+- **`hltb_id` is resolved by appid, never by name.** Searching "Cities: Skylines" returns *Cities: Skylines II* ahead of it and "Slay the Spire" returns the sequel too, and a wrong match reports the wrong number of hours with nothing to show for it. The search only produces candidates; the answer is whichever candidate's own page carries this appid in `profile_steam`. `verified` records that this happened.
+
+- **`hltb_id` NULL with `checked_at` set is a recorded miss** — searched, and nothing there carries this appid. It is a real answer and stops the search repeating every sync at up to four queries a game. Titles that are Chinese in every language (风信楼) have no English string to search with at all and can only be pinned by hand.
+
+- **`manual` means the id was supplied by hand, and an automatic pass never overwrites it.** That is the entire point of pinning one: the search has already failed, or has already got it wrong.
+
+- **`comp_100_count` is how many people reported a completionist time.** Single digits mean the figure is one stranger's playthrough rather than a measurement, and the Dashboard dims it instead of ranking on it as though it were evidence.
 
 ### `guides` columns
 
