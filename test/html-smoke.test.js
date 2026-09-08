@@ -2518,3 +2518,60 @@ describe('a new batch starts from a clean floater', () => {
     );
   });
 });
+
+/**
+ * A job already running when the page loads
+ * ------------------------------------------------
+ * The bottom of the script calls `fetchGen()` once "to pick up a job that may still be running" —
+ * one started by another tab, or before the last refresh. It picked it up and then went quiet:
+ * `setInterval` lived only in `pollGen`, and `pollGen` is called from the two buttons that start a
+ * run, never from the load path. So such a page drew one frozen snapshot of somebody else's job,
+ * never updated it, and never collected its completion — which also meant the table never got its
+ * 「📖 攻略」 link.
+ *
+ * Arm from inside `fetchGen`, **before the branches**, for the same reason the finished-collection
+ * flag is decided there: a branch that may not run is not where a thing that must happen can live.
+ * The `!genTimer` half is not decoration — without it every poll stacks another interval on the
+ * previous one, and the 3-second poll becomes a flood a few minutes in.
+ */
+describe('a job already running when the page loads keeps being polled', () => {
+  const fetchGenBody = () => {
+    const js = inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const a = js.indexOf('function fetchGen');
+    assert.ok(a > 0, 'cannot find fetchGen — the scan has lost its target rather than passed');
+    const b = js.indexOf('.guideGenStatus();', a);
+    assert.ok(b > a, 'cannot find the end of fetchGen');
+    return js.slice(a, b);
+  };
+
+  test('fetchGen arms the poll timer itself, not only the two start buttons', () => {
+    assert.match(
+      fetchGenBody(),
+      /setInterval\(fetchGen/,
+      'only pollGen arms the timer, and the page-load pickup does not call it — a page that loads ' +
+        'while another tab’s job runs shows one frozen snapshot and never updates'
+    );
+  });
+
+  test('it arms before the branches, and only when no timer is already running', () => {
+    const body = fetchGenBody();
+    const iArm = body.search(/setInterval\(fetchGen/);
+    const iRunning = body.search(/if \(s\.running\)/);
+    assert.ok(iArm >= 0 && iRunning >= 0, 'cannot locate both the arming and the s.running branch');
+    assert.ok(
+      iArm < iRunning,
+      'the arming sits inside or after the s.running branch — the branch that may not run is not ' +
+        'where something that must happen can live'
+    );
+    const line = body.slice(body.lastIndexOf('\n', iArm) + 1, body.indexOf('\n', iArm));
+    assert.match(
+      line,
+      /!genTimer/,
+      'the arming is not guarded by !genTimer, so every poll stacks another interval and the ' +
+        '3-second poll turns into a flood'
+    );
+  });
+});

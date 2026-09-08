@@ -6443,6 +6443,14 @@
           // here, merely through a different entrance
           const live = Boolean(s.running) || Boolean(waiting);
 
+          // **Arm here, not only from the two start buttons.** The load path calls fetchGen once to
+          // pick up a job another tab (or an earlier page) left running, and `pollGen` is reachable
+          // only from a click — so that page used to draw one frozen snapshot and never poll again,
+          // never updating it and never collecting its completion. Before the branches, because the
+          // branch that may not run is not where something that must happen can live. `!genTimer`
+          // keeps a poll from stacking a second interval on the one already ticking.
+          if (live && !genTimer) genTimer = setInterval(fetchGen, 3000);
+
           /**
            * **Collect the finished ones first, then look at what is running now.** While queueing
            * both are true at once, and the original code returned at that `if (s.running)` — so every
