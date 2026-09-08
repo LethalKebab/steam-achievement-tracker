@@ -143,13 +143,32 @@ describe('selectGuideStatusUpdates — dropping below 100% goes back to Staged',
   // The demotion direction **only touches Done**. Every other status below 100% is a
   // workflow the person arranged themselves, and overwriting it on every Dashboard open
   // would put them and the machine in a loop.
-  for (const from of ['Not started', 'Staged', 'In progress', 'Paused', 'Differed']) {
+  //
+  // `Not started` is the one exception and is tested below instead: it is the value this
+  // program writes at creation rather than one the reader chose, and a single unlocked
+  // achievement falsifies the claim it makes.
+  for (const from of ['Staged', 'In progress', 'Paused', 'Differed']) {
     test(`below 100% with status ${from} → untouched`, () => {
       const db = freshDb();
       seed(db, { appid: '1', achieved: 5, total: 10 });
       assert.deepEqual(targets(db, [pageRow('1', from)]), []);
     });
   }
+
+  test('below 100% with status Not started and something unlocked → In progress', () => {
+    const db = freshDb();
+    seed(db, { appid: '1', achieved: 5, total: 10 });
+    const r = selectGuideStatusUpdates(db, [pageRow('1', 'Not started')]);
+    assert.equal(r.length, 1);
+    assert.equal(r[0].to, 'In progress');
+  });
+
+  test('below 100% with status Not started and nothing unlocked → untouched', () => {
+    // Nothing has falsified the claim, so it stands
+    const db = freshDb();
+    seed(db, { appid: '1', achieved: 0, total: 10 });
+    assert.deepEqual(targets(db, [pageRow('1', 'Not started')]), []);
+  });
 
   test('total cleared to NULL (Steam says there is no achievement system) → untouched, and not counted as dropping below 100%', () => {
     const db = freshDb();
