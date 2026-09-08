@@ -33,7 +33,7 @@ import {
   setAchievementUnlocks, setAchievementRarity, remainingDifficulty,
   upsertHltb, getHltb, allHltb,
 } from '../lib/db.js';
-import { selectHltbTargets, selectRarityTargets, syncHltb } from '../lib/sync.js';
+import { selectHltbTargets, selectRarityTargets, syncHltb, fullSync } from '../lib/sync.js';
 import { HltbClient, searchQueries, stripCJK } from '../lib/hltb.js';
 import { SteamClient } from '../lib/steam.js';
 
@@ -325,6 +325,171 @@ describe('reading from a host nobody here controls', () => {
     try {
       assert.equal(await c.detail(1), null);
     } finally { globalThis.fetch = original; }
+  });
+});
+
+describe('a third party being down is not this program failing', () => {
+  /** A client whose every request throws, the way a timeout or a dead DNS arrives */
+  const deadNetwork = () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = async () => { throw Object.assign(new Error('fetch failed'), { name: 'TypeError' }); };
+    return () => { globalThis.fetch = original; };
+  };
+
+  test('a network error never escapes the client', async () => {
+    // It used to. Every `fetch` was unguarded, so a timeout travelled out of resolve, out of
+    // syncHltb and out of fullSync — and the Dashboard reported 「同步失败」 for a run whose Steam
+    // data had already landed. The same rule the Notion tick pass follows
+    const restore = deadNetwork();
+    try {
+      const c = new HltbClient({ hltbRequestDelayMs: 0 });
+      assert.deepEqual(await c.search('anything'), [], 'a search answers empty rather than throwing');
+      assert.equal(await c.detail(1), null);
+      const out = await c.resolve({ appid: '1', nameEn: 'Game' });
+      assert.equal(out.verified, false);
+    } finally { restore(); }
+  });
+
+  test('three consecutive unreachable answers stop the phase for the run', async () => {
+    // Counted across games, not within one. A single resolve against a dead network makes one
+    // request — the handshake — and gives up, so the breaker is reached on the third game rather
+    // than the first. That is the intent: one unlucky title must not stop the phase
+    const restore = deadNetwork();
+    try {
+      const c = new HltbClient({ hltbRequestDelayMs: 0 });
+      for (const n of ['Game One', 'Game Two', 'Game Three']) {
+        await c.resolve({ appid: '1', nameEn: n });
+      }
+      assert.ok(c.stopped, `the breaker did not trip after ${c.failures} failures`);
+      assert.match(c.stopped, /fetch failed|网络错误|请求超时/);
+    } finally { restore(); }
+  });
+
+  test('a game HowLongToBeat has never heard of does not count towards the breaker', async () => {
+    // The distinction the breaker rests on: "the service is not answering" against "the service
+    // answered, and the answer is no". A run of obscure Chinese titles must not look like an outage
+    const original = globalThis.fetch;
+    globalThis.fetch = async (url) => (String(url).includes('/init')
+      ? new Response(JSON.stringify({ token: 't', hpKey: 'k', hpVal: 'v' }), { status: 200 })
+      : new Response('{"data":[]}', { status: 200 }));
+    try {
+      const c = new HltbClient({ hltbRequestDelayMs: 0 });
+      for (const n of ['One', 'Two', 'Three', 'Four', 'Five']) await c.resolve({ appid: '1', nameEn: n });
+      assert.equal(c.stopped, null, 'five clean "not found" answers tripped a breaker meant for outages');
+      assert.equal(c.failures, 0);
+    } finally { globalThis.fetch = original; }
+  });
+
+  test('a tripped breaker stops before writing a recorded miss for every remaining game', async () => {
+    // **The expensive half.** A recorded miss is permanent — the game is never searched for again —
+    // so continuing through an outage would quietly retire the rest of the library
+    const db = openDb(':memory:');
+    for (const id of ['1', '2', '3', '4', '5']) {
+      insertGame(db, { appid: id, name: 'G' + id });
+      updateGameStats(db, id, { achieved: 1, total: 4 });
+    }
+    const client = {
+      stopped: null,
+      resolve: async function () {
+        this.stopped = '请求超时';
+        return { verified: false, stopped: this.stopped };
+      },
+      refresh: async () => null,
+    };
+    const out = await syncHltb(db, client);
+    assert.equal(out.stopped, '请求超时', 'the reason travels out so a surface can name it');
+    assert.ok(allHltb(db).length <= 1, `wrote ${allHltb(db).length} rows through an outage`);
+  });
+
+  test('a breaker that trips on the last query still stops the next game', async () => {
+    // **Two guards, and this is the one the other cannot cover.** `resolve` reports `stopped` only
+    // when it gives up *before* a query; tripping during the last query's page fetches leaves it
+    // finishing normally and answering a plain "not found". Without the check at the top of the
+    // loop the run then walks the rest of the library writing a recorded miss for every game —
+    // and a recorded miss is permanent, so those games would never be searched for again.
+    //
+    // A single mutation cannot show this: deleting either guard leaves the other covering the
+    // common case. Hence a test for the shape only the top one sees.
+    const db = openDb(':memory:');
+    for (const id of ['1', '2', '3', '4', '5']) {
+      insertGame(db, { appid: id, name: 'G' + id });
+      updateGameStats(db, id, { achieved: 1, total: 4 });
+    }
+    const client = {
+      stopped: null,
+      calls: 0,
+      // Answers "not found" cleanly, and only then admits it has given up — exactly what the real
+      // client does when the third failure lands inside the final query
+      resolve: async function () { this.calls++; this.stopped = '请求超时'; return { verified: false }; },
+      refresh: async () => null,
+    };
+    await syncHltb(db, client);
+    assert.equal(client.calls, 1, `kept going through an outage — ${client.calls} games attempted`);
+    assert.equal(allHltb(db).length, 1, 'and wrote a permanent miss for each one it attempted');
+  });
+
+  test('the phase failing does not fail the sync', async () => {
+    // A backstop against anything in the phase throwing that the client does not catch itself
+    const db = openDb(':memory:');
+    insertGame(db, { appid: '1', name: 'G' });
+    updateGameStats(db, '1', { achieved: 1, total: 4 });
+    const exploding = { get stopped() { return null; }, resolve: async () => { throw new Error('boom'); }, refresh: async () => null };
+    const steam = {
+      fetchOwnedGamesWithUnvettedFlag: async () => ({ games: [], unvettedAppIds: new Set(), playSnapshot: new Map() }),
+      fetchRecentlyPlayedGames: async () => null,
+      fetchAppName: async () => '',
+      fetchAppNameEn: async () => '',
+      // Real stats, not 'no achievement system' — that marks has_achievements = 0 and the game
+      // stops being a phase-five target, so the throw under test would never be reached
+      fetchAchievementStats: async () => ({ total: 4, achieved: 1, unlocked: ['A'] }),
+      fetchGlobalAchievementPercentages: async () => null,
+      fetchAchievementSchema: async () => null,
+      delay: 0, storeDelay: 0,
+    };
+    const r = await fullSync(db, steam, { hltb: exploding });
+    assert.equal(r.hours.stopped, 'boom', 'the phase reports its own failure');
+    assert.ok(r.library && r.stats, 'and the phases that already succeeded still return their results');
+  });
+});
+
+describe('the pace is set in one place', () => {
+  test('every request waits, including the refresh path that used to have no sleep at all', async () => {
+    // The defect: `resolve` slept after each request and `refresh` slept never, so a monthly pass
+    // over a resolved library fired one request per game back to back. The delay lives in #get now,
+    // where no call site can be written without it
+    const original = globalThis.fetch;
+    const at = [];
+    globalThis.fetch = async () => { at.push(Date.now()); return new Response('{"profile_steam":1,"comp_100":3600}', { status: 200 }); };
+    try {
+      const c = new HltbClient({ hltbRequestDelayMs: 120 });
+      await c.refresh(1);
+      await c.refresh(2);
+      await c.refresh(3);
+      assert.equal(at.length, 3);
+      for (let i = 1; i < at.length; i++) {
+        assert.ok(at[i] - at[i - 1] >= 110, `requests ${i} and ${i + 1} were ${at[i] - at[i - 1]}ms apart, not paced`);
+      }
+    } finally { globalThis.fetch = original; }
+  });
+});
+
+describe('the monthly refresh does not herd', () => {
+  test('the refresh set is capped and spends its budget on the stalest rows', () => {
+    // Everything resolved in the first sync is stamped within minutes, so a month later the whole
+    // library falls due on one run — the spike sweepBudget exists to prevent, reproduced here
+    const db = openDb(':memory:');
+    for (let i = 0; i < 10; i++) {
+      const id = String(i);
+      insertGame(db, { appid: id, name: 'G' + i });
+      updateGameStats(db, id, { achieved: 1, total: 4 });
+      upsertHltb(db, id, { hltbId: 100 + i, verified: true, comp100Med: 3600 });
+      // Oldest first: row 0 is the stalest
+      db.prepare('UPDATE hltb SET checked_at = ? WHERE appid = ?').run(`2000-01-${String(i + 1).padStart(2, '0')}T00:00:00.000Z`, id);
+    }
+    const { refresh, refreshPending } = selectHltbTargets(db, { refreshBudget: 3 });
+    assert.equal(refresh.length, 3, 'the budget is a cap, not a suggestion');
+    assert.equal(refreshPending, 7, 'and what it left behind is reported rather than silently dropped');
+    assert.deepEqual(refresh.map((r) => r.g.appid), ['0', '1', '2'], 'stalest first');
   });
 });
 

@@ -705,7 +705,7 @@ async function cmdSync() {
 
   if (only.length === 0) {
     const hltb = config.hltbEnabled === false ? null : new HltbClient(config);
-    const r = await fullSync(db, steam, { onProgress, selection, hltb });
+    const r = await fullSync(db, steam, { onProgress, selection, hltb, hltbRefreshBudget: config.hltbRefreshBudget });
     p.done();
     console.log(
       clog('sync.library', {
