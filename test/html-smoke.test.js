@@ -2653,3 +2653,71 @@ describe('the floater backup buttons read their state from the archive index', (
     );
   });
 });
+
+describe('the table remembers how it was left', () => {
+  const js = inlineScripts(read('Dashboard.html')).join('\n');
+  const strip = (s) => s.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  const code = strip(js);
+
+  test('the three controls that are choices each record the change', () => {
+    // Missing one presents as "it forgot my sort" with nothing erroring, and only for the control
+    // that was missed — so it is found by whoever happens to use that one control and no other
+    for (const [what, anchor] of [
+      ['the sort header', "sortKey = key; sortDir = -1; }"],
+      ['a filter chip', "setChipState(chip, NEXT_STATE[chip.dataset.state]);"],
+      // **A unique anchor.** The aria-pressed line reads the same in restoreViewState, and
+      // indexOf finds that one first — an assertion that then measures the wrong block
+      ['the view toggle', 'viewMode = btn.dataset.view;'],
+    ]) {
+      const i = code.indexOf(anchor);
+      assert.ok(i > 0, `anchor gone: ${anchor}`);
+      // **Anchor to anchor, never a byte count.** Each of these handlers ends with its repaint, so
+      // this slice is exactly the handler's tail. A fixed window instead reaches into whichever
+      // handler happens to sit next in the file — measured: with a 400-character window, deleting
+      // the sort handler's own save left this assertion green, satisfied by the chip handler's.
+      const j = code.indexOf('render();', i);
+      assert.ok(j > i, `no repaint after ${what}, so the block cannot be bounded`);
+      assert.match(code.slice(i, j), /saveViewState\(\)/, `${what} changes the view without recording it`);
+    }
+  });
+
+  test('what is restored is checked against what exists, not merely against having been stored', () => {
+    // A stored sortKey naming a column that has since been renamed leaves every row's value
+    // undefined, the comparison uniformly false and the header markerless — a table that looks
+    // broken with nothing to say why, arriving months after the rename
+    const fn = code.slice(code.indexOf('function restoreViewState()'));
+    assert.match(fn.slice(0, 1600), /querySelectorAll\('th\[data-key\]'\)/,
+      'the stored sort column is not checked against the columns the page actually has');
+    assert.match(fn.slice(0, 1600), /saved\.sortDir === 1 \|\| saved\.sortDir === -1/,
+      'the stored direction is not checked, and any other value makes the comparison meaningless');
+    assert.match(fn.slice(0, 2000), /'off' \|\| .*'only' \|\| .*'not'/,
+      'a stored chip state is not checked against the three the cycle actually has');
+  });
+
+  test('the search term is never part of what is kept', () => {
+    // A restored filter narrows the table and the reading under it says so. A restored search term
+    // has no such line: the table simply looks empty, and the library looks lost
+    const fn = code.slice(code.indexOf('function saveViewState()'), code.indexOf('function saveViewState()') + 700);
+    assert.doesNotMatch(fn, /searchBox|search/i,
+      'saveViewState reaches for the search box; a restored search reads as a lost library');
+  });
+
+  test('reading and writing the store are both guarded', () => {
+    // A browser set to block site data throws on access rather than answering null, and an
+    // unguarded read at startup takes the whole page down before anything renders
+    for (const fname of ['function restoreViewState()', 'function saveViewState()']) {
+      const fn = code.slice(code.indexOf(fname), code.indexOf(fname) + 1800);
+      assert.match(fn, /try\s*\{/, `${fname} touches localStorage without a guard`);
+      assert.match(fn, /catch/, `${fname} touches localStorage without a guard`);
+    }
+  });
+
+  test('the restore runs before the first render, not after it', () => {
+    // Called after loadDashboard, the table paints once with the defaults and then jumps — which
+    // reads as the page changing its mind
+    const restore = code.indexOf('restoreViewState();');
+    const load = code.indexOf('loadDashboard();');
+    assert.ok(restore > 0 && load > 0, 'anchors gone');
+    assert.ok(restore < load, 'restoreViewState is called after the first loadDashboard, so the table repaints');
+  });
+});

@@ -234,6 +234,22 @@ The fifth column, and the only one that answers "what should I play next" rather
 
 **`updateRateCell` finds its cell by `.rate-cell`, not by position.** It was `tr.lastElementChild`, which is the progress bar only for as long as that is the final column. Adding one after it silently retargets every in-place edit onto the new column, with nothing erroring and the bar simply never moving while a number is typed.
 
+### The table remembers how it was left
+
+Sort column, sort direction, the six filter chips and which of the two views — one `localStorage` entry, `satViewState`.
+
+**Why it was needed at all is not obvious**, because the program lives in the tray and closing the window does not reload the page: within one run these already survived. What they did not survive is the two moments the page really does reload — restarting the program, and **saving anything on the settings page**, which returns to `/`. Losing a chosen sort to a settings save is the case that made this worth keeping.
+
+**The search term is deliberately not kept, and neither is the expanded row.** A restored filter narrows the table and the reading under it says so — 「显示 60 / 共 323」 is on screen and is the explanation. A restored *search* has no such line: the table simply looks empty, and the library looks lost.
+
+**Everything restored is checked against what exists now**, not merely against having been stored. A stored `sortKey` naming a column that has since been renamed leaves `a[sortKey]` undefined for every row, the comparison uniformly false, and the header carrying no marker — a table that looks broken with nothing to say why, arriving months after the rename. So the column is checked against the `th[data-key]` values actually on the page, the direction against `1`/`-1`, the view against the two that exist, and each chip state against the three the cycle has. Anything else falls back to the markup default rather than being applied.
+
+**Both the read and the write are guarded.** A browser set to block site data throws on access rather than answering null, and an unguarded read at startup takes the page down before anything renders.
+
+**`saveViewState` is called from the three controls, never from `render`.** Render runs for reasons that are not choices — the search box among them — and hanging the write off it would persist things nobody chose.
+
+`html-smoke` pins all of it, and the three call sites were mutation-tested individually. The first version of that assertion took a 400-character window after each anchor and was satisfied by the *neighbouring* handler's save, so deleting the sort handler's own left it green; it slices anchor-to-anchor now, from the change to the repaint that closes the block.
+
 ---
 
 ## 7. The filter row
