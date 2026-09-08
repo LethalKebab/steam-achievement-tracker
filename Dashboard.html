@@ -3257,6 +3257,74 @@
     let sortKey = 'rate';
     let sortDir = -1;
     let expandedAppid = null;
+
+    /**
+     * How the table was left last time: which column it was sorted by, which way, which chips were
+     * set, and which of the two views was showing.
+     *
+     * **The program lives in the tray, so a window close does not reload the page** — within one
+     * run these survive on their own. What this covers is the two moments the page really does
+     * reload: restarting the program, and saving anything on the settings page, which returns to
+     * `/`. Losing a chosen sort to a settings save is the case that made this worth keeping.
+     *
+     * **The search box and the expanded row are deliberately not kept.** A restored filter narrows
+     * the table and the reading under it says so — 「显示 60 / 共 323」 is on screen and is the
+     * explanation. A restored *search term* has no such line: the table just looks empty, and the
+     * library looks lost.
+     */
+    const VIEW_STATE_KEY = 'satViewState';
+
+    /**
+     * Restore it, discarding anything that no longer makes sense.
+     *
+     * **Every field is checked against what exists right now**, not merely against having been
+     * stored. A column that has since been renamed would otherwise leave `sortKey` pointing at
+     * nothing — `a[sortKey]` is `undefined` for every row, the comparison is uniformly false, and
+     * the table renders in insertion order with the header showing no marker at all. That is a
+     * page that looks broken with nothing to say why, and it would arrive months after the rename.
+     */
+    function restoreViewState() {
+      let saved;
+      // A corrupted or unreadable store simply means the defaults. Storage can also throw outright
+      // rather than return null — a browser set to block site data does exactly that
+      try { saved = JSON.parse(localStorage.getItem(VIEW_STATE_KEY) || '{}'); }
+      catch (e) { return; }
+      if (!saved || typeof saved !== 'object') return;
+
+      const columns = [...document.querySelectorAll('th[data-key]')].map(function(th){ return th.dataset.key; });
+      if (columns.includes(saved.sortKey)) sortKey = saved.sortKey;
+      if (saved.sortDir === 1 || saved.sortDir === -1) sortDir = saved.sortDir;
+
+      if (saved.viewMode === 'table' || saved.viewMode === 'gallery') {
+        viewMode = saved.viewMode;
+        // The comparison is written out at both call sites rather than lifted into a variable:
+        // html-smoke reads this argument as source and can only see a literal, a Boolean(), a
+        // negation or a comparison — a name it cannot follow, and `undefined` here **flips** the
+        // class instead of clearing it
+        document.querySelectorAll('.view-toggle button').forEach(function(b) {
+          b.classList.toggle('on', b.dataset.view === viewMode);
+          b.setAttribute('aria-pressed', String(b.dataset.view === viewMode));
+        });
+      }
+
+      // A chip whose key is gone keeps whatever the markup gave it, which is the default
+      const states = saved.filters && typeof saved.filters === 'object' ? saved.filters : {};
+      document.querySelectorAll('#filterChips .chip').forEach(function(chip) {
+        const state = states[chip.dataset.filter];
+        if (state === 'off' || state === 'only' || state === 'not') setChipState(chip, state);
+      });
+    }
+
+    /** Record it. Called from the three controls that change it, never from render — render runs for reasons that are not choices, the search box among them */
+    function saveViewState() {
+      const filters = {};
+      document.querySelectorAll('#filterChips .chip').forEach(function(chip) {
+        filters[chip.dataset.filter] = chip.dataset.state;
+      });
+      try {
+        localStorage.setItem(VIEW_STATE_KEY, JSON.stringify({ sortKey: sortKey, sortDir: sortDir, viewMode: viewMode, filters: filters }));
+      } catch (e) { /* a full or blocked store costs the memory, never the interaction */ }
+    }
     /**
      * 'table' | 'gallery'. **This is 「怎么看」, not 「看什么」** — the filter conditions are
      * decided by the row of controls above, and both views share the same set of results. A
@@ -4271,6 +4339,7 @@
         // Every column opens descending, this one included: it sorts by value per hour, where the
         // big end is the interesting one. It was an ascending exception while it sorted by price
         if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = -1; }
+        saveViewState();
         render();
       });
     });
@@ -4285,6 +4354,7 @@
       const chip = e.target.closest('.chip');
       if (!chip) return;
       setChipState(chip, NEXT_STATE[chip.dataset.state]);
+      saveViewState();
       render();
     });
     // Fill in the aria-labels at startup — the HTML carries only data-state (the Chinese
@@ -4293,6 +4363,9 @@
     document.querySelectorAll('#filterChips .chip').forEach(function(chip) {
       setChipState(chip, chip.dataset.state);
     });
+    // **After the markup defaults, before the first render.** This overrides what the HTML gave
+    // the chips, and loadDashboard has not run yet, so nothing is painted twice
+    restoreViewState();
     document.getElementById('searchBox').addEventListener('input', render);
     // The search box does one thing more than the rest: when the library has nothing, go and
     // look on Steam. **Bound separately from render** — render is a pure repaint that has to
@@ -4341,6 +4414,7 @@
           // Painting the selected state without announcing it leaves screen-reader users unable to hear which view in the group is current
           b.setAttribute('aria-pressed', String(b === btn));
         });
+        saveViewState();
         render();
       });
     });
