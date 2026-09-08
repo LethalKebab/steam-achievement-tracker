@@ -30,8 +30,8 @@ graph TD
 
 The dashboard estimates how many hours each unfinished game still needs to reach 100%, and what finishing it would add to your average completion rate. Sort by that column and the best value per hour is at the top.
 
-* **The estimate accounts for what is actually left**, not just how much of it. The achievements you have not unlocked are the ones most other players did not either, so they are weighted by how rare they are rather than counted. Across this library that raised every unfinished game's estimate — most of all the ones sitting at 90%, where what remains is the hard part.
-* **A range rather than false precision**: hover a figure for the spread it came from, because how long a game takes genuinely varies that much between players. A figure hardly anyone has reported is dimmed instead of being presented as fact.
+* **The estimate weighs what is left, not just how much of it**: the achievements you have not unlocked are the ones most other players did not either, so the rarer they are the longer they are assumed to take. A game sitting at 90% is usually further from the end than the percentage suggests.
+* **A range rather than false precision**: hover a figure to see the spread it came from, because how long a game takes genuinely varies that much between players. A figure hardly anyone has reported is dimmed instead of being presented as fact.
 * **The times come from HowLongToBeat**, matched to your games by their Steam ID rather than by title, so a sequel is never mistaken for the game you own. A game it has never heard of simply shows no figure, and is not asked about again.
 
 ### 3. Ticks your guide checkboxes for you
