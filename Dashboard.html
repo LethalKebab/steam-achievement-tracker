@@ -6275,6 +6275,13 @@
 
     function pollGen() {
       if (genTimer) return;
+      // **Past the guard, never before it.** Reaching here means no batch is live, so this is a
+      // new one and the previous batch’s result lines have stopped being about anything on
+      // screen. Above the guard it would instead fire when a job is queued into a batch still
+      // draining, erasing the ones that finished moments ago — which is what the accumulation was
+      // added for. Not a timer: the line carries the guide’s link, and a notice about a write to
+      // the user’s own notes has to survive until it is read (see lib/rpc.js’s sticky flag).
+      genDoneHtml = [];
       genTimer = setInterval(fetchGen, 3000);
       fetchGen();
     }

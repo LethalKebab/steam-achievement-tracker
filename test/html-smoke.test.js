@@ -2461,3 +2461,60 @@ describe('a finished generation refreshes the table on the first one too', () =>
     );
   });
 });
+
+/**
+ * A new batch starts from a clean floater
+ * ------------------------------------------------
+ * The finished lines accumulate on purpose: while a queue is draining, the floater has to carry
+ * both "what is running now" and "these just finished, and here are their guides". Nothing cleared
+ * them, though, so they accumulated for the life of the page — 「关闭」 only hides the bar
+ * (`display = 'none'`), it does not drop what the bar would draw. Starting the next generation
+ * brought the previous one's line back up beside it, and the only real reset was a page reload.
+ *
+ * **This is not an argument for auto-dismissing it.** The line carries the guide's link and its
+ * achievement count, and the repository has already measured that away for `lib/rpc.js`: a notice
+ * reporting a write to the user's own notes must not leave before it is read, and a longer timer
+ * fails exactly the person it exists for. What is wrong is not that it stays — it is that it comes
+ * back for a batch it has nothing to do with.
+ *
+ * **The guard is the load-bearing half.** `pollGen` is entered both to start a fresh batch and to
+ * queue into a live one, and only the first may clear: clearing on the second erases the lines of
+ * jobs finished moments ago in the batch still running, which is the very thing the accumulation
+ * was added for.
+ */
+describe('a new batch starts from a clean floater', () => {
+  const pollGenBody = () => {
+    const js = inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const a = js.indexOf('function pollGen');
+    assert.ok(a > 0, 'cannot find pollGen — the scan has lost its target rather than passed');
+    const b = js.indexOf('\n    }', a);
+    assert.ok(b > a, 'cannot find the end of pollGen');
+    return js.slice(a, b);
+  };
+
+  test('the accumulated finished lines are dropped when a batch starts', () => {
+    assert.match(
+      pollGenBody(),
+      /genDoneHtml\s*=\s*\[\]/,
+      'pollGen never resets genDoneHtml, so the previous batch’s result lines are drawn again ' +
+        'beside the new run — 「关闭」 only hides the bar and leaves the array untouched'
+    );
+  });
+
+  test('and only after the already-polling guard, never before it', () => {
+    const body = pollGenBody();
+    const iGuard = body.search(/if \(genTimer\) return;/);
+    assert.ok(iGuard >= 0, 'cannot find the already-polling guard in pollGen');
+    const iClear = body.search(/genDoneHtml\s*=\s*\[\]/);
+    assert.ok(iClear >= 0, 'cannot find the reset in pollGen');
+    assert.ok(
+      iClear > iGuard,
+      'the reset runs before the already-polling guard, so queueing a job into a batch that is ' +
+        'still draining wipes the lines of the ones that finished moments ago — which is what the ' +
+        'accumulation exists to show'
+    );
+  });
+});
