@@ -4389,6 +4389,19 @@
     }
 
     /**
+     * Is this archive id still listed? **`null` when there is no index to answer from** —
+     * `loadArchiveIndex` keeps the previous copy when its fetch fails, which on a fresh page is
+     * `{}`. A caller reading that as "deleted" would draw every backup button as already gone, so
+     * the three answers stay three: yes, no, and nothing to go on.
+     */
+    function archiveById(id) {
+      const lists = Object.values(archiveIndex);
+      if (!lists.length) return null;
+      for (const list of lists) for (const e of list) if (e.id === id) return true;
+      return false;
+    }
+
+    /**
      * After touching an archive, repaint **both places**: the list in the dialog, and the
      * 「备份 N」 at the end of the row.
      *
@@ -6130,6 +6143,12 @@
       // blocks before writing back, so it takes the same two-click gesture as the backup panel, with
       // the second click's label stating the consequence rather than 「确定」
       genMsg.querySelectorAll('[data-restore-backup]').forEach(function(b) {
+        // Same id as the delete button beside it, so one delete kills both. Restoring is itself an
+        // overwrite — on the Notion side it clears the page’s blocks before writing back — so a
+        // button pointing at an archive that is gone must not stay pressable. Disabled only: the
+        // 「已删除」 next to it is already the sentence, and saying it twice is noise.
+        const restoreId = b.getAttribute('data-restore-backup');
+        if (archiveById(restoreId) === false) { b.disabled = true; return; }
         const label = b.textContent;
         let armed = false;
         b.addEventListener('click', function(e) {
@@ -6171,6 +6190,19 @@
       });
 
       genMsg.querySelectorAll('[data-drop-backup]').forEach(function(b) {
+        // **Ask the index rather than remember.** These lines are stored as rendered HTML and
+        // re-injected on every poll, so a 「已删除」 written onto the node in place is gone three
+        // seconds later and the button reads 「删除备份」 again for a backup that no longer
+        // exists. Deriving it from `archiveIndex` survives any number of repaints, and covers the
+        // delete having happened in the settings panel instead. `=== false` because `null` means
+        // the index could not be loaded, which is not the same as "not there".
+        const dropId = b.getAttribute('data-drop-backup');
+        if (archiveById(dropId) === false) {
+          b.disabled = true;
+          b.classList.remove('armed');
+          b.textContent = t('res.backupDeleted');
+          return;
+        }
         const label = b.textContent;
         let armed = false;
         b.addEventListener('click', function(e) {

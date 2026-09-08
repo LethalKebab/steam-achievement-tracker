@@ -2575,3 +2575,81 @@ describe('a job already running when the page loads keeps being polled', () => {
     );
   });
 });
+
+/**
+ * The floater's backup buttons survive a repaint
+ * ------------------------------------------------
+ * The finished lines are stored as rendered HTML and re-injected on **every** poll while anything
+ * is running. So a state written onto those nodes in place — armed, or 「已删除」 after the delete
+ * landed — is wiped three seconds later and the button reads 「删除备份」 again, for a backup that
+ * no longer exists. Reported from a live app: the backup was gone, confirmed in the settings panel,
+ * while the floater still offered to delete it.
+ *
+ * Stop remembering, start asking. The state comes from `archiveIndex`, which `refreshArchives()`
+ * reloads after every archive write, so any number of repaints land on the same answer — and the
+ * delete having happened in the settings panel instead is covered by the same stroke.
+ *
+ * **`=== false` is the load-bearing half.** A missing id and an index that never loaded are
+ * different facts: `loadArchiveIndex` keeps the previous copy when its fetch fails, which on a
+ * fresh page is `{}`, and a bare falsy test would draw every backup button as already deleted —
+ * turning a failed listing into a screenful of wrong, irreversible-looking state.
+ */
+describe('the floater backup buttons read their state from the archive index', () => {
+  const strippedJs = () =>
+    inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  /** One binding loop, sliced between two real anchors rather than by a byte count */
+  const bindingBlock = (from, to) => {
+    const js = strippedJs();
+    const a = js.indexOf("querySelectorAll('[" + from + "]')");
+    assert.ok(a > 0, `cannot find the ${from} binding loop`);
+    const b = js.indexOf("querySelectorAll('[" + to + "]')", a);
+    assert.ok(b > a, `cannot find the ${to} loop to slice against`);
+    return js.slice(a, b);
+  };
+
+  test('the delete button asks the index before wiring a click', () => {
+    const block = bindingBlock('data-drop-backup', 'data-genlog');
+    const iCheck = block.search(/archiveById\(/);
+    const iWire = block.search(/addEventListener/);
+    assert.ok(iWire >= 0, 'cannot find the click wiring — the scan has lost its target');
+    assert.ok(
+      iCheck >= 0,
+      'the button never consults archiveById, so a backup deleted by this button or by the settings ' +
+        'panel is still offered for deletion after the next repaint'
+    );
+    assert.ok(iCheck < iWire, 'the check runs after the click is wired, so the stale button is live until pressed');
+  });
+
+  test('and treats "not listed" and "no index" as different facts', () => {
+    assert.match(
+      bindingBlock('data-drop-backup', 'data-genlog'),
+      /archiveById\([^)]*\)\s*===\s*false/,
+      'a bare falsy test on archiveById cannot tell a deleted backup from an index that failed to ' +
+        'load — loadArchiveIndex keeps the previous copy on failure, which on a fresh page is {}, ' +
+        'and every backup button would then render as already deleted'
+    );
+  });
+
+  /**
+   * 「恢复备份」 carries the **same** `r.backup.id`, so one delete kills both buttons at once. Left
+   * wired it offers to restore an archive that is not there — and restoring is itself an overwrite,
+   * which on the Notion side clears the page's blocks before writing back. It keeps its label and
+   * is merely disabled: beside a 「已删除」 that is already a sentence, a second copy of the same
+   * news is noise.
+   */
+  test('the restore button on the same line dies with it', () => {
+    const block = bindingBlock('data-restore-backup', 'data-drop-backup');
+    const iCheck = block.search(/archiveById\([^)]*\)\s*===\s*false/);
+    const iWire = block.search(/addEventListener/);
+    assert.ok(iWire >= 0, 'cannot find the click wiring — the scan has lost its target');
+    assert.ok(
+      iCheck >= 0 && iCheck < iWire,
+      'the restore button is wired without asking whether its backup still exists, so once the ' +
+        'delete beside it lands, it offers to restore an archive that is gone'
+    );
+  });
+});
