@@ -28,10 +28,10 @@ graph TD
 
 ### 2. Tells you which game is worth finishing next
 
-The dashboard shows how long each unfinished game takes to reach 100%, so "23 achievements left" stops being a number you cannot act on. Sort by that column and the shortest ones come first.
+The dashboard estimates how many hours each unfinished game still needs to reach 100%, and what finishing it would add to your average completion rate. Sort by that column and the best value per hour is at the top.
 
-* **A range, not a single number**: a game reads as 7h with 5h–12h under it, because how long a game takes genuinely varies by that much between players. A figure hardly anyone has reported is dimmed rather than presented as fact.
-* **The rarest achievement you are still missing** appears beside the hours when almost nobody has it. A short game can still hold one achievement that is a project on its own, and no hour figure can say so.
+* **The estimate accounts for what is actually left**, not just how much of it. The achievements you have not unlocked are the ones most other players did not either, so they are weighted by how rare they are rather than counted. Across this library that raised every unfinished game's estimate — most of all the ones sitting at 90%, where what remains is the hard part.
+* **A range rather than false precision**: hover a figure for the spread it came from, because how long a game takes genuinely varies that much between players. A figure hardly anyone has reported is dimmed instead of being presented as fact.
 * **The times come from HowLongToBeat**, matched to your games by their Steam ID rather than by title, so a sequel is never mistaken for the game you own. A game it has never heard of simply shows no figure, and is not asked about again.
 
 ### 3. Ticks your guide checkboxes for you

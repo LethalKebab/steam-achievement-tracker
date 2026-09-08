@@ -25,9 +25,12 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   openDb, insertGame, updateGameStats, replaceAchievements, achievementsFor,
-  setAchievementUnlocks, setAchievementRarity, hardestRemaining,
+  setAchievementUnlocks, setAchievementRarity, remainingDifficulty,
   upsertHltb, getHltb, allHltb,
 } from '../lib/db.js';
 import { selectHltbTargets, selectRarityTargets, syncHltb } from '../lib/sync.js';
@@ -76,25 +79,134 @@ describe('replaceAchievements keeps what it does not own', () => {
   });
 });
 
-describe('the rarest thing still in the way', () => {
-  test('hardestRemaining reports the lowest rarity among locked achievements only', () => {
-    const db = seeded();
-    const [row] = hardestRemaining(db);
-    assert.equal(row.appid, '1');
-    assert.equal(row.min_rarity, 2.5, 'C is locked and rarest; A is rarer than B but already held');
-    assert.equal(row.locked_known, 2);
+describe('how much of the difficulty is still ahead', () => {
+  const shareOf = (db, appid) => {
+    const r = remainingDifficulty(db).find((x) => x.appid === appid);
+    return r.left_weight / r.all_weight;
+  };
+
+  test('the share is weighted by rarity, not by how many are left', () => {
+    // Two games, each with one of three achievements left. The one whose remaining achievement is
+    // rare must read as far more work than the one whose remaining achievement is common — a
+    // count-based apportionment calls both exactly one third
+    const db = openDb(':memory:');
+    for (const [id, remainingRarity] of [['hard', 0.5], ['easy', 90]]) {
+      insertGame(db, { appid: id, name: id });
+      updateGameStats(db, id, { achieved: 2, total: 3 });
+      replaceAchievements(db, id, [ach('A'), ach('B'), ach('C')]);
+      setAchievementUnlocks(db, id, ['A', 'B']);
+      setAchievementRarity(db, id, new Map([['A', 80], ['B', 70], ['C', remainingRarity]]));
+    }
+    const hard = shareOf(db, 'hard');
+    const easy = shareOf(db, 'easy');
+    assert.ok(hard > 0.85, `a 0.5% achievement is nearly all the work left, got ${hard.toFixed(3)}`);
+    assert.ok(easy < 0.2, `a 90% achievement is nearly none of it, got ${easy.toFixed(3)}`);
+    assert.ok(hard > easy * 4, 'and the two must not land anywhere near the 1/3 a count would give');
   });
 
-  test('an achievement with no rarity on record is left out rather than counted as easy', () => {
+  test('an achievement nobody at all holds is clamped, not infinite', () => {
+    // Steam does publish 0. Left unclamped the weight is infinite, every other achievement in the
+    // game rounds to nothing beside it, and the share pins to exactly 1 however much is done
+    const db = openDb(':memory:');
+    insertGame(db, { appid: '1', name: 'Zero' });
+    updateGameStats(db, '1', { achieved: 1, total: 2 });
+    replaceAchievements(db, '1', [ach('A'), ach('B')]);
+    setAchievementUnlocks(db, '1', ['A']);
+    setAchievementRarity(db, '1', new Map([['A', 50], ['B', 0]]));
+    const share = shareOf(db, '1');
+    assert.ok(Number.isFinite(share), 'a finite number, not NaN or Infinity');
+    assert.ok(share > 0.8 && share < 1, `dominant but not total, got ${share}`);
+  });
+
+  test('a row missing either column contributes to neither sum', () => {
+    // An absent rarity is not evidence of anything. Counting it as easy would flatter exactly the
+    // games least is known about, and counting it as hard would do the opposite
     const db = openDb(':memory:');
     insertGame(db, { appid: '9', name: 'Sparse' });
     updateGameStats(db, '9', { achieved: 0, total: 2 });
     replaceAchievements(db, '9', [ach('X'), ach('Y')]);
     setAchievementUnlocks(db, '9', []);
     setAchievementRarity(db, '9', new Map([['X', 40]]));
-    const [row] = hardestRemaining(db);
-    assert.equal(row.locked_known, 1, 'Y has no figure, so it contributes nothing in either direction');
-    assert.equal(row.min_rarity, 40);
+    const [row] = remainingDifficulty(db);
+    assert.equal(row.known, 1, 'Y has no rarity, so it is in neither the numerator nor the denominator');
+    assert.equal(row.left_weight, row.all_weight, 'X is the only one counted and it is locked');
+  });
+
+  test('a game with nothing unlocked has all of its difficulty ahead of it', () => {
+    const db = seeded();
+    setAchievementUnlocks(db, '1', []);
+    assert.equal(shareOf(db, '1'), 1);
+  });
+});
+
+describe('what finishing a game is worth', () => {
+  /**
+   * The gain half, through the real `getDashboardData`.
+   *
+   * **A game with nothing unlocked is not in the average at all.** Steam's method counts only
+   * games with at least one achievement, so finishing an untouched one adds a term *and* grows the
+   * divisor — `(1 − avg) / (N + 1)` — while finishing a started one only moves its own term,
+   * `(1 − rate) / N`. One formula for both overstates the untouched game about fourfold, and
+   * nothing on screen would look wrong: it is a plausible number in a column of plausible numbers.
+   */
+  async function dashboard(seed) {
+    const dir = mkdtempSync(join(tmpdir(), 'cost-'));
+    process.env.TRACKER_DATA_DIR = dir;
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({ steamApiKey: 'x', steamId: 'y' }));
+    const { createApi } = await import('../lib/api.js');
+    const db = openDb(':memory:');
+    seed(db);
+    const api = createApi({ db, steam: {}, config: {}, syncState: { snapshot: () => ({}) } });
+    const data = api.getDashboardData();
+    rmSync(dir, { recursive: true, force: true });
+    return Object.fromEntries(data.games.map((g) => [g.appid, g]));
+  }
+
+  test('an untouched game and a started one do not share a formula', async () => {
+    const games = await dashboard((db) => {
+      // Twenty games already at 50%, so the average and the divisor are both real
+      for (let i = 0; i < 20; i++) {
+        insertGame(db, { appid: 'e' + i, name: 'E' + i });
+        updateGameStats(db, 'e' + i, { achieved: 5, total: 10 });
+      }
+      // One started, one never touched, both with the same completionist figure on record
+      insertGame(db, { appid: 'started', name: 'Started' });
+      updateGameStats(db, 'started', { achieved: 5, total: 10 });
+      insertGame(db, { appid: 'untouched', name: 'Untouched' });
+      updateGameStats(db, 'untouched', { achieved: 0, total: 10 });
+      for (const id of ['started', 'untouched']) upsertHltb(db, id, { hltbId: 1, verified: true, comp100Med: 36000 });
+    });
+
+    // 21 eligible games all at 50%, so avg = 0.5 and N = 21
+    const started = games.started.cost.gain;
+    const untouched = games.untouched.cost.gain;
+    assert.ok(Math.abs(started - (0.5 / 21) * 100) < 0.001, `started should be (1-rate)/N, got ${started}`);
+    assert.ok(Math.abs(untouched - (0.5 / 22) * 100) < 0.001, `untouched should be (1-avg)/(N+1), got ${untouched}`);
+    assert.ok(untouched < started, 'the untouched game is worth less, because finishing it also grows the divisor');
+  });
+
+  test('remaining hours are apportioned by rarity when it is known', async () => {
+    const games = await dashboard((db) => {
+      insertGame(db, { appid: '1', name: 'Weighted' });
+      updateGameStats(db, '1', { achieved: 2, total: 3 });
+      replaceAchievements(db, '1', [ach('A'), ach('B'), ach('C')]);
+      setAchievementUnlocks(db, '1', ['A', 'B']);
+      // The one left is rare, so it is most of the work despite being one achievement of three
+      setAchievementRarity(db, '1', new Map([['A', 80], ['B', 70], ['C', 0.5]]));
+      upsertHltb(db, '1', { hltbId: 1, verified: true, comp100Med: 36000 }); // 10h
+    });
+    const flat = (1 - 2 / 3) * 10;
+    assert.ok(games['1'].cost.remaining > flat * 2,
+      `a 0.5% achievement is far more than a third of a 10h game, got ${games['1'].cost.remaining}h against a flat ${flat.toFixed(1)}h`);
+  });
+
+  test('with no rarity on record it falls back to the flat share rather than to nothing', async () => {
+    const games = await dashboard((db) => {
+      insertGame(db, { appid: '1', name: 'Bare' });
+      updateGameStats(db, '1', { achieved: 5, total: 10 });
+      upsertHltb(db, '1', { hltbId: 1, verified: true, comp100Med: 36000 });
+    });
+    assert.equal(games['1'].cost.remaining, 5, 'half of ten hours — no weighting available, so no correction');
   });
 });
 
