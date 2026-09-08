@@ -6,7 +6,7 @@ Prompt text and UI strings are quoted verbatim in Chinese, because that is what 
 
 ## What this solves
 
-Writing a guide used to require a Claude Code session: pull the Steam achievement data, read wikis, digest and rewrite entry by entry, write it into Notion, then read it back to verify (the full procedure is in `.claude/skills/achievement-guide-writing/SKILL.md`). The goal is to let **the people using this app** generate guides with their own AI API key, without going through a conversation.
+Writing a guide by hand takes a Claude Code session: pull the Steam achievement data, read wikis, digest and rewrite entry by entry, write it into Notion, then read it back to verify (that procedure is in `.claude/skills/achievement-guide-writing/SKILL.md`). This pipeline exists so **the people using this app** can generate one with their own AI API key, without going through a conversation.
 
 ## Settled decisions
 
@@ -206,7 +206,7 @@ Note that the end-of-round `writeDraft()` overwrites what most tests observe, so
 
 ### Saying how far along a run is (issue #78)
 
-A generation on a large game runs for twenty minutes, and what it used to show was one sentence that the next event overwrote a few seconds later, with nothing kept. The reporter of #78 fell back to watching the API console for spend to tell a working run from a dead one — the interface could not answer that.
+A generation on a large game runs for twenty minutes, so the interface has to answer "is this working" from the screen alone. One sentence that the next event overwrites a few seconds later, with nothing kept, does not — it leaves watching the API console for spend as the only way to tell a working run from a dead one ([#78](https://github.com/LethalKebab/steam-achievement-tracker/issues/78)).
 
 Three separate causes, and only the first is about wording:
 
@@ -328,7 +328,7 @@ Measured against the two hand-written local guides in the corpus before shipping
 
 The classification pass is **asked twice before it degrades** (`REGROUP_ATTEMPTS`). Every way it fails except a cancellation depends on what came back — a reply judged unusable, a grouping nothing could be read out of, an assignment that loses a line when the prose is rearranged by it — so a second ask is a real second chance rather than the same sentence thrown at the wall again. Each attempt gets its own session; a rejected reply left in the context is the model being shown its own bad answer. A cancellation is the one failure the retry must not swallow.
 
-When it does degrade, `ev.reason` travels with the warning onto the finished card. It used to be dropped: five different failures produced the one sentence 「分区统一失败」, so a guide landing with its shards' own headings left nothing to diagnose from once the run's in-memory state was gone. The reason is quoted verbatim rather than mapped to something friendlier, cut to `REASON_MAX` — the kind is at the front of these messages.
+When it does degrade, `ev.reason` travels with the warning onto the finished card. **It has to**: five different failures otherwise produce the one sentence 「分区统一失败」, and a guide landing with its shards' own headings leaves nothing to diagnose from once the run's in-memory state is gone. The reason is quoted verbatim rather than mapped to something friendlier, cut to `REASON_MAX` — the kind is at the front of these messages.
 
 **And the gate it turned out to be, measured.** 月圆之夜 was rewritten and landed the same way a second time — 31 headings, 「愿望之夜」 three times, one section of 31 holding entries from two shards (and that one a `joinBodies` seam merge, not a regrouping). Reproduced offline with no API call: hand `regroupByAssignment` a section list naming one title twice and it **emits that bucket once per naming**, duplicating every entry in it, which assertion 2 catches and pays for by throwing the whole pass away.
 
