@@ -2375,3 +2375,89 @@ describe('the progress bar is an innerHTML sink, so everything reaching it is es
     );
   });
 });
+
+/**
+ * The first generation of each app run
+ * ------------------------------------------------
+ * `fetchGen` refreshes the table when it collects a finished job — that is what turns a row's
+ * 「生成」 into 「📖 攻略」 without a page refresh. It is skipped on the page's first collection,
+ * deliberately: those jobs finished before this page existed, and initialisation has already
+ * loaded them.
+ *
+ * **The flag saying so has to mean "this page has polled before", never "this page has collected
+ * before".** `finished` lives in the server's memory and is empty after every app start, so on
+ * such a page the first poll collects nothing, the branch never runs, and a flag assigned inside
+ * it still reads "first" when the *real* completion arrives a poll later — which is then taken for
+ * backlog, and the table is never refreshed. Reported from a live app: the guide had landed, was
+ * registered, and `getDashboardData` was already serving its `guideUrl`, while the row still
+ * offered 「生成」.
+ *
+ * It costs `refreshArchives()` by the same stroke, so 「备份 N」 goes stale too, and it takes the
+ * "pick up a job another tab started" case with it — that page also loads having collected nothing.
+ *
+ * Narrow enough to have survived unnoticed: only ever the **first** generation of each app run.
+ *
+ * **Every pattern here is a literal regex.** Building one with `new RegExp('\s')` is how the first
+ * version of this file went green against nothing: the escape collapsed on the way to disk and the
+ * pattern quietly became `s`.
+ */
+describe('a finished generation refreshes the table on the first one too', () => {
+  /** fetchGen's body, both kinds of comment gone — this very comment says `loadDashboard()` and `genSeen` */
+  const genBody = () => {
+    const js = inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const a = js.indexOf('function fetchGen');
+    assert.ok(a > 0, 'cannot find fetchGen — the scan has lost its target rather than passed');
+    const b = js.indexOf('.guideGenStatus();', a);
+    assert.ok(b > a, 'cannot find the end of fetchGen');
+    return js.slice(a, b);
+  };
+
+  /** The identifier in the `if (!x)` guarding the refresh pair */
+  const guardFlag = (body) => {
+    const iLoad = body.indexOf('loadDashboard()');
+    assert.ok(iLoad > 0, 'cannot find the loadDashboard() call in fetchGen');
+    const g = [...body.slice(0, iLoad).matchAll(/if \(!([A-Za-z_$][\w$]*)\)/g)].pop();
+    assert.ok(g, 'cannot find the if (!flag) guarding loadDashboard()');
+    return g[1];
+  };
+
+  /** Where a name is first written to — declaration or bare assignment, `==` excluded */
+  const assignedAt = (body, name) => {
+    for (const m of body.matchAll(/([A-Za-z_$][\w$]*)\s*=(?!=)/g)) if (m[1] === name) return m.index;
+    return -1;
+  };
+
+  test('the flag is assigned before the fresh.length branch, not inside it', () => {
+    const body = genBody();
+    const iFresh = body.indexOf('if (fresh.length)');
+    assert.ok(iFresh > 0, 'cannot find the fresh.length branch');
+    const flag = guardFlag(body);
+    const at = assignedAt(body, flag);
+    assert.ok(at > 0, `cannot find where ${flag} is assigned`);
+    assert.ok(
+      at < iFresh,
+      `${flag} is assigned inside the fresh.length branch. A page that loaded while the server had ` +
+        'nothing finished never runs that branch, so the flag still reads "first" when the real ' +
+        'completion arrives, and the table is never refreshed'
+    );
+  });
+
+  test('and it is not derived from genSeen, which only moves inside that branch', () => {
+    const body = genBody();
+    const flag = guardFlag(body);
+    const at = assignedAt(body, flag);
+    assert.ok(at > 0, `cannot find where ${flag} is assigned`);
+    const end = body.indexOf(';', at);
+    assert.ok(end > at, `cannot find the end of the statement assigning ${flag}`);
+    assert.doesNotMatch(
+      body.slice(at, end),
+      /genSeen/,
+      `${flag} is derived from genSeen, which is only assigned inside the fresh.length branch — so ` +
+        'hoisting the declaration alone changes nothing: it still reads its initial value on the poll ' +
+        'that collects the first completion of the run'
+    );
+  });
+});

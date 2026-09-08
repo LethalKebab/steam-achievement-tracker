@@ -6254,6 +6254,19 @@
      */
     let genSeen = -1;
     /**
+     * Whether this page has polled at all yet — **not** whether it has collected a finished job.
+     *
+     * `genSeen` cannot answer that question and must not be asked it: it only moves inside the
+     * `fresh.length` branch below, so a page that loaded while the server had nothing finished
+     * still carries `-1` one poll later, when the first real completion of the run arrives. Reading
+     * that as "finished before this page existed" skipped the refresh pair, and the row kept
+     * offering 「生成」 for a guide that had already landed and registered.
+     *
+     * `finished` is in the server’s memory, so this is every app run’s first generation, and the
+     * page that picks up a job another tab started.
+     */
+    let genPolled = false;
+    /**
      * The ones finished this round, already rendered as HTML. **They accumulate**: while the queue is
      * still running, the screen has to show both "what is running now" and "those just finished, and
      * here are their guides"
@@ -6433,19 +6446,21 @@
            */
           const all = s.finished || [];
           const fresh = all.filter(function (f) { return f.seq > genSeen; });
+          // **Read before the branch, because the branch is exactly what may not run.**
+          const firstPoll = !genPolled;
+          genPolled = true;
           if (fresh.length) {
             // **On a fresh page load only the last one is filled in.** The server keeps the most
             // recent 20, and dumping them all would smear a screenful of history over every refresh —
             // whereas what used to be displayed was the last one (`state.result`), and this keeps
             // that
-            const first = genSeen < 0;
             genSeen = all[all.length - 1].seq;
             // The greying has to be released for **every one** regardless of how many are displayed: miss one and that row's button stays grey forever
             fresh.forEach(function (f) { setGuideBusy(f.appid, false); });
             genDoneHtml = genDoneHtml.concat(
-              (first ? fresh.slice(-1) : fresh).map(renderFinished).filter(Boolean)
+              (firstPoll ? fresh.slice(-1) : fresh).map(renderFinished).filter(Boolean)
             );
-            if (!first) {
+            if (!firstPoll) {
               // `refreshArchives()` — an overwrite/rewrite has just put the original into
               // `.backups/`, and the 「备份 N」 at the end of the row is rendered from archiveIndex,
               // so without re-fetching the new one is invisible.
