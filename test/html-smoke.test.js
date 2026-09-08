@@ -2375,3 +2375,281 @@ describe('the progress bar is an innerHTML sink, so everything reaching it is es
     );
   });
 });
+
+/**
+ * The first generation of each app run
+ * ------------------------------------------------
+ * `fetchGen` refreshes the table when it collects a finished job — that is what turns a row's
+ * 「生成」 into 「📖 攻略」 without a page refresh. It is skipped on the page's first collection,
+ * deliberately: those jobs finished before this page existed, and initialisation has already
+ * loaded them.
+ *
+ * **The flag saying so has to mean "this page has polled before", never "this page has collected
+ * before".** `finished` lives in the server's memory and is empty after every app start, so on
+ * such a page the first poll collects nothing, the branch never runs, and a flag assigned inside
+ * it still reads "first" when the *real* completion arrives a poll later — which is then taken for
+ * backlog, and the table is never refreshed. Reported from a live app: the guide had landed, was
+ * registered, and `getDashboardData` was already serving its `guideUrl`, while the row still
+ * offered 「生成」.
+ *
+ * It costs `refreshArchives()` by the same stroke, so 「备份 N」 goes stale too, and it takes the
+ * "pick up a job another tab started" case with it — that page also loads having collected nothing.
+ *
+ * Narrow enough to have survived unnoticed: only ever the **first** generation of each app run.
+ *
+ * **Every pattern here is a literal regex.** Building one with `new RegExp('\s')` is how the first
+ * version of this file went green against nothing: the escape collapsed on the way to disk and the
+ * pattern quietly became `s`.
+ */
+describe('a finished generation refreshes the table on the first one too', () => {
+  /** fetchGen's body, both kinds of comment gone — this very comment says `loadDashboard()` and `genSeen` */
+  const genBody = () => {
+    const js = inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const a = js.indexOf('function fetchGen');
+    assert.ok(a > 0, 'cannot find fetchGen — the scan has lost its target rather than passed');
+    const b = js.indexOf('.guideGenStatus();', a);
+    assert.ok(b > a, 'cannot find the end of fetchGen');
+    return js.slice(a, b);
+  };
+
+  /** The identifier in the `if (!x)` guarding the refresh pair */
+  const guardFlag = (body) => {
+    const iLoad = body.indexOf('loadDashboard()');
+    assert.ok(iLoad > 0, 'cannot find the loadDashboard() call in fetchGen');
+    const g = [...body.slice(0, iLoad).matchAll(/if \(!([A-Za-z_$][\w$]*)\)/g)].pop();
+    assert.ok(g, 'cannot find the if (!flag) guarding loadDashboard()');
+    return g[1];
+  };
+
+  /** Where a name is first written to — declaration or bare assignment, `==` excluded */
+  const assignedAt = (body, name) => {
+    for (const m of body.matchAll(/([A-Za-z_$][\w$]*)\s*=(?!=)/g)) if (m[1] === name) return m.index;
+    return -1;
+  };
+
+  test('the flag is assigned before the fresh.length branch, not inside it', () => {
+    const body = genBody();
+    const iFresh = body.indexOf('if (fresh.length)');
+    assert.ok(iFresh > 0, 'cannot find the fresh.length branch');
+    const flag = guardFlag(body);
+    const at = assignedAt(body, flag);
+    assert.ok(at > 0, `cannot find where ${flag} is assigned`);
+    assert.ok(
+      at < iFresh,
+      `${flag} is assigned inside the fresh.length branch. A page that loaded while the server had ` +
+        'nothing finished never runs that branch, so the flag still reads "first" when the real ' +
+        'completion arrives, and the table is never refreshed'
+    );
+  });
+
+  test('and it is not derived from genSeen, which only moves inside that branch', () => {
+    const body = genBody();
+    const flag = guardFlag(body);
+    const at = assignedAt(body, flag);
+    assert.ok(at > 0, `cannot find where ${flag} is assigned`);
+    const end = body.indexOf(';', at);
+    assert.ok(end > at, `cannot find the end of the statement assigning ${flag}`);
+    assert.doesNotMatch(
+      body.slice(at, end),
+      /genSeen/,
+      `${flag} is derived from genSeen, which is only assigned inside the fresh.length branch — so ` +
+        'hoisting the declaration alone changes nothing: it still reads its initial value on the poll ' +
+        'that collects the first completion of the run'
+    );
+  });
+});
+
+/**
+ * A new batch starts from a clean floater
+ * ------------------------------------------------
+ * The finished lines accumulate on purpose: while a queue is draining, the floater has to carry
+ * both "what is running now" and "these just finished, and here are their guides". Nothing cleared
+ * them, though, so they accumulated for the life of the page — 「关闭」 only hides the bar
+ * (`display = 'none'`), it does not drop what the bar would draw. Starting the next generation
+ * brought the previous one's line back up beside it, and the only real reset was a page reload.
+ *
+ * **This is not an argument for auto-dismissing it.** The line carries the guide's link and its
+ * achievement count, and the repository has already measured that away for `lib/rpc.js`: a notice
+ * reporting a write to the user's own notes must not leave before it is read, and a longer timer
+ * fails exactly the person it exists for. What is wrong is not that it stays — it is that it comes
+ * back for a batch it has nothing to do with.
+ *
+ * **The guard is the load-bearing half.** `pollGen` is entered both to start a fresh batch and to
+ * queue into a live one, and only the first may clear: clearing on the second erases the lines of
+ * jobs finished moments ago in the batch still running, which is the very thing the accumulation
+ * was added for.
+ */
+describe('a new batch starts from a clean floater', () => {
+  const pollGenBody = () => {
+    const js = inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const a = js.indexOf('function pollGen');
+    assert.ok(a > 0, 'cannot find pollGen — the scan has lost its target rather than passed');
+    const b = js.indexOf('\n    }', a);
+    assert.ok(b > a, 'cannot find the end of pollGen');
+    return js.slice(a, b);
+  };
+
+  test('the accumulated finished lines are dropped when a batch starts', () => {
+    assert.match(
+      pollGenBody(),
+      /genDoneHtml\s*=\s*\[\]/,
+      'pollGen never resets genDoneHtml, so the previous batch’s result lines are drawn again ' +
+        'beside the new run — 「关闭」 only hides the bar and leaves the array untouched'
+    );
+  });
+
+  test('and only after the already-polling guard, never before it', () => {
+    const body = pollGenBody();
+    const iGuard = body.search(/if \(genTimer\) return;/);
+    assert.ok(iGuard >= 0, 'cannot find the already-polling guard in pollGen');
+    const iClear = body.search(/genDoneHtml\s*=\s*\[\]/);
+    assert.ok(iClear >= 0, 'cannot find the reset in pollGen');
+    assert.ok(
+      iClear > iGuard,
+      'the reset runs before the already-polling guard, so queueing a job into a batch that is ' +
+        'still draining wipes the lines of the ones that finished moments ago — which is what the ' +
+        'accumulation exists to show'
+    );
+  });
+});
+
+/**
+ * A job already running when the page loads
+ * ------------------------------------------------
+ * The bottom of the script calls `fetchGen()` once "to pick up a job that may still be running" —
+ * one started by another tab, or before the last refresh. It picked it up and then went quiet:
+ * `setInterval` lived only in `pollGen`, and `pollGen` is called from the two buttons that start a
+ * run, never from the load path. So such a page drew one frozen snapshot of somebody else's job,
+ * never updated it, and never collected its completion — which also meant the table never got its
+ * 「📖 攻略」 link.
+ *
+ * Arm from inside `fetchGen`, **before the branches**, for the same reason the finished-collection
+ * flag is decided there: a branch that may not run is not where a thing that must happen can live.
+ * The `!genTimer` half is not decoration — without it every poll stacks another interval on the
+ * previous one, and the 3-second poll becomes a flood a few minutes in.
+ */
+describe('a job already running when the page loads keeps being polled', () => {
+  const fetchGenBody = () => {
+    const js = inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+    const a = js.indexOf('function fetchGen');
+    assert.ok(a > 0, 'cannot find fetchGen — the scan has lost its target rather than passed');
+    const b = js.indexOf('.guideGenStatus();', a);
+    assert.ok(b > a, 'cannot find the end of fetchGen');
+    return js.slice(a, b);
+  };
+
+  test('fetchGen arms the poll timer itself, not only the two start buttons', () => {
+    assert.match(
+      fetchGenBody(),
+      /setInterval\(fetchGen/,
+      'only pollGen arms the timer, and the page-load pickup does not call it — a page that loads ' +
+        'while another tab’s job runs shows one frozen snapshot and never updates'
+    );
+  });
+
+  test('it arms before the branches, and only when no timer is already running', () => {
+    const body = fetchGenBody();
+    const iArm = body.search(/setInterval\(fetchGen/);
+    const iRunning = body.search(/if \(s\.running\)/);
+    assert.ok(iArm >= 0 && iRunning >= 0, 'cannot locate both the arming and the s.running branch');
+    assert.ok(
+      iArm < iRunning,
+      'the arming sits inside or after the s.running branch — the branch that may not run is not ' +
+        'where something that must happen can live'
+    );
+    const line = body.slice(body.lastIndexOf('\n', iArm) + 1, body.indexOf('\n', iArm));
+    assert.match(
+      line,
+      /!genTimer/,
+      'the arming is not guarded by !genTimer, so every poll stacks another interval and the ' +
+        '3-second poll turns into a flood'
+    );
+  });
+});
+
+/**
+ * The floater's backup buttons survive a repaint
+ * ------------------------------------------------
+ * The finished lines are stored as rendered HTML and re-injected on **every** poll while anything
+ * is running. So a state written onto those nodes in place — armed, or 「已删除」 after the delete
+ * landed — is wiped three seconds later and the button reads 「删除备份」 again, for a backup that
+ * no longer exists. Reported from a live app: the backup was gone, confirmed in the settings panel,
+ * while the floater still offered to delete it.
+ *
+ * Stop remembering, start asking. The state comes from `archiveIndex`, which `refreshArchives()`
+ * reloads after every archive write, so any number of repaints land on the same answer — and the
+ * delete having happened in the settings panel instead is covered by the same stroke.
+ *
+ * **`=== false` is the load-bearing half.** A missing id and an index that never loaded are
+ * different facts: `loadArchiveIndex` keeps the previous copy when its fetch fails, which on a
+ * fresh page is `{}`, and a bare falsy test would draw every backup button as already deleted —
+ * turning a failed listing into a screenful of wrong, irreversible-looking state.
+ */
+describe('the floater backup buttons read their state from the archive index', () => {
+  const strippedJs = () =>
+    inlineScripts(read('Dashboard.html'))
+      .join(SEP)
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  /** One binding loop, sliced between two real anchors rather than by a byte count */
+  const bindingBlock = (from, to) => {
+    const js = strippedJs();
+    const a = js.indexOf("querySelectorAll('[" + from + "]')");
+    assert.ok(a > 0, `cannot find the ${from} binding loop`);
+    const b = js.indexOf("querySelectorAll('[" + to + "]')", a);
+    assert.ok(b > a, `cannot find the ${to} loop to slice against`);
+    return js.slice(a, b);
+  };
+
+  test('the delete button asks the index before wiring a click', () => {
+    const block = bindingBlock('data-drop-backup', 'data-genlog');
+    const iCheck = block.search(/archiveById\(/);
+    const iWire = block.search(/addEventListener/);
+    assert.ok(iWire >= 0, 'cannot find the click wiring — the scan has lost its target');
+    assert.ok(
+      iCheck >= 0,
+      'the button never consults archiveById, so a backup deleted by this button or by the settings ' +
+        'panel is still offered for deletion after the next repaint'
+    );
+    assert.ok(iCheck < iWire, 'the check runs after the click is wired, so the stale button is live until pressed');
+  });
+
+  test('and treats "not listed" and "no index" as different facts', () => {
+    assert.match(
+      bindingBlock('data-drop-backup', 'data-genlog'),
+      /archiveById\([^)]*\)\s*===\s*false/,
+      'a bare falsy test on archiveById cannot tell a deleted backup from an index that failed to ' +
+        'load — loadArchiveIndex keeps the previous copy on failure, which on a fresh page is {}, ' +
+        'and every backup button would then render as already deleted'
+    );
+  });
+
+  /**
+   * 「恢复备份」 carries the **same** `r.backup.id`, so one delete kills both buttons at once. Left
+   * wired it offers to restore an archive that is not there — and restoring is itself an overwrite,
+   * which on the Notion side clears the page's blocks before writing back. It keeps its label and
+   * is merely disabled: beside a 「已删除」 that is already a sentence, a second copy of the same
+   * news is noise.
+   */
+  test('the restore button on the same line dies with it', () => {
+    const block = bindingBlock('data-restore-backup', 'data-drop-backup');
+    const iCheck = block.search(/archiveById\([^)]*\)\s*===\s*false/);
+    const iWire = block.search(/addEventListener/);
+    assert.ok(iWire >= 0, 'cannot find the click wiring — the scan has lost its target');
+    assert.ok(
+      iCheck >= 0 && iCheck < iWire,
+      'the restore button is wired without asking whether its backup still exists, so once the ' +
+        'delete beside it lands, it offers to restore an archive that is gone'
+    );
+  });
+});
