@@ -21,6 +21,7 @@ Only `steamApiKey` and `steamId` are required. Everything else has a working def
   "storeRequestDelayMs": 300, // pause between store calls (name lookup, cover art, search)
   "hltbEnabled": true,        // look up how long each unfinished game takes to finish at 100%
   "hltbRequestDelayMs": 800,  // pause between HowLongToBeat calls
+  "hltbRefreshBudget": 40,    // how many resolved games re-read their hours per run
   "sweepBudget": 120,         // how many "not played, but check anyway" games per auto-sync; 0 = off
   "maxStatsAgeDays": 7,       // re-verify a game at least this often even if untouched
   "perfectGameMaxAgeDays": 3, // 100% games re-verified sooner — they're the ones that can drop
@@ -136,6 +137,14 @@ The tracker can tell you how many achievements are left but nothing about what t
 `hltbRequestDelayMs` (800 ms) is **its own setting and not the Steam one**. HowLongToBeat is not an API vendor with a published allowance; it is a website being asked a favour, and the same reasoning that keeps the store endpoint slow applies more strongly here. The work is bounded anyway: a game is matched to its entry once and for as long as the game exists, and the hours behind it are re-read monthly, so after the first sync this phase usually has nothing to do.
 
 A game HowLongToBeat has never heard of is recorded as such and not searched for again. Titles that are Chinese in every language are the usual case — there is no English string to search with — and those can only be pointed at an entry by hand.
+**`hltbRefreshBudget`** (40) — how many already-resolved games may have their hours re-read in one run.
+
+The cap exists because the due dates herd. Everything resolved in the first sync is stamped within minutes of everything else, so a month later the whole library falls due on a single run — the same spike `sweepBudget` exists to prevent. The stalest rows go first, and because each run re-stamps only the rows it actually read, one cycle is enough to scatter the next round of due dates across the month by itself.
+
+Requests to HowLongToBeat are paced by `hltbRequestDelayMs` wherever they come from, and the phase gives up for the run after three consecutive failures that mean the service is unreachable — a timeout, a 429, a 5xx, or a 403 that survives a fresh handshake. A game HowLongToBeat has simply never heard of is an answer, not a failure, and does not count towards that. Nothing about giving up is remembered between runs: the next sync tries again from scratch, so a service that comes back is picked up without anything to reset.
+
+**A HowLongToBeat failure never fails the sync.** The four phases before it have already written their data, and a third party being down is not this program's sync failing — the same rule the Notion checkbox pass follows.
+
 
 **`sweepBudget` / `maxStatsAgeDays` / `perfectGameMaxAgeDays`** — these three control how much work the *automatic* sync does when you open the Dashboard. (`node tracker.js sync` ignores them and always checks everything; `sync --fast` uses them.)
 
