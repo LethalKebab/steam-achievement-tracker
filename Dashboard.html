@@ -2476,7 +2476,7 @@
         <span class="reading" title="AGCR:所有游戏完成率的平均值" data-t-title="card.avgTitle">
           <span class="value" id="cardAvg">–</span><span class="label" data-t="card.avg">平均完成率</span>
         </span>
-        <span class="reading" title="已经打满全部成就的游戏" data-t-title="card.perfectTitle">
+        <span class="reading" title="已经解锁全部成就的游戏" data-t-title="card.perfectTitle">
           <span class="value" id="cardPerfect">–</span><span class="label" data-t="card.perfect">完美</span>
         </span>
       </div>
@@ -2821,7 +2821,7 @@
       'card.avg':             ['平均完成率', 'Average completion'],
       'card.avgTitle':        ['AGCR:所有游戏完成率的平均值', 'AGCR: the mean completion rate across every game'],
       'card.perfect':         ['完美', 'Perfect'],
-      'card.perfectTitle':    ['已经打满全部成就的游戏', 'Games with every achievement unlocked'],
+      'card.perfectTitle':    ['已经解锁全部成就的游戏', 'Games with every achievement unlocked'],
       'ui.loading':           ['加载中…', 'Loading…'],
       'ui.syncNow':           ['立即同步', 'Sync now'],
       'ui.settings':          ['设置', 'Settings'],
@@ -2872,7 +2872,7 @@
       'ui.searchBox':         ['搜索框', 'the search box'],
 
       // ---- The bell -----------------------------------------------------------
-      'bell.perfect':         ['打满之后又出了新成就', 'Completed, then new achievements appeared'],
+      'bell.perfect':         ['解锁全部成就后又出现了新成就', 'Completed, then new achievements appeared'],
       'bell.added':           ['以前没有成就,现在有了', 'Had no achievements before, has them now'],
       'bell.empty':           ['最近 {days} 天没有新动静', 'Nothing new in the last {days} days'],
       'bell.today':           ['今天', 'today'],
@@ -2882,9 +2882,9 @@
       'table.empty':          ['没有符合条件的游戏', 'No games match'],
       'table.noAchSystem':    ['无成就系统', 'No achievement system'],
       'table.syncing':        ['同步中', 'syncing'],
-      'table.noNumbers':      ['还没填数字', 'no numbers entered yet'],
+      'table.noNumbers':      ['尚未填写数字', 'no numbers entered yet'],
       'table.syncingRow':     ['数据同步中…', 'Syncing…'],
-      'table.openGuide':      ['(点开攻略)', ' (opens the guide)'],
+      'table.openGuide':      ['(点击查看攻略)', ' (opens the guide)'],
       'table.count':          ['显示 {shown} / 共 {total}', 'Showing {shown} of {total}'],
       'table.unvettedTitle':  ['Steam 归为「个人资料功能受限」,不计入平均完成率', 'Steam classes this as “Profile Features Limited”; it is excluded from the average completion rate'],
       'table.lockOn':         ['已锁定:不参与自动同步,数据需手动填写。点击解锁', 'Locked: excluded from automatic syncing, the numbers are yours to fill in. Click to unlock'],
@@ -2893,18 +2893,18 @@
       'table.unlocked':       ['未锁定', 'unlocked'],
       'table.familyOff':      ['取消家庭共享标记', 'Remove the family-share mark'],
       'table.familyOn':       ['标记为家庭共享(非自购,纯信息用途)', 'Mark as family-shared — not self-purchased, for information only'],
-      'table.newAch':         ['{n}天前新增成就', 'new achievements {n}d ago'],
+      'table.newAch':         ['{n} 天前新增成就', 'new achievements {n}d ago'],
       'table.playedToday':    ['今天在玩', 'playing today'],
-      'table.playedAgo':      ['{n}天前玩过', 'played {n}d ago'],
+      'table.playedAgo':      ['{n} 天前玩过', 'played {n}d ago'],
       'table.guide':          ['攻略', 'Guide'],
       'table.generate':       ['生成', 'Generate'],
       'table.priority':       ['重点关注', 'Priority'],
       'table.favourite':      ['喜爱', 'Favourite'],
       'table.rewrite':        ['重写', 'Rewrite'],
-      'table.rewriteTitle':   ['让 AI 重新写一份,覆盖现在这份(会先备份原文)', 'Have the AI write it again, replacing the current one — the original is backed up first'],
+      'table.rewriteTitle':   ['让 AI 重新写一份,覆盖当前版本(会先备份原文)', 'Have the AI write it again, replacing the current one — the original is backed up first'],
       'table.moveTitle':      ['把这份本地攻略搬到 Notion', 'Move this local guide to Notion'],
       'table.backups':        ['备份 {n}', 'Backups {n}'],
-      'table.backupsTitle':   ['覆盖前的原文、搬去 Notion 时留下的原件、没过校验的草稿', 'Originals kept before an overwrite, the file left behind when a guide moved to Notion, and drafts that did not pass the checks'],
+      'table.backupsTitle':   ['覆盖前的原文、搬去 Notion 时留下的原件、未通过校验的草稿', 'Originals kept before an overwrite, the file left behind when a guide moved to Notion, and drafts that did not pass the checks'],
       'table.more':           ['更多操作', 'More'],
 
       // ---- The achievement panel ----------------------------------------------
@@ -2923,8 +2923,8 @@
       // state the guide's language outright and stay true wherever they are put
       'ach.guideLangZh':      ['中文攻略', 'Chinese guide'],
       'ach.guideLangEn':      ['英文攻略', 'English guide'],
-      'ach.searchGuide':      ['搜攻略', 'Search'],
-      'ach.notWritten':       ['攻略里还没写这条', 'Not written up yet'],
+      'ach.searchGuide':      ['搜索攻略', 'Search'],
+      'ach.notWritten':       ['攻略里还未写这条', 'Not written up yet'],
       'ach.openInGuide':      ['在攻略中打开', 'Open in the guide'],
 
       // ---- Deleting a row -----------------------------------------------------
@@ -2963,7 +2963,7 @@
       // two opposite outcomes on a control the reader sees once per game
       'menu.hide':            ['隐藏', 'Hide'],
       'menu.unhide':          ['取消隐藏', 'Unhide'],
-      'menu.hideTitle':       ['从表格里移出这一行。同步、统计和 Steam 都不受影响,用「已隐藏」筛选可以找回来。', 'Takes this row out of the table. Syncing, the readings and Steam are all untouched; the 「Hidden」 filter brings it back.'],
+      'menu.hideTitle':       ['从表格里移出这一行。同步、统计和 Steam 都不受影响,用「已隐藏」筛选可以找回来。', 'Takes this row out of the table. Syncing, the readings and Steam are all untouched; the “Hidden” filter brings it back.'],
       'menu.delete':          ['删除', 'Delete'],
 
       // ---- Adding a game ------------------------------------------------------
@@ -2971,7 +2971,7 @@
       'add.failed':           ['添加失败: {reason}', 'Could not add: {reason}'],
       'add.storeResults':     ['Steam 商店 · {n} 个', 'Steam store · {n}'],
       'add.notFound':         ['没有找到「{query}」', 'Nothing found for “{query}”'],
-      'add.unreachable':      ['连不上后台服务,刷新一下页面', 'Cannot reach the local service. Refresh the page.'],
+      'add.unreachable':      ['连接后台服务失败,刷新页面', 'Cannot reach the local service. Refresh the page.'],
       'add.searchFailed':     ['搜索 Steam 失败:{reason}', 'Searching Steam failed: {reason}'],
 
       // ---- Dialogs and the achievement picker ---------------------------------
@@ -3003,7 +3003,7 @@
       'scope.rare':           ['稀有', 'Rare'],
       'scope.rareTitle':      ['全球解锁率低于 {pct}% 的成就', 'Achievements under {pct}% global unlock rate'],
       'scope.locked':         ['未解锁', 'Locked'],
-      'scope.lockedTitle':    ['还没打下来的那些', 'The ones still to get'],
+      'scope.lockedTitle':    ['尚未解锁的那些', 'The ones still to get'],
       'scope.range':          ['范围', 'Scope'],
       'scope.whole':          ['整篇', 'Whole guide'],
       'scope.pick':           ['自选', 'Pick some'],
@@ -3026,7 +3026,7 @@
       'gen.fast':             ['极速模式', 'Fast'],
       'gen.deep':             ['深度模式', 'Thorough'],
       'mv.checkboxes':        ['{n} 个 checkbox 原样搬过去(含勾选状态)。', '{n} checkboxes move across as they are, ticks included.'],
-      'mv.localKept':         ['本地文件挪进 guides/.migrated/,不会删。', 'The local file moves into guides/.migrated/ — nothing is deleted.'],
+      'mv.localKept':         ['本地文件挪进 guides/.migrated/,不会删除。', 'The local file moves into guides/.migrated/ — nothing is deleted.'],
       'mv.unconverted':       ['{n} 行特殊排版会转为普通段落,文字不会丢失。', '{n} specially formatted lines become ordinary paragraphs. No text is lost.'],
       'mv.title':             ['把《{game}》的攻略搬到 Notion?', 'Move the guide for {game} to Notion?'],
       'mv.ok':                ['搬过去', 'Move it'],
@@ -3040,16 +3040,16 @@
       'gen.running':          ['⏳ 生成《{game}》…', '⏳ Generating {game}…'],
       'gen.cancelOk':         ['取消生成', 'Cancel generation'],
       'gen.cancelTitle':      ['取消《{game}》的生成?', 'Cancel generating {game}?'],
-      'gen.cancelBody':       ['已经查到、写好的部分会留在草稿里,不会丢。', 'Anything already researched and written stays in the draft — nothing is lost.'],
+      'gen.cancelBody':       ['已经查到、写好的部分会留在草稿里,不会丢失。', 'Anything already researched and written stays in the draft — nothing is lost.'],
       'gen.cancelling':       ['正在取消《{game}》…', 'Cancelling {game}…'],
 
       // ---- The two-click buttons on a generation result ------------------------
       'res.actionFailed':     ['{label}失败:{reason}', '{label} failed: {reason}'],
-      'res.rolledBackKept':   ['已用回旧版,新的那份存成了备份', 'Rolled back; the new version is kept as a backup'],
-      'res.rolledBack':       ['已用回旧版', 'Rolled back'],
+      'res.rolledBackKept':   ['已恢复旧版,新的那份已存为备份', 'Rolled back; the new version is kept as a backup'],
+      'res.rolledBack':       ['已恢复旧版', 'Rolled back'],
       'res.restoreFailed':    ['恢复失败:{reason}', 'Could not restore: {reason}'],
       'res.deleteArmed':      ['永久删除', 'Delete for good'],
-      'res.backupDeleted':    ['备份已删', 'Backup deleted'],
+      'res.backupDeleted':    ['备份已删除', 'Backup deleted'],
       'res.deleteFailed':     ['删除失败:{reason}', 'Could not delete: {reason}'],
       'res.openFailed':       ['打开失败:{reason}', 'Could not open: {reason}'],
 
@@ -3057,8 +3057,8 @@
       'res.genFailed':        ['《{game}》生成失败:{reason}', 'Generating {game} failed: {reason}'],
       'res.genCancelled':     ['已取消:《{game}》', 'Cancelled: {game}'],
       'res.chunkFailed':      ['第 {chunk}/{of} 段({count} 个成就)未生成:{reason}', 'Part {chunk} of {of} ({count} achievements) was not generated: {reason}'],
-      'res.draftKept':        ['《{game}》校验没过,已存草稿,没写进攻略。', '{game} did not pass the checks. The draft is saved; nothing was written to the guide.'],
-      'res.noSearch':         ['没联网,内容是模型凭已有知识写的。', 'No web access — the content is what the model already knew.'],
+      'res.draftKept':        ['《{game}》未通过校验,已存草稿,未写入攻略。', '{game} did not pass the checks. The draft is saved; nothing was written to the guide.'],
+      'res.noSearch':         ['未联网,内容是模型凭已有知识写的。', 'No web access — the content is what the model already knew.'],
       'res.neverSearched':    ['一次都没搜,内容等同于凭记忆写的。', 'It never searched, so the content is effectively from memory.'],
       'res.openGuide':        ['打开攻略', 'Open the guide'],
       'res.openFolder':       ['打开文件夹', 'Open folder'],
@@ -3069,7 +3069,7 @@
       'res.unsyncable':       ['{n} 个成就同名、Steam 上描述是空的,自动勾选认不出它们,需手动勾选:', '{n} achievements share a name and have no description on Steam, so automatic ticking cannot tell them apart. Tick these by hand:'],
       'res.andMore':          [' 等 {n} 个', ' and {n} more'],
       'res.preExisting':      ['攻略里还有 {n} 条原有的校验问题,本次未处理', 'The guide still has {n} pre-existing check failures, untouched this time'],
-      'res.rewrote':          ['《{game}》已改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
+      'res.rewrote':          ['《{game}》已修改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
       'res.generated':        ['《{game}》已生成 · {covered}/{total} 个成就 · ', '{game} generated · {covered} of {total} achievements · '],
       'res.readItYourself':   ['内容需要你自己过一遍。', 'Read it through yourself.'],
       'res.queueLeft':        [' · 还有 {n} 个排队', ' · {n} still queued'],
@@ -4719,7 +4719,7 @@
      * user's own directory.
      *
      * In this row `label` is the entire identity (「覆盖前的原文」 / 「搬去 Notion 时留下的原
-     * 件」 / 「没过校验的草稿」) — the dialog title already says which game it is, and writing the
+     * 件」 / 「未通过校验的草稿」) — the dialog title already says which game it is, and writing the
      * game name again on every row prints the same sentence ten times
      */
     function arcRow(e) {

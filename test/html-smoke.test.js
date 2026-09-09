@@ -1148,7 +1148,7 @@ describe('the wording in the confirmation dialog', () => {
 
   test('the scope of a partial rewrite really travels with the request, and is exclusive with the whole guide', () => {
     // The scope is chosen and the value is not passed down, presenting as a full rewrite every time
-    // — which is exactly the thing this feature exists to avoid, carrying a 「已改 N 条」 success
+    // — which is exactly the thing this feature exists to avoid, carrying a 「已修改 N 条」 success
     // notice with it. Everything looks fine on screen
     assert.match(js, /scopeChoice\.value === 'all'\s*\n?\s*\?\s*null/,
       'choosing 「整篇」 has to pass null rather than a scope whose selector is all — '
