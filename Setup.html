@@ -75,6 +75,28 @@
     --prog-done: #66c0f4;
     --prog-none: #3a4759;   /* no data */
 
+    /* ---- Cost-column scale ----------------------------------------------
+       The 「预计还需」 column used to borrow this progress scale's colours for a
+       different variable (quartile of value-per-hour, not completion) — reused because
+       the tokens already existed, not because the two were the same kind of thing. Blue
+       already means "100% done" two columns over, so painting it here for "best value
+       per hour" asked the reader to hold two meanings for one colour depending which
+       column they were in, and green/amber/blue read as three different facts rather
+       than three steps of one. A quartile rank is ordinal, not categorical — one hue,
+       monotone lightness, is the right shape. Reuses `--accent` as the brightest step
+       so no new hue enters the page; the steps below taper lightness and chroma
+       together, so the dimmest still reads as "this blue, quieter" rather than a
+       different colour arriving. Validated (dataviz skill, `validate_palette.js
+       --ordinal`): monotone L, adjacent ΔL ≥ 0.06, single hue (spread 1°). Text
+       contrast against `--surface` is 8.02 / 6.33 / 4.96 / 3.84 — the last one under
+       AA's 4.5:1 on purpose: this is the quarter the column exists to say "don't
+       optimise for", and `.cost-thin` below already accepts a bigger legibility cut
+       (50% opacity) for the same kind of low-confidence, low-priority figure. */
+    --cost-1: #66c0f4;   /* = --accent, best quarter */
+    --cost-2: #60aad6;
+    --cost-3: #5a95b9;
+    --cost-4: #53819c;   /* worst quarter — still blue, not a different hue */
+
     /* ---- Semantic colours ---------------------------------------------- */
     --ok:     #8cc63f;
     --warn:   #e0a63f;
