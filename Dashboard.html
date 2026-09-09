@@ -1173,6 +1173,18 @@
       border-bottom: 1px solid var(--line-2);
       transition: color var(--dur-1);
     }
+    /* **The four right-hand columns are as wide as their contents, and 游戏 takes what is left.**
+       Auto table layout gives every column a share of the leftover width in proportion to its
+       content, so on a wide window the 「预计还需」 column was handed 120px to hold 41px of
+       「+0.44pp」 — and being the last one, the empty half ran to the table's own edge. 完成数 and
+       成就总数 were inflated the same way.
+
+       A width of 1% is below every one of their minimums, so each falls back to its max-content
+       width and the single column without a width absorbs the rest. **完成率 keeps its size from
+       .bar-wrap's own min-width**, not from here — the bar has to stay readable, and it is the one
+       column whose content is a drawing rather than a number. */
+    #gameTable th:not(:first-child) { width: 1%; }
+
     th:first-child { border-top-left-radius: var(--r-lg); }
     th:last-child  { border-top-right-radius: var(--r-lg); }
     th:hover { color: var(--text-hi); }
@@ -2739,7 +2751,7 @@
         <th data-key="achieved" data-t="th.achieved">完成数</th>
         <th data-key="total" data-t="th.total">成就总数</th>
         <th data-key="rate" data-t="th.rate">完成率</th>
-        <th data-key="cost" data-t="th.cost">通关时长</th>
+        <th data-key="cost" data-t="th.cost">预计还需</th>
       </tr>
     </thead>
     <tbody id="gameTableBody">
