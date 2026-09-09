@@ -2806,3 +2806,57 @@ describe('the addresses on the setup page', () => {
     }
   });
 });
+
+/**
+ * The table's column widths, and the labels shipped in the markup
+ * ---------------------------------------------------------------
+ * Two things that go wrong without reporting anything.
+ *
+ * **Auto table layout inflates every column.** It hands each one a share of the leftover width in
+ * proportion to its content, so on a wide window the 「预计还需」 column was given 120px to hold
+ * 41px of 「+0.44pp」 — and being the last, its empty half ran to the table's own edge. Measured in
+ * a browser at a 1600px viewport: that column 120 → 88, 成就总数 120 → 88, 完成数 103 → 75, and
+ * 游戏 960 → 1114.
+ *
+ * **A renamed label leaves the old wording in the markup.** The inline text is the pre-JS default
+ * and `applyStrings` overwrites it a moment later, so a stale one is invisible except as a flash on
+ * load — 「预计还需」 shipped for a while with 「通关时长」 still sitting in its `<th>`.
+ */
+describe('the table columns, and the labels shipped in the markup', () => {
+  const dashCss = () => styleBlocks(read('Dashboard.html')).join(SEP).replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('every column but the first takes its content width, so the name column absorbs the slack', () => {
+    assert.match(dashCss(), /#gameTable th:not\(:first-child\)\s*\{[^}]*width:\s*1%/,
+      'without this, every column is handed a share of the leftover width and a 41px number sits in a 120px column');
+  });
+
+  test('the progress column has a floor of its own, which the rule above must not be asked to provide', () => {
+    // Shrinking the columns to content would otherwise collapse the bar, whose content is a
+    // drawing rather than text and therefore has no width to fall back on
+    assert.match(dashCss(), /\.bar-wrap\s*\{[^}]*min-width:\s*\d+px/,
+      'the bar has no minimum of its own, so sizing the columns to content collapses it');
+  });
+
+  for (const page of PAGES) {
+    test(`${page}: every label in the markup matches the table it is repainted from`, () => {
+      const strings = pageStrings(page);
+      const markup = markupNoComments(read(page));
+      const checked = [];
+      const stale = [];
+      for (const m of markup.matchAll(/<(\w+)[^>]*\sdata-t="([^"]+)"[^>]*>([^<]*)</g)) {
+        const [, tag, key, text] = m;
+        const want = strings[key] && strings[key][0];
+        if (!want || !text.trim()) continue;
+        checked.push(key);
+        if (text.trim() !== want.trim()) {
+          stale.push(`${tag}[${key}]: markup ${JSON.stringify(text.trim())}, table ${JSON.stringify(want)}`);
+        }
+      }
+      // Without a floor the assertion is satisfied by an extraction that matches nothing
+      assert.ok(checked.length >= 20,
+        `only ${checked.length} labels compared — the extraction is broken, not the rule satisfied`);
+      assert.deepEqual(stale, [],
+        'the inline text is the pre-JS default, and a stale one flashes the old wording on every load');
+    });
+  }
+});

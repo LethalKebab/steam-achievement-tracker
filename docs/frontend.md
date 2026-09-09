@@ -232,6 +232,20 @@ The fifth column, and the only one that answers "what should I play next" rather
 
 **`updateRateCell` finds its cell by `.rate-cell`, never by position.** A position-based lookup silently retargets onto whatever column is last, so adding one after the progress bar leaves every in-place edit writing to the wrong cell with nothing erroring — the bar simply never moves while a number is typed.
 
+### Column widths: four columns take their content, 游戏 takes the rest
+
+`#gameTable th:not(:first-child) { width: 1% }`.
+
+Auto table layout gives every column a share of the leftover width in proportion to its content, which on a wide window is a column of empty space beside a short number. Measured at a 1600px viewport: 「预计还需」 held 41px of text in a 120px column, 成就总数 the same, 完成数 103px — and 「预计还需」 being last, its empty half ran to the table's own rounded edge, which is where it reads as a mistake rather than as spacing.
+
+A width below every column's minimum makes each fall back to its max-content width, and the one column left without a width absorbs everything else. The same measurement afterwards: 88 / 88 / 75, with 游戏 taking 960 → 1114.
+
+**完成率 keeps its width from `.bar-wrap`'s own `min-width`, not from this rule.** Its content is a drawing rather than text, so it has no max-content width to fall back on and would collapse.
+
+### Labels in the markup are the pre-JS default, and they go stale silently
+
+Every `data-t` element's inline text is what shows for the instant before `applyStrings` runs. Rename a label in `STRINGS` and the markup keeps the old wording — visible only as a flash on load, which nobody reports. 「预计还需」 shipped for a while with 「通关时长」 still in its `<th>`. `html-smoke.test.js` compares every inline default against the Chinese half of its entry, on both pages.
+
 ### The table remembers how it was left
 
 Sort column, sort direction, the six filter chips and which of the two views — one `localStorage` entry, `satViewState`.
