@@ -107,6 +107,28 @@
       --prog-done: #66c0f4;
       --prog-none: #3a4759;   /* no data */
 
+      /* ---- Cost-column scale ----------------------------------------------
+         The 「预计还需」 column used to borrow this progress scale's colours for a
+         different variable (quartile of value-per-hour, not completion) — reused because
+         the tokens already existed, not because the two were the same kind of thing. Blue
+         already means "100% done" two columns over, so painting it here for "best value
+         per hour" asked the reader to hold two meanings for one colour depending which
+         column they were in, and green/amber/blue read as three different facts rather
+         than three steps of one. A quartile rank is ordinal, not categorical — one hue,
+         monotone lightness, is the right shape. Reuses `--accent` as the brightest step
+         so no new hue enters the page; the steps below taper lightness and chroma
+         together, so the dimmest still reads as "this blue, quieter" rather than a
+         different colour arriving. Validated (dataviz skill, `validate_palette.js
+         --ordinal`): monotone L, adjacent ΔL ≥ 0.06, single hue (spread 1°). Text
+         contrast against `--surface` is 8.02 / 6.33 / 4.96 / 3.84 — the last one under
+         AA's 4.5:1 on purpose: this is the quarter the column exists to say "don't
+         optimise for", and `.cost-thin` below already accepts a bigger legibility cut
+         (50% opacity) for the same kind of low-confidence, low-priority figure. */
+      --cost-1: #66c0f4;   /* = --accent, best quarter */
+      --cost-2: #60aad6;
+      --cost-3: #5a95b9;
+      --cost-4: #53819c;   /* worst quarter — still blue, not a different hue */
+
       /* ---- Semantic colours ---------------------------------------------- */
       --ok:     #8cc63f;
       --warn:   #e0a63f;
@@ -1347,13 +1369,15 @@
        figure scales with how many games are eligible — a threshold tuned to a 222-game library
        puts a 50-game one entirely in the top band. 「哪些最划算」 is a comparison to begin with.
 
-       **The bottom quarter is muted, not red.** A 300-hour game is not a warning, it is a long
-       game; the traffic light was rejected once already on this page, for saying that about a
-       completion rate. */
-    .cost-q1 .cost-mid { color: var(--prog-done); font-weight: 600; }
-    .cost-q2 .cost-mid { color: var(--prog-high); }
-    .cost-q3 .cost-mid { color: var(--prog-mid); }
-    .cost-q4 .cost-mid { color: var(--text-3); }
+       **One hue, not four.** `--cost-1..4` (see `:root`) replaced a reuse of the progress
+       scale's blue/green/amber/muted — the ranking is ordinal, so it earns a single-hue
+       lightness ramp rather than a borrowed set of state colours. The bottom quarter is still
+       muted, not red: a 300-hour game is not a warning, it is a long game — the same reason the
+       traffic light was rejected on the completion bar itself. */
+    .cost-q1 .cost-mid { color: var(--cost-1); font-weight: 600; }
+    .cost-q2 .cost-mid { color: var(--cost-2); }
+    .cost-q3 .cost-mid { color: var(--cost-3); }
+    .cost-q4 .cost-mid { color: var(--cost-4); }
 
     /* ---- Badges ----------------------------------------------------------
        There used to be four sets — .badge / .badge-new / .badge-played / .badge-btn —
