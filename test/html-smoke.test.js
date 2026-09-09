@@ -1829,8 +1829,11 @@ describe('the bulk delete of guide backups', () => {
    * to do nothing and never reaching a second click**, with not one error reported
    */
   test('clicking it does not count as "clicking outside", or it is disarmed the moment it arms', () => {
-    const i = js.indexOf("document.addEventListener('click'");
-    assert.ok(i > 0);
+    // Anchored on the disarm guard itself, not on the first document click listener: the page
+    // has more than one, and 'the first one' quietly became a different handler once another was
+    // added above it
+    const i = js.indexOf('if (armed && !e.target.closest(');
+    assert.ok(i > 0, 'the disarm guard is gone');
     const guard = js.slice(i, i + 200);
     // Assert one by one rather than pinning the whole string: this check should not get in the way
     // when another exception is added later, and it has to fire when one is missing
@@ -2719,5 +2722,87 @@ describe('the table remembers how it was left', () => {
     const load = code.indexOf('loadDashboard();');
     assert.ok(restore > 0 && load > 0, 'anchors gone');
     assert.ok(restore < load, 'restoreViewState is called after the first loadDashboard, so the table repaints');
+  });
+});
+
+/**
+ * The addresses on the setup page
+ * -------------------------------
+ * Every address this page names is a link, and every one of them asks before it opens.
+ *
+ * The one the family `access_token` comes from was inert text, on the grounds that the page it
+ * leads to — raw JSON, no way back — would strand the app's own window. It cannot:
+ * `launcher/main.js` hands http(s) opened from a `target="_blank"` to the system browser and
+ * denies the navigation itself.
+ *
+ * **The question is a page element, not the link's own text.** Two of the five sit inside a
+ * sentence (「在 Notion 开发者页面 点 New connection」), and swapping the words there rewrites the
+ * instruction around them.
+ *
+ * **The layout is not checked here** (no DOM — see the header).
+ */
+describe('the addresses on the setup page', () => {
+  const markup = markupNoComments(read('Setup.html'));
+  /** Code only: both kinds of comment stripped, or the comment explaining a rule feeds its assertion */
+  const js = inlineScripts(read('Setup.html'))
+    .join(SEP)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  test('the family token address is a link, not text to be retyped', () => {
+    const tag = markup.match(/<a[^>]*id="fam-url"[^>]*>/);
+    assert.ok(tag, 'the address is no longer an <a> — as plain text there is no way to open it');
+    assert.match(tag[0], /href="https:[^"]*pointssummary\/ajaxgetasyncconfig"/);
+  });
+
+  test('every off-site address opens in the browser, not in this window', () => {
+    const external = [...markup.matchAll(/<a\s[^>]*href="https?:[^"]*"[^>]*>/g)].map((m) => m[0]);
+    // Without a floor the assertion is satisfied by an extraction that finds nothing
+    assert.ok(external.length >= 5,
+      `only ${external.length} off-site links found — the extraction is broken, not the rule satisfied`);
+    // Without target="_blank" the launcher's setWindowOpenHandler never fires, and the click
+    // navigates this window off a page that has no address bar to come back from
+    const inWindow = external.filter((a) => !/target="_blank"/.test(a));
+    assert.deepEqual(inWindow, [], 'these would open inside the app window');
+  });
+
+  test('a click on one asks first, rather than going straight there', () => {
+    const i = js.indexOf(`closest('a[target="_blank"]')`);
+    assert.ok(i > 0, 'nothing intercepts an off-site link any more');
+    const handler = js.slice(i, i + 400);
+    // Without this the anchor's own navigation still runs and the question is decoration
+    assert.match(handler, /preventDefault\(\)/, 'the click is not cancelled, so it navigates anyway');
+    assert.match(handler, /\$\('ask'\)\.hidden = false/, 'the question is never shown');
+  });
+
+  test('answering it reaches the system browser', () => {
+    const i = js.indexOf(`$('ask-yes').addEventListener`);
+    assert.ok(i > 0, 'anchor gone');
+    // window.open is what the launcher's setWindowOpenHandler sees; assigning location would
+    // navigate this window instead, which is the thing being avoided
+    assert.match(js.slice(i, i + 300), /window\.open\(url, '_blank', 'noopener'\)/);
+  });
+
+  test('the question has more than one way out', () => {
+    // A question with a single exit is a trap — the same rule the first-run fork had to learn
+    assert.match(js, /e\.key === 'Escape'/, 'Escape does not dismiss it');
+    assert.match(js, /e\.target === \$\('ask'\)/, 'clicking the dimmed area does not dismiss it');
+  });
+
+  test('it sits outside the <form>, and both answers are type="button"', () => {
+    assert.ok(markup.indexOf('</form>') < markup.indexOf('id="ask"'),
+      'the question is inside the form, where either answer can submit it');
+    for (const id of ['ask-yes', 'ask-no']) {
+      const tag = markup.match(new RegExp(`<button[^>]*id="${id}"[^>]*>`));
+      assert.ok(tag, `${id} is gone`);
+      assert.match(tag[0], /type="button"/, `${id} would submit the form`);
+    }
+  });
+
+  test('the question and its two answers are in the table, in both languages', () => {
+    const strings = pageStrings('Setup.html');
+    for (const k of ['ask.external', 'act.open', 'act.cancel']) {
+      assert.ok(strings[k] && strings[k][0] && strings[k][1], `${k} is missing a half`);
+    }
   });
 });

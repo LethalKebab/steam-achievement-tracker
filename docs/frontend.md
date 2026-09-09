@@ -599,6 +599,14 @@ Three details are load-bearing:
 
 A clean form leaves on one click; only a dirty one arms, since a confirmation shown every time trains itself into a reflex. `#back-btn` must also sit in the document-click disarm exception beside `#arc-wipe`.
 
+### The addresses on this page are links, and each one asks
+
+All of them, including the one the family `access_token` comes from. `launcher/main.js` hands http(s) opened from a `target="_blank"` to the system browser and denies the navigation itself, so a click cannot leave this window on an off-site page — which is what makes a link safe here, and why an address has no reason to be written out as text instead.
+
+A browser window arriving on top of the app is a surprise, so a click asks 「在默认浏览器中打开这个链接?」 first. **The question is a page element, not the link's own text**: two of these links sit inside a sentence (「在 Notion 开发者页面 点 New connection」), and swapping the words there rewrites the instruction around them. It is not a native dialog either — those are dead in the packaged build, see [self-update.md](self-update.md). Escape and the dimmed area both dismiss it.
+
+The backup path is not an address and stays a plain value: `user-select: all` selects it in one click, and 「打开文件夹」 beside it is the thing actually wanted.
+
 ### Three wizard steps, one mechanism, two behaviours
 
 Step 1 Steam (required) → 2 AI → 3 Notion, one section visible at a time, plus a settings-only 4th (备份与恢复).
