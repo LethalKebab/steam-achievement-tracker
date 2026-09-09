@@ -20,6 +20,10 @@ There *is* a shared stylesheet now (`/fonts/noto-sans-sc.css`), and the tokens s
 
 `--topbar-h` is deliberately **not** in this block: it's a runtime measurement, not a design token. A test pins that too — otherwise the cheapest way to make the parity check pass is to paste a useless `--topbar-h` into Setup, and the block starts collecting non-design junk.
 
+### A token that does not exist fails in silence
+
+`var(--nope)` does not error: the declaration is dropped and the value falls back to whatever was inherited. `.cost-mid` was set to `var(--text-1)` for its whole life — a token neither page has ever defined — and inherited a colour close enough that nobody saw it. `html-smoke.test.js` checks every `var(--x)` written without a fallback against the tokens the page actually defines.
+
 ### Lines are alpha, never a fixed hex
 
 The old `--border` was literally the same value as `--panel-alt`, so every border drawn on a hover surface vanished. An alpha white is correct against all four surfaces by construction, not by tuning.
@@ -231,6 +235,16 @@ The fifth column, and the only one that answers "what should I play next" rather
 **The range lives in the tooltip.** A point estimate lands within ±30% of the truth about seven times in ten, so the spread is worth having, but it is not what the decision turns on and the cell already carries the two numbers that are.
 
 **`updateRateCell` finds its cell by `.rate-cell`, never by position.** A position-based lookup silently retargets onto whatever column is last, so adding one after the progress bar leaves every in-place edit writing to the wrong cell with nothing erroring — the bar simply never moves while a number is typed.
+
+**The colour is the ratio, and the two numbers are only its halves.** 「23h · +0.44pp」 beside 「9.6h · +0.04pp」 does not say which is the better hour — the first is four times the better. The sort knew it and the cell did not, so each row is painted by which quarter of the library its value per hour falls in: `--prog-done`, `--prog-high`, `--prog-mid`, then muted `--text-3`.
+
+**Quartiles of the library, not fixed cuts.** The gain half is (1 − rate) / N, so every figure scales with how many games are eligible — a cut tuned to 222 games puts a 50-game library entirely in the top band. Ranked over the whole library and never over the filtered rows: a colour that changes meaning when a chip is pressed says nothing until you know which set it is relative to.
+
+**The bottom quarter is muted, not red.** A 300-hour game is a long game, not a warning — the same reason the completion bar is a progressive scale and not a traffic light.
+
+**`.cost-thin` dims with `opacity`, not `color`.** The tier owns this number's colour, and two rules setting `color` on one element means whichever loses is ignored in silence.
+
+**pp is explained on the column header** through `data-t-title`, not beside the number: one sentence, wanted once, and this page does not carry standing explanations.
 
 ### Column widths: four columns take their content, 游戏 takes the rest
 
