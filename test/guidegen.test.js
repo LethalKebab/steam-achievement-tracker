@@ -2145,7 +2145,7 @@ describe('sharded writing', () => {
         // it has never seen
         const refill = provider.asked[4];
         assert.match(refill, /只写第 13–18 个成就/, 'it has to use the original "write this shard" wording');
-        assert.doesNotMatch(refill, /校验没过/, 'this shard was never written, so there is no failed validation to speak of');
+        assert.doesNotMatch(refill, /未通过校验/, 'this shard was never written, so there is no failed validation to speak of');
       });
 
       test('a broken vendor is thrown through verbatim rather than recorded as "this shard did not work"', async () => {

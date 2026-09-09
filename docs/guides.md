@@ -366,7 +366,7 @@ Clicking a game row expands the achievements you haven't unlocked yet. Each card
 
 The card already prints the name and the official description from Steam, so the guide text has its opening echo of those two stripped — what's left is your notes. Only exact echoes go, and only from the top: a description you paraphrased is your own wording and stays, which is what keeps a *hidden* achievement's condition on screen (Steam gives no description for those, so that line in your guide is the only place it appears). An entry that copied the official text and added nothing shows no guide block at all, rather than repeating what's already above it.
 
-Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement`): a verbatim quote of a description that is unique in the game, or a name that maps to exactly one achievement. **It refuses to guess.** An achievement it can't attribute shows **Not written up yet** (「攻略里还没写这条」) and keeps the search link. Do not loosen the matching to fill those blanks — the same function decides which boxes get ticked in your notes, so loosening it here loosens it there.
+Attribution uses the same reverse lookup `audit` does (`resolveTodoToAchievement`): a verbatim quote of a description that is unique in the game, or a name that maps to exactly one achievement. **It refuses to guess.** An achievement it can't attribute shows **Not written up yet** (「攻略里还未写这条」) and keeps the search link. Do not loosen the matching to fill those blanks — the same function decides which boxes get ticked in your notes, so loosening it here loosens it there.
 
 That refusal is what makes the panel worth reading: every achievement your guide doesn't cover says so on its own card. So the panel doubles as a map of **which achievements your guide still doesn't cover** — something that was previously only reachable by running `guide-lint` across the corpus.
 
@@ -379,7 +379,7 @@ Details:
 - One Notion read per game, on the first expand, cached for the rest of the page's life.
 - **Failure is soft.** An expired token leaves the achievement list exactly as it was and says why in the header — it does not take the panel down.
 - Local markdown guides show the text but no jump link: a line number is not an anchor.
-- A game with no registered guide is unchanged — search link only. Nothing claims **Not written up yet** (「攻略里还没写这条」) when there is no guide to have written it in.
+- A game with no registered guide is unchanged — search link only. Nothing claims **Not written up yet** (「攻略里还未写这条」) when there is no guide to have written it in.
 
 ## Running the sync
 
@@ -476,7 +476,7 @@ This strictness is deliberate and was arrived at the hard way. Loose matching pr
 
 There's a third case exact matching can't solve on its own: some games contain **two different achievements with identical names**. If only one is unlocked, names alone can't say which checkbox belongs to it. If both are unlocked, any assignment is correct and it proceeds normally.
 
-A name is disqualified individually, not the achievement as a whole. Most collisions are localization slips where only one language is affected — Plague Inc ships two achievements called 生化武器大师 whose English names are `Nano-Virus Master` and `Bioweapon Master` — so if the other language's name is unique, matching still uses it. The colliding name itself is never used either way.
+A name is disqualified individually, not the achievement as a whole. Most collisions are localisation slips where only one language is affected — Plague Inc ships two achievements called 生化武器大师 whose English names are `Nano-Virus Master` and `Bioweapon Master` — so if the other language's name is unique, matching still uses it. The colliding name itself is never used either way.
 
 **The fix for that is in how you write the guide, not in the code.** If a checkbox quotes the achievement's official description verbatim, and that description is unique in the game, the box is unambiguously about that achievement — so the sync can tick it correctly even though the names collide. That's why the recommended shape is:
 

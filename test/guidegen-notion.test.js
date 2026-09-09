@@ -361,7 +361,7 @@ describe('landToNotion — write it in, then verify by reading back', () => {
     notion.extractAppIdFromPageContent = async () => '1';
     await assert.rejects(
       land(db, config, draftPath, notion, {}),
-      /回读校验没过[\s\S]*第二步/
+      /回读未通过校验[\s\S]*第二步/
     );
   });
 
