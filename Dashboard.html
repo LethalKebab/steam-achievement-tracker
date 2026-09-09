@@ -1327,13 +1327,33 @@
     /* The completion-time cell. Two lines, and the second is deliberately quieter: the median
        is the figure to read, the range is there to say how much to trust it */
     .cost-cell { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
-    .cost-mid { color: var(--text-1); font-variant-numeric: tabular-nums; }
+    .cost-mid { color: var(--text); font-variant-numeric: tabular-nums; }
     /* A thin sample is not a wrong figure, it is an unsupported one — so the number is dimmed
-       rather than hidden or flagged, which is what 'treat this as a hint' looks like */
-    .cost-thin .cost-mid { color: var(--text-3); }
+       rather than hidden or flagged, which is what 'treat this as a hint' looks like.
+       **Opacity, not colour.** The tier below owns this number's colour, and two rules setting
+       `color` on one element means whichever loses is silently ignored */
+    .cost-thin { opacity: 0.5; }
     /* The second number, and quieter than the hours: it is what the hours buy, not what they cost */
     .cost-gain { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
     .cost-none { color: var(--text-3); }
+
+    /* ---- How good a use of the time this row is --------------------------
+       The cell carries both halves of the ratio, and neither of them can show the ratio: one is
+       the numerator and the other the denominator, and 「23h」 beside 「+0.44pp」 does not say
+       whether that beats 「9.6h」 beside 「+0.04pp」 (it does, by four times). The order already
+       encodes it; the colour is what makes it readable without trusting the order.
+
+       **Quartiles of the library, not fixed cuts.** The gain half is (1 − rate) / N, so every
+       figure scales with how many games are eligible — a threshold tuned to a 222-game library
+       puts a 50-game one entirely in the top band. 「哪些最划算」 is a comparison to begin with.
+
+       **The bottom quarter is muted, not red.** A 300-hour game is not a warning, it is a long
+       game; the traffic light was rejected once already on this page, for saying that about a
+       completion rate. */
+    .cost-q1 .cost-mid { color: var(--prog-done); font-weight: 600; }
+    .cost-q2 .cost-mid { color: var(--prog-high); }
+    .cost-q3 .cost-mid { color: var(--prog-mid); }
+    .cost-q4 .cost-mid { color: var(--text-3); }
 
     /* ---- Badges ----------------------------------------------------------
        There used to be four sets — .badge / .badge-new / .badge-played / .badge-btn —
@@ -2751,7 +2771,7 @@
         <th data-key="achieved" data-t="th.achieved">完成数</th>
         <th data-key="total" data-t="th.total">成就总数</th>
         <th data-key="rate" data-t="th.rate">完成率</th>
-        <th data-key="cost" data-t="th.cost">预计还需</th>
+        <th data-key="cost" data-t="th.cost" data-t-title="th.cost.help">预计还需</th>
       </tr>
     </thead>
     <tbody id="gameTableBody">
@@ -2834,6 +2854,7 @@
       'th.total':             ['成就总数', 'Total'],
       'th.rate':              ['完成率', 'Rate'],
       'th.cost':              ['预计还需', 'Est. left'],
+      'th.cost.help':         ['pp:解锁全部成就后,平均完成率提高的幅度。颜色越亮,每小时的性价比越高。', 'pp: how far your average completion rate rises once every achievement is unlocked. The brighter the colour, the better the value per hour.'],
       'table.costRange':      ['估算区间 {lo} – {hi}', 'Estimated range {lo} – {hi}'],
       'table.loading':        ['正在读取数据…', 'Loading…'],
 
@@ -3492,6 +3513,30 @@
      * estimate lands within ±30% of the truth about seven times in ten — but it is not what the
      * decision turns on, and this cell already carries the two numbers that are.
      */
+    /**
+     * Which quarter of the library this row's value per hour falls in — 1 the best, 4 the worst.
+     *
+     * **Ranked over the whole library, never over the filtered view.** A colour that changed
+     * meaning when a chip was pressed would be worse than no colour: the reader would have to know
+     * which set it was relative to before it said anything.
+     *
+     * Rebuilt on every render because a sync replaces `allGames` wholesale, and a row that has just
+     * gained an estimate has no entry from the run before.
+     */
+    let costTier = new Map();
+    function rankCosts(games) {
+      const ranked = games
+        .map(function(g) { return { appid: String(g.appid), roi: roiOf(g) }; })
+        .filter(function(x) { return typeof x.roi === 'number'; })
+        .sort(function(a, b) { return b.roi - a.roi; });
+      costTier = new Map();
+      ranked.forEach(function(x, i) {
+        // The last element's i / length is one short of 1, so the floor cannot reach 4 on its own;
+        // the min is there for a single-row library, where 0 / 1 is 0 and the only row is the best
+        costTier.set(x.appid, Math.min(4, Math.floor((i / ranked.length) * 4) + 1));
+      });
+    }
+
     function costCell(g) {
       const c = g.cost;
       if (!c || c.remaining === null) return '<span class="cost-none">—</span>';
@@ -3501,10 +3546,13 @@
       // A thin sample is not a wrong figure, it is an unsupported one, so the number is dimmed
       // rather than hidden or flagged — which is what 'treat this as a hint' looks like
       const thin = c.sample > 0 && c.sample < MIN_HLTB_SAMPLE ? ' cost-thin' : '';
+      // The colour is the ratio the two numbers cannot show between them
+      const tier = costTier.get(String(g.appid));
+      const rank = tier ? ' cost-q' + tier : '';
       const gain = typeof c.gain === 'number'
         ? '<span class="cost-gain">+' + c.gain.toFixed(2) + 'pp</span>'
         : '';
-      return '<div class="cost-cell' + thin + '"' + (range ? ' title="' + escapeHtml(range) + '"' : '') + '>'
+      return '<div class="cost-cell' + thin + rank + '"' + (range ? ' title="' + escapeHtml(range) + '"' : '') + '>'
         + '<span class="cost-mid">' + fmtHours(c.remaining) + '</span>' + gain + '</div>';
     }
 
@@ -3893,6 +3941,8 @@
 
 
     function render() {
+      // Before any row is built, and from the whole library rather than what survives the filter
+      rankCosts(allGames);
       const filters = currentFilters();
       let rows = allGames.filter(function(g) { return !hidingFilter(g, filters); });
 

@@ -2860,3 +2860,75 @@ describe('the table columns, and the labels shipped in the markup', () => {
     });
   }
 });
+
+/**
+ * The cost column's colour, and the tokens it is painted with
+ * -----------------------------------------------------------
+ * The cell carries both halves of the ratio and neither can show the ratio: one is the numerator,
+ * the other the denominator. 「23h · +0.44pp」 beside 「9.6h · +0.04pp」 does not say that the first
+ * is four times the better use of an hour. The sort knows; the colour is what lets a reader see it.
+ */
+describe('the cost column colour-codes value per hour', () => {
+  const html = read('Dashboard.html');
+  const css = styleBlocks(html).join(SEP).replace(/\/\*[\s\S]*?\*\//g, '');
+  const js = inlineScripts(html).join(SEP)
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/[^\n]*/gm, '$1');
+
+  test('four tiers, each painted, and the worst one is not a warning', () => {
+    for (const q of [1, 2, 3, 4]) {
+      const at = css.indexOf('.cost-q' + q + ' .cost-mid');
+      assert.ok(at > 0, `cost-q${q} has no rule at all`);
+      const rule = css.slice(at, css.indexOf(String.fromCharCode(125), at) + 1);
+      assert.match(rule, /color:/, `cost-q${q} sets no colour`);
+      // A 300-hour game is a long game, not a warning. The traffic light was rejected once on this
+      // page already, for saying that about a completion rate
+      assert.ok(!rule.includes('--prog-low'), `cost-q${q} paints a row as a warning`);
+    }
+  });
+
+  test('the ranking is over the whole library, never the filtered view', () => {
+    // Ranked over what survives the filter, a colour changes meaning when a chip is pressed, and
+    // the reader has to know which set it is relative to before it says anything
+    assert.match(js, /rankCosts\(allGames\)/, 'the ranking is not taken from the whole library');
+  });
+
+  test('the thin-sample marker does not set a colour, which the tier owns', () => {
+    const at = css.indexOf('.cost-thin');
+    assert.ok(at > 0, 'the thin marker is gone');
+    const rule = css.slice(at, css.indexOf(String.fromCharCode(125), at) + 1);
+    assert.match(rule, /opacity:/, 'the thin marker no longer dims anything');
+    // Two rules setting `color` on one element means whichever loses is silently ignored
+    assert.ok(!rule.includes('color:'), 'the thin marker fights the tier for the same property');
+  });
+
+  test('the header explains pp, in both languages', () => {
+    assert.match(markupNoComments(html), /data-key="cost"[^>]*data-t-title="th\.cost\.help"/,
+      'the column offers no explanation of pp');
+    const s = pageStrings('Dashboard.html');
+    assert.ok(s['th.cost.help'] && s['th.cost.help'][0] && s['th.cost.help'][1], 'the explanation is missing a half');
+    assert.match(s['th.cost.help'][0], /pp/, 'the explanation never names the thing it explains');
+  });
+});
+
+/**
+ * An undefined CSS variable does not error
+ * ----------------------------------------
+ * The declaration simply fails and the value falls back to whatever was inherited, which is why
+ * `.cost-mid { color: var(--text-1) }` survived: `--text-1` has never existed on either page, and
+ * the number happened to inherit a colour close enough that nobody saw it.
+ */
+describe('no page references a design token that does not exist', () => {
+  for (const page of PAGES) {
+    test(`${page}: every var(--x) with no fallback resolves to a real token`, () => {
+      const css = styleBlocks(read(page)).join(SEP).replace(/\/\*[\s\S]*?\*\//g, '');
+      const defined = new Set([...css.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]));
+      // Only references without a fallback: `var(--x, .12s)` is fine whether or not --x exists
+      const used = [...new Set([...css.matchAll(/var\(\s*(--[\w-]+)\s*\)/g)].map((m) => m[1]))];
+      assert.ok(used.length >= 20,
+        `only ${used.length} token references found — the extraction is broken, not the rule satisfied`);
+      assert.deepEqual(used.filter((x) => !defined.has(x)), [],
+        'these resolve to nothing, and the declaration falls back to the inherited value in silence');
+    });
+  }
+});
