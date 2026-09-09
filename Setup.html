@@ -438,8 +438,10 @@
     word-break: break-all;
     user-select: all;
   }
+  /* The path and what to do with it, on one line */
   .bk-row { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s3); }
   .bk-row .btn-sub { margin-top: 0; }
+  .bk-row > .bk-path { margin-top: 0; flex: 1; min-width: 0; }
   /* 「备份」 and 「恢复」 are the two things in this section and need a break
      between them. `.step-title`'s top margin is 0 (it is normally a section's
      first element), so the 「打开文件夹」 button would sit flush against the
@@ -710,6 +712,37 @@
   @media (prefers-reduced-motion: reduce) {
     .steps li, .steps li::before, input, select, button { transition: none; }
   }
+  /* ---- Leaving for the browser ---------------------------------------
+     Every off-site address asks first: a browser window arriving on top of the
+     app is otherwise a surprise, and two of these addresses are raw JSON.
+
+     A page element and not a native dialog — native ones are dead in the
+     packaged build (see docs/self-update.md), and the question has to read the
+     same in a browser and in the packaged app.
+
+     The question cannot be put into the link's own text: two of the five sit
+     inside a sentence (「在 Notion 开发者页面 点 New connection」), and swapping
+     the words there rewrites the instruction around them. */
+  .ask {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--s5);
+    background: rgba(8, 12, 18, 0.62);
+  }
+  .ask-box {
+    width: min(380px, 100%);
+    padding: var(--s5);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    border: 1px solid var(--line-3);
+  }
+  .ask-q { font-size: var(--fs-md); color: var(--text); line-height: 1.6; }
+  .ask-row { display: flex; gap: var(--s3); justify-content: flex-end; margin-top: var(--s5); }
+  .ask-row button { width: auto; margin-top: 0; padding: 6px var(--s4); font-size: var(--fs-sm); }
   </style>
 </head>
 <body>
@@ -815,15 +848,16 @@
            after completeSetup is what makes it work on first run, where the
            credentials it needs are only saved a moment earlier.
            **The address has to be on the page.** Nobody can act on this without
-           knowing where the token comes from. It is a <code> and not a link: the
-           page it names is raw JSON, and opening that inside the app's own window
-           would strand the user with no way back. -->
+           knowing where the token comes from. It is a link like the two above it:
+           launcher/main.js hands http(s) opened from a target="_blank" to the
+           system browser and denies the navigation, so this window is never left
+           on the page of raw JSON it names. -->
       <label for="fam-token">③ <span data-t="step1.fam.label">家庭库 access_token</span><span class="tag opt" data-t="tag.opt">可选</span></label>
       <div class="hint">
         <span data-t="step1.fam.what">一次性加入你玩过的家庭共享游戏。日常同步只覆盖最近两周。</span><br>
-        <span data-t="step1.fam.where">登录 Steam 后打开这个地址,复制 webapi_token:</span>
+        <span data-t="step1.fam.where">登录 Steam 后打开这个地址,复制 webapi_token:</span><br>
+        → <a id="fam-url" href="https://store.steampowered.com/pointssummary/ajaxgetasyncconfig" target="_blank" rel="noopener">store.steampowered.com/pointssummary/ajaxgetasyncconfig</a>
       </div>
-      <code class="bk-path">https://store.steampowered.com/pointssummary/ajaxgetasyncconfig</code>
       <input id="fam-token" name="fam-token" type="password" autocomplete="off" spellcheck="false" style="margin-top: var(--s3)" data-t-placeholder="step1.fam.ph" placeholder="留空就跳过">
       <div class="hint" data-t="step1.fam.drop">token 用完即弃,不会保存。</div>
     </section>
@@ -919,8 +953,9 @@
           <span data-t="step4.include">包含 Steam / Notion / AI 密钥</span>
         </label>
         <div class="msg" id="bk-msg" role="status"></div>
-        <code class="bk-path" id="bk-path" hidden></code>
+        <!-- Where it went and what to do with it, on one line -->
         <div class="bk-row" id="bk-done" hidden>
+          <code class="bk-path" id="bk-path"></code>
           <button type="button" class="btn-sub" id="bk-reveal" data-t="step4.reveal">打开文件夹</button>
         </div>
       </div>
@@ -976,6 +1011,18 @@
     </div>
     <div class="msg" id="msg" role="status"></div>
   </form>
+
+  <!-- Asked when an off-site address is clicked. Outside the <form> on purpose:
+       nothing in here should ever be able to submit it -->
+  <div class="ask" id="ask" hidden>
+    <div class="ask-box" role="dialog" aria-modal="true" aria-labelledby="ask-q">
+      <div class="ask-q" id="ask-q" data-t="ask.external">在默认浏览器中打开这个链接?</div>
+      <div class="ask-row">
+        <button type="button" class="btn-sub" id="ask-no" data-t="act.cancel">取消</button>
+        <button type="button" id="ask-yes" data-t="act.open">打开</button>
+      </div>
+    </div>
+  </div>
   <script>
     const form = document.getElementById('setup-form');
     const btn = document.getElementById('submit-btn');
@@ -1223,6 +1270,9 @@
       'act.submit':           ['保存并验证', 'Save and verify'],
       'act.finish':           ['完成设置', 'Finish setup'],
       'act.discard':          ['放弃未保存的修改?', 'Discard unsaved changes?'],
+      'act.open':             ['打开', 'Open'],
+      'act.cancel':           ['取消', 'Cancel'],
+      'ask.external':         ['在默认浏览器中打开这个链接?', 'Open this link in your default browser?'],
 
       'msg.unreachable':      ['连不上后台服务,刷新一下页面', 'Cannot reach the local service. Refresh the page.'],
       'msg.failed':           ['请求失败', 'The request failed'],
@@ -1880,13 +1930,43 @@
       setNotionMsg(t('notion.created', { name: r.title, options: r.options.join(' / ') }), 'ok');
     });
 
+    // ---- Leaving for the browser -------------------------------------------
+    //
+    // Every off-site address asks before it opens. Delegated from the document, so it covers the
+    // five links wherever they sit and needs no rewiring when the language repaints them.
+    //
+    // `window.open` is what reaches launcher/main.js's setWindowOpenHandler, which hands http(s)
+    // to the system browser and denies the navigation — the href stays on the anchor so hovering
+    // still shows where it goes.
+    let pendingUrl = '';
+    const closeAsk = () => { $('ask').hidden = true; pendingUrl = ''; };
+
+    document.addEventListener('click', (e) => {
+      const a = e.target.closest('a[target="_blank"]');
+      if (!a) return;
+      e.preventDefault();
+      pendingUrl = a.href;
+      $('ask').hidden = false;
+      $('ask-yes').focus();
+    });
+
+    $('ask-no').addEventListener('click', closeAsk);
+    $('ask-yes').addEventListener('click', () => {
+      const url = pendingUrl;
+      closeAsk();
+      if (url) window.open(url, '_blank', 'noopener');
+    });
+    // Clicking the dimmed area and Escape are both ways out: a question with only one exit is a trap
+    $('ask').addEventListener('click', (e) => { if (e.target === $('ask')) closeAsk(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('ask').hidden) closeAsk(); });
+
     // ---- Backup ------------------------------------------------------------
     //
     // The backup is written to disk, and **only the path is shown here; no
     // download link**. The packaged build does not hook will-download, so Electron
     // falls back to the native save dialog, and native dialogs are dead in this
     // program (see docs/self-update.md). A download button that does nothing when
-    // pressed is far worse than a path.
+    // pressed is far worse than a path with 「打开文件夹」 beside it.
     let lastBackupPath = '';
 
     const setMsg = (id, text, cls) => {
@@ -1904,7 +1984,6 @@
         if (r.error) throw new Error(r.error);
         lastBackupPath = r.path;
         $('bk-path').textContent = r.path;
-        $('bk-path').hidden = false;
         $('bk-done').hidden = false;
         // Success is conveyed by the path and the numbers; no 「备份成功」 sentence
         // is needed.
