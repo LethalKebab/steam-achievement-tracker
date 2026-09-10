@@ -2924,10 +2924,17 @@
       'th.cost':              ['预计还需', 'Est. left'],
       'th.cost.help':         ['pp:解锁全部成就后,平均完成率提高的幅度。颜色越亮,每小时的性价比越高。', 'pp: how far your average completion rate rises once every achievement is unlocked. The brighter the colour, the better the value per hour.'],
       'table.costRange':      ['估算区间 {lo} – {hi}', 'Estimated range {lo} – {hi}'],
-      // What the dotted underline means. It says why the figure is soft, not how soft —
-      // the per-game count is not on screen and naming a threshold here would only add a
-      // number the reader cannot act on
-      'table.costThin':       ['报告通关时长的人很少,估算仅供参考', 'Few reported completion times, so treat this estimate as a hint'],
+      // What the dotted underline means: few reports, so the figure moves further.
+      //
+      // **Every figure in this column is an estimate, so saying so says nothing about the
+      // marked row.** An earlier wording ended 「估算仅供参考」, which is equally true of the
+      // 92 rows carrying no mark — it filled the half of the tooltip that had to carry the
+      // one fact the mark exists for. What is particular to a marked row is that the median
+      // rests on a handful of playthroughs and can sit a long way from typical.
+      //
+      // The threshold and the per-game count are both left out. Neither is on screen, and
+      // neither changes what the reader does with the number
+      'table.costThin':       ['样本少,偏差可能较大', 'Small sample, so the real figure may differ a lot'],
       'table.loading':        ['正在读取数据…', 'Loading…'],
 
       // ---- Filter chips and the search box ------------------------------------
