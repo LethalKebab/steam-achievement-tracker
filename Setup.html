@@ -86,16 +86,35 @@
        monotone lightness, is the right shape. Reuses `--accent` as the brightest step
        so no new hue enters the page; the steps below taper lightness and chroma
        together, so the dimmest still reads as "this blue, quieter" rather than a
-       different colour arriving. Validated (dataviz skill, `validate_palette.js
-       --ordinal`): monotone L, adjacent ΔL ≥ 0.06, single hue (spread 1°). Text
-       contrast against `--surface` is 8.02 / 6.33 / 4.96 / 3.84 — the last one under
-       AA's 4.5:1 on purpose: this is the quarter the column exists to say "don't
-       optimise for", and `.cost-thin` below already accepts a bigger legibility cut
-       (50% opacity) for the same kind of low-confidence, low-priority figure. */
+       different colour arriving.
+
+       **Every step clears AA on both backgrounds a row is ever drawn on.** Contrast
+       against `--surface` is 8.02 / 7.03 / 6.13 / 5.19, and against `--surface-2`
+       — which `tr.game-row:hover td` paints under this very cell — 6.98 / 6.11 /
+       5.33 / 4.51. The hover surface is the binding one and it is the one an earlier
+       ramp never checked: at 4.31 and 3.34 its bottom two steps failed AA on any
+       hovered row, while the comment recorded only the `--surface` figures and so
+       reported one failure instead of two.
+
+       **The floor is what fixes the range, and four steps have to fit inside it.**
+       Holding 4.5:1 on `--surface-2` puts the dimmest step at about L 0.53, leaving
+       ~0.15 of HSL lightness below `--accent` — three gaps of the 0.06 an earlier
+       revision asked for need 0.18, so that criterion and four tiers cannot both
+       hold. It is the criterion that gives, because **HSL lightness is not
+       perceptually uniform and 0.06 of it does not mean the same thing at each end
+       of a ramp.** Measured in CIELAB instead, adjacent steps are ΔL* 4.3 / 4.4 /
+       5.0 — roughly twice the ~2.3 just-noticeable difference, so the tiers stay
+       apart. Monotone luminance, hue spread 0.2°.
+
+       **Each step also stays clearly blue against `--text-3`**, which `.cost-gain`
+       uses one line below inside the same cell: ΔE 23–25 across the ramp. A more
+       muted bottom step was derived first and reached ΔE 8.8, close enough to read
+       as the same colour as the line under it, which would have flattened the cell's
+       own hierarchy while every contrast figure still passed. */
     --cost-1: #66c0f4;   /* = --accent, best quarter */
-    --cost-2: #60aad6;
-    --cost-3: #5a95b9;
-    --cost-4: #53819c;   /* worst quarter — still blue, not a different hue */
+    --cost-2: #57b4ea;
+    --cost-3: #4aa8de;
+    --cost-4: #3f9acf;   /* worst quarter — still blue, not a different hue */
 
     /* ---- Semantic colours ---------------------------------------------- */
     --ok:     #8cc63f;

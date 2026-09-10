@@ -2893,13 +2893,79 @@ describe('the cost column colour-codes value per hour', () => {
     assert.match(js, /rankCosts\(allGames\)/, 'the ranking is not taken from the whole library');
   });
 
-  test('the thin-sample marker does not set a colour, which the tier owns', () => {
+  test('the thin-sample marker touches nothing that carries lightness', () => {
+    // **The two facts in this cell must not share a channel.** The tier encodes value-per-hour as
+    // a lightness ramp; the marker says the figure rests on few reports. Anything here that moves
+    // lightness makes a well-supported bottom-quarter row and a thin top-quarter row look alike —
+    // measured on the version that used `opacity: 0.5`, which shifted a step 0.32 in luminance
+    // while the whole ramp spans 0.27, so the marker outweighed the ranking underneath it
     const at = css.indexOf('.cost-thin');
     assert.ok(at > 0, 'the thin marker is gone');
     const rule = css.slice(at, css.indexOf(String.fromCharCode(125), at) + 1);
-    assert.match(rule, /opacity:/, 'the thin marker no longer dims anything');
-    // Two rules setting `color` on one element means whichever loses is silently ignored
-    assert.ok(!rule.includes('color:'), 'the thin marker fights the tier for the same property');
+    for (const prop of ['opacity', 'filter', 'color']) {
+      assert.ok(
+        !new RegExp('(^|[^-])' + prop + '\\s*:').test(rule),
+        `the thin marker sets ${prop}, which moves the same channel the tier ranks on`
+      );
+    }
+    assert.match(rule, /text-decoration/, 'the marker has to be a texture, or it marks nothing at all');
+  });
+
+  test('the thin marker underlines the hours, not the whole cell', () => {
+    // `text-decoration` inherits into descendants and a child cannot switch it off, so on
+    // `.cost-cell` it would strike the gain line too — which is not the figure whose support is
+    // in question. The selector is the only thing keeping the two lines apart
+    const at = css.indexOf('.cost-thin');
+    const selector = css.slice(css.lastIndexOf(String.fromCharCode(10), at) + 1, css.indexOf('{', at));
+    assert.match(selector, /\.cost-thin\s+\.cost-mid/, 'the marker is on the cell, so it underlines the gain line as well');
+  });
+
+  test('every cost tier is legible on both surfaces a row is drawn on', () => {
+    // The ramp is read against `--surface` normally and `--surface-2` while hovered
+    // (`tr.game-row:hover td`). Only the first was ever checked, and the version that shipped had
+    // its bottom two steps at 4.31 and 3.34 on hovered rows — below AA, on every row the reader
+    // points at. Computed here rather than trusted to a comment, because a hand-copied contrast
+    // figure goes stale the first time a token is nudged and nothing says so
+    const tok = (name) => {
+      const m = css.match(new RegExp('--' + name + ':\\s*(#[0-9a-f]{6})', 'i'));
+      assert.ok(m, `--${name} is not defined`);
+      return m[1];
+    };
+    const lin = (c) => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const lum = (h) => {
+      const [r, g, b] = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+      return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+    };
+    const contrast = (a, b) => {
+      const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+      return (hi + 0.05) / (lo + 0.05);
+    };
+    const surfaces = [tok('surface'), tok('surface-2')];
+    const tiers = [1, 2, 3, 4].map((q) => tok('cost-' + q));
+    for (const [i, colour] of tiers.entries()) {
+      for (const bg of surfaces) {
+        const r = contrast(colour, bg);
+        assert.ok(r >= 4.5, `--cost-${i + 1} (${colour}) is ${r.toFixed(2)} on ${bg}, under AA's 4.5`);
+      }
+    }
+    // Ordinal, so the steps have to keep their order — a ramp that clears AA by lifting the bottom
+    // past the step above it is legible and says the wrong thing
+    for (let i = 1; i < tiers.length; i++) {
+      assert.ok(lum(tiers[i]) < lum(tiers[i - 1]),
+        `--cost-${i + 1} is not dimmer than --cost-${i}, so the ranking no longer reads in order`);
+    }
+  });
+
+  test('the marker says what it means on hover', () => {
+    // A mark nobody can decode is noise. The underline is the only thing on screen saying the
+    // figure is thinly supported, so the sentence explaining it is not optional
+    const s = pageStrings('Dashboard.html');
+    assert.ok(s['table.costThin'] && s['table.costThin'][0] && s['table.costThin'][1],
+      'the thin-sample explanation is missing a half');
+    assert.match(js, /table\.costThin/, 'the explanation is defined but never reaches the cell');
+    // Both facts can be true of one row, and one must not silently replace the other
+    assert.match(js, /\[range,[^\]]*costThin[^\]]*\][\s\S]{0,80}\.join\(/,
+      'the range and the thin note do not compose, so a thin row loses its range or vice versa');
   });
 
   test('the header explains pp, in both languages', () => {

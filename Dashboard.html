@@ -118,16 +118,35 @@
          monotone lightness, is the right shape. Reuses `--accent` as the brightest step
          so no new hue enters the page; the steps below taper lightness and chroma
          together, so the dimmest still reads as "this blue, quieter" rather than a
-         different colour arriving. Validated (dataviz skill, `validate_palette.js
-         --ordinal`): monotone L, adjacent ΔL ≥ 0.06, single hue (spread 1°). Text
-         contrast against `--surface` is 8.02 / 6.33 / 4.96 / 3.84 — the last one under
-         AA's 4.5:1 on purpose: this is the quarter the column exists to say "don't
-         optimise for", and `.cost-thin` below already accepts a bigger legibility cut
-         (50% opacity) for the same kind of low-confidence, low-priority figure. */
+         different colour arriving.
+
+         **Every step clears AA on both backgrounds a row is ever drawn on.** Contrast
+         against `--surface` is 8.02 / 7.03 / 6.13 / 5.19, and against `--surface-2`
+         — which `tr.game-row:hover td` paints under this very cell — 6.98 / 6.11 /
+         5.33 / 4.51. The hover surface is the binding one and it is the one an earlier
+         ramp never checked: at 4.31 and 3.34 its bottom two steps failed AA on any
+         hovered row, while the comment recorded only the `--surface` figures and so
+         reported one failure instead of two.
+
+         **The floor is what fixes the range, and four steps have to fit inside it.**
+         Holding 4.5:1 on `--surface-2` puts the dimmest step at about L 0.53, leaving
+         ~0.15 of HSL lightness below `--accent` — three gaps of the 0.06 an earlier
+         revision asked for need 0.18, so that criterion and four tiers cannot both
+         hold. It is the criterion that gives, because **HSL lightness is not
+         perceptually uniform and 0.06 of it does not mean the same thing at each end
+         of a ramp.** Measured in CIELAB instead, adjacent steps are ΔL* 4.3 / 4.4 /
+         5.0 — roughly twice the ~2.3 just-noticeable difference, so the tiers stay
+         apart. Monotone luminance, hue spread 0.2°.
+
+         **Each step also stays clearly blue against `--text-3`**, which `.cost-gain`
+         uses one line below inside the same cell: ΔE 23–25 across the ramp. A more
+         muted bottom step was derived first and reached ΔE 8.8, close enough to read
+         as the same colour as the line under it, which would have flattened the cell's
+         own hierarchy while every contrast figure still passed. */
       --cost-1: #66c0f4;   /* = --accent, best quarter */
-      --cost-2: #60aad6;
-      --cost-3: #5a95b9;
-      --cost-4: #53819c;   /* worst quarter — still blue, not a different hue */
+      --cost-2: #57b4ea;
+      --cost-3: #4aa8de;
+      --cost-4: #3f9acf;   /* worst quarter — still blue, not a different hue */
 
       /* ---- Semantic colours ---------------------------------------------- */
       --ok:     #8cc63f;
@@ -1350,11 +1369,36 @@
        is the figure to read, the range is there to say how much to trust it */
     .cost-cell { display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
     .cost-mid { color: var(--text); font-variant-numeric: tabular-nums; }
-    /* A thin sample is not a wrong figure, it is an unsupported one — so the number is dimmed
-       rather than hidden or flagged, which is what 'treat this as a hint' looks like.
-       **Opacity, not colour.** The tier below owns this number's colour, and two rules setting
-       `color` on one element means whichever loses is silently ignored */
-    .cost-thin { opacity: 0.5; }
+    /* A thin sample is not a wrong figure, it is an unsupported one — so the number is marked
+       rather than hidden, which is what 'treat this as a hint' looks like without throwing away
+       the only estimate there is.
+
+       **Texture, because lightness is taken.** This used to be `opacity: 0.5`, which is the one
+       thing it cannot be: the tier below encodes value-per-hour as a lightness ramp, and opacity
+       moves lightness. Measured, half-opacity shifted a step 0.32 in luminance while the whole
+       four-tier ramp spans 0.27 — so the sample marker was louder than the ranking it was painted
+       over, and a top-quarter row with few reports came out darker than a bottom-quarter row with
+       many. Two facts, one channel, and the channel read as the wrong fact. It also put all four
+       tiers under AA (3.07 / 2.64 / 2.25 / 1.95).
+
+       A dotted underline is a different channel entirely, so the tier keeps lightness to itself.
+       It is deliberately not invented: it is what browsers draw under `<abbr title>`, i.e. "this
+       term is annotated, the explanation is on hover", which is exactly the meaning wanted — and
+       `title` on the cell is already where the range lives. `currentColor` by default, so the mark
+       rides on the tier's colour instead of introducing a second one.
+
+       **It goes on `.cost-mid`, never on `.cost-cell`.** `text-decoration` propagates to
+       descendants and cannot be switched off by a child, so on the cell it would underline the
+       gain line too — which is not the figure whose support is in question.
+
+       Solid underline means "link" on this page (`.ach-guide-link:hover`), so this stays dotted,
+       and nothing here sets `cursor: pointer` — a mark that reads as clickable would be a third
+       meaning on the same number. */
+    .cost-thin .cost-mid {
+      text-decoration: underline dotted;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+    }
     /* The second number, and quieter than the hours: it is what the hours buy, not what they cost */
     .cost-gain { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
     .cost-none { color: var(--text-3); }
@@ -2880,6 +2924,10 @@
       'th.cost':              ['预计还需', 'Est. left'],
       'th.cost.help':         ['pp:解锁全部成就后,平均完成率提高的幅度。颜色越亮,每小时的性价比越高。', 'pp: how far your average completion rate rises once every achievement is unlocked. The brighter the colour, the better the value per hour.'],
       'table.costRange':      ['估算区间 {lo} – {hi}', 'Estimated range {lo} – {hi}'],
+      // What the dotted underline means. It says why the figure is soft, not how soft —
+      // the per-game count is not on screen and naming a threshold here would only add a
+      // number the reader cannot act on
+      'table.costThin':       ['报告通关时长的人很少,估算仅供参考', 'Few reported completion times, so treat this estimate as a hint'],
       'table.loading':        ['正在读取数据…', 'Loading…'],
 
       // ---- Filter chips and the search box ------------------------------------
@@ -3567,16 +3615,21 @@
       const range = (c.lo !== null && c.hi !== null && c.hi > c.lo)
         ? t('table.costRange', { lo: fmtHours(c.lo), hi: fmtHours(c.hi) })
         : '';
-      // A thin sample is not a wrong figure, it is an unsupported one, so the number is dimmed
-      // rather than hidden or flagged — which is what 'treat this as a hint' looks like
-      const thin = c.sample > 0 && c.sample < MIN_HLTB_SAMPLE ? ' cost-thin' : '';
+      // A thin sample is not a wrong figure, it is an unsupported one, so the number is marked
+      // rather than hidden — 'treat this as a hint' without discarding the only estimate there is.
+      // The mark is texture, never lightness: see .cost-thin for why opacity cannot be used here
+      const isThin = c.sample > 0 && c.sample < MIN_HLTB_SAMPLE;
+      const thin = isThin ? ' cost-thin' : '';
       // The colour is the ratio the two numbers cannot show between them
       const tier = costTier.get(String(g.appid));
       const rank = tier ? ' cost-q' + tier : '';
       const gain = typeof c.gain === 'number'
         ? '<span class="cost-gain">+' + c.gain.toFixed(2) + 'pp</span>'
         : '';
-      return '<div class="cost-cell' + thin + rank + '"' + (range ? ' title="' + escapeHtml(range) + '"' : '') + '>'
+      // **The underline is only a mark until this says what it means.** Two separate facts, so
+      // they go on separate lines rather than being run together with a separator
+      const tip = [range, isThin ? t('table.costThin') : ''].filter(Boolean).join('\n');
+      return '<div class="cost-cell' + thin + rank + '"' + (tip ? ' title="' + escapeHtml(tip) + '"' : '') + '>'
         + '<span class="cost-mid">' + fmtHours(c.remaining) + '</span>' + gain + '</div>';
     }
 
