@@ -25,17 +25,20 @@
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   openDb, insertGame, updateGameStats, replaceAchievements, achievementsFor,
   setAchievementUnlocks, setAchievementRarity, remainingDifficulty,
-  upsertHltb, getHltb, allHltb,
+  upsertHltb, getHltb, allHltb, hltbHistory,
 } from '../lib/db.js';
 import { selectHltbTargets, selectRarityTargets, syncHltb, fullSync } from '../lib/sync.js';
 import { HltbClient, searchQueries, stripCJK } from '../lib/hltb.js';
 import { SteamClient } from '../lib/steam.js';
+
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 const ach = (apiName, extra = {}) => ({ apiName, nameCn: apiName, description: 'd', ...extra });
 
@@ -558,6 +561,106 @@ describe('the hltb table', () => {
     assert.equal(allHltb(db).length, 2, 'the miss gets a row too, or it is searched again next run');
     assert.equal(getHltb(db, '1').comp_100_hi, 54000, 'the spread is stored, not just the midpoint');
     assert.equal(getHltb(db, '2').hltb_id, null);
+  });
+});
+
+/**
+ * The readings behind "should the refresh interval still be the same for every game".
+ *
+ * `hltb` keeps only the latest figures, so a refresh destroys the number it would have to be
+ * compared against. These four tests are the difference between a table that can answer how fast
+ * a completionist figure moves and one that cannot — and every failure here is silent: the sync
+ * keeps working, the Dashboard keeps rendering, and the measurement is simply never taken.
+ */
+describe('the hltb reading history', () => {
+  test('a refresh appends a reading instead of replacing one', () => {
+    const db = openDb(':memory:');
+    upsertHltb(db, '1', { hltbId: 42, verified: true, comp100Med: 7200, comp100Count: 3 });
+    // The stamp is the primary key, so two writes inside one millisecond are one reading
+    db.prepare("UPDATE hltb_history SET checked_at = '2026-01-01T00:00:00.000Z' WHERE appid = '1'").run();
+    upsertHltb(db, '1', { hltbId: 42, verified: true, comp100Med: 9000, comp100Count: 5 });
+
+    const seen = hltbHistory(db, '1');
+    assert.equal(seen.length, 2, 'the earlier reading has to survive, or there is nothing to compare');
+    assert.deepEqual(
+      seen.map((r) => [r.comp_100_med, r.comp_100_count]),
+      [[7200, 3], [9000, 5]],
+      'oldest first, and each reading keeps the count it was taken with'
+    );
+    assert.equal(getHltb(db, '1').comp_100_med, 9000, 'the live row still holds only the latest');
+  });
+
+  test('the reading and the row it came from carry the same stamp', () => {
+    const db = openDb(':memory:');
+    upsertHltb(db, '1', { hltbId: 42, verified: true, comp100Med: 7200, comp100Count: 3 });
+    assert.equal(hltbHistory(db, '1')[0].checked_at, getHltb(db, '1').checked_at);
+
+    // **The line above cannot see the edit worth guarding against.** Two calls to nowIso() land
+    // in the same millisecond nearly every time, so timing the two writes apart is green whether
+    // the stamp is shared or taken twice — measured, by making exactly that change and watching
+    // the assertion pass. What has to hold is structural: one clock reading per write, or the
+    // two tables stop joining on a boundary crossing that nothing reproduces on demand
+    const src = readFileSync(join(ROOT, 'lib', 'db.js'), 'utf8');
+    const open = src.indexOf('export function upsertHltb');
+    const close = src.indexOf('export function hltbHistory');
+    assert.ok(open > 0 && close > open, 'both anchors must exist, or the slice below is empty and vacuous');
+    const body = src
+      .slice(open, close)
+      // Line comments first: a `//` here can hold a `/*` and the block rule would then eat real code
+      .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    assert.equal(
+      (body.match(/nowIso\(\)/g) ?? []).length,
+      1,
+      'upsertHltb reads the clock once and hands the value to both writes'
+    );
+  });
+
+  test('a recorded miss and a declined write both record nothing', () => {
+    const db = openDb(':memory:');
+    upsertHltb(db, '1', {}); // searched, found nothing — there is no entry behind it to trend
+    assert.equal(hltbHistory(db, '1').length, 0, 'a row of nulls would dilute the counts this exists to produce');
+
+    upsertHltb(db, '2', { hltbId: 42, verified: true, manual: true, comp100Med: 7200, comp100Count: 3 });
+    upsertHltb(db, '2', { hltbId: 999, verified: true, comp100Med: 1, comp100Count: 999 });
+    assert.equal(hltbHistory(db, '2').length, 1, 'a write the pin declined changed nothing, so it observed nothing');
+    assert.equal(hltbHistory(db, '2')[0].comp_100_med, 7200);
+  });
+
+  test('a database resolved before this table existed is given its first reading, once', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'hltbhist-'));
+    const path = join(dir, 'steam.db');
+    try {
+      const db = openDb(path);
+      upsertHltb(db, '1', { hltbId: 42, verified: true, comp100Med: 7200, comp100Count: 3 });
+      upsertHltb(db, '2', {}); // a miss, which has nothing to seed
+      const stamp = getHltb(db, '1').checked_at;
+      // Exactly the state every existing database is in: figures on record, no reading behind them
+      db.exec('DELETE FROM hltb_history');
+      db.close();
+
+      // **Seeding here is worth a whole test because skipping it costs a month.** Without it the
+      // first refresh writes reading #1 with nothing to compare against, and the delta this table
+      // exists for arrives two refresh cycles out rather than one
+      const reopened = openDb(path);
+      assert.deepEqual(
+        hltbHistory(reopened, '1').map((r) => [r.checked_at, r.comp_100_med, r.comp_100_count]),
+        [[stamp, 7200, 3]],
+        'the figures already on record are a reading, and they are the only one that predates the table'
+      );
+      assert.equal(hltbHistory(reopened, '2').length, 0, 'a miss seeds nothing — same reason it records nothing');
+      reopened.close();
+
+      const again = openDb(path);
+      assert.equal(
+        again.prepare('SELECT COUNT(*) AS n FROM hltb_history').get().n,
+        1,
+        'seeding converges on state, so it must be a no-op every time after the first'
+      );
+      again.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
