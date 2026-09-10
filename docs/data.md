@@ -24,6 +24,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 | `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
 | `hltb` | appid → its HowLongToBeat entry and how many hours finishing it takes |
+| `hltb_history` | one row per reading taken from HowLongToBeat, so a figure's movement can be measured rather than guessed at |
 | `sync_log` | every checkbox change, skip and failure, for after-the-fact auditing |
 | `meta` | last sync timestamp and other odds and ends |
 
@@ -121,6 +122,46 @@ How long a game takes to finish at 100%, from HowLongToBeat's **Completionist** 
 - **`manual` means the id was supplied by hand, and an automatic pass never overwrites it.** That is the entire point of pinning one: the search has already failed, or has already got it wrong.
 
 - **`comp_100_count` is how many people reported a completionist time.** Single digits mean the figure is one stranger's playthrough rather than a measurement, and the Dashboard dims it instead of ranking on it as though it were evidence.
+
+### `hltb_history` columns
+
+`appid` + `checked_at` (primary key together) / `comp_100` / `comp_100_med` / `comp_100_count`
+
+One row per reading taken from HowLongToBeat. The `hltb` table holds only the latest figures and a refresh overwrites them, so without this table "did this number change, and by how much" cannot be asked of the database that stores it.
+
+- **The refresh interval is one fixed number for every game, and this table is what a better one would be built from.** A completionist figure is a median over submissions: at 500 submissions a month of new ones cannot move it, and at 3 a single one halves it — which argues for spending the refresh budget by how fast a row actually moves. How fast that is has never been measured, so the readings are collected first.
+
+- **The signal is `comp_100_count`'s rate of change, not its size.** A count of 0 almost always means nobody will ever report one rather than that the game is new, so "few submissions ⇒ check often" spends the most requests on the rows worth the fewest. A count that *jumps* is a game whose content just changed. Telling those apart needs two readings, which is what this table is.
+
+- **`checked_at` is the same stamp as the `hltb` row the reading came from**, so the two join. It is also half the primary key, which makes seeding and re-seeding safe: a reading already recorded is ignored rather than duplicated.
+
+- **A miss records nothing.** A row with no `hltb_id` has no entry behind it and therefore no figure that could move; a row of nulls would only dilute the counts this table exists to produce.
+
+- **An existing database is seeded with the figures it already holds**, on open, as that game's first reading. Without it the first refresh writes reading #1 with nothing to compare against and the first delta arrives two refresh cycles out instead of one.
+
+Each game's oldest and newest reading side by side, once more than one has been taken:
+
+```sql
+WITH ordered AS (
+  SELECT appid, checked_at, comp_100_med, comp_100_count,
+         ROW_NUMBER() OVER (PARTITION BY appid ORDER BY checked_at)      AS oldest,
+         ROW_NUMBER() OVER (PARTITION BY appid ORDER BY checked_at DESC) AS newest,
+         COUNT(*)     OVER (PARTITION BY appid)                          AS readings
+    FROM hltb_history
+)
+SELECT g.name,
+       f.readings,
+       julianday(l.checked_at) - julianday(f.checked_at) AS days_apart,
+       f.comp_100_count AS count_then, l.comp_100_count AS count_now,
+       f.comp_100_med   AS med_then,   l.comp_100_med   AS med_now
+  FROM ordered f
+  JOIN ordered l ON l.appid = f.appid AND l.newest = 1
+  LEFT JOIN games g ON g.appid = f.appid
+ WHERE f.oldest = 1 AND f.readings > 1
+ ORDER BY (l.comp_100_count - f.comp_100_count) DESC;
+```
+
+**Divide by `days_apart`, never compare the raw deltas.** Refreshes are capped per run and taken stalest-first, so one game's two readings are not the same distance apart as another's, and a count that grew by 4 over 30 days is not the observation that one which grew by 4 over 90 days is.
 
 ### `guides` columns
 
