@@ -77,13 +77,16 @@ const stripComments = (s) =>
  */
 describe('nothing lib/ says to a user is a loose literal any more', () => {
   /**
-   * The one real exemption, and the reason it is real.
+   * Files that may still hold their own strings, each with its reason written out. None today.
    *
-   * `lib/rpc.js` is **served to the browser** as `/_rpc.js` — it runs inside the page, not in Node,
-   * so it cannot import `lib/messages.js` at all. Its single message is the same sentence as
-   * `Setup.html`'s `msg.failed`, and it converts when the Dashboard's own table is built.
+   * `lib/rpc.js` is the file this looks as if it should cover: it is **served to the browser** as
+   * `/_rpc.js`, runs inside the page rather than in Node, and cannot import `lib/messages.js`. It
+   * is not exempt. It carries its own [zh, en] table, and "the sync bar speaks the interface
+   * language" below holds it to the same checks — the scan here reads only `new Error(...)` and
+   * `{error: ...}`, and a sync bar's strings are neither, so an exemption for it would be checking
+   * almost nothing.
    */
-  const EXEMPT = { 'rpc.js': ['请求失败'] };
+  const EXEMPT = {};
 
   const libFiles = readdirSync(join(ROOT, 'lib')).filter((f) => f.endsWith('.js'));
 
@@ -554,7 +557,7 @@ describe('every prompt that reaches the model forks, not only the rules', () => 
    * `'回复一个字:好'` is the **prompt** the connectivity check sends to the model, not a sentence
    * anybody reads — nothing renders the reply, only whether one came back. Putting it in a table
    * whose stated subject is what a person reads would make that table say something untrue about
-   * itself. Written out here instead, the way `rpc.js` is above.
+   * itself. Written out here, with its reason beside it.
    *
    * Keys are the path with forward slashes; `posix` normalises whatever `join` produced.
    */
@@ -675,6 +678,104 @@ describe('what the CLI prints is available in both languages', () => {
       assert.ok(CJK.test(zh), `the phase label ${JSON.stringify(zh)} is not Chinese`);
       assert.ok(en && !CJK.test(en), `${k}: the English phase label is missing or still Chinese`);
     }
+  });
+});
+
+/**
+ * The sync bar's strings live in `lib/rpc.js` rather than `lib/messages.js`, because `/_rpc.js`
+ * runs in the browser and cannot import a Node module. The scan at the top of this file cannot see
+ * them — they are neither an `Error` nor an `{error}` — so this block checks the file on its own
+ * terms: everything the bar shows is in its table, the table is right in both halves, every phase
+ * a sync reports has a label, and the language comes from the page.
+ */
+describe('the sync bar speaks the interface language', () => {
+  const SRC = stripComments(read(join('lib', 'rpc.js')));
+  // A CJK ideograph or CJK punctuation. Punctuation counts: 、 is how a Chinese list is joined, so
+  // an entry holding only that is still the Chinese half, and it is Chinese wherever else it appears
+  const CJK_ANY = /[　-〿一-鿿＀-￯]/;
+
+  /** Where the table sits in the source, so the rest of the file can be checked without it */
+  const tableSpan = () => {
+    const at = SRC.indexOf('const STRINGS = {');
+    assert.ok(at !== -1, 'rpc.js no longer has its STRINGS table');
+    const close = SRC.indexOf('\n  };', at);
+    assert.ok(close > at, 'the STRINGS table has no closing brace where one is expected');
+    return { at, end: close + '\n  };'.length, literal: SRC.slice(at + 'const STRINGS = '.length, close + '\n  }'.length) };
+  };
+  // A plain object literal of string pairs, so evaluating it is reading it, not running anything
+  const TABLE = new Function('return (' + tableSpan().literal + ');')();
+
+  test('every string the bar shows comes from its table', () => {
+    const { at, end } = tableSpan();
+    const rest = SRC.slice(0, at) + SRC.slice(end);
+    const stray = rest.split('\n').map((l) => l.trim()).filter((l) => CJK_ANY.test(l));
+    assert.deepEqual(stray, [], 'these lines put Chinese on screen whatever language the page is set to');
+  });
+
+  test('both halves of every entry are present and in their own language', () => {
+    const slots = (x) => (x.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
+    assert.ok(Object.keys(TABLE).length >= 20, `only ${Object.keys(TABLE).length} entries were read — the extraction is broken`);
+    for (const [k, v] of Object.entries(TABLE)) {
+      assert.ok(Array.isArray(v) && v.length === 2 && v[0] && v[1], `${k} is not a [zh, en] pair`);
+      const [zh, en] = v;
+      assert.ok(CJK_ANY.test(zh), `${k}: the Chinese half is not Chinese`);
+      assert.ok(!CJK_ANY.test(en), `${k}: the English half still contains Chinese`);
+      assert.notEqual(zh, en, `${k}: both halves are the same string`);
+      // A dropped slot does not throw — it renders the sentence without the value it existed to carry
+      assert.equal(slots(zh), slots(en), `${k}: the two halves fill different slots`);
+    }
+  });
+
+  test('every key asked for exists, and every key defined is shown', () => {
+    const asked = new Set([...SRC.matchAll(/\bt\('([^']+)'/g)].map((m) => m[1]));
+    const missing = [...asked].filter((k) => !(k in TABLE));
+    assert.deepEqual(missing, [], 'these are asked for and would print their own key');
+    // Phase labels are looked up by the phase's own name, so the next test is what shows them used
+    const unused = Object.keys(TABLE).filter((k) => !k.startsWith('phase.') && !asked.has(k));
+    assert.deepEqual(unused, [], 'these are defined and never shown');
+  });
+
+  /**
+   * Read from the code that emits them, so a phase added later fails here rather than showing the
+   * bare fallback in the bar or its raw name in the terminal. The terminal runs `fullSync` only, so
+   * it needs `lib/sync.js`'s phases; the bar also shows the two the server adds around a sync.
+   */
+  const syncPhases = [...new Set([...read(join('lib', 'sync.js')).matchAll(/phase: '([^']+)'/g)].map((m) => m[1]))];
+  const servePhases = [...new Set([...read(join('lib', 'server.js')).matchAll(/syncState\.onProgress\(\{ phase: '([^']+)'/g)].map((m) => m[1]))];
+  const cliSrc = stripComments(read('tracker.js'));
+  const cliAt = cliSrc.indexOf('const PHASE_LABEL = {');
+  const CLI_PHASES = new Function('return (' + cliSrc.slice(cliAt + 'const PHASE_LABEL = '.length, cliSrc.indexOf('};', cliAt) + 1) + ');')();
+
+  test('every phase a sync reports has a label in both places', () => {
+    assert.ok(syncPhases.length >= 6 && servePhases.length >= 2,
+      `found ${syncPhases.length} sync and ${servePhases.length} server phases — the extraction is broken`);
+    const barless = [...syncPhases, ...servePhases].filter((p) => !TABLE['phase.' + p]);
+    assert.deepEqual(barless, [], 'the bar would show only "syncing" for these phases');
+    assert.ok(cliAt !== -1, 'tracker.js no longer has PHASE_LABEL');
+    const termless = syncPhases.filter((p) => !(p in CLI_PHASES));
+    assert.deepEqual(termless, [], 'the terminal would print these phases as their raw names');
+  });
+
+  test('a phase is called the same thing in the terminal and in the bar', () => {
+    // Two copies of one label drift. tracker.js maps each phase name onto its own table's key
+    const drift = [];
+    for (const [phase, key] of Object.entries(CLI_PHASES)) {
+      const bar = TABLE['phase.' + phase];
+      const term = TRACKER_MESSAGES[key];
+      if (!bar || !term) { drift.push(`${phase}: missing on the ${bar ? 'terminal' : 'bar'} side`); continue; }
+      if (bar[0] !== term[0] || bar[1] !== term[1]) {
+        drift.push(`${phase}: bar ${JSON.stringify(bar)} vs terminal ${JSON.stringify(term)}`);
+      }
+    }
+    assert.deepEqual(drift, [], 'the same phase is described differently in the two places');
+  });
+
+  test('the language is the one the page publishes, read on every string', () => {
+    assert.match(SRC, /document\.documentElement\.lang/, 'rpc.js no longer reads the language the page publishes');
+    // Captured once, it would freeze whichever language was current when this script loaded, which is
+    // before the page's first data load has set it
+    assert.doesNotMatch(SRC, /const\s+\w+\s*=\s*\(?\s*document\.documentElement\.lang/,
+      'the language is read once into a constant rather than each time a string is built');
   });
 });
 

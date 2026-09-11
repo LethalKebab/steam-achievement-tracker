@@ -186,9 +186,20 @@ describe('a sticky notice can be dismissed', () => {
     assert.match(SRC, /<path d="M6 6l12 12M18 6L6 18"\/>/, 'the cross is drawn inline');
   });
 
-  test('an icon-only control still carries a name', () => {
-    assert.match(SRC, /closeBtn\.setAttribute\('aria-label', '关闭'\)/,
-      'nothing in the button is text, so the accessible name has to be supplied');
+  test('an icon-only control still carries a name, in the language shown', () => {
+    // Nothing in the button is text, so the accessible name has to be supplied — and supplied when
+    // the bar is shown, not when the button is built. The button exists from the moment this script
+    // loads, before the page has settled its language, so a name given then is frozen in whichever
+    // language happened to be current
+    const at = SRC.indexOf('const show = (');
+    const end = SRC.indexOf('};', at);
+    assert.ok(at !== -1 && end > at, 'show() should still be the arrow function it was');
+    const body = SRC.slice(at, end);
+    assert.match(body, /closeBtn\.setAttribute\('aria-label', t\('close'\)\)/,
+      'the accessible name is not taken from the table where the bar is shown');
+    assert.match(body, /closeBtn\.title = t\('close'\)/, 'nor is the tooltip');
+    assert.doesNotMatch(SRC, /closeBtn\.(?:title\s*=\s*|setAttribute\('aria-label',\s*)['"`]/,
+      'a literal name is one language whatever the page is set to');
     assert.match(SRC, /closeBtn\.type = 'button';/,
       'a bare <button> defaults to submit');
     assert.match(SRC, /aria-hidden="true"/, 'and the svg inside it must not be announced twice');

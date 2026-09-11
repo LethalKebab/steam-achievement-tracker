@@ -212,7 +212,13 @@ They are **not** the same predicate though: `isRecentlyPlayed` drives the badge;
 
 ### 🔔 replaced the new-achievements table
 
-The old `#newAchSection` table listed anything whose `total` had grown. The bell instead shows two specific events sourced from `perfect_lost_date` / `ach_added_date`.
+The old `#newAchSection` table listed anything whose `total` had grown. The bell lists three events, each read from its own stamp: a finished game that gained achievements (`perfect_lost_date`), any game whose achievement total went up (`new_ach_date`), and a game that gained an achievement system (`ach_added_date`).
+
+**Every rise in the total is listed, because it is rare.** A developer patch that adds achievements is a change you cannot notice on your own, and listing one is only crying wolf if it happens often — measured across a 323-game library, one game had ever had its total rise.
+
+**A finished game gaining achievements is one event, listed once.** It stamps `perfect_lost_date` and `new_ach_date` in the same moment, so a total-went-up entry whose stamp matches the game's perfect-lost stamp is left to the first group. A later rise on the same game is a separate event and is listed.
+
+**The sync bar still reports it too.** The bar describes the run that just finished and is replaced by the next one; the bell keeps the entry for 30 days.
 
 "Read" is stored in `localStorage` keyed on the **raw ISO timestamps**, not the day counts the UI renders — day counts change daily, so a seen-set keyed on them stops matching overnight and the red dot resurrects itself every morning.
 
@@ -512,6 +518,8 @@ What "does not auto-dismiss" costs is the corner. The only thing that replaces a
 **That corner is shared with `#toTop`**, which steps up to `bottom: 76px` for as long as the sync bar is displayed — its `MutationObserver` watches the bar's `style` attribute, so dismissing puts it back. Until the bar could be dismissed, one finished sync displaced the back-to-top button indefinitely.
 
 The × is **drawn inline in `lib/rpc.js`, not `<use href="#i-close">`**, for the same reason the status dot is: that id lives in `Dashboard.html`, and renaming it would leave a button containing nothing, with no error anywhere. The duplication is deliberate — do not consolidate it.
+
+**Its words follow the page's language, read from the page.** `lib/rpc.js` runs in the browser and cannot import `lib/messages.js`, so it carries its own `[zh, en]` table. What it reads is `<html lang>`, which `applyStrings()` sets before the first paint — the one language signal the page already publishes, for screen readers and line breaking — rather than the page's `LANG`, which lives in another script and is reachable only by name. It is read on every string, because the bar is built and first polled before the page's data load has settled the language, and a value captured then would freeze whichever language happened to be there. The close button is named in `show()` for the same reason. The phase labels match the terminal's word for word, and a test holds the two copies together.
 
 ---
 

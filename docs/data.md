@@ -53,7 +53,7 @@ Six decisions worth knowing before you write queries:
   UPDATE games SET stats_checked_at = NULL WHERE appid = '...';
   ```
 
-- **`perfect_lost_date` and `ach_added_date` record two things that happened, not two things that are true.** They feed the 🔔 notifications on the Dashboard: a game you had at 100% that the developer then added achievements to, and a game Steam previously reported as having no achievement system that now has one.
+- **`perfect_lost_date`, `new_ach_date` and `ach_added_date` record things that happened, not things that are true.** They feed the 🔔 notifications on the Dashboard: a game you had at 100% that the developer then added achievements to, any game whose achievement total went up, and a game Steam previously reported as having no achievement system that now has one. One event is one moment: a finished game gaining achievements gets the same timestamp in `perfect_lost_date` and `new_ach_date`, and the bell lists it once.
 
   Both are stamped inside `updateGameStats`, which is the only moment the previous values are still visible. A row that has dropped below 100% looks exactly like a row that was never at 100%, and `has_achievements` is overwritten with `1` the instant new stats arrive — so neither event can be reconstructed afterwards from the row itself. That is also why the notifications start out empty on an existing database: nothing recorded these events before the columns existed, and there is no way to backfill them.
 

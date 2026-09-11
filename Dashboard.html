@@ -2953,6 +2953,7 @@
       // ---- The bell -----------------------------------------------------------
       'bell.perfect':         ['解锁全部成就后又出现了新成就', 'Completed, then new achievements appeared'],
       'bell.added':           ['以前没有成就,现在有了', 'Had no achievements before, has them now'],
+      'bell.bumped':          ['新增了成就', 'New achievements added'],
       'bell.empty':           ['最近 {days} 天没有新动静', 'Nothing new in the last {days} days'],
       'bell.today':           ['今天', 'today'],
       'bell.daysAgo':         ['{n} 天前', '{n} days ago'],
@@ -3146,7 +3147,12 @@
       'res.searches':         ['{n} 次搜索', '{n} searches'],
       'res.noSearches':       ['没有联网搜索', 'no web searches'],
       'res.unsyncable':       ['{n} 个成就同名、Steam 上描述是空的,自动勾选认不出它们,需手动勾选:', '{n} achievements share a name and have no description on Steam, so automatic ticking cannot tell them apart. Tick these by hand:'],
-      'res.andMore':          [' 等 {n} 个', ' and {n} more'],
+      // Said after names already listed, so {n} counts the ones **not** listed; the Chinese says so
+      // outright (其余), because 「等 {n} 个」 alone reads as the total
+      'res.andMore':          [' 等其余 {n} 个', ' and {n} more'],
+      // Joins a short list of names. Its own entry because 、 is Chinese punctuation, and a list
+      // joined with it would be the one Chinese mark left in an English sentence
+      'list.sep':             ['、', ', '],
       'res.preExisting':      ['攻略里还有 {n} 条原有的校验问题,本次未处理', 'The guide still has {n} pre-existing check failures, untouched this time'],
       'res.rewrote':          ['《{game}》已修改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
       'res.generated':        ['《{game}》已生成 · {covered}/{total} 个成就 · ', '{game} generated · {covered} of {total} achievements · '],
@@ -3724,11 +3730,16 @@
 
     // ---- 🔔 Notifications -----------------------------------------------------
     //
-    // Two kinds, both **transitions**, with timestamps stamped by updateGameStats in
+    // Three kinds, all **transitions**, with timestamps stamped by updateGameStats in
     // lib/db.js at the one moment the old value is still visible. This only filters by
     // window and groups by kind — **do not try to recompute them from achieved/total**: a
     // game that dropped below 100% and one that was never complete look identical in their
     // current state.
+    //
+    // **A finished game gaining achievements is one event, listed once.** It stamps both
+    // perfect_lost_date and new_ach_date in the same moment, so a total-went-up entry whose
+    // stamp matches the game's perfect-lost stamp is that same event and is left to the
+    // perfect group. A later rise on the same game is a separate event and is listed.
     //
     // 「已读」 is stored in localStorage keyed by the raw timestamp. A day count cannot be
     // the key: day counts change every day, so a stored read marker no longer matches the
@@ -3738,7 +3749,21 @@
     const BELL_GROUPS = [
       ['perfect', 'bell.perfect'],
       ['added', 'bell.added'],
+      ['bumped', 'bell.bumped'],
     ];
+
+    /**
+     * Whether two stamps record the same event. updateGameStats gives both one clock reading, so
+     * for anything it writes now they are equal; the tolerance covers rows where each stamp took
+     * its own reading a millisecond or two apart. Two separate syncs a minute apart each seeing
+     * the total rise is not a case that occurs
+     */
+    const BELL_SAME_EVENT_MS = 60 * 1000;
+    function sameBellEvent(a, b) {
+      if (!a || !b) return false;
+      const ta = Date.parse(a), tb = Date.parse(b);
+      return Number.isFinite(ta) && Number.isFinite(tb) && Math.abs(ta - tb) < BELL_SAME_EVENT_MS;
+    }
 
     function bellItems() {
       const out = [];
@@ -3750,6 +3775,10 @@
         if (g.achAddedDaysAgo !== null && g.achAddedDaysAgo <= BELL_DAYS) {
           out.push({ kind: 'added', game: g, days: g.achAddedDaysAgo,
                      key: g.appid + '|added|' + g.achAddedAt });
+        }
+        if (g.newAchDaysAgo !== null && g.newAchDaysAgo <= BELL_DAYS && !sameBellEvent(g.newAchAt, g.perfectLostAt)) {
+          out.push({ kind: 'bumped', game: g, days: g.newAchDaysAgo,
+                     key: g.appid + '|bumped|' + g.newAchAt });
         }
       });
       return out.sort(function(a, b){ return a.days - b.days; });
@@ -6758,8 +6787,8 @@
       // like the sync being broken. Listing the names is what tells them which
       const unsyncable = (r.unsyncable || []).length
         ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.unsyncable', { n: r.unsyncable.length })) +
-          escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
-          (r.unsyncable.length > 4 ? escapeHtml(t('res.andMore', { n: r.unsyncable.length })) : '') + '</span>'
+          escapeHtml(r.unsyncable.slice(0, 4).join(t('list.sep'))) +
+          (r.unsyncable.length > 4 ? escapeHtml(t('res.andMore', { n: r.unsyncable.length - 4 })) : '') + '</span>'
         : '';
       // A partial rewrite has **something else** to say: how many were changed, and that the rest
       // were untouched. Written as 「已生成 · 11/11 个成就」, an operation that changed only 5 looks
