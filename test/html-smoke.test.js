@@ -3196,3 +3196,203 @@ describe('a day count of zero reads as today', () => {
     }
   });
 });
+
+/**
+ * The list a row opens is asked for once per reading of the table. **loadDashboard forgets every list
+ * it holds**, because each path that changes what a list shows ends there: a finished sync changes
+ * what is unlocked, and a guide being written, restored or re-registered changes what each card says
+ * and where it links. A list kept past that goes on naming achievements already unlocked while the
+ * count beside it has moved on — and a page whose window closes to the tray lives for days.
+ *
+ * These run the page's own functions against a stub `rpc` that holds each request until the test
+ * delivers its reply, so the order replies arrive in is the test's to choose.
+ */
+describe('the list a row opens lasts one reading of the table', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  // Line comments first: a `//` here can hold a `/*`, and the other order eats code
+  const CODE = PAGE_JS.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  /** One function's source, sliced by brace depth from its own declaration */
+  const fnBody = (name) => {
+    const at = CODE.indexOf('function ' + name + '(');
+    assert.ok(at !== -1, `${name} is gone, so this check has lost its target rather than passed`);
+    let depth = 0, i = CODE.indexOf('{', at);
+    for (; i < CODE.length; i++) {
+      if (CODE[i] === '{') depth++;
+      else if (CODE[i] === '}' && --depth === 0) break;
+    }
+    return CODE.slice(at, i + 1);
+  };
+
+  /** Two games whose rows can expand, the state every test starts from, so a refresh keeps them open */
+  const OPEN_GAMES = [{ appid: '10', rate: 0.5, total: 10 }, { appid: '20', rate: 0.5, total: 10 }];
+
+  /**
+   * The cache and the functions that touch it, in a scope of their own. `sent` records every
+   * request; each record's `ok` / `fail` delivers that request's reply whenever the test calls it.
+   * `render` counts its calls, since a list that arrives and is never drawn is the bug over again.
+   * The page's `allGames` and `editingAppid` are set through `games()` and `edit()`
+   */
+  function panel() {
+    const decls = [/let missingAchCache = \{\};/, /let missingAchGen = 0;/].map((re) => {
+      const m = CODE.match(re);
+      assert.ok(m, `${re} is gone, so this check has lost its target rather than passed`);
+      return m[0];
+    });
+    const sent = [];
+    let renders = 0;
+    const rpc = {
+      withSuccessHandler: (ok) => ({
+        withFailureHandler: (fail) => ({
+          getMissingAchievements: (appid) => { sent.push({ appid, ok, fail }); },
+        }),
+      }),
+    };
+    const fns = ['canExpandRow', 'openMissingPanel', 'missingListFailed', 'fetchMissingList', 'redrawIfOpen', 'forgetMissingLists'];
+    // eslint-disable-next-line no-new-func
+    const make = new Function('rpc', 'render', 'OPEN_GAMES', [
+      'let expandedAppid = null;',
+      'let editingAppid = null;',
+      'let allGames = OPEN_GAMES.slice();',
+      ...decls,
+      ...fns.map((name) => fnBody(name)),
+      'return {',
+      '  open: openMissingPanel,',
+      '  forget: forgetMissingLists,',
+      '  collapse: function() { expandedAppid = null; },',
+      '  expanded: function() { return expandedAppid; },',
+      '  edit: function(appid) { editingAppid = appid; },',
+      '  games: function(list) { allGames = list; },',
+      '  entry: function(appid) { return missingAchCache[appid]; },',
+      '};',
+    ].join(SEP));
+    return { sent, renders: () => renders, ...make(rpc, () => { renders++; }, OPEN_GAMES) };
+  }
+
+  test('a row opened before the table is read again asks the server again', () => {
+    const p = panel();
+    p.open('10');
+    p.sent[0].ok({ missingCount: 3 });
+    p.collapse();
+    p.open('10');
+    assert.equal(p.sent.length, 1, 'reopening a row within one reading of the table asks again, one Steam call per click');
+    p.collapse();
+    p.forget(); // what loadDashboard does once a sync finishes
+    p.open('10');
+    assert.equal(p.sent.length, 2, 'the list from before the refresh is served again, naming achievements unlocked since');
+    p.sent[1].ok({ missingCount: 2 });
+    assert.deepEqual(p.entry('10'), { missingCount: 2 });
+  });
+
+  test('the open row is asked again at once, keeps its list on screen until the answer arrives, then draws it', () => {
+    const p = panel();
+    p.open('10');
+    p.sent[0].ok({ missingCount: 3 });
+    p.forget();
+    assert.equal(p.sent.length, 2, 'the open row waits for a click before it shows the refreshed list');
+    assert.deepEqual(p.entry('10'), { missingCount: 3 },
+      'the open row goes blank while its list is fetched again, moving every row under it until the answer lands');
+    const before = p.renders();
+    p.sent[1].ok({ missingCount: 2 });
+    assert.deepEqual(p.entry('10'), { missingCount: 2 });
+    assert.ok(p.renders() > before, 'the fresh list arrives and is never drawn, so the open row goes on showing the old one');
+  });
+
+  test('a reply to a request sent before the refresh is never written in', () => {
+    // Landing last, it would replace the fresh list for good; landing first, it would be drawn until the fresh one arrived
+    const orders = {
+      'the old reply lands last': (p, old, fresh) => { fresh.ok({ missingCount: 2 }); old.ok({ missingCount: 3 }); },
+      'the old failure lands last': (p, old, fresh) => { fresh.ok({ missingCount: 2 }); old.fail(new Error('timeout')); },
+      'the old reply lands first': (p, old, fresh) => {
+        old.ok({ missingCount: 3 });
+        assert.notEqual(p.entry('10').missingCount, 3,
+          'the old reply lands first: the list from before the refresh is drawn until the fresh one arrives');
+        fresh.ok({ missingCount: 2 });
+      },
+    };
+    for (const [name, deliver] of Object.entries(orders)) {
+      const p = panel();
+      p.open('10'); // the request goes out before the sync finishes
+      p.forget(); // and the sync finishes while it is still on its way
+      assert.equal(p.sent.length, 2, `${name}: the open row was not asked again`);
+      deliver(p, p.sent[0], p.sent[1]);
+      assert.deepEqual(p.entry('10'), { missingCount: 2 }, `${name}: the list from before the refresh replaced the fresh one`);
+    }
+  });
+
+  test('a failure is drawn, and is not kept as the answer: opening the row again asks again', () => {
+    // Both shapes: the request itself failing, and the server answering with an error (Steam busy, say)
+    for (const fail of [(r) => r.fail(new Error('timeout')), (r) => r.ok({ error: 'Steam is busy' })]) {
+      const p = panel();
+      p.open('10');
+      const before = p.renders();
+      fail(p.sent[0]);
+      assert.ok(p.entry('10').error, 'the failure is not kept for the row to show');
+      assert.ok(p.renders() > before, 'the failure is never drawn, so the row reads as loading for good');
+      p.collapse();
+      p.open('10');
+      assert.equal(p.sent.length, 2, 'a failure is kept as if it were the list, so the row shows it until the page is reloaded');
+      assert.deepEqual(p.entry('10'), { loading: true }, 'the second try shows the old failure rather than that it is loading');
+    }
+  });
+
+  test('an answer whose guide could not be read is asked for again, with its list kept on screen meanwhile', () => {
+    const p = panel();
+    const answer = { missingCount: 3, guide: { error: 'unreadable' } };
+    p.open('10');
+    p.sent[0].ok(answer);
+    p.collapse();
+    p.open('10');
+    assert.equal(p.sent.length, 2, 'a list whose guide could not be read is kept as a good answer, so reopening never reads the guide again');
+    assert.deepEqual(p.entry('10'), answer, 'the list goes blank while the guide is read again');
+  });
+
+  test('a closed row is forgotten rather than asked again', () => {
+    const p = panel();
+    p.open('10');
+    p.sent[0].ok({ missingCount: 3 });
+    p.open('20'); // opening another row closes this one
+    p.sent[1].ok({ missingCount: 5 });
+    p.forget();
+    assert.deepEqual(p.sent.slice(2).map((r) => r.appid), ['20'], 'only the open row is asked again; the rest wait until they are opened');
+    assert.equal(p.entry('10'), undefined, 'a closed row keeps its list past the refresh');
+  });
+
+  test('an open row that can no longer expand is closed rather than asked again', () => {
+    const finished = { appid: '10', rate: 1, total: 10 };
+    const cases = { 'finished by the sync': [finished, OPEN_GAMES[1]], 'gone from the table': [OPEN_GAMES[1]] };
+    for (const [why, games] of Object.entries(cases)) {
+      const p = panel();
+      p.open('10');
+      p.sent[0].ok({ missingCount: 1 });
+      p.games(games);
+      p.forget();
+      assert.equal(p.sent.length, 1, `${why}: the row is asked for on every reading although nobody can see it`);
+      assert.equal(p.expanded(), null, `${why}: the row stays open, so a game that can expand again opens it by itself`);
+    }
+  });
+
+  test('a list arriving while a row is being edited waits for the edit to end', () => {
+    const p = panel();
+    p.open('10');
+    p.edit('30'); // a locked row's numbers are being typed into
+    const before = p.renders();
+    p.sent[0].ok({ missingCount: 3 });
+    assert.equal(p.renders(), before, 'the table is redrawn mid-edit, replacing the fields being typed into and the focus with them');
+    assert.deepEqual(p.entry('10'), { missingCount: 3 }, 'the list is not kept for the repaint that ends the edit');
+  });
+
+  test('loadDashboard forgets the lists once the new games are in, and before it draws the table', () => {
+    const body = fnBody('loadDashboard');
+    const at = body.indexOf('forgetMissingLists()');
+    assert.ok(at !== -1, 'the table is read again without forgetting the lists, so a row opened before a sync keeps its old one');
+    const games = body.indexOf('allGames = data.games');
+    assert.ok(games !== -1 && games < at,
+      'the lists are forgotten before the new games are in, so whether the open row can still expand is judged on the last reading');
+    assert.ok(at < body.indexOf('render()'), 'the table is drawn before the lists are forgotten, so the open row draws its old list once more');
+  });
+
+  test('the arrow and the check that closes a finished row are one rule', () => {
+    assert.match(CODE, /const canExpand = canExpandRow\(g\);/,
+      'render() decides expandability on its own, and the arrow and forgetMissingLists will drift apart');
+  });
+});
