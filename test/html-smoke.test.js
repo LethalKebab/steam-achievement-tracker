@@ -3030,3 +3030,67 @@ describe('a list of names follows the interface language', () => {
     assert.equal(m[1], m[2], 'the slice and the subtraction disagree about how many names were shown');
   });
 });
+
+/**
+ * The bell's list, run rather than read. `bellItems` is pulled out of the page and fed games in
+ * each shape that matters — a source pattern cannot say whether a finished game appears once or
+ * twice, and that is the one thing this group can get wrong without any error.
+ */
+describe('the bell lists each event once', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  const from = PAGE_JS.indexOf('const BELL_SAME_EVENT_MS');
+  const to = PAGE_JS.indexOf('function bellSeen()', from);
+  // The page's own code, given the two names it reads from the page's scope
+  // eslint-disable-next-line no-new-func
+  const bellItems = (games) => new Function('allGames', 'BELL_DAYS',
+    PAGE_JS.slice(from, to) + '\nreturn bellItems();')(games, 30);
+  const T = '2026-09-11T01:34:00.000Z';
+  const game = (over) => ({
+    appid: '1', name: 'G',
+    newAchDaysAgo: null, newAchAt: null,
+    perfectLostDaysAgo: null, perfectLostAt: null,
+    achAddedDaysAgo: null, achAddedAt: null,
+    ...over,
+  });
+
+  test('the code under test was found, or everything below is vacuous', () => {
+    assert.ok(from !== -1 && to > from, 'cannot find the bell list code in Dashboard.html');
+  });
+
+  test('an unfinished game whose total went up is listed', () => {
+    const items = bellItems([game({ newAchDaysAgo: 0, newAchAt: T })]);
+    assert.deepEqual(items.map((i) => i.kind), ['bumped']);
+    assert.equal(items[0].key, '1|bumped|' + T, 'the read marker is keyed on the raw stamp, never on a day count');
+  });
+
+  test('a finished game that gained achievements is listed once, as a lost 100%', () => {
+    const items = bellItems([game({ newAchDaysAgo: 0, newAchAt: T, perfectLostDaysAgo: 0, perfectLostAt: T })]);
+    assert.deepEqual(items.map((i) => i.kind), ['perfect']);
+  });
+
+  test('stamps a millisecond apart are still one event', () => {
+    // How a row looks when each stamp took its own clock reading
+    const items = bellItems([game({
+      newAchDaysAgo: 0, newAchAt: '2026-09-11T01:34:00.001Z', perfectLostDaysAgo: 0, perfectLostAt: T,
+    })]);
+    assert.deepEqual(items.map((i) => i.kind), ['perfect']);
+  });
+
+  test('a later rise on a game that lost its 100% earlier is its own event', () => {
+    const items = bellItems([game({
+      newAchDaysAgo: 0, newAchAt: T, perfectLostDaysAgo: 12, perfectLostAt: '2026-08-30T10:00:00.000Z',
+    })]);
+    assert.deepEqual(items.map((i) => i.kind).sort(), ['bumped', 'perfect']);
+  });
+
+  test('a rise older than the window is not listed', () => {
+    assert.deepEqual(bellItems([game({ newAchDaysAgo: 31, newAchAt: T })]), []);
+  });
+
+  test('the group is drawn, with a heading in both languages', () => {
+    const s = pageStrings('Dashboard.html');
+    assert.ok(s['bell.bumped'] && s['bell.bumped'][0] && s['bell.bumped'][1], 'the heading is missing a half');
+    assert.match(PAGE_JS, /\['bumped', 'bell\.bumped'\]/,
+      'the group is not in BELL_GROUPS, so its entries are collected and never drawn');
+  });
+});

@@ -2953,6 +2953,7 @@
       // ---- The bell -----------------------------------------------------------
       'bell.perfect':         ['解锁全部成就后又出现了新成就', 'Completed, then new achievements appeared'],
       'bell.added':           ['以前没有成就,现在有了', 'Had no achievements before, has them now'],
+      'bell.bumped':          ['新增了成就', 'New achievements added'],
       'bell.empty':           ['最近 {days} 天没有新动静', 'Nothing new in the last {days} days'],
       'bell.today':           ['今天', 'today'],
       'bell.daysAgo':         ['{n} 天前', '{n} days ago'],
@@ -3729,11 +3730,16 @@
 
     // ---- 🔔 Notifications -----------------------------------------------------
     //
-    // Two kinds, both **transitions**, with timestamps stamped by updateGameStats in
+    // Three kinds, all **transitions**, with timestamps stamped by updateGameStats in
     // lib/db.js at the one moment the old value is still visible. This only filters by
     // window and groups by kind — **do not try to recompute them from achieved/total**: a
     // game that dropped below 100% and one that was never complete look identical in their
     // current state.
+    //
+    // **A finished game gaining achievements is one event, listed once.** It stamps both
+    // perfect_lost_date and new_ach_date in the same moment, so a total-went-up entry whose
+    // stamp matches the game's perfect-lost stamp is that same event and is left to the
+    // perfect group. A later rise on the same game is a separate event and is listed.
     //
     // 「已读」 is stored in localStorage keyed by the raw timestamp. A day count cannot be
     // the key: day counts change every day, so a stored read marker no longer matches the
@@ -3743,7 +3749,21 @@
     const BELL_GROUPS = [
       ['perfect', 'bell.perfect'],
       ['added', 'bell.added'],
+      ['bumped', 'bell.bumped'],
     ];
+
+    /**
+     * Whether two stamps record the same event. updateGameStats gives both one clock reading, so
+     * for anything it writes now they are equal; the tolerance covers rows where each stamp took
+     * its own reading a millisecond or two apart. Two separate syncs a minute apart each seeing
+     * the total rise is not a case that occurs
+     */
+    const BELL_SAME_EVENT_MS = 60 * 1000;
+    function sameBellEvent(a, b) {
+      if (!a || !b) return false;
+      const ta = Date.parse(a), tb = Date.parse(b);
+      return Number.isFinite(ta) && Number.isFinite(tb) && Math.abs(ta - tb) < BELL_SAME_EVENT_MS;
+    }
 
     function bellItems() {
       const out = [];
@@ -3755,6 +3775,10 @@
         if (g.achAddedDaysAgo !== null && g.achAddedDaysAgo <= BELL_DAYS) {
           out.push({ kind: 'added', game: g, days: g.achAddedDaysAgo,
                      key: g.appid + '|added|' + g.achAddedAt });
+        }
+        if (g.newAchDaysAgo !== null && g.newAchDaysAgo <= BELL_DAYS && !sameBellEvent(g.newAchAt, g.perfectLostAt)) {
+          out.push({ kind: 'bumped', game: g, days: g.newAchDaysAgo,
+                     key: g.appid + '|bumped|' + g.newAchAt });
         }
       });
       return out.sort(function(a, b){ return a.days - b.days; });
