@@ -16,8 +16,8 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-import { openDb, insertGame, setGameField, updateGameStats, upsertGuide, getGame, allGames } from '../lib/db.js';
-import { createBackup, applyBackup, inspectBackup, backupName, BACKUP_VERSION } from '../lib/backup.js';
+import { openDb, insertGame, setGameField, updateGameStats, upsertGuide, getGame, allGames, upsertHltb, getHltb, hltbHistory } from '../lib/db.js';
+import { createBackup, applyBackup, inspectBackup, backupName, BACKUP_VERSION, TABLES } from '../lib/backup.js';
 import { zipWrite, zipRead } from '../lib/zip.js';
 
 /** A database carrying every "marker Steam cannot give back" — which is precisely why backups exist */
@@ -353,5 +353,82 @@ describe('backup / restore', () => {
     const b = backupName(new Date(2026, 7, 19, 14, 30));
     assert.equal(a, 'steam-tracker-backup-20260819-0905.zip');
     assert.notEqual(a, b);
+  });
+});
+
+/**
+ * Which tables a restore actually moves.
+ *
+ * `TABLES` is a hand-written list driving both the manifest counts and the restore, and the
+ * failure it produces is the quietest one on this path: a table absent from it is not an error,
+ * it is a restore that finishes, reports success, and leaves that table holding whatever the
+ * destination already had. `hltb` sat outside the list for a month exactly that way.
+ */
+describe('a restore moves every table, not the ones somebody remembered', () => {
+  test('the HowLongToBeat tables survive a round trip', () => {
+    const src = tmp('sat-bk-hltb-src-');
+    const dst = tmp('sat-bk-hltb-dst-');
+    try {
+      const db = seedDb(join(src, 'steam.db'));
+      upsertHltb(db, '294100', { hltbId: 4001, verified: true, comp100Med: 360000, comp100Count: 640 });
+      // A recorded miss, which is an answer and has to travel too — without it the new machine
+      // searches this title again on every sync, at up to four queries each
+      upsertHltb(db, '620', {});
+      // Backdate the seeded reading so the second one is a distinct row rather than the same stamp
+      db.prepare("UPDATE hltb_history SET checked_at = '2026-01-01T00:00:00.000Z' WHERE appid = '294100'").run();
+      upsertHltb(db, '294100', { hltbId: 4001, verified: true, comp100Med: 372000, comp100Count: 655 });
+      assert.equal(hltbHistory(db, '294100').length, 2, 'the fixture itself has to carry two readings');
+      const { zip, manifest } = createBackup({ db, configPath: null, guidesDir: join(src, 'guides') });
+      db.close();
+
+      assert.equal(manifest.counts.hltb, 2, 'the manifest never counted the hltb rows');
+      assert.equal(manifest.counts.hltb_history, 2);
+
+      const db2 = openDb(join(dst, 'steam.db'));
+      const r = applyBackup({ db: db2, buf: zip, configPath: null, guidesDir: join(dst, 'guides') });
+      assert.equal(r.tables.hltb, 2, 'the resolutions did not come back');
+      assert.equal(r.tables.hltb_history, 2, 'the readings did not come back');
+
+      const row = getHltb(db2, '294100');
+      assert.equal(row.hltb_id, 4001);
+      assert.equal(row.comp_100_med, 372000, 'the latest figures did not travel');
+      assert.equal(getHltb(db2, '620').hltb_id, null, 'the recorded miss did not travel, so it will be searched again');
+
+      // **The readings are the half that cannot be re-derived.** A resolution can be fetched
+      // again; a reading taken on a date that has passed cannot, so losing these is permanent
+      assert.deepEqual(
+        hltbHistory(db2, '294100').map((h) => [h.comp_100_med, h.comp_100_count]),
+        [[360000, 640], [372000, 655]],
+        'both readings have to come back, in order — one of them is the delta'
+      );
+      db2.close();
+    } finally {
+      rmSync(src, { recursive: true, force: true });
+      rmSync(dst, { recursive: true, force: true });
+    }
+  });
+
+  test('every table the schema creates is on the list, or the next one goes missing too', () => {
+    // **This is the assertion that stops it happening a third time.** Naming the tables that were
+    // forgotten only fixes the ones already known; the failure is a table added to db.js later
+    // while this list stays as it was, which is how `hltb` was lost. Read from a real database
+    // rather than by parsing the schema string, so a table created anywhere else still counts
+    const probe = tmp('sat-bk-schema-');
+    try {
+      const db = openDb(join(probe, 'steam.db'));
+      const present = db
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+        .all()
+        .map((r) => r.name);
+      db.close();
+      assert.ok(present.length > 0, 'the probe database has no tables, so this proves nothing');
+      const missing = present.filter((t) => !TABLES.includes(t));
+      assert.deepEqual(missing, [], `these tables exist but a restore would silently skip them: ${missing.join(', ')}`);
+      // And the reverse: a name left behind after a table is dropped makes the count lookup throw
+      const stale = TABLES.filter((t) => !present.includes(t));
+      assert.deepEqual(stale, [], `these are listed but no longer exist: ${stale.join(', ')}`);
+    } finally {
+      rmSync(probe, { recursive: true, force: true });
+    }
   });
 });
