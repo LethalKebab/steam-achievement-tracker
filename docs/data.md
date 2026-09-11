@@ -228,11 +228,12 @@ In the app: the first-run screen offers **从备份恢复** before the setup wiz
 
 **The zip contains your credentials in plain text** — the Steam API key, the Notion token and the AI key — unless you pass `--no-config` (or untick the box). That is the point of including them, and it is also the risk: anyone who gets the file can spend your AI credit. Treat it like a password file.
 
-Three things about it are load-bearing, and each fails silently if changed:
+Four things about it are load-bearing, and each fails silently if changed:
 
 - **The database is snapshotted with `VACUUM INTO`, never file-copied.** It runs in WAL mode, so recent writes live in `data/steam.db-wal` until a checkpoint and a plain copy can be stale. Measured separately: while the app is running in the tray, `steam.db` is **locked** — PowerShell's `Get-FileHash` cannot even read it, while `VACUUM INTO` works fine.
 - **Restore does not replace the database file.** The server is holding an open handle and Windows will not let an open file be deleted. It attaches the backup as a second database and copies the tables across inside one transaction, so the handle stays valid and nothing needs restarting.
 - **Tables are copied column by shared column, not `SELECT *`.** An older backup has fewer columns (`cover_url` was added later), and `SELECT *` would fail outright on that — or, worse in the other direction, silently misalign. Missing columns take their default.
+- **Which tables move is a written list, and a table missing from it is silently skipped.** The zip always holds the whole database, so the data is in the file either way — but the restore copies only the tables it names, and one left out is not an error. It is a restore that finishes, reports success, and leaves that table holding whatever this machine already had. `hltb` sat outside the list for a month exactly that way. A test now checks the list against the schema, so a table added later fails CI instead of going missing. **A backup taken before that fix still restores its HowLongToBeat rows** — they were always inside the zip.
 
 Restoring **replaces** the tables — it is a restore, not a merge, so rows on this machine that aren't in the backup are gone. Guide *files* are the exception: they are written over, never deleted, because losing a hand-written `.md` is unrecoverable while an extra unreferenced file costs nothing.
 
