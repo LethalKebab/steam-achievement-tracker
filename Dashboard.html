@@ -3482,7 +3482,13 @@
      * as focus leaves that row; the lock remains and the numbers revert to plain text.
      */
     let editingAppid = null;
-    const missingAchCache = {};
+    /**
+     * appid → what that game is still missing, as the server answered during this reading of the
+     * table. **loadDashboard empties it**; forgetMissingLists says why that is the one place
+     */
+    let missingAchCache = {};
+    /** How many times the cache has been emptied. A reply is written in only if this has not moved since its request went out */
+    let missingAchGen = 0;
 
     function fmtPct(rate) {
       if (rate === null || rate === undefined) return '';
@@ -4267,11 +4273,7 @@
           + '</div>'
           + '</div>';
 
-        // Expanding shows 「还差哪些成就」, and the criterion is **this row genuinely not being
-        // finished**, not which tab is selected. With the tabs gone, a completed game also
-        // appears in the table whenever 「已完成」 is not excluded — giving it an expand arrow
-        // would expand an empty list
-        const canExpand = g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid;
+        const canExpand = canExpandRow(g);
         const rowClass = 'game-row' + (canExpand ? ' expandable' : '') + (String(g.appid) === String(jumpedAppid) ? ' row-jumped' : '');
 
         // **Only the row being edited gets input fields.** A locked row that is not being
@@ -4460,24 +4462,95 @@
     }
 
     /**
-     * Expand a game's row and fetch what it is still missing, if that has not been fetched yet.
-     * **Opens, never toggles** — the row's own click decides toggling before it gets here, and the
-     * bell must not close a list that happened to be open already. One copy, because the row and the
-     * bell reaching the same list by two routes is how the two drift apart
+     * Whether a row opens to its list of what is still missing. The criterion is **the game genuinely
+     * not being finished**, not which filter is on: a completed game appears in the table whenever
+     * 「已完成」 is not excluded, and an expand arrow on it would open an empty list. render() draws the
+     * arrow from this, and forgetMissingLists decides from it whether the open row is still one
+     */
+    function canExpandRow(g) {
+      return Boolean(g && g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid);
+    }
+
+    /**
+     * Expand a game's row and fetch what it is still missing, unless this reading of the table already
+     * has it. **Opens, never toggles** — the row's own click decides toggling before it gets here, and
+     * the bell must not close a list that happened to be open already. One copy, because the row and
+     * the bell reaching the same list by two routes is how the two drift apart.
+     *
+     * A failure is not kept as the answer: opening the row again is how it is asked for again
      */
     function openMissingPanel(appid) {
       expandedAppid = appid;
-      if (!missingAchCache[appid]) {
-        missingAchCache[appid] = { loading: true };
-        rpc.withSuccessHandler(function(data) {
-          missingAchCache[appid] = data;
-          if (expandedAppid === appid) render();
-        }).withFailureHandler(function(err) {
-          missingAchCache[appid] = { error: err.message };
-          if (expandedAppid === appid) render();
-        }).getMissingAchievements(appid);
-      }
+      const had = missingAchCache[appid];
+      if (!had || missingListFailed(had)) fetchMissingList(appid);
       render();
+    }
+
+    /**
+     * An entry carrying a failure: the request's own, or the guide read inside an answer that
+     * otherwise arrived. Either is asked for again the next time the row opens
+     */
+    function missingListFailed(entry) {
+      return Boolean(entry.error || (entry.guide && entry.guide.error));
+    }
+
+    /**
+     * Ask the server for one game's list. Whatever the row already shows stays on screen until the
+     * answer arrives; with nothing there, or only a failure, it shows that the list is loading.
+     *
+     * **A reply is written in only if the cache has not been emptied since the request went out.** A
+     * request sent before a sync finished describes the game as it was, and written in afterwards it
+     * would put back exactly what the emptying removed, with nothing left to ask again
+     */
+    function fetchMissingList(appid) {
+      const gen = missingAchGen;
+      const had = missingAchCache[appid];
+      if (!had || had.error) missingAchCache[appid] = { loading: true };
+      rpc.withSuccessHandler(function(data) {
+        if (gen !== missingAchGen) return;
+        missingAchCache[appid] = data;
+        redrawIfOpen(appid);
+      }).withFailureHandler(function(err) {
+        if (gen !== missingAchGen) return;
+        missingAchCache[appid] = { error: err.message };
+        redrawIfOpen(appid);
+      }).getMissingAchievements(appid);
+    }
+
+    /**
+     * Draw a list that has just arrived, if its row is the open one. **Not while a row's numbers are
+     * being edited**: render() rebuilds the table, and with it the two fields being typed into and
+     * the focus. Editing ends in stopManualEdit's full repaint, which draws the list then — the same
+     * rule setGuideBusy follows
+     */
+    function redrawIfOpen(appid) {
+      if (expandedAppid === appid && editingAppid === null) render();
+    }
+
+    /**
+     * Forget every list fetched so far. **loadDashboard calls it, and that is the one place**: each
+     * path that changes what a list shows ends there — a finished sync changes what is unlocked, and a
+     * guide being written, restored or re-registered changes what each card says and where it links.
+     * Kept past that, a row opened before a sync goes on naming achievements already unlocked while
+     * the count beside it has moved on — for days, since closing the window only hides it in the tray.
+     *
+     * The open row is asked again at once and keeps what it shows until the answer arrives: emptied,
+     * it would collapse to the loading line and move every row under it for as long as the request
+     * takes. **An open row that can no longer expand is closed instead** — the sync finished its game,
+     * or the bell went to one already finished — or every later reading would fetch a list nobody
+     * can see, and a patch that reopens the game would open the row by itself. A row the filters are
+     * hiding stays open and is asked again, so it is current when the filter is cleared. A closed
+     * row is simply forgotten, and asked for when it is next opened
+     */
+    function forgetMissingLists() {
+      missingAchGen++;
+      const shown = expandedAppid ? missingAchCache[expandedAppid] : null;
+      missingAchCache = {};
+      if (!expandedAppid) return;
+      const game = allGames.find(function(g) { return String(g.appid) === expandedAppid; });
+      if (!canExpandRow(game)) { expandedAppid = null; return; }
+      if (shown && !shown.loading && !shown.error) missingAchCache[expandedAppid] = shown;
+      fetchMissingList(expandedAppid);
     }
 
     /** How long the row the bell went to stays lit */
@@ -5916,6 +5989,9 @@
         docTitleKey = 'title.page';
         applyStrings();
         allGames = data.games;
+        // After allGames, so the open row is judged against this reading's games; before render(),
+        // which would draw the last reading's list once more
+        forgetMissingLists();
         // cardTotal belongs solely to render() — only it knows the filter results
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
         document.getElementById('cardPerfect').textContent = fmtCount(data.perfectCount);

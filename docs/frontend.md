@@ -411,6 +411,18 @@ Expansion is `classList.toggle('expanded')`; the single-argument toggle is a del
 
 The jump to Notion is an **icon beside the achievement name**, not a labelled link under the guide — under the guide it competes with the window for space and has to be kept out of the clip by hand.
 
+### A row's list lasts one reading of the table
+
+The list is fetched the first time a row opens and kept while the table shows the same reading. **`loadDashboard` forgets every list** (`forgetMissingLists`), because each path that changes what a list shows ends there: a finished sync changes what is unlocked, and a guide being written, restored or re-registered changes what the cards say and where they link. A list kept past that goes on naming achievements already unlocked while the count beside it has moved on — and closing the window only hides it in the tray, so the page lives for days.
+
+- **The open row is asked again at once, and keeps its list on screen until the answer lands.** Emptied, the panel would collapse to its loading line and move every row below it for as long as the request takes.
+- **An open row that can no longer expand is closed instead** (`canExpandRow`, the rule `render()` draws the arrow from): the sync finished the game, or the bell went to one already finished. Left open, every later reading fetches a list nobody can see, and a patch that reopens the game opens the row by itself. A row the filters are hiding stays open and is asked again, so it is current when the filter is cleared.
+- **A reply is written in only if nothing has emptied the cache since its request went out** (`missingAchGen`). A request sent before a sync finished describes the game as it was, and written in afterwards it would put back exactly what was just forgotten.
+- **A reply does not redraw the table while a row's numbers are being edited** (`redrawIfOpen`): `render()` would replace the two fields being typed into, and the focus with them. The list waits in the cache for the repaint that ends the edit — the same rule `setGuideBusy` follows.
+- **A failure is not kept as the answer.** Whether the request failed, the server answered `{error}` (Steam busy, say), or only the guide read inside an answer failed, opening the row again asks again; in the last case the list stays on screen meanwhile.
+
+`html-smoke.test.js` runs these functions against a stub `rpc` that holds each reply until the test releases it, and a `render` that counts its calls, so the order replies land in is the test's to choose. Every assertion was mutation-tested.
+
 ---
 
 ## 10. The rewrite dialog (♻)
