@@ -3167,3 +3167,32 @@ describe('a bell entry goes to its game', () => {
     assert.match(panel, /isNewAch\(a\)[^;]*'ach\.new'/, 'the badge is not drawn');
   });
 });
+
+/**
+ * A count of days reads 「0 天前」 on the day itself. Every "{n} days ago" string on the page is
+ * drawn behind a test for zero that picks a "today" form instead — the bell and the played badge
+ * always were, and the new-achievements badge said 「0 天前新增成就」 beside a bell saying 「今天」
+ * about the same event.
+ */
+describe('a day count of zero reads as today', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  // Line comments first: a `//` here can hold a `/*`, and the other order eats code
+  const CODE = PAGE_JS.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('every "{n} days ago" string is drawn behind a test for zero', () => {
+    const s = pageStrings('Dashboard.html');
+    const ago = Object.keys(s).filter((k) => /\{n\}\s*天前/.test(s[k][0]));
+    assert.ok(ago.length >= 3, `expected the bell's and both row badges' strings, found: ${ago.join(', ')}`);
+    const guarded = [...CODE.matchAll(/=== 0 \? t\('([\w.]+)'\) : t\('([\w.]+)'/g)];
+    for (const key of ago) {
+      const drawn = CODE.split(`t('${key}'`).length - 1;
+      assert.ok(drawn > 0, `${key} is never drawn, so this check has lost its target rather than passed`);
+      const todays = guarded.filter((m) => m[2] === key).map((m) => m[1]);
+      assert.equal(todays.length, drawn, `${key} is drawn without a today form, so it reads 「0 天前」 on the day itself`);
+      for (const today of todays) {
+        assert.ok(s[today] && s[today][0] && s[today][1], `${today} is missing a half`);
+        assert.doesNotMatch(s[today].join(' '), /\{n\}/, `${today} is the zero case, so it has no count to show`);
+      }
+    }
+  });
+});

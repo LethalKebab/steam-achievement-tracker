@@ -2993,6 +2993,7 @@
       'table.unlocked':       ['未锁定', 'unlocked'],
       'table.familyOff':      ['取消家庭共享标记', 'Remove the family-share mark'],
       'table.familyOn':       ['标记为家庭共享(非自购,纯信息用途)', 'Mark as family-shared — not self-purchased, for information only'],
+      'table.newAchToday':    ['今天新增成就', 'new achievements today'],
       'table.newAch':         ['{n} 天前新增成就', 'new achievements {n}d ago'],
       'table.playedToday':    ['今天在玩', 'playing today'],
       'table.playedAgo':      ['{n} 天前玩过', 'played {n}d ago'],
@@ -4183,7 +4184,8 @@
         const familyBadge = '<button class="' + familyBadgeClass + '" data-family-appid="' + g.appid + '" title="'
           + escapeHtml(g.family ? t('table.familyOff') : t('table.familyOn')) + '">' + escapeHtml(t('filter.family')) + '</button>';
         const newAchBadge = (g.newAchDaysAgo !== null && g.newAchDaysAgo <= 30)
-          ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('table.newAch', { n: g.newAchDaysAgo })) + '</span>'
+          ? '<span class="badge badge-new">' + icon('sparkle')
+            + escapeHtml(g.newAchDaysAgo === 0 ? t('table.newAchToday') : t('table.newAch', { n: g.newAchDaysAgo })) + '</span>'
           : '';
         const playedBadge = isRecentlyPlayed(g)
           ? '<span class="badge badge-played">' + icon('gamepad')
