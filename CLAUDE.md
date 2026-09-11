@@ -202,7 +202,7 @@ Two methods are **button-only and never on the save path**, because they write o
 
 The other two tables, since three columns arrived late and none of them is obvious from the first:
 
-- `achievements`: `appid` / `api_name` / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon` / `unlocked` / `rarity` / `rarity_checked_at`
+- `achievements`: `appid` / `api_name` / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon` / `unlocked` / `rarity` / `rarity_checked_at` / `first_seen` — the last written on insert and never by a refresh, which is how the Dashboard tells a patch's additions from the set a game shipped with
 - `hltb`: `appid` / `hltb_id` / `verified` / `manual` / `comp_100` / `comp_100_med` / `comp_100_lo` / `comp_100_hi` / `comp_100_count` / `checked_at`
 - `hltb_history`: `appid` + `checked_at` (PK together) / `comp_100` / `comp_100_med` / `comp_100_count`
 - `guides`: `appid` / `name` / `url` / `kind` / `updated` / `lang` / `gen_prose` / `status_seen_at`
@@ -438,6 +438,7 @@ Every one of these was paid for.
 | `guidepatch.test.js` | the bytes the user did not ask to change — nearly every assertion is about what did *not* change |
 | `notionsetup.test.js` | onboarding: a PATCH that returns 200 and changes nothing must be reported as a failure, a stale option set is appended to rather than clobbered |
 | `notifications.test.js` | the three events that get one chance to be noticed, the false positives that would make the bell useless, and that one event is stamped as one moment so the bell can list it once |
+| `new-achievements.test.js` | which achievements a patch added — the first-seen stamp written on insert and never moved by a refresh, one moment per call, rows that predate the column left unknown rather than new, and what the Dashboard's list marks, through the real API |
 | `html-smoke.test.js` | the two HTML files, which nothing else touches — referential integrity plus rules distilled from shipped bugs. **Not a behaviour test**: no DOM in the runner, so clicks, focus and cascade are still checked by hand |
 | `forbidden.test.js` | the difference between "ask again later" and "this will never answer again". 403 keeps `retry` true (six call sites in `lib/` branch on it and would otherwise read an absent `achievements` array) while gaining a flag, still writes no `stats_checked_at`, and 429 must not be reported as permanent — a fixture set built only from 403s passes against code that names every retry |
 | `syncbar.test.js` | the notices that report something already done — source assertions over `lib/rpc.js`, which has no DOM here. They lived one poll tick each before the sticky flag existed |
