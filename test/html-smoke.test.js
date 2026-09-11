@@ -3094,3 +3094,105 @@ describe('the bell lists each event once', () => {
       'the group is not in BELL_GROUPS, so its entries are collected and never drawn');
   });
 });
+
+/**
+ * A bell entry goes to its game, and the game's list marks what a patch added. Most of this is
+ * DOM work with no DOM in the runner, so the structural rules are pinned as source and the two
+ * pure helpers the panel uses are run.
+ */
+describe('a bell entry goes to its game', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  // Line comments first: a `//` here can hold a `/*`, and the other order eats code
+  const CODE = PAGE_JS.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  /** One function's source, sliced by brace depth from its own declaration */
+  const fnBody = (name) => {
+    const at = CODE.indexOf('function ' + name + '(');
+    assert.ok(at !== -1, `${name} is gone, so this check has lost its target rather than passed`);
+    let depth = 0, i = CODE.indexOf('{', at);
+    for (; i < CODE.length; i++) {
+      if (CODE[i] === '{') depth++;
+      else if (CODE[i] === '}' && --depth === 0) break;
+    }
+    return CODE.slice(at, i + 1);
+  };
+
+  test('each entry is a button that knows its game', () => {
+    const body = fnBody('renderBell');
+    assert.match(body, /<button type="button" class="bell-item" data-appid="/,
+      'an entry that is a div cannot be reached from the keyboard, and one without its appid cannot go anywhere');
+    assert.doesNotMatch(body, /<div class="bell-item"/, 'a div entry is back');
+  });
+
+  test('a hidden row is revealed by putting the chip in the way back to neutral, never one step round', () => {
+    const body = fnBody('jumpToGame');
+    assert.match(body, /hidingFilter\(/, 'the jump has to ask what is in the way rather than assume');
+    assert.match(body, /setChipState\(blocker\.el, 'off'\)/, 'the chip in the way is not put back to neutral');
+    assert.doesNotMatch(body, /NEXT_STATE/,
+      'advancing a chip from 排除 lands on 只看, which swaps the table for its complement');
+  });
+
+  test('the row and the bell open the list through one helper, and it is fetched in one place', () => {
+    assert.equal((CODE.match(/\bopenMissingPanel\(/g) ?? []).length, 3,
+      'one definition, the row click and the jump — a second copy of the open-and-fetch step drifts from the first');
+    assert.equal((CODE.match(/\.getMissingAchievements\(/g) ?? []).length, 1, 'the list is fetched from more than one place');
+  });
+
+  test('the light on the jumped-to row is applied by render(), so a redraw cannot wipe it', () => {
+    assert.match(CODE, /const rowClass = [^;]*jumpedAppid[^;]*row-jumped/,
+      'the list arrives asynchronously and redraws the table; a class set once on the row would vanish mid-glance');
+  });
+
+  test("the list puts a patch's additions first, inside the bell's window, and marks them", () => {
+    const from = PAGE_JS.indexOf('function isNewAch(');
+    const to = PAGE_JS.indexOf('function renderMissingRow(', from);
+    assert.ok(from !== -1 && to > from, 'cannot find the helpers the panel uses');
+    // eslint-disable-next-line no-new-func
+    const h = new Function('BELL_DAYS', PAGE_JS.slice(from, to) + '\nreturn { isNewAch, newFirst };')(30);
+    const list = [
+      { name: 'old1', addedDaysAgo: null },
+      { name: 'new1', addedDaysAgo: 0 },
+      { name: 'old2', addedDaysAgo: null },
+      { name: 'stale', addedDaysAgo: 45 },
+      { name: 'new2', addedDaysAgo: 3 },
+    ];
+    assert.deepEqual(h.newFirst(list).map((a) => a.name), ['new1', 'new2', 'old1', 'old2', 'stale'],
+      'additions first, and each group keeps the order it had');
+    assert.equal(h.isNewAch({ addedDaysAgo: 30 }), true);
+    assert.equal(h.isNewAch({ addedDaysAgo: 31 }), false, 'past the bell window it is no longer new');
+    assert.equal(h.isNewAch({ addedDaysAgo: null }), false, 'the set a game shipped with is never new');
+    const s = pageStrings('Dashboard.html');
+    assert.ok(s['ach.new'] && s['ach.new'][0] && s['ach.new'][1], 'the badge is missing a half');
+    const panel = fnBody('renderMissingRow');
+    assert.match(panel, /newFirst\(data\.missing\)/, 'the panel does not use the ordering');
+    assert.match(panel, /isNewAch\(a\)[^;]*'ach\.new'/, 'the badge is not drawn');
+  });
+});
+
+/**
+ * A count of days reads 「0 天前」 on the day itself. Every "{n} days ago" string on the page is
+ * drawn behind a test for zero that picks a "today" form instead — the bell and the played badge
+ * always were, and the new-achievements badge said 「0 天前新增成就」 beside a bell saying 「今天」
+ * about the same event.
+ */
+describe('a day count of zero reads as today', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  // Line comments first: a `//` here can hold a `/*`, and the other order eats code
+  const CODE = PAGE_JS.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('every "{n} days ago" string is drawn behind a test for zero', () => {
+    const s = pageStrings('Dashboard.html');
+    const ago = Object.keys(s).filter((k) => /\{n\}\s*天前/.test(s[k][0]));
+    assert.ok(ago.length >= 3, `expected the bell's and both row badges' strings, found: ${ago.join(', ')}`);
+    const guarded = [...CODE.matchAll(/=== 0 \? t\('([\w.]+)'\) : t\('([\w.]+)'/g)];
+    for (const key of ago) {
+      const drawn = CODE.split(`t('${key}'`).length - 1;
+      assert.ok(drawn > 0, `${key} is never drawn, so this check has lost its target rather than passed`);
+      const todays = guarded.filter((m) => m[2] === key).map((m) => m[1]);
+      assert.equal(todays.length, drawn, `${key} is drawn without a today form, so it reads 「0 天前」 on the day itself`);
+      for (const today of todays) {
+        assert.ok(s[today] && s[today][0] && s[today][1], `${today} is missing a half`);
+        assert.doesNotMatch(s[today].join(' '), /\{n\}/, `${today} is the zero case, so it has no count to show`);
+      }
+    }
+  });
+});

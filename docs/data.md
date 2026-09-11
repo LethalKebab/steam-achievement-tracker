@@ -21,7 +21,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 | Table | Holds |
 |---|---|
 | `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
-| `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL |
+| `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL, and when each one first appeared |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
 | `hltb` | appid → its HowLongToBeat entry and how many hours finishing it takes |
 | `hltb_history` | one row per reading taken from HowLongToBeat, so a figure's movement can be measured rather than guessed at |
@@ -81,7 +81,9 @@ Six decisions worth knowing before you write queries:
 
 ### `achievements` columns
 
-`appid` + `api_name` (composite primary key) / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon` / `unlocked` / `rarity` / `rarity_checked_at`
+`appid` + `api_name` (composite primary key) / `game_name` / `name_cn` / `name_en` / `description` / `description_en` / `hidden` / `icon` / `unlocked` / `rarity` / `rarity_checked_at` / `first_seen`
+
+`first_seen` is when the row was first written, and nothing moves it afterwards — a description refresh updates the text and leaves it alone. A game's first sync writes its whole set in one moment, so an achievement stamped later arrived with an update, and that is what the Dashboard marks 「新」. Rows written before the column existed are `NULL`: their moment was never recorded, and they count as part of the original set rather than as new.
 
 - **Both languages come from one sync, not two.** `fetchGameSchema` calls `GetSchemaForGame` twice, once per language, because the name has always been stored in both. The English description arrives in the response fetched for the English *name*, so storing it costs no extra request.
 

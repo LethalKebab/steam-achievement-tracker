@@ -693,10 +693,20 @@
       letter-spacing: 0.06em;
       padding: var(--s2) var(--s2) var(--s1);
     }
+    /* **A button, not a div**, for the same reason as .game-search-result: an entry that goes
+       somewhere when clicked has to be reachable from the keyboard, and as a button the global
+       :focus-visible ring and Enter come for free. The lines after gap reset the button defaults */
     .bell-item {
       display: flex;
       align-items: center;
       gap: var(--s2);
+      width: 100%;
+      text-align: left;
+      font: inherit;
+      color: inherit;
+      background: none;
+      border: none;
+      cursor: pointer;
       padding: 7px var(--s2);
       border-radius: var(--r-sm);
     }
@@ -1253,6 +1263,11 @@
     tr.game-row.expandable { cursor: pointer; }
     /* The whole row brightens on hover. A surface rather than a line: one more line among 167 rows is graph paper */
     tr.game-row:hover td { background: var(--surface-2); }
+    /* The row the bell just went to, lit for a moment so the eye lands on it among three hundred.
+       After the hover rule, at equal specificity, so it holds while the pointer is over it.
+       **State that render() applies, not a class set on the element**: the achievement list
+       arrives asynchronously and redraws the table, and a class set once would vanish mid-glance */
+    tr.game-row.row-jumped td { background: var(--accent-soft); }
 
     /* ---- Row contents ----------------------------------------------------
        A row really holds three groups: **marks** (star, heart), **identity** (cover,
@@ -1525,6 +1540,9 @@
     .ach-icon { width: 32px; height: 32px; border-radius: var(--r-sm); flex-shrink: 0; background: var(--bg); }
     .ach-head { display: flex; align-items: flex-start; gap: var(--s2); }
     .ach-name { font-size: var(--fs-sm); font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+    /* The mark on an achievement a patch added. Inline after the name, so a long name wraps with it
+       rather than pushing it off the card */
+    .ach-name .badge { margin-left: var(--s1); vertical-align: 1px; font-weight: 400; }
     /* Icon only. It sits right against the achievement name, and a sentence 「在攻略中
        打开」 would crowd the name out, while the title attribute already says it — the
        fewer words on screen the better, and long explanations belong in docs/ */
@@ -2954,6 +2972,8 @@
       'bell.perfect':         ['解锁全部成就后又出现了新成就', 'Completed, then new achievements appeared'],
       'bell.added':           ['以前没有成就,现在有了', 'Had no achievements before, has them now'],
       'bell.bumped':          ['新增了成就', 'New achievements added'],
+      // Beside an achievement a patch added, in the game's list of what is missing
+      'ach.new':              ['新', 'New'],
       'bell.empty':           ['最近 {days} 天没有新动静', 'Nothing new in the last {days} days'],
       'bell.today':           ['今天', 'today'],
       'bell.daysAgo':         ['{n} 天前', '{n} days ago'],
@@ -2973,6 +2993,7 @@
       'table.unlocked':       ['未锁定', 'unlocked'],
       'table.familyOff':      ['取消家庭共享标记', 'Remove the family-share mark'],
       'table.familyOn':       ['标记为家庭共享(非自购,纯信息用途)', 'Mark as family-shared — not self-purchased, for information only'],
+      'table.newAchToday':    ['今天新增成就', 'new achievements today'],
       'table.newAch':         ['{n} 天前新增成就', 'new achievements {n}d ago'],
       'table.playedToday':    ['今天在玩', 'playing today'],
       'table.playedAgo':      ['{n} 天前玩过', 'played {n}d ago'],
@@ -3375,6 +3396,8 @@
     let sortKey = 'rate';
     let sortDir = -1;
     let expandedAppid = null;
+    /** The row the bell last went to, lit until JUMP_LIGHT_MS has passed. render() reads it — see rowClass */
+    let jumpedAppid = null;
 
     /**
      * How the table was left last time: which column it was sorted by, which way, which chips were
@@ -3807,11 +3830,12 @@
         if (!rows.length) return;
         html += '<div class="bell-group">' + escapeHtml(t(pair[1])) + '</div>';
         html += rows.map(function(i) {
-          return '<div class="bell-item">'
-            + '<img src="' + thumbUrl(i.game.appid) + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+          // A button carrying the appid, so the entry goes to its game — see jumpToGame
+          return '<button type="button" class="bell-item" data-appid="' + escapeHtml(String(i.game.appid)) + '">'
+            + '<img src="' + thumbUrl(i.game.appid) + '" alt="" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
             + '<span class="bell-name">' + escapeHtml(i.game.name) + '</span>'
             + '<span class="bell-when">' + escapeHtml(i.days === 0 ? t('bell.today') : t('bell.daysAgo', { n: i.days })) + '</span>'
-            + '</div>';
+            + '</button>';
         }).join('');
       });
       panel.innerHTML = html;
@@ -3838,6 +3862,18 @@
           } catch (e) { /* if it cannot be stored, it is reported again next time, which beats raising an error */ }
           document.getElementById('bellDot').hidden = true;
         }
+      });
+
+      // An entry goes to its game. Delegated to the panel, because renderBell rewrites the entries
+      // every time it runs. **The bell closes first**: the page scrolls and lights the row behind it,
+      // and an open panel would sit over the very thing it just pointed at. Focus goes back to the
+      // bell rather than being left on an entry that is no longer on screen
+      panel.addEventListener('click', function(e) {
+        const item = e.target.closest('.bell-item');
+        if (!item) return;
+        close();
+        btn.focus({ preventScroll: true });
+        jumpToGame(item.dataset.appid);
       });
 
       // Clicking elsewhere closes it. **blur cannot be used** — an element inside the panel
@@ -4148,7 +4184,8 @@
         const familyBadge = '<button class="' + familyBadgeClass + '" data-family-appid="' + g.appid + '" title="'
           + escapeHtml(g.family ? t('table.familyOff') : t('table.familyOn')) + '">' + escapeHtml(t('filter.family')) + '</button>';
         const newAchBadge = (g.newAchDaysAgo !== null && g.newAchDaysAgo <= 30)
-          ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('table.newAch', { n: g.newAchDaysAgo })) + '</span>'
+          ? '<span class="badge badge-new">' + icon('sparkle')
+            + escapeHtml(g.newAchDaysAgo === 0 ? t('table.newAchToday') : t('table.newAch', { n: g.newAchDaysAgo })) + '</span>'
           : '';
         const playedBadge = isRecentlyPlayed(g)
           ? '<span class="badge badge-played">' + icon('gamepad')
@@ -4235,7 +4272,7 @@
         // appears in the table whenever 「已完成」 is not excluded — giving it an expand arrow
         // would expand an empty list
         const canExpand = g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid;
-        const rowClass = 'game-row' + (canExpand ? ' expandable' : '');
+        const rowClass = 'game-row' + (canExpand ? ' expandable' : '') + (String(g.appid) === String(jumpedAppid) ? ' row-jumped' : '');
 
         // **Only the row being edited gets input fields.** A locked row that is not being
         // edited shows its numbers as plain text like any other — permanent input fields would
@@ -4400,18 +4437,9 @@
       body.querySelectorAll('tr.expandable').forEach(function(tr) {
         tr.addEventListener('click', function() {
           const appid = tr.dataset.appid;
-          expandedAppid = (expandedAppid === appid) ? null : appid;
-          if (expandedAppid && !missingAchCache[expandedAppid]) {
-            missingAchCache[expandedAppid] = { loading: true };
-            rpc.withSuccessHandler(function(data) {
-              missingAchCache[appid] = data;
-              if (expandedAppid === appid) render();
-            }).withFailureHandler(function(err) {
-              missingAchCache[appid] = { error: err.message };
-              if (expandedAppid === appid) render();
-            }).getMissingAchievements(appid);
-          }
-          render();
+          // The row toggles; opening goes through the same helper the bell uses
+          if (expandedAppid === appid) { expandedAppid = null; render(); return; }
+          openMissingPanel(appid);
         });
       });
 
@@ -4429,6 +4457,91 @@
         // toggle rather than add — once expanded it has to be collapsible with another click. The single-argument flip is deliberate
         el.addEventListener('click', function() { el.classList.toggle('expanded'); });
       });
+    }
+
+    /**
+     * Expand a game's row and fetch what it is still missing, if that has not been fetched yet.
+     * **Opens, never toggles** — the row's own click decides toggling before it gets here, and the
+     * bell must not close a list that happened to be open already. One copy, because the row and the
+     * bell reaching the same list by two routes is how the two drift apart
+     */
+    function openMissingPanel(appid) {
+      expandedAppid = appid;
+      if (!missingAchCache[appid]) {
+        missingAchCache[appid] = { loading: true };
+        rpc.withSuccessHandler(function(data) {
+          missingAchCache[appid] = data;
+          if (expandedAppid === appid) render();
+        }).withFailureHandler(function(err) {
+          missingAchCache[appid] = { error: err.message };
+          if (expandedAppid === appid) render();
+        }).getMissingAchievements(appid);
+      }
+      render();
+    }
+
+    /** How long the row the bell went to stays lit */
+    const JUMP_LIGHT_MS = 2400;
+
+    /**
+     * Go to one game from outside the table — a bell entry. Each thing that could keep its row off
+     * screen is undone in turn:
+     *
+     *  1. **The gallery has no expanding rows**, so the view switches to the table — through the
+     *     toggle's own button, the one path that also updates its pressed state and saves it.
+     *  2. **A filter may hide the row.** hidingFilter names the first thing in the way: a search that
+     *     excludes the game is emptied, and a chip goes back to **neutral, not one step round the
+     *     cycle** — the same rule as the 「被…挡住了」 reveal, since advancing from 排除 lands on 只看 and
+     *     swaps the table for its complement. Asked again until nothing is in the way, because the
+     *     first answer names only one of what may be several.
+     *  3. **The row opens its list of what is missing**, where a patch's additions are marked, and is
+     *     lit for a moment so the eye lands on it.
+     */
+    function jumpToGame(appid) {
+      const g = allGames.find(function(x) { return String(x.appid) === String(appid); });
+      if (!g) return;
+      if (viewMode !== 'table') {
+        const tableBtn = document.querySelector('.view-toggle button[data-view="table"]');
+        if (tableBtn) tableBtn.click();
+      }
+      let changed = false;
+      for (let guard = 0; guard <= FILTERS.length; guard++) {
+        const blocker = hidingFilter(g, currentFilters());
+        if (!blocker || !blocker.el) break;
+        changed = true;
+        if (blocker.el.id === 'searchBox') {
+          blocker.el.value = '';
+          // Dispatched, not handled by name: the box carries more than one listener
+          blocker.el.dispatchEvent(new Event('input', { bubbles: true }));
+        } else {
+          setChipState(blocker.el, 'off');
+        }
+      }
+      if (changed) saveViewState();
+      const id = String(g.appid);
+      jumpedAppid = id;
+      setTimeout(function() {
+        if (jumpedAppid !== id) return;
+        jumpedAppid = null;
+        const lit = document.querySelector('tr.row-jumped');
+        if (lit) lit.classList.remove('row-jumped');
+      }, JUMP_LIGHT_MS);
+      openMissingPanel(id);
+      const row = document.querySelector('tr.game-row[data-appid="' + id + '"]');
+      if (row) {
+        const still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        row.scrollIntoView({ block: 'center', behavior: still ? 'auto' : 'smooth' });
+      }
+    }
+
+    /** A patch added it within the bell's window. The server says how long ago; the window lives here, once */
+    function isNewAch(a) {
+      return typeof a.addedDaysAgo === 'number' && a.addedDaysAgo <= BELL_DAYS;
+    }
+
+    /** A patch's additions first, each group keeping the order it had — the list is opened to see what arrived */
+    function newFirst(list) {
+      return list.filter(isNewAch).concat(list.filter(function(a) { return !isNewAch(a); }));
     }
 
     function renderMissingRow(appid) {
@@ -4459,7 +4572,7 @@
           head += ' · ' + data.guide.error;
         }
         inner = '<div class="missing-header">' + escapeHtml(head) + '</div>'
-          + '<div class="ach-grid">' + data.missing.map(function(a) {
+          + '<div class="ach-grid">' + newFirst(data.missing).map(function(a) {
             const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
             const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
               + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' ' + escapeHtml(t('ach.searchGuide')) + '</a>';
@@ -4494,7 +4607,9 @@
             return '<div class="ach-item">'
               + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
               + '<div class="ach-body">'
-              + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name) + '</div>' + jump + '</div>'
+              + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name)
+                + (isNewAch(a) ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('ach.new')) + '</span>' : '')
+                + '</div>' + jump + '</div>'
               + '<div class="ach-desc">' + escapeHtml(a.description) + '</div>' + tail + '</div>'
               + '</div>';
           }).join('') + '</div>';

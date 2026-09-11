@@ -220,6 +220,10 @@ The old `#newAchSection` table listed anything whose `total` had grown. The bell
 
 **The sync bar still reports it too.** The bar describes the run that just finished and is replaced by the next one; the bell keeps the entry for 30 days.
 
+**An entry goes to its game.** Each one is a button carrying its appid. Clicking it closes the bell, then undoes in turn everything that could keep the row off screen: the gallery switches to the table through the toggle's own button, a search that excludes the game is cleared, and a chip hiding it goes back to **neutral** — the same rule as the 「被…挡住了」 reveal, never one step round the cycle. Then the row opens its list of what is missing and is lit for a moment. The light is state that `render()` applies, because the list arrives asynchronously and redraws the table.
+
+**The list marks what a patch added, and shows it first.** `achievements.first_seen` is written when a row is first inserted and never after, so a game's original set shares its first sync's moment and anything later arrived with an update. The server sends how many days ago each addition arrived, and the page shows 「新」 within the bell's own 30-day window, so that number has one copy.
+
 "Read" is stored in `localStorage` keyed on the **raw ISO timestamps**, not the day counts the UI renders — day counts change daily, so a seen-set keyed on them stops matching overnight and the red dot resurrects itself every morning.
 
 Opening the panel marks everything read: the dot answers "is there anything new", not "have you dealt with it".
