@@ -3146,7 +3146,12 @@
       'res.searches':         ['{n} 次搜索', '{n} searches'],
       'res.noSearches':       ['没有联网搜索', 'no web searches'],
       'res.unsyncable':       ['{n} 个成就同名、Steam 上描述是空的,自动勾选认不出它们,需手动勾选:', '{n} achievements share a name and have no description on Steam, so automatic ticking cannot tell them apart. Tick these by hand:'],
-      'res.andMore':          [' 等 {n} 个', ' and {n} more'],
+      // Said after names already listed, so {n} counts the ones **not** listed; the Chinese says so
+      // outright (其余), because 「等 {n} 个」 alone reads as the total
+      'res.andMore':          [' 等其余 {n} 个', ' and {n} more'],
+      // Joins a short list of names. Its own entry because 、 is Chinese punctuation, and a list
+      // joined with it would be the one Chinese mark left in an English sentence
+      'list.sep':             ['、', ', '],
       'res.preExisting':      ['攻略里还有 {n} 条原有的校验问题,本次未处理', 'The guide still has {n} pre-existing check failures, untouched this time'],
       'res.rewrote':          ['《{game}》已修改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
       'res.generated':        ['《{game}》已生成 · {covered}/{total} 个成就 · ', '{game} generated · {covered} of {total} achievements · '],
@@ -6758,8 +6763,8 @@
       // like the sync being broken. Listing the names is what tells them which
       const unsyncable = (r.unsyncable || []).length
         ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.unsyncable', { n: r.unsyncable.length })) +
-          escapeHtml(r.unsyncable.slice(0, 4).join('、')) +
-          (r.unsyncable.length > 4 ? escapeHtml(t('res.andMore', { n: r.unsyncable.length })) : '') + '</span>'
+          escapeHtml(r.unsyncable.slice(0, 4).join(t('list.sep'))) +
+          (r.unsyncable.length > 4 ? escapeHtml(t('res.andMore', { n: r.unsyncable.length - 4 })) : '') + '</span>'
         : '';
       // A partial rewrite has **something else** to say: how many were changed, and that the rest
       // were untouched. Written as 「已生成 · 11/11 个成就」, an operation that changed only 5 looks

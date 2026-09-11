@@ -513,6 +513,8 @@ What "does not auto-dismiss" costs is the corner. The only thing that replaces a
 
 The × is **drawn inline in `lib/rpc.js`, not `<use href="#i-close">`**, for the same reason the status dot is: that id lives in `Dashboard.html`, and renaming it would leave a button containing nothing, with no error anywhere. The duplication is deliberate — do not consolidate it.
 
+**Its words follow the page's language, read from the page.** `lib/rpc.js` runs in the browser and cannot import `lib/messages.js`, so it carries its own `[zh, en]` table. What it reads is `<html lang>`, which `applyStrings()` sets before the first paint — the one language signal the page already publishes, for screen readers and line breaking — rather than the page's `LANG`, which lives in another script and is reachable only by name. It is read on every string, because the bar is built and first polled before the page's data load has settled the language, and a value captured then would freeze whichever language happened to be there. The close button is named in `show()` for the same reason. The phase labels match the terminal's word for word, and a test holds the two copies together.
+
 ---
 
 ## 12. Shared interaction rules

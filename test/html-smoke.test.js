@@ -2998,3 +2998,35 @@ describe('no page references a design token that does not exist', () => {
     });
   }
 });
+
+/**
+ * A list of names inside a sentence carries two pieces of the language besides its words: the mark
+ * between the names, and the "and N more" after them, which counts the names **not** shown. Both have
+ * to come from the table, and the count has to agree with how many were shown.
+ */
+describe('a list of names follows the interface language', () => {
+  // Line comments first, then block comments: a `//` here can hold a `/*`, and the other order eats code
+  const DASH_JS = inlineScripts(read('Dashboard.html')).join(SEP)
+    .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+
+  test('no list is joined with a literal 、', () => {
+    assert.doesNotMatch(DASH_JS, /\.join\(\s*['"`]、['"`]\s*\)/,
+      'a list joined with 、 leaves Chinese punctuation in an English sentence');
+  });
+
+  test('the separator is in the table, in both languages', () => {
+    const s = pageStrings('Dashboard.html');
+    assert.ok(Array.isArray(s['list.sep']), 'list.sep is missing from the table');
+    assert.equal(s['list.sep'][0], '、');
+    assert.equal(s['list.sep'][1], ', ');
+  });
+
+  test('"and N more" is given how many were not listed', () => {
+    // slice(0, k) followed by length - k. Passing the length itself makes the English say "and 10
+    // more" beside four names when six are missing — nothing throws, the number is simply wrong
+    const m = DASH_JS.match(/unsyncable\.slice\(0, (\d+)\)[\s\S]{0,240}?t\('res\.andMore', \{ n: r\.unsyncable\.length - (\d+) \}\)/);
+    assert.ok(m, 'the count handed to res.andMore is not the number left unlisted');
+    assert.equal(m[1], m[2], 'the slice and the subtraction disagree about how many names were shown');
+  });
+});

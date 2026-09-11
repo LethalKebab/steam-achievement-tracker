@@ -217,7 +217,7 @@ function progressPrinter() {
 
 // The label is a key now; the text lives in `lib/tracker-messages.js` like everything else the
 // CLI prints. A phase with no entry still falls through to its own raw name below
-const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', hltb: 'phase.hltb' };
+const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', 'library-family': 'phase.libraryFamily', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', hltb: 'phase.hltb' };
 
 function makeProgressHandler(p) {
   return (ev) => {
