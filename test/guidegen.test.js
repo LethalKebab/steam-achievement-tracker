@@ -3195,6 +3195,18 @@ describe('the prompt in two languages', () => {
       assert.match(build('en'), /Bilibili/);
     });
 
+    test('a search that finds nothing falls back to the brief line, not an invented explanation', () => {
+      // The old wording asked for "the most reasonable explanation" once research came up empty —
+      // which is exactly the unverifiable, token-costing padding this fallback exists to forbid.
+      // Reusing `briefInstruction`'s one-line shape for an unlocked achievement leaves nothing left
+      // to elaborate: either write what a source actually gave, or write the name and the official
+      // description and stop.
+      assert.match(build('zh'), /直接写 `- \[ \] \*\*名字\*\* — 官方描述` 一行就停/);
+      assert.match(build('en'), /stop at `- \[ \] \*\*Name\*\* — official description`/);
+      assert.doesNotMatch(build('zh'), /最合理的说明/, 'the old "give the most reasonable explanation" wording should be gone');
+      assert.doesNotMatch(build('en'), /most reasonable account/, 'the old "most reasonable account" wording should be gone');
+    });
+
     test('the offline variant forks too', () => {
       assert.match(build('en', { canSearch: false }), /You have \*\*no search or page-fetch tools\*\*/);
       assert.match(build('zh', { canSearch: false }), /你这次没有联网能力/);

@@ -253,6 +253,16 @@ Three guards, each pinned by a test:
 
 Asking a shard what to write has **exactly one exit** (`chunkMessage`). With the two call sites each passing it separately, the one that forgot the skip-list would not error and would not lose content — that shard's list would just quietly vanish, on the path that is hardest to reach (a whole shard has to fail first).
 
+## Achievements a search can't find material for
+
+The online research instructions used to end with "give the most reasonable explanation the name and description support — don't invent specific figures, places or item names." That sentence asked for two things that don't fit together: write an explanation, but the explanation may not contain anything specific — which is what an explanation is for. The gap between "don't invent specifics" and "don't invent" is exactly where a paragraph got written from the achievement's name and its one-sentence Steam description, dressed up to read like the researched entries next to it. That is the "reasonable-sounding but unverifiable" failure this whole design exists to keep out, produced by the fallback instruction meant to bound it.
+
+The fallback is now the same one-line shape `briefApiNames` already produces for an achievement the player has unlocked: `- [ ] **名字** — 官方描述` and stop, no third part. **A search failing for one achievement is not different, for what gets written, from that achievement needing no write-up at all** — either way nothing the model could add would be anything but invented, so the entry is exactly as long as what is actually known. `BRIEF_LINE_ZH` / `BRIEF_LINE_EN` in `lib/guidegen.js` hold that one line's exact text, imported by both `briefInstruction` and `RESEARCH_ONLINE`/`RESEARCH_ONLINE_EN`, so a future edit to the shape cannot update one call site and miss the other.
+
+**This is a prompt instruction, not a structural guarantee — same limit as everything else in this section.** `guidelint.js` cannot tell a genuinely-thin entry from one the model gave up on too early, or a fabricated explanation from a correct one; "is the content right" stays outside what the machine checks, exactly as "What is guaranteed and what is not" says above. What changed is that the instruction no longer *asks* for elaboration when there is nothing to elaborate from — the old wording invited the exact behaviour it forbade in the same breath.
+
+**Why `RESEARCH_OFFLINE` was left alone.** It already tells the model to leave the third part empty on anything it's unsure of, for a stronger reason than the online path had: with no source at all, "don't invent specifics" is unenforceable to begin with, because the model cannot tell what it remembers from what it confabulated (see the comment on `RESEARCH_OFFLINE`). It was never inviting a reasoned-but-generic paragraph the way the online fallback was, so it had no matching failure mode to fix.
+
 ## Classification: one more pass, after the whole guide is written
 
 **Runs only when the guide was actually sharded** (`chunks.length > 1`). A single-shard guide has no cross-shard consistency problem, and that shard already had the descriptions and rarity in hand, so it classifies better than any after-the-fact pass.

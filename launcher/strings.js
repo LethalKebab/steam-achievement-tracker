@@ -79,9 +79,9 @@ export const LAUNCHER_MESSAGES = {
   'update.downloading':     ['正在下载 {version}', 'Downloading {version}'],
   'update.downloadingBody': ['下载完会自动重启,期间可以继续用。',
                              'It restarts by itself once the download finishes; carry on using it meanwhile.'],
-  'update.failed':          ['更新失败:{reason}\n\n数据没有受到影响。可以稍后再试,或到 {url} 手动下载。',
+  'update.failed':          ['更新失败: {reason}\n\n数据没有受到影响。可以稍后再试,或到 {url} 手动下载。',
                              'The update failed: {reason}\n\nYour data is untouched. Try again later, or download it by hand from {url}.'],
-  'update.helperFailed':    ['更新没能开始:更新程序起不来。\n\n数据和程序都没有被改动。可以到 {url} 手动下载。\n\n诊断信息:{log}',
+  'update.helperFailed':    ['更新没能开始:更新程序起不来。\n\n数据和程序都没有被改动。可以到 {url} 手动下载。\n\n诊断信息: {log}',
                              'The update did not start: the updater could not launch.\n\nNeither your data nor the program was changed. You can download it by hand from {url}.\n\nDiagnostics: {log}'],
 
   'prompt.heading':         ['有新版本 {version}', 'Version {version} is available'],
