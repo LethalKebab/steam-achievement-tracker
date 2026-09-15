@@ -35,7 +35,7 @@ import {
   getGame, achievementsFor, appIdsWithAchievements,
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
-import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats } from './lib/sync.js';
+import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats, agcrPercent } from './lib/sync.js';
 import { HltbClient } from './lib/hltb.js';
 import { runFamilyImport } from './lib/family.js';
 import { setMessageLanguage, messageLanguage, achName } from './lib/messages.js';
@@ -754,9 +754,10 @@ async function cmdSync() {
   }
 
   const agcr = computeAgcrStats(db);
+  const agcrPct = agcrPercent(agcr.avg, 3);
   console.log(clog('sync.done', {
     seconds: ((Date.now() - t0) / 1000).toFixed(0),
-    pct: Math.floor(agcr.avg * 100), exact: (agcr.avg * 100).toFixed(3), perfect: agcr.perfectCount,
+    pct: agcrPct.whole, exact: agcrPct.precise, perfect: agcr.perfectCount,
   }));
 }
 
@@ -770,6 +771,7 @@ function cmdStatus() {
   const { db } = withSteam({ requireSteam: false });
   const games = allGames(db);
   const agcr = computeAgcrStats(db);
+  const agcrPct = agcrPercent(agcr.avg, 3);
   const last = getMeta(db, 'last_sync');
   const count = (fn) => games.filter(fn).length;
 
@@ -780,7 +782,7 @@ function cmdStatus() {
   const guides = allGuides(db);
   console.log(clog('status.db', { n: countGames(db) }));
   console.log(clog('status.lastSync', { when: last ? new Date(last).toLocaleString(locale) : clog('status.never') }));
-  console.log(clog('status.agcr', { pct: Math.floor(agcr.avg * 100), exact: (agcr.avg * 100).toFixed(3), n: agcr.eligibleCount }));
+  console.log(clog('status.agcr', { pct: agcrPct.whole, exact: agcrPct.precise, n: agcr.eligibleCount }));
   console.log(clog('status.perfect', { n: agcr.perfectCount }));
   console.log(clog('status.flags', {
     unvetted: count((g) => g.status === 'Unvetted'),
