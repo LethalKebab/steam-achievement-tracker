@@ -5994,6 +5994,9 @@
         forgetMissingLists();
         // cardTotal belongs solely to render() — only it knows the filter results
         document.getElementById('cardAvg').textContent = data.avgRounded || '-';
+        // The whole number barely moves in a large library, so hovering it shows the same average to
+        // two places. On the number rather than the reading: the label beside it keeps the definition
+        document.getElementById('cardAvg').title = data.avgPrecise || '';
         document.getElementById('cardPerfect').textContent = fmtCount(data.perfectCount);
         document.getElementById('cardAchieved').textContent = fmtCount(data.achievedTotal);
         // The element ships with data-t="ui.loading" so it reads correctly before this arrives.

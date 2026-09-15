@@ -26,8 +26,17 @@ const DIR = mkdtempSync(join(tmpdir(), 'readout-'));
 process.env.TRACKER_DATA_DIR = DIR;
 writeFileSync(join(DIR, 'config.json'), JSON.stringify({ steamApiKey: 'x', steamId: 'y' }));
 const { createApi } = await import('../lib/api.js');
+const { agcrPercent } = await import('../lib/sync.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+// Source with its JavaScript comments removed, so the comment explaining a line cannot satisfy an
+// assertion looking for that line; every assertion here looks for a JavaScript statement. Line
+// comments go before block comments: a `//` line can hold `/api/` and a star, which a block strip
+// run first reads as an opening delimiter
+const code = (s) => s
+  .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1')
+  .replace(/\/\*[\s\S]*?\*\//g, '');
 
 /**
  * A library holding one of every case the two rules disagree about:
@@ -97,6 +106,35 @@ describe('the average and the perfect count keep their own rule', () => {
     assert.equal(data.achievedTotal, 25);
     assert.equal(data.totalGames, 5);
   });
+
+  test('the precise figure is the same average, to two places', () => {
+    assert.equal(env().avgPrecise, '80.00%');
+  });
+});
+
+/**
+ * The readout prints the whole number and hovering it shows the precise one, so the precise one
+ * has to begin with the whole one. Rounded, a mean of 78.996% hovers as 79.00% beside a 78%;
+ * floored straight off the double, an exact 29% prints as 28.
+ */
+describe('agcrPercent keeps the whole and the precise figure in agreement', () => {
+  test('it truncates rather than rounds', () => {
+    assert.deepEqual(agcrPercent(0.78996, 2), { whole: 78, precise: '78.99' });
+  });
+
+  test('a figure a double cannot hold exactly is not printed one lower', () => {
+    // 0.29 * 100 * 100 is 2899.9999999999995
+    assert.deepEqual(agcrPercent(0.29, 2), { whole: 29, precise: '29.00' });
+  });
+
+  test('the ends of the range, 0% and 100%', () => {
+    assert.deepEqual(agcrPercent(0, 2), { whole: 0, precise: '0.00' });
+    assert.deepEqual(agcrPercent(1, 2), { whole: 100, precise: '100.00' });
+  });
+
+  test("the terminal's three places follow the same rule", () => {
+    assert.deepEqual(agcrPercent(0.789996, 3), { whole: 78, precise: '78.999' });
+  });
 });
 
 describe('the readout is wired to what the API actually sends', () => {
@@ -120,4 +158,25 @@ describe('the readout is wired to what the API actually sends', () => {
         id + ' skips fmtCount, so it loses the thousands separator the others have');
     }
   });
+
+  test('hovering the average shows the precise figure', () => {
+    assert.ok(code(page).includes("getElementById('cardAvg').title = data.avgPrecise"),
+      'avgPrecise is computed and sent, and nothing on the page shows it');
+  });
+});
+
+describe('every surface turns the average into a percentage through agcrPercent', () => {
+  // A copy of that arithmetic anywhere else can round where agcrPercent truncates, and the terminal
+  // and the readout then print different figures for one average. Two checks, because each misses
+  // what the other catches: the count drops when a call is replaced outright, and the pattern finds
+  // a copy written beside a call that is still there, in either operand order
+  for (const [file, calls] of [['lib/api.js', 1], ['tracker.js', 2]]) {
+    test(file, () => {
+      const src = code(readFileSync(join(ROOT, file), 'utf8'));
+      assert.equal(src.split('agcrPercent(agcr.avg, ').length - 1, calls,
+        file + ' calls agcrPercent a different number of times than the ' + calls + ' expected');
+      assert.ok(!/avg\s*\*\s*100|100\s*\*\s*[\w.]*avg\b/.test(src),
+        file + ' turns the average into a percentage itself');
+    });
+  }
 });

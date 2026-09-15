@@ -152,6 +152,14 @@ The sync sweep (`.topbar::after`) survives unchanged in purpose but moved to `bo
 
 `data.avg` in `getDashboardData` went with it — it had no other caller.
 
+### Hovering the average shows two decimal places
+
+平均完成率 prints as a whole percent, and in a large library that number can stay put through dozens of unlocks. Hovering it shows the same average to two places: `#cardAvg` carries `avgPrecise` as its `title`. The attribute sits on the number, not on the reading around it, so hovering the label still shows the definition.
+
+**At two places, most single unlocks show.** Measured over 224 counted games, one achievement in the median unfinished game moves the average by 0.0086 points, which changes the second place on about six unlocks in seven.
+
+**Both figures are truncated from one integer** (`agcrPercent` in `lib/sync.js`), so the precise one always begins with the whole one. Rounding it instead shows 79.00% beside a 78% for a mean of 78.996%. `sync` and `status` in the terminal print three places under the same rule.
+
 ---
 
 ## 5. Icons
