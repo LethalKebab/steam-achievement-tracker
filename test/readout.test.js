@@ -30,11 +30,11 @@ const { agcrPercent } = await import('../lib/sync.js');
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-// Source with its comments removed, so the comment explaining a line cannot satisfy an assertion
-// looking for that line. Line comments go before block comments: a `//` line can hold `/api/` and
-// a star, which a block strip run first reads as an opening delimiter
+// Source with its JavaScript comments removed, so the comment explaining a line cannot satisfy an
+// assertion looking for that line; every assertion here looks for a JavaScript statement. Line
+// comments go before block comments: a `//` line can hold `/api/` and a star, which a block strip
+// run first reads as an opening delimiter
 const code = (s) => s
-  .replace(/<!--[\s\S]*?-->/g, '')
   .replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1')
   .replace(/\/\*[\s\S]*?\*\//g, '');
 
