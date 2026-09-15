@@ -49,6 +49,14 @@ jobs:
           # One value covers both — and it reaches the inline scripts in Dashboard.html and
           # Setup.html, which is where most of this project's JavaScript actually lives
           languages: javascript-typescript
+          # **test/ is not analysed.** Nothing there ships or reads input from outside this
+          # repository. Its source assertions strip comments, <style> and <script> out of the two
+          # pages before matching, and CodeQL reports each strip as incomplete HTML sanitisation at
+          # high severity. Each strip is load-bearing: without it, text inside a comment or a CSS
+          # rule decides the result. A finding nobody can act on is the kind the header warns about
+          config: |
+            paths-ignore:
+              - test
 
       # No build step: JavaScript is analysed from source, and this repository has nothing to
       # compile. `autobuild` would only try to guess at launcher/ and fail loudly for no gain
