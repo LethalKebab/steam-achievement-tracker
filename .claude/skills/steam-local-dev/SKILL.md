@@ -56,6 +56,7 @@ No build step, nothing to deploy — edit and re-run. `serve` doesn't hot-reload
 8. Family Sharing achievements are recorded per **playing** account, not per license owner. A shared game actually played on a different family member's account will correctly and permanently show 0 progress for your `steamId` — expected, not a bug to chase.
 9. Guide content stays out of the database — only a pointer is stored. Guides need to be human-editable and tickable in Notion, so the database tracks *where* a guide is, never its text.
 10. **`status` and `sync_locked` are separate columns on purpose.** "Skip the daily achievement sync" and "pin this row's label so Steam can't re-classify it Unvetted" are different wishes; a single flag cannot express one without the other. The Dashboard toggles both together, but they can be diverged by hand. `family` is separate from both again: purely informational, never affects sync.
+11. An `appdetails` reply is not always keyed by the appid you asked for: some titles come back under another appid's key while `data.steam_appid` still names the one you asked about. Read replies with `appDetailsOf(reply, appid)` in `lib/steam.js`, never with `reply[appid]` — the latter reports "no store page" for those titles. The cover and the English name then go missing without any error, and the Notion icon falls back to the 32×32 square icon or to nothing.
 
 ## Debugging Steam API responses
 
