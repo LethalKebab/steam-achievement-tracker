@@ -211,6 +211,63 @@ describe('what finishing a game is worth', () => {
     });
     assert.equal(games['1'].cost.remaining, 5, 'half of ten hours — no weighting available, so no correction');
   });
+
+  /**
+   * **`gain` must survive a missing `remaining`.** It comes from the account's own achievement
+   * counts and the library's current AGCR — never from HowLongToBeat — so a game HowLongToBeat
+   * has no hours for must not lose a pp figure it can compute perfectly well on its own. Before
+   * this was pinned, `costOf` read HLTB first and returned `{ gain: null, ... }` for the whole
+   * row the moment `total` came back null, which is the common case (an unresolved title, a
+   * recorded miss, or `hltbEnabled: false` for the whole library) rather than a rare one.
+   */
+  test('gain does not depend on HowLongToBeat data — only remaining/lo/hi do', async () => {
+    const games = await dashboard((db) => {
+      // Twenty started games at 50%, so the average and its divisor are real
+      for (let i = 0; i < 20; i++) {
+        insertGame(db, { appid: 'e' + i, name: 'E' + i });
+        updateGameStats(db, 'e' + i, { achieved: 5, total: 10 });
+      }
+      // Three identical games — 5 of 10 unlocked — differing only in what HLTB has on file
+      for (const id of ['withHltb', 'noRow', 'missRow']) {
+        insertGame(db, { appid: id, name: id });
+        updateGameStats(db, id, { achieved: 5, total: 10 });
+      }
+      upsertHltb(db, 'withHltb', { hltbId: 1, verified: true, comp100Med: 36000 }); // 10h on record
+      upsertHltb(db, 'missRow', {}); // searched, nothing found — 'noRow' never gets a row at all
+    });
+
+    // All three test rows are eligible too (achieved > 0), so N is 20 + 3 = 23, not just the 20 'e's
+    const expectedGain = (0.5 / 23) * 100;
+    for (const id of ['withHltb', 'noRow', 'missRow']) {
+      assert.ok(Math.abs(games[id].cost.gain - expectedGain) < 0.001,
+        `${id} should still report (1-rate)/N, got ${games[id].cost.gain}`);
+    }
+    assert.equal(games.withHltb.cost.remaining, 5, 'the one row with hours keeps its estimate');
+    for (const id of ['noRow', 'missRow']) {
+      assert.equal(games[id].cost.remaining, null, `${id} has no hours to report`);
+      assert.equal(games[id].cost.lo, null);
+      assert.equal(games[id].cost.hi, null);
+    }
+  });
+
+  test('gain is still null for an Unvetted game or one with no achievement system, with or without hours', async () => {
+    const games = await dashboard((db) => {
+      for (let i = 0; i < 5; i++) {
+        insertGame(db, { appid: 'e' + i, name: 'E' + i });
+        updateGameStats(db, 'e' + i, { achieved: 5, total: 10 });
+      }
+      insertGame(db, { appid: 'unvetted', name: 'Unvetted', status: 'Unvetted' });
+      updateGameStats(db, 'unvetted', { achieved: 5, total: 10 });
+      upsertHltb(db, 'unvetted', { hltbId: 1, verified: true, comp100Med: 36000 });
+
+      // No achievement system at all: insertGame alone leaves `total` NULL, same as a row
+      // updateGameStats has never touched — covers `!row.total` without inventing a field
+      insertGame(db, { appid: 'nosystem', name: 'NoSystem' });
+    });
+    assert.equal(games.unvetted.cost.gain, null, 'Unvetted stays excluded from AGCR even with hours on record');
+    assert.equal(games.unvetted.cost.remaining, 5, 'but the hours estimate is unaffected — it is a different exclusion');
+    assert.equal(games.nosystem.cost.gain, null, 'no achievement system means no total, so no gain either');
+  });
 });
 
 describe('HowLongToBeat — a name is a candidate, an appid is the answer', () => {

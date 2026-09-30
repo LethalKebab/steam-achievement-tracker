@@ -3626,6 +3626,13 @@
      * The range goes in the tooltip rather than on a third line. It is worth having — a point
      * estimate lands within ±30% of the truth about seven times in ten — but it is not what the
      * decision turns on, and this cell already carries the two numbers that are.
+     *
+     * **The two numbers have independent sources, so a missing top number must not blank the
+     * bottom one.** The pp figure comes from the account's own achievement counts; the hours
+     * figure comes from HowLongToBeat, a third party this program can fail to get an answer
+     * from for an unresolved game, a recorded miss, or the whole library with HLTB turned off.
+     * That is most of a library's rows, not an edge case, so the cell shows 「— · +0.44pp」
+     * rather than hiding a real number because a different, unrelated one is not known.
      */
     /**
      * Which quarter of the library this row's value per hour falls in — 1 the best, 4 the worst.
@@ -3653,7 +3660,10 @@
 
     function costCell(g) {
       const c = g.cost;
-      if (!c || c.remaining === null) return '<span class="cost-none">—</span>';
+      // `gain` does not need `remaining` — it comes from the account's own achievement counts,
+      // never from HowLongToBeat — so an unresolved/missing hours figure must not hide a known
+      // pp value. Only when *neither* half is known does the cell fall back to a plain dash
+      if (!c || (c.remaining === null && typeof c.gain !== 'number')) return '<span class="cost-none">—</span>';
       const range = (c.lo !== null && c.hi !== null && c.hi > c.lo)
         ? t('table.costRange', { lo: fmtHours(c.lo), hi: fmtHours(c.hi) })
         : '';
@@ -3662,17 +3672,22 @@
       // The mark is texture, never lightness: see .cost-thin for why opacity cannot be used here
       const isThin = c.sample > 0 && c.sample < MIN_HLTB_SAMPLE;
       const thin = isThin ? ' cost-thin' : '';
-      // The colour is the ratio the two numbers cannot show between them
+      // The colour is the ratio the two numbers cannot show between them. A row with no hours
+      // never has a tier — roiOf needs remaining too — so this stays unset for it
       const tier = costTier.get(String(g.appid));
       const rank = tier ? ' cost-q' + tier : '';
       const gain = typeof c.gain === 'number'
         ? '<span class="cost-gain">+' + c.gain.toFixed(2) + 'pp</span>'
         : '';
+      // `.cost-none` reused here, on just the hours half — same "nothing known" muting as the
+      // standalone dash above, but the gain half beside it can still say something
+      const midClass = c.remaining === null ? 'cost-mid cost-none' : 'cost-mid';
+      const mid = c.remaining === null ? '—' : fmtHours(c.remaining);
       // **The underline is only a mark until this says what it means.** Two separate facts, so
       // they go on separate lines rather than being run together with a separator
       const tip = [range, isThin ? t('table.costThin') : ''].filter(Boolean).join('\n');
       return '<div class="cost-cell' + thin + rank + '"' + (tip ? ' title="' + escapeHtml(tip) + '"' : '') + '>'
-        + '<span class="cost-mid">' + fmtHours(c.remaining) + '</span>' + gain + '</div>';
+        + '<span class="' + midClass + '">' + mid + '</span>' + gain + '</div>';
     }
 
 

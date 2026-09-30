@@ -132,7 +132,7 @@ If a sync reports games as "留待重试" (left for retry) you are being rate-li
 
 **`hltbEnabled` / `hltbRequestDelayMs` / `hltbRefreshBudget`** — how long each unfinished game still needs to reach 100%, from HowLongToBeat.
 
-No Steam endpoint answers that question, so it is asked of a third party — which is why it can be turned off. Set `hltbEnabled` to `false` and the phase is skipped entirely, leaving every other part of the sync untouched and the Est. left (预计还需) column empty.
+No Steam endpoint answers that question, so it is asked of a third party — which is why it can be turned off. Set `hltbEnabled` to `false` and the phase is skipped entirely, leaving every other part of the sync untouched. The Est. left (预计还需) column's hours half stays empty for every game, since nothing ever supplies one — but its pp half does not: that number comes from your own achievement counts, not from HowLongToBeat, so it keeps showing with the hours side blank.
 
 `hltbRequestDelayMs` (800 ms) is **its own setting and not the Steam one**. HowLongToBeat is not an API vendor with a published allowance; it is a website being asked a favour, and the same reasoning that keeps the store endpoint slow applies more strongly here. Every request is paced by it, wherever in the phase it comes from.
 
