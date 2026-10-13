@@ -2236,7 +2236,8 @@ describe('the progress bar is an innerHTML sink, so everything reaching it is es
   const HTML_BY_CONSTRUCTION = new Set([
     // icon() — inline SVG
     'GEN_WARN', 'GEN_OK', 'GEN_QUEUE',
-    // warnLines() / renderFinished() escape everything dynamic inside themselves
+    // warnLines() / renderFinished() escape everything dynamic inside themselves. **Claims that have
+    // to stay true**: the test after genLogHtml's runs renderFinished with markup in every field
     'warns', 'doneTail', 'genDoneHtml', 'join',
     // genLogHtml() — same rule: the timestamp and every log line are escaped inside it, and the
     // only markup it emits is its own. **Being on this list is a claim that has to stay true**;
@@ -2352,6 +2353,45 @@ describe('the progress bar is an innerHTML sink, so everything reaching it is es
     }
     // …and nothing else from the log is interpolated raw
     assert.ok(!/\+\s*e\.(at|text)/.test(body), 'a log field reaches the markup without escapeHtml');
+  });
+
+  test('renderFinished, run for real, never lets markup in a finding, a reason, a warning or a name reach the card', () => {
+    // **Run rather than read.** The list of findings it prints is joined with `<br>`, which does not
+    // look like interpolation: a finding names an achievement, and an achievement is called whatever
+    // Steam says
+    const js = inlineScripts(read('Dashboard.html')).join(SEP);
+    const END = SEP + '    }';
+    const grab = (name) => {
+      const at = js.indexOf(`function ${name}(`);
+      assert.ok(at !== -1, `${name} is gone: this check has lost its target`);
+      const end = js.indexOf(END, at);
+      assert.ok(end > at, `the end of ${name} was not found`);
+      return js.slice(at, end + END.length);
+    };
+    const HOSTILE = '<img src=x onerror=alert(1)>';
+    const card = (f) => new Script(
+      [grab('escapeHtml'), grab('warnLines'), grab('renderFinished'), `renderFinished(${JSON.stringify(f)})`].join(SEP)
+    ).runInNewContext({
+      t: (key, values) => `${key} ${JSON.stringify(values ?? {})}`,
+      GEN_WARN: '', GEN_OK: '', GEN_CANCEL: '',
+    });
+
+    const failed = card({
+      game: HOSTILE,
+      warnings: [HOSTILE],
+      result: {
+        ok: false,
+        blocking: [`missing a box: ${HOSTILE}`],
+        chunkFailures: [{ chunk: 1, of: 2, count: 3, reason: HOSTILE }],
+      },
+    });
+    const errored = card({ game: HOSTILE, warnings: [HOSTILE], error: HOSTILE });
+
+    for (const [label, html] of [['a draft that did not pass', failed], ['an error', errored]]) {
+      assert.ok(html.includes('&lt;img'), `${label}: the text is not on the card at all, so this checked nothing`);
+      assert.ok(!html.includes('<img'), `${label}: a tag from the data reached the card as markup: ${html}`);
+    }
+    assert.ok(failed.includes('missing a box: &lt;img'), 'the findings are not listed on the card');
   });
 
   test('every value handed to showGen is escaped, or is HTML this file built itself', () => {

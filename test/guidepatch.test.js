@@ -305,6 +305,28 @@ describe('what the model returns — only the entries that were named count', ()
     assert.equal(found.size, 1);
     assert.ok(found.get('B')[0].includes('第一版'));
   });
+
+  test('a box the model ticked comes back unticked, on the entry and on its sub-steps', () => {
+    // Ticking belongs to the program: `applyChecks` only ever adds a tick, so a `[x]` that got through
+    // would sit in the guide for an achievement that is not unlocked, and nothing would remove it
+    const md = reply(
+      '- [x] **第二步**<br>完成第二关。<br>模型自己画了勾。',
+      '  - [X] 拿到钥匙',
+      '  - [ ] 打完 Boss',
+    );
+    const { found } = parsePatchReply(md, DEFS);
+    assert.deepEqual(found.get('B'), [
+      '- [ ] **第二步**<br>完成第二关。<br>模型自己画了勾。',
+      '  - [ ] 拿到钥匙',
+      '  - [ ] 打完 Boss',
+    ]);
+  });
+
+  test('only the box is read as unticked: a bracketed x in the prose is left alone', () => {
+    const md = reply('- [ ] **第二步**<br>完成第二关。<br>按 [x] 键,再按 [X] 键。');
+    const { found } = parsePatchReply(md, DEFS);
+    assert.equal(found.get('B')[0], '- [ ] **第二步**<br>完成第二关。<br>按 [x] 键,再按 [X] 键。');
+  });
 });
 
 describe('the gate — one entry missed cannot count as a pass', () => {
@@ -911,6 +933,12 @@ describe('how far along a partial rewrite says it is', () => {
     // somebody watched it, which is worse than having no total at all
     assert.equal(patchSteps({ rounds: 3 }).length, patchSteps().length);
   });
+
+  test('a run that adds entries has one more step, between the writing and the backup', () => {
+    // Filing them is a request of its own. Whether it happens is known before the run starts — it
+    // depends on whether anything is being added — so it belongs in the total, unlike a round
+    assert.deepEqual(patchSteps({ placing: true }), ['write', 'place', 'backup', 'land']);
+  });
 });
 
 describe('the wiring of patchGuide (source assertions — this part cannot be reached without a network)', () => {
@@ -954,14 +982,14 @@ describe('the wiring of patchGuide (source assertions — this part cannot be re
     const fn = src.slice(src.indexOf('const ask = async (prompt, round)'), src.indexOf('const verdict = checkResult'));
     assert.ok(fn.length > 0 && fn.length < 2000, 'what was sliced should be the ask');
     assert.match(fn, /countStreamedEntries\(streamed\)/, 'the one figure this path can move per achievement');
-    assert.match(fn, /phase: 'written'[^}]*of: entries\.length/,
-      'counted against what was asked for, or the figure has no denominator');
+    assert.match(fn, /phase: 'written'[^}]*of: asked\.length/,
+      'counted against what was asked for — the entries to rewrite and the ones to write — or the figure has no denominator');
   });
 
   test('the steps are announced up front and then marked off', () => {
-    assert.match(src, /const steps = patchSteps\(\)/);
+    assert.match(src, /const steps = patchSteps\(\{ placing: additions\.length > 0 \}\)/);
     assert.match(src, /stepReporter\(steps, onProgress\)/, 'the reporter is shared with the generation path, not copied');
-    for (const key of ['write', 'backup', 'land']) {
+    for (const key of ['write', 'place', 'backup', 'land']) {
       assert.match(src, new RegExp(`step\\('${key}'\\)`), `nothing marks the ${key} step as started`);
     }
   });

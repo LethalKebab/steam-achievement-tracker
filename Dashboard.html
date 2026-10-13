@@ -3078,6 +3078,7 @@
       // ---- Dialogs and the achievement picker ---------------------------------
       'dlg.ok':               ['确认', 'Confirm'],
       'pick.unsectioned':     ['未分节', 'No section'],
+      'pick.added':           ['攻略里还没有', 'Not in the guide yet'],
       'pick.selectAll':       ['全选「{section}」这一节', 'Select all of “{section}”'],
       'pick.deselectAll':     ['取消选中「{section}」这一节', 'Deselect all of “{section}”'],
       'pick.unlocked':        ['已解锁', 'unlocked'],
@@ -3176,6 +3177,10 @@
       'list.sep':             ['、', ', '],
       'res.preExisting':      ['攻略里还有 {n} 条原有的校验问题,本次未处理', 'The guide still has {n} pre-existing check failures, untouched this time'],
       'res.rewrote':          ['《{game}》已修改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
+      'res.rewroteAdded':     ['《{game}》已修改 {n} 条 · 新增 {added} 条 · 其余不变 · ', '{game}: {n} rewritten, {added} added, the rest unchanged · '],
+      'res.added':            ['《{game}》已新增 {added} 条 · 其余不变 · ', '{game}: {added} added, the rest unchanged · '],
+      'res.addedAtEnd':       ['{n} 条没能归进已有的小节,放在了末尾的「{heading}」里', '{n} could not be filed under an existing section and are under “{heading}” at the end'],
+      'res.unaddable':        ['{n} 条攻略里没有,写出来也认不出是哪个成就(同名且描述为空),没有去写', '{n} are missing from the guide, but could not be told apart from another achievement once written (same name, no description), so they were not written'],
       'res.generated':        ['《{game}》已生成 · {covered}/{total} 个成就 · ', '{game} generated · {covered} of {total} achievements · '],
       'res.readItYourself':   ['内容需要你自己过一遍。', 'Read it through yourself.'],
       'res.queueLeft':        [' · 还有 {n} 个排队', ' · {n} still queued'],
@@ -5735,7 +5740,9 @@
 
             const allOn = items.every(function (it) { return sel.has(it.apiName); });
             const someOn = !allOn && items.some(function (it) { return sel.has(it.apiName); });
-            const secName = g.heading || t('pick.unsectioned');
+            // The group of achievements the guide has no entry for is named here, in the interface's
+            // own language: the server sends the fact (`added`), never a sentence for it
+            const secName = g.added ? t('pick.added') : (g.heading || t('pick.unsectioned'));
 
             /**
              * The section's row is split into **two buttons, each doing one thing**:
@@ -6921,7 +6928,11 @@
           })
           .join('');
         return '<span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.draftKept', { game: f.game || '' })) + '</span>' + failed +
-          (r.blocking && r.blocking.length ? '<br>' + r.blocking.join('<br>') : '') +
+          // Each finding is a sentence naming an achievement, and an achievement's name is whatever
+          // Steam returns: markup in one is script on this page unless it is escaped here
+          (r.blocking && r.blocking.length
+            ? '<br>' + r.blocking.map(function (m) { return escapeHtml(m); }).join('<br>')
+            : '') +
           warnLines(f.warnings);
       }
       // 「能搜」 and 「搜了」 are two different things that the user cannot tell apart on the page —
@@ -7008,10 +7019,25 @@
       const preExisting = pat && pat.preExisting
         ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.preExisting', { n: pat.preExisting })) + '</span>'
         : '';
+      // New entries that fitted no section went to the end of the guide, and the guide is where
+      // somebody will look for them; the heading is the guide's own text and is shown as written
+      const atEnd = pat && pat.fallback
+        ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.addedAtEnd', { n: pat.fallback, heading: pat.fallbackHeading || '' })) + '</span>'
+        : '';
+      const unaddable = pat && pat.unaddable
+        ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.unaddable', { n: pat.unaddable })) + '</span>'
+        : '';
+      // 「改了 3 条」, 「新增 2 条」 and 「改了 3 条、新增 2 条」 are three different statements, and the rest
+      // being unchanged is the reason somebody chose a partial run
+      const patLead = pat && pat.added
+        ? (pat.rewrote
+          ? t('res.rewroteAdded', { game: f.game || '', n: pat.rewrote, added: pat.added })
+          : t('res.added', { game: f.game || '', added: pat.added }))
+        : pat ? t('res.rewrote', { game: f.game || '', n: pat.rewrote }) : '';
       const headline = pat
-        ? GEN_OK + ' ' + escapeHtml(t('res.rewrote', { game: f.game || '', n: pat.rewrote })) + where + restoreBackup + dropBackup
+        ? GEN_OK + ' ' + escapeHtml(patLead) + where + restoreBackup + dropBackup
         : GEN_OK + ' ' + escapeHtml(t('res.generated', { game: f.game || '', covered: r.covered, total: r.total })) + where + restoreBackup + dropBackup;
-      return headline + noResearch + unsyncable + preExisting + warnLines(f.warnings) +
+      return headline + noResearch + unsyncable + preExisting + atEnd + unaddable + warnLines(f.warnings) +
         '<br><span class="warn">' + escapeHtml(t('res.readItYourself')) + '</span>';
     }
 

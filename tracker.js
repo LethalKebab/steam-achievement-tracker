@@ -59,7 +59,7 @@ import {
   generateGuide, planGuide, systemPromptFor, buildPatchMessage, DRAFTS_DIR,
 } from './lib/guidegen.js';
 import { planMigration, migrateGuideToNotion } from './lib/guidemigrate.js';
-import { planPatch, patchGuide, PATCH_ROUNDS } from './lib/guidepatch.js';
+import { planPatch, patchGuide, askedEntries, PATCH_ROUNDS } from './lib/guidepatch.js';
 import {
   BACKUPS_DIR, overwritePreflight, formatPreflight, formatPatchPreflight, diffGuides, formatDiff,
 } from './lib/guidebackup.js';
@@ -1497,37 +1497,49 @@ async function cmdGuidePatch(appid) {
   const rounds = Number(flagValue('rounds') ?? config.ai.maxRounds ?? PATCH_ROUNDS);
 
   const pp = await planPatch(db, { config, steam, appid, notion, selector });
-  const { plan, entries, unlocatable, baseline, kind } = pp;
+  const { plan, entries, additions, unaddable, unlocatable, baseline, kind } = pp;
+  // What the request carries: the entries to rewrite and the ones to write, in one list
+  const asked = askedEntries({ entries, additions, defs: plan.defs });
 
   console.log(clog('gp.header', { game: plan.game, appid, where: clog(kind === 'notion' ? 'gg.notionPage' : 'gg.localFile'), url: plan.existing.url }));
-  console.log(clog('gp.selected', { selector, n: entries.length }));
-  for (const e of entries.slice(0, 12)) {
+  console.log(clog('gp.selected', { selector, n: asked.length }));
+  for (const e of asked.slice(0, 12)) {
     const pct = plan.rarity?.get(e.apiName);
     const rare = pct === undefined || pct === null ? '' : clog('gp.rarity', { pct: pct.toFixed(1) });
-    console.log(`       ${achName(e.def)}${rare}`);
+    console.log(`       ${achName(e.def)}${rare}${e.added ? clog('gp.newTag') : ''}`);
   }
-  if (entries.length > 12) console.log(clog('gp.andMore', { n: entries.length - 12 }));
+  if (asked.length > 12) console.log(clog('gp.andMore', { n: asked.length - 12 }));
 
   console.log('');
   console.log(formatPatchPreflight(pp.preflight, { defsCount: plan.defs.length }));
 
-  // Named but not locatable in the guide: **report them, do not pretend they do not exist**. Their
-  // symptom is missing-checkbox, and fixing that takes a full rewrite (or writing a line by hand),
-  // which is not something this command can do
-  if (unlocatable.length) {
-    console.log(clog('gp.unlocatable', { n: unlocatable.length }));
-    for (const a of unlocatable.slice(0, 8)) {
+  // Named but not changeable by this run: **report them, do not pretend they do not exist**. Two
+  // different reasons with two different remedies, so two lists: the guide has a box for them that
+  // cannot be told apart from another achievement's, or it has none and nothing written for them
+  // could be told apart either
+  const listNames = (apiNames) => {
+    for (const a of apiNames.slice(0, 8)) {
       const d = plan.defs.find((x) => x.api_name === a);
       console.log(`       ${achName(d) || a}`);
     }
-    if (unlocatable.length > 8) console.log(clog('gp.andMore', { n: unlocatable.length - 8 }));
+    if (apiNames.length > 8) console.log(clog('gp.andMore', { n: apiNames.length - 8 }));
+  };
+  if (unlocatable.length) {
+    console.log(clog('gp.unlocatable', { n: unlocatable.length }));
+    listNames(unlocatable);
     console.log(clog('gp.unlocatableWhy'));
+  }
+  if (unaddable.length) {
+    console.log(clog('gp.unaddable', { n: unaddable.length }));
+    listNames(unaddable);
+    console.log(clog('gp.unaddableWhy'));
   }
 
   // The findings the old guide already failed on. **Say plainly that this run will not fix them** —
   // otherwise seeing them still in the report afterwards reads as damage done by this change
   const oldBlocking = baseline.findings.filter((f) => f.level === 'error');
-  const outside = oldBlocking.filter((f) => !f.apiName || !pp.scope.apiNames.includes(f.apiName));
+  const askedApis = new Set(asked.map((e) => e.apiName));
+  const outside = oldBlocking.filter((f) => !f.apiName || !askedApis.has(f.apiName));
   if (outside.length) {
     console.log(clog('gp.outside', { n: outside.length }));
     for (const f of outside.slice(0, 5)) console.log(`       ${f.message}`);
@@ -1551,7 +1563,7 @@ async function cmdGuidePatch(appid) {
   if (dryRun) {
     console.log(clog('gp.dryRun'));
     console.log('─'.repeat(70));
-    console.log(buildPatchMessage(entries, { instruction, lang: plan.lang }));
+    console.log(buildPatchMessage(asked, { instruction, lang: plan.lang }));
     console.log('─'.repeat(70));
     console.log(clog('gp.samePrompt'));
     return;
@@ -1560,7 +1572,9 @@ async function cmdGuidePatch(appid) {
   if (!flags.has('--yes')) {
     const io = makeSecretReader();
     const answer = await io.ask(
-      clog('gp.confirm', { n: entries.length, keeping: pp.preflight.keeping })
+      additions.length
+        ? clog('gp.confirmAdd', { n: asked.length, added: additions.length, keeping: pp.preflight.keeping })
+        : clog('gp.confirm', { n: entries.length, keeping: pp.preflight.keeping })
     );
     io.close();
     if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
@@ -1587,8 +1601,12 @@ async function cmdGuidePatch(appid) {
       } else if (ev.phase === 'lint') {
         p.done(clog('gp.findings', { round: ev.round, caused: ev.caused, preExisting: ev.preExisting }));
       } else if (ev.phase === 'warn') p.done(`  ⚠️  ${ev.note}`);
+      else if (ev.phase === 'place') p.update(clog('gp.filing', { n: ev.n }));
+      else if (ev.phase === 'place-retry') p.done(clog('gp.filingRetry', { reason: ev.reason }));
+      else if (ev.phase === 'place-failed') p.done(clog('gp.filingFailed', { reason: ev.reason }));
       else if (ev.phase === 'backup') p.update(clog('gg.backingUp'));
       else if (ev.phase === 'backup-done') p.done(clog('gg.backedUp', { path: ev.path, bytes: ev.bytes }));
+      else if (ev.phase === 'notion-add') p.update(clog('gp.notionAdding', { name: ev.name, n: ev.n }));
       else if (ev.phase === 'notion-patch') p.update(clog('gp.notionPatch', { name: ev.name }));
       else if (ev.phase === 'notion-verify') p.update(clog('gp.notionVerify'));
     },
@@ -1598,8 +1616,27 @@ async function cmdGuidePatch(appid) {
   const secs = ((Date.now() - started) / 1000).toFixed(0);
   console.log('\n' + '─'.repeat(70));
   if (r.ok) {
-    console.log(clog('gp.done', { n: r.rewrote.length, rounds: r.rounds, secs, url: r.url }));
+    // 「改了 0 条,新增 3 条」 is what `--only missing` would otherwise open with, and the zero reads
+    // as though nothing was done: a run that only adds says so
+    console.log(!r.added.length
+      ? clog('gp.done', { n: r.rewrote.length, rounds: r.rounds, secs, url: r.url })
+      : r.rewrote.length
+        ? clog('gp.doneAdd', { n: r.rewrote.length, added: r.added.length, rounds: r.rounds, secs, url: r.url })
+        : clog('gp.doneAddOnly', { added: r.added.length, rounds: r.rounds, secs, url: r.url }));
     console.log(clog('gp.keeping', { n: pp.preflight.keeping }));
+    if (r.added.length) {
+      // Where each new entry went, so the one reading this knows which sections to look at. The
+      // line says how many fitted a section and how many did not, and the reason when it failed
+      const rest = r.placement.fallback.length
+        ? clog('gp.filedRest', { n: r.placement.fallback.length, heading: r.placement.heading })
+        : '';
+      console.log(clog('gp.filed', { placed: r.added.length - r.placement.fallback.length, rest }));
+      for (const w of r.placement.where.slice(0, 12)) {
+        const d = plan.defs.find((x) => x.api_name === w.apiName);
+        console.log(`       ${achName(d) || w.apiName} → ${w.section}`);
+      }
+      if (r.placement.where.length > 12) console.log(clog('gp.andMore', { n: r.placement.where.length - 12 }));
+    }
     if (r.backup) console.log(clog('gg.backupPath', { path: r.backup.path }));
   } else {
     // Not passing means not one byte was written — this has to be said, or the user goes looking
@@ -1991,6 +2028,7 @@ const CLI_HINTS = {
   'no-guide-to-patch': 'hint.noGuideToPatch',
   'unknown-achievements': 'hint.unknownAchievements',
   'empty-scope-result': 'hint.emptyScopeResult',
+  'nothing-missing': 'hint.nothingMissing',
   'nothing-locatable': 'hint.nothingLocatable',
   'no-rarity': 'hint.noRarity',
   'section-needs-local': 'hint.sectionNeedsLocal',
