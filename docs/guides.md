@@ -90,7 +90,7 @@ This is not a quality check. Your guide is your guide — it is moved as written
 
 The number of steps is fixed before the run starts and does not change while you watch. A guide long enough to be written in parts counts **each part as a step**, so on a large game the number moves as parts land rather than sitting still for the whole of the writing. Rewrite rounds are not extra steps — they are the writing step going round again, and are shown separately as a round count.
 
-A partial rewrite (**自选**, or `--only`) reports the same way, over its own three steps: write, back up, land. It is one request covering every entry you picked, so what moves during the long step there is the count of entries written.
+A partial rewrite (**自选**, or `--only`) reports the same way, over its own steps: write, back up, land, and one more — choosing sections — when it is adding entries. The writing is one request covering every entry you picked, so what moves during the long step there is the count of entries written.
 
 **Before it lands, the sections are tidied.** A long guide is written in several passes that cannot see one another, so the same section can be opened more than once — those are folded together, and the bar says how many were. The pass that reconciles differently-*worded* sections is an AI one and can fail; when it does, the finished card says so and now names which check rejected it, and the guide lands with its sections as written rather than not at all.
 
@@ -176,9 +176,15 @@ or not their section is collapsed, and restores the collapsed state when you cle
 confirm button stays disabled until something is selected, and what gets sent is a plain list of
 the selected achievements.
 
+**The first group, 攻略里还没有, is the achievements the guide has no entry for** — what a game
+update adds. It behaves like a section: its checkbox takes or drops the whole group, and the two
+filters apply to it. It is absent when the guide is complete. Picking those is how new
+achievements get written; see [Adding entries the guide doesn't have](#adding-entries-the-guide-doesnt-have).
+
 **Section grouping works on Notion guides too.** `fetchAllToDoBlocks` only collects checkboxes,
-so it cannot see headings — but the dialog reads the page with `fetchAllBlocks`, which returns
-every block including headings. (`--only section:` on the command line is still local-only; it
+so it cannot see headings — but the dialog reads the page with `fetchSectionBlocks`, which returns
+every block including headings and leaves out what hangs under a checkbox, since the outline never
+reads it. (`--only section:` on the command line is still local-only; it
 receives the markdown text rather than the blocks.) If the outline can't be read for any reason,
 the list falls back to a flat one rather than failing.
 
@@ -200,6 +206,7 @@ node tracker.js guide-gen <appid> --only locked --dry-run
 |---|---|
 | `rare` / `rare:25` | Achievements below 10% global unlock rate (or the percentage you give). Not merely the same number as the prompt's 🟠 tier — `rarityTag` imports the constant, so the entries the prompt calls 偏难 and the entries `rare` picks cannot drift apart |
 | `locked` | Ones you haven't earned yet |
+| `missing` | Ones the guide has no entry for — see [Adding entries the guide doesn't have](#adding-entries-the-guide-doesnt-have) |
 | `section:主线` | Everything under that heading. **Command line only** — see the Dashboard section below for picking by section on a Notion guide |
 | `名字A,名字B` | Named achievements, by Chinese name, English name, or `api_name` |
 
@@ -238,8 +245,45 @@ rewritten, so block ids survive — links you saved to a specific entry still wo
 markdown converter can't represent is never at risk. The page is read back and re-validated
 afterwards, same as a full generation.
 
-Achievements the guide has no checkbox for cannot be targeted this way — there is nothing to
-replace. Those are reported separately and need a full `--overwrite` (or a line written by hand).
+#### Adding entries the guide doesn't have
+
+A game update adds achievements, and a guide written before it has no checkbox for them. `--only`
+writes those entries and files each one under the section it belongs to; nothing already in the
+guide moves.
+
+```bash
+node tracker.js guide-gen <appid> --only missing --dry-run   # which ones, and the request
+node tracker.js guide-gen <appid> --only missing
+```
+
+`missing` picks the achievements no box in the guide names. `locked`, `rare` and a name list reach
+them too, so one run can rewrite some entries and write others. In the Dashboard they are the first
+group of **自选**.
+
+The entries are written in the same request as any rewrite. A second, smaller request then chooses a
+section for each from the guide's own list of sections — no web search, at low depth, because it
+decides nothing about the content. A new entry goes **after everything that section already holds**,
+never between an entry and what follows it, and keeps the blank-line spacing the guide already uses.
+
+When no section fits, or that second request fails, the entries go into one new section at the end,
+headed 更新新增成就 (English guides: "Added in updates"). The finished card and the command line say
+how many went there and, if the request failed, why. A later run adds to that section rather than
+opening another.
+
+Two kinds of achievement are never added:
+
+- **One the guide has a box for, but the program cannot tell which achievement the box is.** Two
+  achievements share a name and the box does not quote the official description. A second entry
+  would list it twice and the old box would never tick. Quote the description in that entry and it
+  is recognised from then on.
+- **One that could not be told apart once written** — the same name, and an empty description on
+  Steam. The command line lists these; `--overwrite`, or a line written by hand, covers them.
+
+On Notion the new blocks go in **after** a block recorded when the run was planned, inside the same
+container as the entries there; blocks already on the page keep their ids. They are added first and
+the entries being rewritten are edited afterwards, so an anchor that went stale fails the run before
+anything has been replaced. The page is read back, and each new entry is checked against the section
+it was meant for.
 
 A guide that fails validation three times is left in `guides/.drafts/` rather than thrown away —
 you paid for it, and *which* checks failed is itself information. Nothing scans that directory, so

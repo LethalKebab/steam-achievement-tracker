@@ -491,13 +491,17 @@ That box was added after the owner asked whether sections could be selected at o
 
 So "pick a section" and "pick individual entries" are the same control, and the request that goes out is always a plain `api_name` list — the explicit-list branch `resolveScope` already had, so the Dashboard never needs a `section:` selector at all.
 
+**The first group, 攻略里还没有, is not a section.** It holds the achievements the guide has no entry for, which is what a game update leaves behind, and it comes first for that reason. The server sends it as a group flagged `added` with no heading, and the page words it — the same split as 未分节, so the language is the page's and no sentence travels from the server. It behaves as a section does: a tri-state box, a collapsing heading, and both filters apply to it. It lists only what a click can do something with. An achievement the guide has a box for that cannot be attributed, and one that could not be recognised once written, are left out (see [guides.md](guides.md#adding-entries-the-guide-doesnt-have)). The group is the picker's equivalent of `--only missing`, which is why that selector exists on the command line. The confirmation does not change: a selected entry is written and filed rather than rewritten, and the dialog already says nothing about how.
+
+The finished card says 新增 beside 已修改 when entries were added, and warns when some went to the section at the end, naming it.
+
 Empty selection **disables the confirm button** (and Enter respects that) rather than being refused server-side.
 
 ### There is no `thin` selector, and the reason generalises
 
 It has no honest short Chinese name: 「写得薄」 is a translation of *thin content* and additionally *grades* the entry; 「没写打法」 calls "wrote one sentence" "wrote nothing". **A criterion that needs its threshold explained before it makes sense cannot be a button.**
 
-It was not built on the CLI either — `--only` accepts `rare` / `locked` / `section:` / a name list, and `test/guidepatch.test.js` pins `thin` as absent. **A criterion that cannot be stated clearly enough for a button is not made a selector anywhere.**
+It was not built on the CLI either — `--only` accepts `rare` / `locked` / `missing` / `section:` / a name list, and `test/guidepatch.test.js` pins `thin` as absent. **A criterion that cannot be stated clearly enough for a button is not made a selector anywhere.**
 
 ### Two labels that read as casual, and the shape rule behind both
 

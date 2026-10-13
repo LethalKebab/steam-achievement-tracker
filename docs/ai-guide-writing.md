@@ -51,6 +51,8 @@ lib/ai-deepseek.js   DeepSeek's OpenAI-compatible request format, reasoning_cont
 lib/guidegen.js   Orchestration: fetch achievement data → research + write → mechanical ticking →
                   hand to the linter → feed specific errors back and rewrite (max 3 rounds) → land
 lib/guidepatch.js Partial rewrite (`--only`). **A separate path, not a branch in generateGuide**
+lib/guideplace.js Where a new entry goes: the guide's sections and where each ends, the request that
+                  chooses one, and the insertions that put an entry there
 lib/guidelint.js  The linter, reusing what guides.js / markdown.js already have rather than rewriting it
 ```
 
@@ -442,7 +444,7 @@ A same-titled page with content is refused; an empty one is treated as "the page
 
 ## Partial rewrite (`--only`)
 
-`lib/guidescope.js` (selection set / entry location / fault attribution) + `lib/guidepatch.js` (orchestration) + `markdown.js`'s `todoSpans` / `spliceLines`. The entry point is `guide-gen <appid> --only <selector> [--note "…"]`.
+`lib/guidescope.js` (selection set / entry location / fault attribution) + `lib/guidepatch.js` (orchestration) + `lib/guideplace.js` (where a new entry goes) + `markdown.js`'s `todoSpans` / `spliceLines`. The entry point is `guide-gen <appid> --only <selector> [--note "…"]`.
 
 **It is not a branch of `generateGuide`, it is a separate path.** `generateGuide` is 500+ lines, almost all of it sharded-concurrency machinery (a session per shard, the three-rung split ladder, failed-shard bookkeeping, the flattened shard-index mapping), and a partial rewrite needs none of it. What the two genuinely share is **the prompt and the gate**, and both are imported.
 
@@ -457,13 +459,37 @@ The preflight **asks the opposite question**: a full rewrite's preflight says "w
 
 **Mechanical ticking must run before validation, and the computed set must be passed to the landing.** `applyPatchToTodos` marks every rewritten achievement `checked: false` (correct — what the model returns is always `- [ ]`), while `lintGuide` runs before landing and sees that unticked version — so any **unlocked** achievement reports `checked-mismatch`, which is not in `MODEL_FIXABLE`, and it throws on the spot. **The consequence is that this path is unusable for any unlocked achievement.** The reverse is equally fatal: the landing must not recompute, because `computeCheckedKeys` skips entries that are already ticked, so recomputing over the ticked version yields an empty set and the Notion path would then **untick** the boxes it just ticked, using `checked: false`.
 
+### Adding entries the guide does not have
+
+A game update adds achievements, and a guide written before it has no box for them. `scopeEntries` splits what it cannot locate three ways, because the three ask for different responses:
+
+- **`additions`** — no box in the guide names it. The entry is written and put in place.
+- **`unaddable`** — missing too, but an entry written for it could not be recognised afterwards: the name is shared and Steam's description is empty, so the reply resolves to nothing. Asking would fail the round, and landing being all-or-nothing, the batch with it. The test is the resolver itself, run over the least a reply must carry (`canonicalEntry`).
+- **`unlocatable`** — the guide **has** a box that names it, and the resolver cannot say which achievement it is (a shared name, no description quoted). A second entry would list the achievement twice, and the old box would never tick. Left alone and reported.
+
+**"Missing" is the linter's word, and "located" is the resolver's; neither is relaxed.** They disagree both ways — a box quoting only the description is located and uncovered, a box naming two same-named achievements covers both and locates neither — so `scopeEntries` applies both, locating first. `uncoveredApiNames` reads the `missing-checkbox` findings of the baseline lint, which is what makes "the guide is missing it" and "the gate stops complaining once it is there" one definition.
+
+**Findings are charged to what was asked for, not to what was named.** An entry that could not be added or located is not changed by the run, so what the linter says about it was true before and stays true after. Charged to the run it is a failure no reply could clear.
+
+**One request writes, a second files.** Rewrites and new entries share the writing request: the research is what costs, and `buildPatchMessage` shows a new entry as one that does not exist yet rather than as one to improve. Where each goes is decided afterwards by `placeAdditions`, a small request with no web search, run at `ASIDE_EFFORT` and asked up to `REGROUP_ATTEMPTS` times, each in a session of its own. It sees the guide's sections as a **closed, numbered list** and answers in numbers (`1 -> 3`, `0` for none): a title has to match to the letter, two sections can share one, and a number cannot be misspelt. It runs after the writing passed and before the backup, so a cancellation there has written and taken nothing.
+
+**A failed filing lands anyway.** The entries are written, ticked and through the gates; a section they were not filed under costs tidiness only. Every failure — an unreadable reply, a refusal, nothing answered — degrades to one new section at the end and carries its reason out to the finished card. An answer of 0 for everything is an answer, not a failure; a reply with no readable answer at all is. A cancellation is the one outcome that is neither retried nor swallowed.
+
+**A new entry goes after everything its section holds** — the last non-blank line before the next heading, any level — not after its last entry. An entry's neighbours (a fold, a table, an image pasted beside it) belong with it, and a new entry between the two attaches them to the wrong achievement without anything noticing. After everything can only look a little late. On Notion that is the last sibling before the next heading; an entry inside a container is followed inside that container. A local guide's spacing is kept: where its entries are separated by blank lines the new ones are too, judged from the gaps between its own entries.
+
+**Entries that fit no section go to one section at the end**, headed in the guide's language (`FALLBACK_HEADING`, chosen by index and never composed through `msg()`, which would answer in the interface's). A section made by an earlier run, in either language, is reused rather than headed again.
+
+**The landing reads where each entry went.** An insertion that lands under the wrong heading raises nothing: every call succeeds and the linter has no rule about position. So after writing, the sections are read again from what is on the page and each new entry is looked up in them by title and path (`verifyPlacement`); a miss fails the run with the backup in hand. On Notion the new blocks go in **first**, because adding is non-destructive and a stale anchor should fail before anything has been replaced.
+
+Measured against the live API: a request that inserts with `after` answers with the blocks it created **followed by every sibling after them** (one block after the second of six paragraphs comes back as five results), so `appendBlocks` takes the last block *created* — by position among the first results, never the last result — as where the next batch attaches. Nesting deeper than two levels, a batch over a hundred blocks and an insertion inside a toggle all keep their order.
+
 ### The Dashboard entry point
 
 In the ♻ 重写 confirmation, the scope is an either/or — 「整篇」 or 「自选」. 自选 expands a list of the guide's achievements grouped by section (`pickableEntries`, delivered by `previewGuidePatch`), with two **filters** at the top (rare / locked, both pressed = intersection), a 「全选」 beside the count — **which takes whatever is currently displayed** — and a 「清空」. The filters only change what is shown and never touch the selection, so a pressed state means exactly "I pressed it". **What goes out is always a list of named `api_name`s**, taking the backend `resolveScope`'s explicit-list branch — the UI needs no selector kinds of its own, and same-named achievements can't be picked by name anyway.
 
 Two things deliberately not built into the UI:
 
-- **The computed selectors are not offered as scope options.** `rare` / `locked` / `section` are selectors on the CLI and **filters** in the UI, because the properties **overlap** (the one locked achievement also happens to be rare): as "select a batch" toggles you get "nobody pressed it and it lit up by itself", and as add-only actions they can only express unions, never intersections. Filters have neither problem, and "both pressed = AND" comes for free.
+- **The computed selectors are not offered as scope options.** `rare` / `locked` / `section` are selectors on the CLI and **filters** in the UI (`missing` is the first group of the list, whose box selects it), because the properties **overlap** (the one locked achievement also happens to be rare): as "select a batch" toggles you get "nobody pressed it and it lit up by itself", and as add-only actions they can only express unions, never intersections. Filters have neither problem, and "both pressed = AND" comes for free.
 - **Natural language → selection set** — the one step where a misparse is only discovered after paying, so it comes after all the computed selectors work. The existing ones cover the overwhelming majority of real cases and need no model call at all.
 
 ## The provider layer
