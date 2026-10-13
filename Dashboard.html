@@ -3179,8 +3179,7 @@
       'res.rewrote':          ['《{game}》已修改 {n} 条 · 其余不变 · ', '{game}: {n} rewritten, the rest unchanged · '],
       'res.rewroteAdded':     ['《{game}》已修改 {n} 条 · 新增 {added} 条 · 其余不变 · ', '{game}: {n} rewritten, {added} added, the rest unchanged · '],
       'res.added':            ['《{game}》已新增 {added} 条 · 其余不变 · ', '{game}: {added} added, the rest unchanged · '],
-      'res.addedAtEnd':       ['{n} 条没能归进已有的小节,放在了末尾的「{heading}」里', '{n} could not be filed under an existing section and are under “{heading}” at the end'],
-      'res.unaddable':        ['{n} 条攻略里没有,写出来也认不出是哪个成就(同名且描述为空),没有去写', '{n} are missing from the guide, but could not be told apart from another achievement once written (same name, no description), so they were not written'],
+      'res.addedAtEnd':       ['有 {n} 条新增的放在了文末的「{heading}」里', '{n} of the new entries went to “{heading}” at the end of the guide'],
       'res.generated':        ['《{game}》已生成 · {covered}/{total} 个成就 · ', '{game} generated · {covered} of {total} achievements · '],
       'res.readItYourself':   ['内容需要你自己过一遍。', 'Read it through yourself.'],
       'res.queueLeft':        [' · 还有 {n} 个排队', ' · {n} still queued'],
@@ -7024,9 +7023,6 @@
       const atEnd = pat && pat.fallback
         ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.addedAtEnd', { n: pat.fallback, heading: pat.fallbackHeading || '' })) + '</span>'
         : '';
-      const unaddable = pat && pat.unaddable
-        ? '<br><span class="warn">' + GEN_WARN + ' ' + escapeHtml(t('res.unaddable', { n: pat.unaddable })) + '</span>'
-        : '';
       // 「改了 3 条」, 「新增 2 条」 and 「改了 3 条、新增 2 条」 are three different statements, and the rest
       // being unchanged is the reason somebody chose a partial run
       const patLead = pat && pat.added
@@ -7037,7 +7033,7 @@
       const headline = pat
         ? GEN_OK + ' ' + escapeHtml(patLead) + where + restoreBackup + dropBackup
         : GEN_OK + ' ' + escapeHtml(t('res.generated', { game: f.game || '', covered: r.covered, total: r.total })) + where + restoreBackup + dropBackup;
-      return headline + noResearch + unsyncable + preExisting + atEnd + unaddable + warnLines(f.warnings) +
+      return headline + noResearch + unsyncable + preExisting + atEnd + warnLines(f.warnings) +
         '<br><span class="warn">' + escapeHtml(t('res.readItYourself')) + '</span>';
     }
 

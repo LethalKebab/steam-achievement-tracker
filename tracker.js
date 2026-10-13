@@ -1571,10 +1571,13 @@ async function cmdGuidePatch(appid) {
 
   if (!flags.has('--yes')) {
     const io = makeSecretReader();
+    const keeping = pp.preflight.keeping;
     const answer = await io.ask(
-      additions.length
-        ? clog('gp.confirmAdd', { n: asked.length, added: additions.length, keeping: pp.preflight.keeping })
-        : clog('gp.confirm', { n: entries.length, keeping: pp.preflight.keeping })
+      !additions.length
+        ? clog('gp.confirm', { n: entries.length, keeping })
+        : entries.length
+          ? clog('gp.confirmAdd', { n: entries.length, added: additions.length, keeping })
+          : clog('gp.confirmNew', { n: additions.length, keeping })
     );
     io.close();
     if (!/^y(es)?$/i.test(answer)) return console.log(clog('gtn.cancelled'));
@@ -1587,8 +1590,15 @@ async function cmdGuidePatch(appid) {
     config, provider: probe, steam, appid, notion,
     selector, instruction, rounds, patchPlan: pp,
     onProgress(ev) {
-      if (ev.phase === 'write') p.update(clog('gp.write', { round: ev.round, of: ev.of, scope: ev.scope }));
-      else if (ev.phase === 'rewrite') p.update(clog('gp.rewrite', { round: ev.round, of: ev.of }));
+      if (ev.phase === 'write') {
+        // 「重写 3 条」 is wrong for an entry that was never written: say which are which
+        const rewriting = ev.scope - (ev.added ?? 0);
+        p.update(!ev.added
+          ? clog('gp.write', { round: ev.round, of: ev.of, scope: ev.scope })
+          : rewriting
+            ? clog('gp.writeAdd', { round: ev.round, of: ev.of, n: rewriting, added: ev.added })
+            : clog('gp.writeNew', { round: ev.round, of: ev.of, n: ev.added }));
+      } else if (ev.phase === 'rewrite') p.update(clog('gp.rewrite', { round: ev.round, of: ev.of }));
       else if (ev.phase === 'tool') p.update(clog('gp.tool', { round: ev.round, name: ev.name }));
       else if (ev.phase === 'retry') p.done(clog('gp.retry', { round: ev.round, reason: ev.reason }));
       else if (ev.phase === 'check') {
@@ -1601,7 +1611,7 @@ async function cmdGuidePatch(appid) {
       } else if (ev.phase === 'lint') {
         p.done(clog('gp.findings', { round: ev.round, caused: ev.caused, preExisting: ev.preExisting }));
       } else if (ev.phase === 'warn') p.done(`  ⚠️  ${ev.note}`);
-      else if (ev.phase === 'place') p.update(clog('gp.filing', { n: ev.n }));
+      else if (ev.phase === 'place') p.update(clog('gp.filing'));
       else if (ev.phase === 'place-retry') p.done(clog('gp.filingRetry', { reason: ev.reason }));
       else if (ev.phase === 'place-failed') p.done(clog('gp.filingFailed', { reason: ev.reason }));
       else if (ev.phase === 'backup') p.update(clog('gg.backingUp'));

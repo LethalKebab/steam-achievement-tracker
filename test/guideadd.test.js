@@ -532,7 +532,6 @@ describe('the wiring (source assertions — none of this runs without a server, 
 
   test('the finished card carries what was added and where the overflow went', () => {
     assert.match(server, /added: \(r\.added \?\? \[\]\)\.length/);
-    assert.match(server, /unaddable: \(r\.unaddable \?\? \[\]\)\.length/);
     assert.match(server, /fallback: \(r\.placement\?\.fallback \?\? \[\]\)\.length/);
     assert.match(server, /fallbackHeading: r\.placement\?\.heading \?\? null/);
   });

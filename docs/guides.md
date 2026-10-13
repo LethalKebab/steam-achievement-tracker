@@ -266,7 +266,7 @@ decides nothing about the content. A new entry goes **after everything that sect
 never between an entry and what follows it, and keeps the blank-line spacing the guide already uses.
 
 When no section fits, or that second request fails, the entries go into one new section at the end,
-headed 更新新增成就 (English guides: "Added in updates"). The finished card and the command line say
+headed 更新后新增的成就 (English guides: "Added in updates"). The finished card and the command line say
 how many went there and, if the request failed, why. A later run adds to that section rather than
 opening another.
 
