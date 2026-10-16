@@ -123,7 +123,7 @@ describe('what hiding deliberately does not touch', () => {
     assert.equal(after.totalGames, before.totalGames);
     assert.equal(after.achievedTotal, before.achievedTotal);
     assert.equal(after.avgRounded, before.avgRounded);
-    assert.equal(after.perfectCount, before.perfectCount);
+    assert.equal(after.completedCount, before.completedCount);
   });
 
   test('it is orthogonal to sync_locked, which is the column that actually stops a sync', () => {

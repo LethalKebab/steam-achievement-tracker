@@ -1,5 +1,6 @@
 /**
- * Achievement sets: reading Steam's two replies, and deciding what a player is shown
+ * Achievement sets: reading Steam's two replies, deciding what a player is shown, and what a game adds
+ * to the completed count
  * ------------------------------------------------
  * Run with: node --test
  *
@@ -7,7 +8,7 @@
  * name, size and DLC app it belongs to; the account's reply to `GetUserAchievements` lists the
  * groups **this account can earn**, with how far along each one is. `lib/sets.js` is the pure half
  * of the feature — no network, no database — so everything that can go wrong in reading a reply or
- * in choosing what to draw is checked here.
+ * in choosing what to draw or count is checked here.
  *
  * The fixtures are trimmed copies of real replies (Crusader Kings III, DREDGE and Left 4 Dead 2),
  * not shapes made up to suit the code: a reply with every optional field present would pass a
@@ -16,7 +17,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseGameSets, parseUserSets, buildSetRows, displaySets } from '../lib/sets.js';
+import {
+  parseGameSets, parseUserSets, buildSetRows, displaySets, completedUnits, groupSetsByGame,
+} from '../lib/sets.js';
 
 const group = (id, name, extra = {}) => ({
   groupid: id, localized_name: name, dlcappid: 0, order: 0, archived: false, developeronly: false,
@@ -339,5 +342,87 @@ describe('displaySets', () => {
     assert.deepEqual(Object.keys(s).sort(), ['base', 'complete', 'completedAt', 'dlc', 'done', 'earnable', 'id', 'name', 'need'].sort());
     assert.equal(s.done, 3);
     assert.equal(s.need, 10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// What a game adds to the completed count
+// ---------------------------------------------------------------------------
+
+describe('completedUnits', () => {
+  /** A stored row, as the table returns it */
+  const row = (id, extra = {}) => ({
+    set_id: id, name_en: '', name_cn: '', dlc_appid: null, position: 0, total: 10, need: 10,
+    archived: 0, visible: 1, achievable: 1, done: 0, completed: 0, completed_at: null, ...extra,
+  });
+  const game = (achieved, total) => ({ achieved, total });
+
+  test('a game without sets is one unit when everything in it is unlocked, and none otherwise', () => {
+    assert.equal(completedUnits(game(8, 8), undefined), 1);
+    assert.equal(completedUnits(game(8, 8), []), 1, 'an empty list is the same as none stored');
+    assert.equal(completedUnits(game(7, 8), undefined), 0);
+    assert.equal(completedUnits(game(0, 0), undefined), 0, 'a game with nothing to unlock is not a finished one');
+    assert.equal(completedUnits(game(null, null), undefined), 0, 'a game Steam has no achievements for is not one either');
+  });
+
+  test('a game with sets is one unit per completed set — DREDGE with all three finished is three', () => {
+    const rows = [row(0, { completed: 1 }), row(1, { completed: 1 }), row(2, { completed: 1 })];
+    assert.equal(completedUnits(game(60, 60), rows), 3);
+  });
+
+  test('a game short of 100% still counts the sets it finished — Crusader Kings III is one', () => {
+    // 75 of 198 on the flat list, because it holds three DLC sets this account does not own. One set
+    // of the five it can earn is finished, and that is what the profile counts
+    const rows = [
+      row(0, { total: 56, need: 56, done: 46 }), row(2, { total: 20, need: 20, done: 20, completed: 1 }),
+      row(8, { achievable: 0 }), row(9, { achievable: 0 }),
+    ];
+    assert.equal(completedUnits(game(75, 198), rows), 1);
+  });
+
+  test('Steam says whether a set is finished, not the arithmetic', () => {
+    // A set Steam keeps finished after the developer adds to it can read 9 of 10, and 40 of 40 can be
+    // unfinished when the flag has not arrived. Each is asserted alone: counted together in one list
+    // the two mistakes cancel, and swapping the flag for the arithmetic would still read 1
+    assert.equal(completedUnits(game(49, 60), [row(0, { done: 9, need: 10, completed: 1 })]), 1);
+    assert.equal(completedUnits(game(40, 40), [row(0, { done: 40, need: 40, completed: 0 })]), 0);
+  });
+
+  test('a set the developer keeps to themselves, or one with nothing in it, is not a unit', () => {
+    const rows = [
+      row(0, { completed: 1 }),
+      row(1, { completed: 1, visible: 0 }),
+      row(2, { completed: 1, total: 0, need: 0 }),
+    ];
+    assert.equal(completedUnits(game(10, 10), rows), 1);
+  });
+
+  test('a game whose sets are stored is judged by them, not by the flat count beside them', () => {
+    // 60 of 60 on the flat list; the stored reading says no set is finished yet. Two answers to one
+    // question is how the figure comes to disagree with the strip drawn on the same row
+    assert.equal(completedUnits(game(60, 60), [row(0), row(1)]), 0);
+  });
+
+  test('a game Steam has stopped answering for adds nothing, whatever sets it once stored', () => {
+    // markNoAchievements clears the game's numbers and leaves its set rows, so without a check the
+    // sets would go on counting beside a row that reads N/A
+    const rows = [row(0, { completed: 1 }), row(1, { completed: 1 })];
+    assert.equal(completedUnits({ achieved: null, total: null, has_achievements: 0 }, rows), 0);
+    assert.equal(completedUnits({ achieved: 20, total: 20, has_achievements: 1 }, rows), 2);
+  });
+});
+
+describe('groupSetsByGame', () => {
+  test('one list per game, in the order the rows arrive', () => {
+    const grouped = groupSetsByGame([
+      { appid: '1', set_id: 0 }, { appid: '1', set_id: 1 }, { appid: '2', set_id: 0 },
+    ]);
+    assert.deepEqual([...grouped.keys()], ['1', '2']);
+    assert.deepEqual(grouped.get('1').map((r) => r.set_id), [0, 1]);
+    assert.equal(grouped.get('3'), undefined, 'a game with no rows is absent, not an empty list');
+  });
+
+  test('no rows is an empty map', () => {
+    assert.equal(groupSetsByGame([]).size, 0);
   });
 });

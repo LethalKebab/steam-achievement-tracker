@@ -2614,19 +2614,19 @@
         <span class="reading" title="库里的游戏总数" data-t-title="card.totalTitle">
           <span class="value" id="cardTotal">–</span><span class="label" data-t="card.total">游戏</span>
         </span>
-        <!-- Second, beside the game count and ahead of the two rates: these two are the plain
-             「库里有多少」 pair, and both rates after them are derived from these numbers.
+        <!-- Second, beside the game count and ahead of the two readings derived from the rows.
+             Unlike the game count it leaves 「受限」 games out, as Steam's profile does.
              **The label names the state, not the noun.** A bare 「成就」 sitting next to 「游戏」
              reads as 「库里一共有多少个成就」, which is a different and equally believable
              number; 「已解锁成就」 can only mean the one thing -->
-        <span class="reading" title="整个库里已解锁的成就总数" data-t-title="card.achievedTitle">
+        <span class="reading" title="已解锁的成就总数;不含「受限」游戏" data-t-title="card.achievedTitle">
           <span class="value" id="cardAchieved">–</span><span class="label" data-t="card.achieved">已解锁成就</span>
         </span>
         <span class="reading" title="AGCR:所有游戏完成率的平均值" data-t-title="card.avgTitle">
           <span class="value" id="cardAvg">–</span><span class="label" data-t="card.avg">平均完成率</span>
         </span>
-        <span class="reading" title="已经解锁全部成就的游戏" data-t-title="card.perfectTitle">
-          <span class="value" id="cardPerfect">–</span><span class="label" data-t="card.perfect">完美</span>
+        <span class="reading" title="已完成的游戏和集合,每个计一次;不含「受限」游戏" data-t-title="card.completedTitle">
+          <span class="value" id="cardCompleted">–</span><span class="label" data-t="card.completed">已完成</span>
         </span>
       </div>
     </div>
@@ -2766,7 +2766,7 @@
            API rather than the user's; the database column is still called Unvetted (it
            reaches CSV and is a compatibility surface). The explanation goes in a title and
            takes no screen space -->
-      <button type="button" class="chip" data-filter="unvetted" data-state="not" data-t-title="chip.unvettedTitle" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label" data-t="filter.unvetted">受限</span></button>
+      <button type="button" class="chip" data-filter="unvetted" data-state="not" data-t-title="chip.unvettedTitle" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方的「已解锁成就」「平均完成率」「已完成」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label" data-t="filter.unvetted">受限</span></button>
       <!-- Excluded at startup, for the same reason as 「已完成」: this page answers 「还有
            什么值得打」, and a game with no achievement system contributes nothing to it —
            it does not even have one target to aim at.
@@ -2966,11 +2966,11 @@
       'card.total':           ['游戏', 'Games'],
       'card.totalTitle':      ['库里的游戏总数', 'How many games are in the library'],
       'card.achieved':        ['已解锁成就', 'Unlocked'],
-      'card.achievedTitle':   ['整个库里已解锁的成就总数', 'How many achievements you have unlocked across the whole library'],
+      'card.achievedTitle':   ['已解锁的成就总数;不含「受限」游戏', 'How many achievements you have unlocked; Limited games are not counted'],
       'card.avg':             ['平均完成率', 'Average completion'],
       'card.avgTitle':        ['AGCR:所有游戏完成率的平均值', 'AGCR: the mean completion rate across every game'],
-      'card.perfect':         ['完美', 'Perfect'],
-      'card.perfectTitle':    ['已经解锁全部成就的游戏', 'Games with every achievement unlocked'],
+      'card.completed':       ['已完成', 'Completed'],
+      'card.completedTitle':  ['已完成的游戏和集合,每个计一次;不含「受限」游戏', 'Completed games and sets, one each; Limited games are not counted'],
       'ui.loading':           ['加载中…', 'Loading…'],
       'ui.syncNow':           ['立即同步', 'Sync now'],
       'ui.settings':          ['设置', 'Settings'],
@@ -2986,7 +2986,7 @@
       'ui.close':             ['关闭', 'Close'],
       'ui.cancel':            ['取消', 'Cancel'],
       'ui.toTop':             ['回到顶部', 'Back to top'],
-      'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but excluded from the average completion rate above — the same as Steam’s own method.'],
+      'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方的「已解锁成就」「平均完成率」「已完成」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but not counted in the Unlocked, Average completion or Completed figures above — the same as Steam’s own method.'],
       'gen.stepOf':           ['第 {n} / {of} 步', 'step {n} of {of}'],
       'gen.written':          ['已写 {done} / {of} 条', '{done} of {of} written'],
       'gen.showLog':          ['查看步骤', 'Show steps'],
@@ -3049,7 +3049,7 @@
       'table.syncingRow':     ['数据同步中…', 'Syncing…'],
       'table.openGuide':      ['(点击查看攻略)', ' (opens the guide)'],
       'table.count':          ['显示 {shown} / 共 {total}', 'Showing {shown} of {total}'],
-      'table.unvettedTitle':  ['Steam 归为「个人资料功能受限」,不计入平均完成率', 'Steam classes this as “Profile Features Limited”; it is excluded from the average completion rate'],
+      'table.unvettedTitle':  ['Steam 归为「个人资料功能受限」,不计入上方的「已解锁成就」「平均完成率」「已完成」','Steam classes this as “Profile Features Limited”; it is not counted in the Unlocked, Average completion or Completed figures'],
       'table.lockOn':         ['已锁定:不参与自动同步,数据需手动填写。点击解锁', 'Locked: excluded from automatic syncing, the numbers are yours to fill in. Click to unlock'],
       'table.lockOff':        ['锁定这一行:停止自动同步', 'Lock this row: stop syncing it automatically'],
       'table.locked':         ['已锁定', 'locked'],
@@ -6170,7 +6170,7 @@
         // The whole number barely moves in a large library, so hovering it shows the same average to
         // two places. On the number rather than the reading: the label beside it keeps the definition
         document.getElementById('cardAvg').title = data.avgPrecise || '';
-        document.getElementById('cardPerfect').textContent = fmtCount(data.perfectCount);
+        document.getElementById('cardCompleted').textContent = fmtCount(data.completedCount);
         document.getElementById('cardAchieved').textContent = fmtCount(data.achievedTotal);
         // The element ships with data-t="ui.loading" so it reads correctly before this arrives.
         // Once it holds a real timestamp that key is wrong, and applyStrings would repaint 「加载中…」

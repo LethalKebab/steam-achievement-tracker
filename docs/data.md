@@ -130,6 +130,8 @@ A developer can split a game's achievements into **sets**: the base game, a mode
 
 - **Nothing here changes `games.total`, `achieved` or the average completion rate.** Those still come from the flat list of every achievement, DLC you do not own included. Steam's own achievements page divides by what you can earn instead, so a game with DLC you do not own reads lower here than there.
 
+- **The Dashboard's Completed count is the one figure computed from these rows.** It counts finished games and finished sets, one each. A game with sets adds one for every set whose `completed` is 1, whose `visible` is not 0 and whose `total` is above 0; any other game adds one when `achieved` equals `total` and `total` is above 0. A game with sets is judged by them alone, so one that is short of 100% on the flat list can still add units. Two rows are the exception: a game with `has_achievements` 0 adds nothing, and a locked row keeps counting the sets it holds, which the sync no longer refreshes. Games marked Unvetted add nothing.
+
 The sets are asked for in the sync's fifth phase, and only a game Steam reports with sets costs more than one request. A game is asked when it has never been, when it has sets and its stats were read since (progress moves when you play), and when its last reading is a week old (capped per run, oldest first, so they do not all fall due together). A game whose reading cannot be completed — Steam refuses the request for your own progress, or answers with no set at all — is left unread and asked again on the next sync. Deleting a game from the Dashboard deletes its sets. To force one game to be read again:
 
 ```sql
@@ -227,7 +229,7 @@ Anything other than `'en'` is stored as `'zh'`. A third value would make the mar
 
 Steam's API is the source of truth for nearly everything, but a few situations need a human, and those are what `status` and `family` exist for.
 
-**`Unvetted`** — games Steam hides from the owned-games API by default (its "Profile Features Limited" classification). They're still synced normally; they're just excluded from the aggregate completion average, which matches Steam's own AGCR methodology.
+**`Unvetted`** — games Steam hides from the owned-games API by default (its "Profile Features Limited" classification). They're still synced normally; they're just left out of the readout's unlocked total, average completion rate and completed count. The average follows Steam's published AGCR method, and the other two are the figures Steam's profile shows.
 
 **`Manual`** — for when Steam genuinely can't give *your* account real data. The usual case is a Family Library Sharing title that a *different* family member actually plays: Steam records achievements against the playing account, not the licence holder, so your own account will permanently read 0 on it. These rows are edited by hand and always skipped by the sync.
 

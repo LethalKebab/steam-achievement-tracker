@@ -5,9 +5,10 @@
  *
  * The feature records what Steam says about a game's sets and draws it. It is deliberately **not**
  * allowed to move anything the library already reports: `total`, `achieved`, `rate`, the average
- * completion rate, the 🔔 notices. Recording is additive, and "additive" is the claim that most needs
- * a test, because a column written to the wrong row or a stamp that moves `updated_at` breaks nothing
- * that fails loudly.
+ * completion rate, the 🔔 notices. The one reading that follows the sets is the completed count, and
+ * a test below pins that it alone does. Recording is additive, and "additive" is the claim that most
+ * needs a test, because a column written to the wrong row or a stamp that moves `updated_at` breaks
+ * nothing that fails loudly.
  *
  * Three more things are easy to get wrong and invisible when they are:
  *  - **A failed request must not look like an answer.** A stamp written for a game that was never
@@ -648,7 +649,7 @@ describe('getDashboardData', () => {
     assert.equal(g.sets.length, 2);
   });
 
-  test('every number the readout is made of is the same with and without them', () => {
+  test('sets that complete nothing change nothing the readout shows', () => {
     const db = openDb(':memory:');
     game(db, '1', { achieved: 7, total: 20 });
     game(db, '2', { achieved: 60, total: 60 });
@@ -657,5 +658,25 @@ describe('getDashboardData', () => {
     replaceAchievementSets(db, '1', rowsFor([[0, '', '', { total: 56, need: 56, done: 46 }], [8, 'Khans of the Steppe', '', { dlcAppid: '3315510', achievable: false }]]));
     const withSets = strip(apiFor(db).getDashboardData());
     assert.deepEqual(withSets, without);
+  });
+
+  test('a completed set moves the completed count and no other number', () => {
+    // 75 of 198 on the flat list: three DLC sets this account does not own are in the 198. One of
+    // the sets it can earn is finished, and that is a unit on Steam's profile
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 75, total: 198 });
+    game(db, '2', { achieved: 60, total: 60 });
+    const strip = ({ completedCount, ...d }) => ({ ...d, games: d.games.map(({ sets, ...rest }) => rest) });
+    const without = apiFor(db).getDashboardData();
+    replaceAchievementSets(db, '1', rowsFor([
+      [0, '', '', { total: 56, need: 56, done: 46 }],
+      [2, 'Royal Court', '', { dlcAppid: '1303182', total: 20, need: 20, done: 20, completed: true }],
+      [8, 'Khans of the Steppe', '', { dlcAppid: '3315510', achievable: false }],
+    ]));
+    const withSets = apiFor(db).getDashboardData();
+    assert.equal(without.completedCount, 1, 'the finished game alone');
+    assert.equal(withSets.completedCount, 2, 'and the finished set');
+    assert.deepEqual(strip(withSets), strip(without),
+      'the unlocked total, the average and every game row stay on the flat list');
   });
 });
