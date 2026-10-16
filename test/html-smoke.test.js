@@ -3643,3 +3643,256 @@ describe('the strip of sets above a game\'s list', () => {
     assert.equal(slots(s['sets.completedOn'][0]), '{date}');
   });
 });
+
+/**
+ * The list of what is left, split by set.
+ *
+ * `renderMissingGroups` is the page's own function, run here with `t` replaced by a readable stub and
+ * the card renderer handed in as a plain function — and **`escapeHtml` is the real one**, because a
+ * set's name comes from a developer. Which sets there are, their order, which can be earned and how
+ * many are left in each was decided by the server (`groupMissing`); what is tested is that the page
+ * draws it faithfully: every achievement once, under its own set, with the sets the account cannot
+ * earn last and closed.
+ */
+describe('the list of what is left, split by set', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  // Line comments first: a `//` here can hold a `/*`, and the other order eats code
+  const CODE = PAGE_JS.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  const fnBody = (name) => {
+    const at = CODE.indexOf('function ' + name + '(');
+    assert.ok(at !== -1, `${name} is gone, so this check has lost its target rather than passed`);
+    let depth = 0, i = CODE.indexOf('{', at);
+    for (; i < CODE.length; i++) {
+      if (CODE[i] === '{') depth++;
+      else if (CODE[i] === '}' && --depth === 0) break;
+    }
+    return CODE.slice(at, i + 1);
+  };
+
+  const opened = new Set();
+  // eslint-disable-next-line no-new-func
+  const render = new Function('t', 'newFirst', 'openSetGroups', [fnBody('renderMissingGroups'), fnBody('escapeHtml'), 'return renderMissingGroups;'].join(SEP))(
+    // Slots rendered as `key(a=1,b=2)`: no quote in it for the real escapeHtml to turn into an entity
+    (key, values) => key + (values ? '(' + Object.entries(values).map(([k, v]) => `${k}=${v}`).join(',') + ')' : ''),
+    (list) => list,
+    opened
+  );
+  const card = (a) => `<i>${a.name}</i>`;
+  const group = (id, name, extra = {}) => ({ id, base: id === 0, name, dlc: false, earnable: true, count: 1, ...extra });
+  const item = (name, setId) => ({ name, setId });
+  const draw = (data, appid = '10') => render(data, appid, card);
+  const count = (html, needle) => html.split(needle).length - 1;
+  const names = (html) => [...html.matchAll(/<i>([^<]*)<\/i>/g)].map((m) => m[1]);
+
+  test('one section per set, in the order the server chose, each with its own heading and how many are left', () => {
+    const html = draw({ groups: [group(0, ''), group(1, 'Pack')], missing: [item('A', 0), item('B', 1), item('C', 0)] });
+    assert.equal(count(html, 'class="ach-group"'), 2);
+    assert.match(html, /<span class="ach-group-name">sets\.base<\/span><span class="ach-group-n">ach\.groupLeft\(n=2\)<\/span>/,
+      'the base game has no name of its own, so the page words it; and it has two left');
+    assert.match(html, /<span class="ach-group-name">Pack<\/span><span class="ach-group-n">ach\.groupLeft\(n=1\)<\/span>/);
+    assert.ok(html.indexOf('sets.base') < html.indexOf('Pack'), 'the order the server chose was not kept');
+  });
+
+  test('every achievement is drawn once, under its own set, in the order it had', () => {
+    const html = draw({ groups: [group(0, ''), group(1, 'Pack')], missing: [item('A', 1), item('B', 0), item('C', 1), item('D', 0)] });
+    const [, base, pack] = html.split('class="ach-group"');
+    assert.deepEqual(names(base), ['B', 'D']);
+    assert.deepEqual(names(pack), ['A', 'C']);
+    assert.deepEqual(names(html).sort(), ['A', 'B', 'C', 'D'], 'one of them was dropped or drawn twice');
+  });
+
+  test('the patch ordering is applied inside each set', () => {
+    // newFirst is the page\'s own helper; here it reverses, so a section drawn without it shows
+    const reversing = new Function('t', 'newFirst', 'openSetGroups', [fnBody('renderMissingGroups'), fnBody('escapeHtml'), 'return renderMissingGroups;'].join(SEP))(
+      (key) => key, (list) => list.slice().reverse(), opened
+    );
+    const html = reversing({ groups: [group(0, ''), group(1, 'Pack')], missing: [item('A', 0), item('B', 0), item('C', 1)] }, '10', card);
+    const [, base] = html.split('class="ach-group"');
+    assert.deepEqual(names(base).slice(0, 2), ['B', 'A']);
+  });
+
+  test('a set the account cannot earn comes last, closed, and its achievements are not drawn open', () => {
+    const html = draw({
+      groups: [group(0, ''), group(8, 'Khans', { earnable: false, dlc: true, count: 2 }), group(1, 'Pack')],
+      missing: [item('A', 0), item('X', 8), item('Y', 8), item('B', 1)],
+    });
+    assert.ok(html.indexOf('Pack') < html.indexOf('Khans'), 'a set that cannot be earned was drawn before one that can');
+    assert.equal(count(html, 'class="ach-group is-off"'), 1);
+    assert.match(html, /<button type="button" class="ach-group-toggle" aria-expanded="false" aria-controls="ach-set-10-8"/);
+    assert.match(html, /<div class="ach-grid" id="ach-set-10-8" hidden>/, 'closed means hidden, and a hidden grid is out of the reading order too');
+  });
+
+  test('a set the account cannot earn is drawn open when it was left open', () => {
+    opened.add('10|8');
+    try {
+      const html = draw({ groups: [group(8, 'Khans', { earnable: false, dlc: true, count: 1 })], missing: [item('X', 8)] });
+      assert.match(html, /aria-expanded="true"/);
+      assert.doesNotMatch(html, /id="ach-set-10-8" hidden/);
+    } finally {
+      opened.clear();
+    }
+  });
+
+  test('what was left open is remembered for the game it was opened in, not for another with the same set id', () => {
+    opened.add('10|8');
+    try {
+      const html = draw({ groups: [group(8, 'Khans', { earnable: false, dlc: true, count: 1 })], missing: [item('X', 8)] }, '11');
+      assert.match(html, /aria-expanded="false"/);
+    } finally {
+      opened.clear();
+    }
+  });
+
+  test('the toggle says what the set is, and a DLC the account does not own says so to a screen reader too', () => {
+    const html = draw({
+      groups: [
+        group(8, 'Khans', { earnable: false, dlc: true, count: 2 }),
+        group(9, 'Restricted', { earnable: false, dlc: false, count: 1 }),
+      ],
+      missing: [item('X', 8), item('Y', 8), item('Z', 9)],
+    });
+    const [, khans, restricted] = html.split('<button type="button" class="ach-group-toggle"');
+    assert.match(khans, /title="Khans · sets\.notOwned" aria-label="Khans, 2, sets\.notOwned"/);
+    assert.match(restricted, /title="Restricted" aria-label="Restricted, 1"/,
+      'a set that is not a DLC was called one the account does not own');
+    assert.match(khans, /<span class="ach-group-name">Khans<\/span><span class="ach-group-n">2<\/span>/);
+  });
+
+  test('an achievement in no listed set gets a heading of its own, before the sets that cannot be earned', () => {
+    const html = draw({
+      groups: [group(0, ''), group(8, 'Khans', { earnable: false, dlc: true, count: 1 })],
+      missing: [item('A', 0), item('X', 8), item('Q', null), item('R', 99)],
+    });
+    assert.match(html, /<span class="ach-group-name">ach\.groupOther<\/span><span class="ach-group-n">ach\.groupLeft\(n=2\)<\/span>/);
+    assert.ok(html.indexOf('ach.groupOther') > html.indexOf('sets.base'));
+    assert.ok(html.indexOf('ach.groupOther') < html.indexOf('Khans'));
+    assert.deepEqual(names(html).sort(), ['A', 'Q', 'R', 'X'], 'an achievement the server could not place was lost');
+  });
+
+  test('with only sets the account cannot earn left, nothing is drawn as left to earn', () => {
+    const html = draw({ groups: [group(8, 'Khans', { earnable: false, dlc: true, count: 1 })], missing: [item('X', 8)] });
+    assert.equal(count(html, 'class="ach-group"'), 0);
+    assert.equal(count(html, 'class="ach-group is-off"'), 1);
+  });
+
+  test('what a developer wrote is escaped in the heading, the title and the spoken label', () => {
+    const hostile = '"><img src=x onerror=alert(1)>';
+    const html = draw({
+      groups: [group(1, hostile), group(8, hostile, { earnable: false, dlc: true, count: 1 })],
+      missing: [item('A', 1), item('X', 8)],
+    });
+    assert.doesNotMatch(html, /<img/, 'a set named with markup put markup on the page');
+    // The earnable section: the heading and the group's own label. The toggle: the name, the title
+    // and the label
+    assert.equal(count(html, '&lt;img src=x onerror=alert(1)&gt;'), 5);
+    assert.match(html.split('<button type="button" class="ach-group-toggle"')[1], /^ aria-expanded="false" aria-controls="[^"]*" data-key="[^"]*" title="[^"]*" aria-label="[^"]*">/,
+      'an attribute was closed early, so a value became markup');
+  });
+
+  test('an id that is not a number cannot break out of the attributes it is written into', () => {
+    // A restored backup is any file the user picks, and a column is not guaranteed to hold a number
+    const hostile = '8" onclick="alert(1)';
+    const html = draw({
+      groups: [group(hostile, 'Khans', { earnable: false, dlc: true, count: 1 })],
+      missing: [item('X', hostile)],
+    }, '10"><b>');
+    assert.doesNotMatch(html, /<b>/, 'the game id put markup on the page');
+    assert.doesNotMatch(html, /"\s+onclick=/, 'the set id closed its attribute and started another');
+    const [, toggle] = html.split('<button type="button" class="ach-group-toggle"');
+    assert.match(toggle, /^ aria-expanded="false" aria-controls="[^"]*" data-key="[^"]*" title="[^"]*" aria-label="[^"]*">/);
+    assert.match(html, /<div class="ach-grid" id="[^"]*" hidden>/, 'the grid keeps an id that is one value');
+  });
+
+  test('every section is a named group, so a screen reader can tell where one set ends', () => {
+    const html = draw({ groups: [group(0, ''), group(1, 'Pack')], missing: [item('A', 0), item('B', 1), item('Q', null)] });
+    assert.equal(count(html, 'role="group"'), 3, 'the base game, the pack and what no set holds');
+    assert.match(html, /role="group" aria-label="sets\.base, ach\.groupLeft\(n=1\)"/);
+    assert.match(html, /role="group" aria-label="ach\.groupOther, ach\.groupLeft\(n=1\)"/);
+  });
+
+  test('the panel splits the list only when the server sent sets, and keeps the all-done line for a game that has none', () => {
+    const body = fnBody('renderMissingRow');
+    assert.match(body, /renderMissingGroups\(/, 'the panel never draws the groups');
+    assert.match(body, /data\.groups/, 'the panel does not look at what the server sent');
+    assert.match(body, /data\.missingCount === 0 && !/,
+      'with only sets that cannot be earned left the count is 0, and the game is not done');
+    assert.match(body, /data\.missingCount > 0 \?/, 'a heading saying nothing is left to earn above sets that are left is wrong twice');
+    assert.match(body, /newFirst\(data\.missing\)/, 'the flat list lost its ordering');
+  });
+
+  test('the toggles are bound on every repaint, to the one function that opens and closes a set', () => {
+    const body = fnBody('render');
+    assert.match(body, /querySelectorAll\('\.ach-group-toggle'\)/, 'nothing is bound to the toggles');
+    assert.match(body, /toggleSetGroup\(btn\)/, 'a click on a toggle does nothing');
+  });
+
+  test('a toggle opens its set in place and closes it again, and keeps what was left open', () => {
+    const opened2 = new Set();
+    const measured = [];
+    const grid = { hidden: true };
+    const dom = { getElementById: (id) => (id === 'grid-1' ? grid : null) };
+    // eslint-disable-next-line no-new-func
+    const toggle = new Function('document', 'openSetGroups', 'clampGuides', fnBody('toggleSetGroup') + SEP + 'return toggleSetGroup;')(
+      dom, opened2, (el) => measured.push(el)
+    );
+    const attrs = { 'aria-expanded': 'false', 'aria-controls': 'grid-1' };
+    const button = { getAttribute: (k) => attrs[k], setAttribute: (k, v) => { attrs[k] = v; }, dataset: { key: '10|8' } };
+
+    toggle(button);
+    assert.equal(attrs['aria-expanded'], 'true', 'the button does not say it is open');
+    assert.equal(grid.hidden, false, 'the grid it controls is still hidden');
+    assert.deepEqual(measured, [grid], 'the guide windows in the grid are measured when it opens, not before');
+    assert.equal(opened2.has('10|8'), true, 'the next repaint would close it again');
+
+    toggle(button);
+    assert.equal(attrs['aria-expanded'], 'false');
+    assert.equal(grid.hidden, true);
+    assert.equal(measured.length, 1, 'closing a set measures nothing');
+    assert.equal(opened2.has('10|8'), false, 'a set that was closed again comes back open on the next repaint');
+  });
+
+  test('a toggle whose grid is not on the page still keeps its state and throws nothing', () => {
+    const opened2 = new Set();
+    // eslint-disable-next-line no-new-func
+    const toggle = new Function('document', 'openSetGroups', 'clampGuides', fnBody('toggleSetGroup') + SEP + 'return toggleSetGroup;')(
+      { getElementById: () => null }, opened2, () => { throw new Error('nothing to measure'); }
+    );
+    const attrs = { 'aria-expanded': 'false', 'aria-controls': 'gone' };
+    toggle({ getAttribute: (k) => attrs[k], setAttribute: (k, v) => { attrs[k] = v; }, dataset: { key: '1|2' } });
+    assert.equal(attrs['aria-expanded'], 'true');
+    assert.equal(opened2.has('1|2'), true);
+  });
+
+  test('a guide window is marked as clipped only when it is, and only once however often its set is opened', () => {
+    // eslint-disable-next-line no-new-func
+    const clamp = new Function(fnBody('clampGuides') + SEP + 'return clampGuides;')();
+    const windowOf = (scrollHeight) => {
+      const marks = new Set();
+      const clicks = [];
+      return {
+        scrollHeight, clientHeight: 50, marks, clicks,
+        classList: { add: (c) => marks.add(c), contains: (c) => marks.has(c), toggle: () => {} },
+        addEventListener: (_, fn) => clicks.push(fn),
+      };
+    };
+    const clipped = windowOf(120);
+    const whole = windowOf(40);
+    const root = { querySelectorAll: () => [clipped, whole] };
+    clamp(root);
+    assert.equal(clipped.marks.has('clamped'), true, 'a window that overflows gets the gradient and the gesture');
+    assert.equal(whole.marks.has('clamped'), false, 'one that fits is already complete and gets neither');
+    clamp(root);
+    clamp(root);
+    assert.equal(clipped.clicks.length, 1, 'a click bound on every opening of the set toggles the window back as many times');
+  });
+
+  test('its strings are in the table with both halves, and take the same slots', () => {
+    const s = pageStrings('Dashboard.html');
+    const slots = (x) => (x.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
+    for (const key of ['ach.groupLeft', 'ach.groupOther']) {
+      assert.ok(s[key] && s[key][0] && s[key][1], `${key} is missing a half`);
+      assert.equal(slots(s[key][0]), slots(s[key][1]), `${key}: the two halves fill different slots`);
+    }
+    assert.equal(slots(s['ach.groupLeft'][0]), '{n}');
+  });
+});

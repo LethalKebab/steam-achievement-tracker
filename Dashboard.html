@@ -1587,6 +1587,65 @@
          height the tallest card in a row takes, its row-mates take with it */
       align-items: stretch;
     }
+    /* ---- The list of what is left, split by set ------------------------------
+       One section per set that has something left, in the strip's order. The heading is the set's
+       name and how many are left in it, and it hangs above its own grid, so a card never has to say
+       which set it is in. **The sets the account cannot earn come last and closed**: nothing in them
+       can be done, so each is one line until it is asked for, dashed and muted like its chip in the
+       strip.
+
+       **State is shape and position, not colour.** The caret turns, the cards are dashed, and the
+       toggle is a real button whose `aria-expanded` says it aloud; a closed grid is `hidden`, so it
+       is out of the tab order as well as out of sight. The toggle is taller than a pointer target
+       has to be (WCAG 2.2 asks for 24px, it is 28) so it does not have to be hit exactly. */
+    .ach-group + .ach-group { margin-top: var(--s4); }
+    .ach-group-head, .ach-group-toggle {
+      display: flex;
+      align-items: baseline;
+      gap: var(--s2);
+      min-width: 0;
+      margin-bottom: var(--s2);
+    }
+    .ach-group-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      color: var(--text-2);
+    }
+    .ach-group-n { flex: none; font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .ach-group-toggle {
+      align-items: center;
+      width: fit-content;
+      max-width: 100%;
+      min-height: 28px;
+      padding: var(--s1) var(--s2);
+      border: 0;
+      border-radius: var(--r-sm);
+      background: none;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .ach-group-toggle:hover { background: var(--surface-2); }
+    .ach-group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    /* A closed set has no grid under it, so the margin that separates a heading from its cards would
+       only widen the gap to the next section */
+    .ach-group-toggle[aria-expanded="false"] { margin-bottom: 0; }
+    /* The caret: a pure-CSS triangle, pointing down when open and right when closed. transform is a
+       compositor property, so opening one set does not relayout the list */
+    .ach-group-caret {
+      flex: none;
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--text-3);
+      transition: transform var(--dur-1) ease;
+    }
+    .ach-group-toggle[aria-expanded="false"] .ach-group-caret { transform: rotate(-90deg); }
+    .ach-group.is-off .ach-group-name, .ach-group.is-off .ach-name { color: var(--text-3); }
+    .ach-group.is-off .ach-item { background: none; border-style: dashed; }
     .ach-item {
       display: flex;
       gap: var(--s2);
@@ -2473,6 +2532,7 @@
         transform: none;
       }
       .bar-fill { transition: none; }
+      .ach-group-caret { transition: none; }
       /* The skeleton rows **do not pulse**, but they stay — they are not decoration, they are the sentence "waiting for Steam to answer" */
       .game-search-result.skeleton { animation: none; opacity: 0.6; }
       /* **The transition is on .chip and the two pseudo-elements, not on the container** —
@@ -3090,6 +3150,10 @@
       'ach.searchGuide':      ['搜索攻略', 'Search'],
       'ach.notWritten':       ['攻略里还未写这条', 'Not written up yet'],
       'ach.openInGuide':      ['在攻略中打开', 'Open in the guide'],
+      // The list of what is left, split by set: a heading says how many are left in the set, and
+      // achievements the server could not place in any set go under the last one
+      'ach.groupLeft':        ['剩余 {n} 个', '{n} remaining'],
+      'ach.groupOther':       ['其他', 'Other'],
 
       // ---- Achievement sets (the strip above a game's list) -------------------
       // Steam's own Chinese for these is 集合 and 基础游戏, so the page says what its Steam page says.
@@ -3565,6 +3629,14 @@
     let missingAchCache = {};
     /** How many times the cache has been emptied. A reply is written in only if this has not moved since its request went out */
     let missingAchGen = 0;
+    /**
+     * The sets a person has opened in a list of what is left, as `appid|set id`. Only the sets the
+     * account cannot earn start closed, and render() rebuilds the table on every filter and every
+     * keystroke in the search box, so what was opened is kept here rather than in the markup — or the
+     * next keystroke would close it again. Not emptied with the lists: it names no achievement, and a
+     * set that has gone is simply never asked for
+     */
+    const openSetGroups = new Set();
 
     function fmtPct(rate) {
       if (rate === null || rate === undefined) return '';
@@ -4541,16 +4613,48 @@
         });
       });
 
-      // The height is left entirely to the CSS max-height, and this only decides "was it
-      // genuinely clipped".
-      // **Measure everything first, then change the classes together** — reading scrollHeight
-      // and writing a class in the same loop forces one reflow per card, and a game with four
-      // hundred achievements can stall for a visible beat
-      const wins = Array.prototype.slice.call(body.querySelectorAll('.ach-guide'));
+      clampGuides(body);
+
+      // The sets the account cannot earn start closed; toggleSetGroup opens and closes them
+      body.querySelectorAll('.ach-group-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function() { toggleSetGroup(btn); });
+      });
+    }
+
+    /**
+     * Open or close one set in a list of what is left, in place, and remember which it is: the next
+     * filter or keystroke redraws the row from scratch, and the choice is read back from
+     * openSetGroups. **The state lives on the button** (`aria-expanded`), which is what a screen
+     * reader reads, and the grid it controls follows it (`hidden`)
+     */
+    function toggleSetGroup(btn) {
+      const open = btn.getAttribute('aria-expanded') !== 'true';
+      btn.setAttribute('aria-expanded', String(open));
+      const grid = document.getElementById(btn.getAttribute('aria-controls'));
+      if (grid) {
+        grid.hidden = !open;
+        // Measured only now: while the grid was hidden every guide window in it read as 0 high, so
+        // none could have been found clipped
+        if (open) clampGuides(grid);
+      }
+      if (open) openSetGroups.add(btn.dataset.key); else openSetGroups.delete(btn.dataset.key);
+    }
+
+    /**
+     * Decide which guide windows under `root` are genuinely clipped, and give those the gradient and
+     * the gesture. The height is left entirely to the CSS max-height.
+     *
+     * **Measure everything first, then change the classes together** — reading scrollHeight and
+     * writing a class in the same loop forces one reflow per card, and a game with four hundred
+     * achievements can stall for a visible beat. A window already marked is left alone, so a set that
+     * is opened, closed and opened again does not bind its click twice
+     */
+    function clampGuides(root) {
+      const wins = Array.prototype.slice.call(root.querySelectorAll('.ach-guide'));
       const overflowing = wins.map(function(el) { return el.scrollHeight > el.clientHeight + 1; });
       wins.forEach(function(el, i) {
         // Nothing is done to an unclipped one: it is already complete and gets neither the gradient nor the gesture
-        if (!overflowing[i]) return;
+        if (!overflowing[i] || el.classList.contains('clamped')) return;
         el.classList.add('clamped');
         // toggle rather than add — once expanded it has to be collapsible with another click. The single-argument flip is deliberate
         el.addEventListener('click', function() { el.classList.toggle('expanded'); });
@@ -4740,12 +4844,14 @@
       // The sets come from the game's own row, not from the list, so they are on screen while the
       // list is still loading, and when it failed
       const sets = renderSetStrip(game);
+      // The server splits the list by set only for a game with sets it could place the achievements in
+      const hasGroups = Boolean(data && Array.isArray(data.groups) && data.groups.length);
       let inner;
       if (!data || data.loading) {
         inner = '<div class="missing-header">' + escapeHtml(t('ach.loading')) + '</div>';
       } else if (data.error) {
         inner = '<div class="missing-header">' + escapeHtml(data.error) + '</div>';
-      } else if (data.missingCount === 0) {
+      } else if (data.missingCount === 0 && !hasGroups) {
         // With the sets drawn above, a line saying everything is unlocked only says it a second time
         inner = sets ? '' : '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
       } else {
@@ -4764,50 +4870,117 @@
         } else if (data.guide && data.guide.error) {
           head += ' · ' + data.guide.error;
         }
-        inner = '<div class="missing-header">' + escapeHtml(head) + '</div>'
-          + '<div class="ach-grid">' + newFirst(data.missing).map(function(a) {
-            const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
-            const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
-              + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' ' + escapeHtml(t('ach.searchGuide')) + '</a>';
-            let tail;
-            if (a.guide) {
-              // After stripping the restatement of the official name and description there may
-              // be nothing left (the guide copied only the official copy and wrote no method).
-              // In that case no window is drawn at all — the name, the description and the jump
-              // button are all still above, and an empty box only tells you "there should have
-              // been something here"
-              const substeps = a.guide.subSteps.map(function(s) {
-                return '<div class="ach-substep' + (s.checked ? ' done' : '') + '"'
-                  + ' style="margin-left:' + (s.depth * 12) + 'px">' + escapeHtml(s.text) + '</div>';
-              }).join('');
-              tail = (a.guide.text || substeps)
-                ? '<div class="ach-guide">'
-                  + (a.guide.text ? '<div class="ach-guide-text">' + escapeHtml(a.guide.text) + '</div>' : '')
-                  + substeps + '</div>'
-                : '';
-            } else if (hasGuide) {
-              tail = '<div class="ach-gap">' + escapeHtml(t('ach.notWritten')) + '</div>' + search;
-            } else {
-              tail = search;
-            }
-            // The jump button hangs beside the achievement name rather than inside the guide
-            // window — the window gets clipped, and this is the card's only action; putting it
-            // above also stops its position drifting with the guide's length
-            const jump = (a.guide && a.guide.url)
-              ? '<a class="ach-jump" href="' + escapeHtml(a.guide.url)
-                + '" target="_blank" rel="noopener" title="' + escapeHtml(t('ach.openInGuide')) + '">' + GEN_BOOK + '</a>'
+        // One card per achievement, drawn the same whether the list is flat or split by set
+        const card = function(a) {
+          const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
+          const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
+            + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' ' + escapeHtml(t('ach.searchGuide')) + '</a>';
+          let tail;
+          if (a.guide) {
+            // After stripping the restatement of the official name and description there may
+            // be nothing left (the guide copied only the official copy and wrote no method).
+            // In that case no window is drawn at all — the name, the description and the jump
+            // button are all still above, and an empty box only tells you "there should have
+            // been something here"
+            const substeps = a.guide.subSteps.map(function(s) {
+              return '<div class="ach-substep' + (s.checked ? ' done' : '') + '"'
+                + ' style="margin-left:' + (s.depth * 12) + 'px">' + escapeHtml(s.text) + '</div>';
+            }).join('');
+            tail = (a.guide.text || substeps)
+              ? '<div class="ach-guide">'
+                + (a.guide.text ? '<div class="ach-guide-text">' + escapeHtml(a.guide.text) + '</div>' : '')
+                + substeps + '</div>'
               : '';
-            return '<div class="ach-item">'
-              + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-              + '<div class="ach-body">'
-              + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name)
-                + (isNewAch(a) ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('ach.new')) + '</span>' : '')
-                + '</div>' + jump + '</div>'
-              + '<div class="ach-desc">' + escapeHtml(a.description) + '</div>' + tail + '</div>'
-              + '</div>';
-          }).join('') + '</div>';
+          } else if (hasGuide) {
+            tail = '<div class="ach-gap">' + escapeHtml(t('ach.notWritten')) + '</div>' + search;
+          } else {
+            tail = search;
+          }
+          // The jump button hangs beside the achievement name rather than inside the guide
+          // window — the window gets clipped, and this is the card's only action; putting it
+          // above also stops its position drifting with the guide's length
+          const jump = (a.guide && a.guide.url)
+            ? '<a class="ach-jump" href="' + escapeHtml(a.guide.url)
+              + '" target="_blank" rel="noopener" title="' + escapeHtml(t('ach.openInGuide')) + '">' + GEN_BOOK + '</a>'
+            : '';
+          return '<div class="ach-item">'
+            + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            + '<div class="ach-body">'
+            + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name)
+              + (isNewAch(a) ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('ach.new')) + '</span>' : '')
+              + '</div>' + jump + '</div>'
+            + '<div class="ach-desc">' + escapeHtml(a.description) + '</div>' + tail + '</div>'
+            + '</div>';
+        };
+        const list = hasGroups
+          ? renderMissingGroups(data, appid, card)
+          : '<div class="ach-grid">' + newFirst(data.missing).map(card).join('') + '</div>';
+        // With only sets the account cannot earn left, nothing is left to earn, so no heading says so
+        inner = (data.missingCount > 0 ? '<div class="missing-header">' + escapeHtml(head) + '</div>' : '') + list;
       }
       return '<tr class="missing-row"><td colspan="5">' + sets + inner + '</td></tr>';
+    }
+
+    /**
+     * The list of what is left when the server split it by set (`data.groups`): one section per set
+     * that has something left, in the order of the strip above. The sets the account can earn come
+     * first, each under a heading; the ones it cannot (a DLC it does not own) come last and closed,
+     * since nothing in them can be done. `card` draws one achievement — this only files them.
+     *
+     * **Every achievement is drawn once.** One whose set is not among the groups — a set the strip
+     * does not draw, or one no reading placed — goes under its own heading after the sets that can be
+     * earned: dropping it would hide something the count above includes.
+     *
+     * A closed set is a button and a hidden grid, out of the reading order and the tab order until it
+     * is opened. What was opened is in `openSetGroups`, keyed by game as well as by set, because set
+     * ids repeat from game to game. Names are escaped, the title too: they come from a developer
+     */
+    function renderMissingGroups(data, appid, card) {
+      const listed = data.groups.map(function(g) { return g.id; });
+      const itemsOf = function(g) {
+        return newFirst(data.missing.filter(function(a) { return a.setId === g.id; }));
+      };
+      const nameOf = function(g) { return g.base ? t('sets.base') : g.name; };
+      // A section a person can act on: a heading with how many are left, and the grid under it. It is
+      // a named group as well, since the heading is a div and says nothing to a screen reader's list
+      // of landmarks by itself
+      const section = function(name, items) {
+        const left = t('ach.groupLeft', { n: items.length });
+        return '<div class="ach-group" role="group" aria-label="' + escapeHtml(name + ', ' + left) + '">'
+          + '<div class="ach-group-head"><span class="ach-group-name">' + escapeHtml(name) + '</span>'
+          + '<span class="ach-group-n">' + escapeHtml(left) + '</span></div>'
+          + '<div class="ach-grid">' + items.map(card).join('') + '</div></div>';
+      };
+
+      const earnable = data.groups.filter(function(g) { return g.earnable; }).map(function(g) {
+        return section(nameOf(g), itemsOf(g));
+      }).join('');
+
+      const loose = newFirst(data.missing.filter(function(a) { return listed.indexOf(a.setId) === -1; }));
+      const other = loose.length ? section(t('ach.groupOther'), loose) : '';
+
+      const closed = data.groups.filter(function(g) { return !g.earnable; }).map(function(g) {
+        const key = appid + '|' + g.id;
+        const isOpen = openSetGroups.has(key);
+        const items = itemsOf(g);
+        const name = nameOf(g);
+        // Only a DLC set is called one that is not owned: a set the account cannot earn for another
+        // reason has no word here, as on its chip in the strip
+        const state = g.dlc ? t('sets.notOwned') : '';
+        const spoken = name + ', ' + items.length + (state ? ', ' + state : '');
+        // Both ids are text the database holds, so this is escaped like the rest
+        const gridId = escapeHtml('ach-set-' + appid + '-' + g.id);
+        return '<div class="ach-group is-off">'
+          + '<button type="button" class="ach-group-toggle" aria-expanded="' + isOpen + '" aria-controls="' + gridId + '"'
+          + ' data-key="' + escapeHtml(key) + '"'
+          + ' title="' + escapeHtml(name + (state ? ' · ' + state : '')) + '" aria-label="' + escapeHtml(spoken) + '">'
+          + '<span class="ach-group-caret"></span><span class="ach-group-name">' + escapeHtml(name) + '</span>'
+          + '<span class="ach-group-n">' + items.length + '</span></button>'
+          + '<div class="ach-grid" id="' + gridId + '"' + (isOpen ? '' : ' hidden') + '>' + items.map(card).join('') + '</div>'
+          + '</div>';
+      }).join('');
+
+      return earnable + other + closed;
     }
 
     /**

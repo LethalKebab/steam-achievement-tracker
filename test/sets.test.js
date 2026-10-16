@@ -18,7 +18,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  parseGameSets, parseUserSets, buildSetRows, displaySets, completedUnits, groupSetsByGame,
+  parseGameSets, parseUserSets, buildSetRows, displaySets, completedUnits, groupSetsByGame, groupMissing,
 } from '../lib/sets.js';
 
 const group = (id, name, extra = {}) => ({
@@ -126,8 +126,8 @@ describe('parseGameSets', () => {
   });
 
   test('a reply that names no set is an empty list rather than null; what that means is for the caller to decide', () => {
-    assert.deepEqual(parseGameSets({ response: {} }), { sets: [] });
-    assert.deepEqual(parseGameSets(reply([])), { sets: [] });
+    assert.deepEqual(parseGameSets({ response: {} }), { sets: [], members: new Map() });
+    assert.deepEqual(parseGameSets(reply([])), { sets: [], members: new Map() });
   });
 });
 
@@ -424,5 +424,118 @@ describe('groupSetsByGame', () => {
 
   test('no rows is an empty map', () => {
     assert.equal(groupSetsByGame([]).size, 0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Which set each achievement is in
+// ---------------------------------------------------------------------------
+
+describe('parseGameSets: the set of each achievement', () => {
+  const ach = (name, groupid, extra = {}) => ({ internal_name: name, internal_key: 1, groupid, ...extra });
+  const replyWith = (groups, achievements) => ({ response: { achievements, schema_version: 32, groups } });
+  const TWO = [group(0, ''), group(1, 'Pack', { dlcappid: 2561440 })];
+
+  test('reads the set of each achievement by its internal name', () => {
+    const { members } = parseGameSets(replyWith(TWO, [ach('A', 0), ach('B', 1), ach('C', 1)]));
+    assert.ok(members instanceof Map);
+    assert.deepEqual([...members], [['A', 0], ['B', 1], ['C', 1]]);
+  });
+
+  test('an achievement with no group id is in the base set, as any field Steam leaves out is its default', () => {
+    const { members } = parseGameSets(replyWith(TWO, [ach('A', undefined)]));
+    assert.deepEqual([...members], [['A', 0]]);
+  });
+
+  test('an achievement in a set the reply does not list is left out, since there is nothing to file it under', () => {
+    const { members } = parseGameSets(replyWith(TWO, [ach('A', 0), ach('X', 7)]));
+    assert.deepEqual([...members.keys()], ['A']);
+  });
+
+  test('a name seen twice keeps its first set', () => {
+    const { members } = parseGameSets(replyWith(TWO, [ach('A', 1), ach('A', 0)]));
+    assert.deepEqual([...members], [['A', 1]]);
+  });
+
+  test('a name or an id that cannot be Steam\'s is dropped, and the rest of the list is still read', () => {
+    const { members } = parseGameSets(replyWith(TWO, [
+      ach('', 0), ach(null, 0), ach(42, 0), ach('x'.repeat(201), 0),
+      ach('NEG', -1), ach('FRAC', 0.5), ach('HUGE', 2 ** 40), ach('STR', '1'),
+      null, 'not an object', ach('OK', 1),
+    ]));
+    assert.deepEqual([...members], [['OK', 1]]);
+  });
+
+  test('a reply with no achievements, or a list that is not one, has no members and is still a reply', () => {
+    for (const achievements of [undefined, [], 'x', { A: 0 }]) {
+      const parsed = parseGameSets(replyWith(TWO, achievements));
+      assert.equal(parsed.members.size, 0, JSON.stringify(achievements));
+      assert.equal(parsed.sets.length, 2, 'the sets are read whatever the list holds');
+    }
+  });
+
+  test('a list longer than any game has records none, so a broken reply cannot fill the table', () => {
+    const many = Array.from({ length: 10001 }, (_, i) => ach('N' + i, 0));
+    const parsed = parseGameSets(replyWith(TWO, many));
+    assert.equal(parsed.members.size, 0);
+    assert.equal(parsed.sets.length, 2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where a game's unfinished achievements go
+// ---------------------------------------------------------------------------
+
+describe('groupMissing', () => {
+  /** A set as `displaySets` returns it */
+  const drawn = (id, name, extra = {}) => ({
+    id, base: id === 0, name, dlc: false, earnable: true, done: 0, need: 10, complete: false, completedAt: null, ...extra,
+  });
+  const item = (name, setId) => ({ name, setId });
+
+  test('is null when the game draws no sets, or when no achievement says which set it is in', () => {
+    assert.equal(groupMissing([item('A', 0)], null), null);
+    assert.equal(groupMissing([item('A', 0)], []), null);
+    assert.equal(groupMissing([item('A', null), item('B', null)], [drawn(0, ''), drawn(1, 'P')]), null,
+      'nothing to file under: the list stays flat rather than becoming one group');
+    assert.equal(groupMissing([], [drawn(0, ''), drawn(1, 'P')]), null);
+  });
+
+  test('lists each set that has something left, in the strip\'s order, with how many', () => {
+    const grouping = groupMissing(
+      [item('A', 1), item('B', 0), item('C', 1)],
+      [drawn(0, ''), drawn(1, 'Pack'), drawn(2, 'Finished')]
+    );
+    assert.deepEqual(grouping.groups, [
+      { id: 0, base: true, name: '', dlc: false, earnable: true, count: 1 },
+      { id: 1, base: false, name: 'Pack', dlc: false, earnable: true, count: 2 },
+    ]);
+  });
+
+  test('counts what can be earned on its own, and what the account cannot earn apart from it', () => {
+    const grouping = groupMissing(
+      [item('A', 0), item('B', 0), item('C', 0), item('D', 8), item('E', 8)],
+      [drawn(0, ''), drawn(8, 'Khans', { earnable: false, dlc: true })]
+    );
+    assert.equal(grouping.earnableCount, 3);
+    assert.equal(grouping.notOwnedCount, 2);
+    assert.deepEqual(grouping.groups.map((g) => [g.id, g.earnable, g.count]), [[0, true, 3], [8, false, 2]]);
+  });
+
+  test('an achievement in no drawn set is still something left to earn, and has no group of its own', () => {
+    const grouping = groupMissing(
+      [item('A', 0), item('X', null), item('Y', 9)],
+      [drawn(0, ''), drawn(1, 'Pack')]
+    );
+    assert.deepEqual(grouping.groups.map((g) => g.id), [0]);
+    assert.equal(grouping.earnableCount, 3, 'the one in a set that is not drawn, and the one with no set, are not lost');
+    assert.equal(grouping.notOwnedCount, 0);
+  });
+
+  test('a set that holds only what is left of it counts there and nowhere else', () => {
+    const grouping = groupMissing([item('A', 8)], [drawn(0, ''), drawn(8, 'Khans', { earnable: false })]);
+    assert.equal(grouping.earnableCount, 0);
+    assert.equal(grouping.notOwnedCount, 1);
+    assert.deepEqual(grouping.groups.map((g) => g.id), [8]);
   });
 });

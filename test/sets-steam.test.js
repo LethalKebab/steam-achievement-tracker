@@ -67,6 +67,8 @@ describe('fetchAchievementSets', () => {
       assert.equal(seen[0].url.includes(KEY), false, 'the game\'s sets are public; a key in the address is a secret for nothing');
       assert.equal(seen[0].url.includes(SID), false);
       assert.deepEqual(out.sets.map((s) => [s.id, s.name, s.dlcAppid]), [[0, '', null], [1, 'The Pale Reach', '2561440']]);
+      assert.deepEqual([...out.members], [['A', 1]],
+        'the same reply files each achievement under its set, so which set it is in costs no request of its own');
     });
   });
 
@@ -94,7 +96,7 @@ describe('fetchAchievementSets', () => {
 
   test('a reply of "nothing for this app" is an empty list, which is not a failure', async () => {
     await withFetch(() => json({ response: {} }), async () => {
-      assert.deepEqual(await client().fetchAchievementSets('1', 'english'), { sets: [] });
+      assert.deepEqual(await client().fetchAchievementSets('1', 'english'), { sets: [], members: new Map() });
     });
   });
 });

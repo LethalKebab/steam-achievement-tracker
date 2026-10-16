@@ -26,8 +26,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  openDb, insertGame, updateGameStats, allGames, getGame, deleteGame,
-  replaceAchievementSets, achievementSetsFor, allAchievementSets, countGamesWithSets,
+  openDb, insertGame, updateGameStats, allGames, getGame, deleteGame, replaceAchievements,
+  replaceAchievementSets, achievementSetsFor, achievementSetMembersFor, allAchievementSets, countGamesWithSets,
 } from '../lib/db.js';
 import {
   selectSetsTargets, syncAchievementSets, fullSync, computeAgcrStats, SETS_STALE_DAYS, SETS_BREAKER,
@@ -61,9 +61,10 @@ const OWN = (done = 0, extra = {}) => ({ achievable: true, done, completed: fals
 
 /**
  * A Steam stub for the sets phase. `sets[appid]` is the English reply; `names[appid]` maps set id to
- * its Chinese name. `fail` lists appids whose requests answer null, and `failOn` names which request.
+ * its Chinese name; `members[appid]` lists `[internal name, set id]` for the achievements the reply
+ * files under a set. `fail` lists appids whose requests answer null, and `failOn` names which request.
  */
-function fakeSteam({ sets = {}, names = {}, progress = {}, fail = [], failOn = null } = {}) {
+function fakeSteam({ sets = {}, names = {}, progress = {}, members = {}, fail = [], failOn = null } = {}) {
   const asked = [];
   const down = (appid, kind) => fail.includes(appid) && (!failOn || failOn === kind);
   return {
@@ -73,7 +74,10 @@ function fakeSteam({ sets = {}, names = {}, progress = {}, fail = [], failOn = n
       asked.push(`sets:${appid}:${language}`);
       if (down(appid, language)) return null;
       const base = sets[appid] ?? [S(0, '')];
-      return { sets: language === 'schinese' ? base.map((s) => ({ ...s, name: names[appid]?.[s.id] ?? s.name })) : base };
+      return {
+        sets: language === 'schinese' ? base.map((s) => ({ ...s, name: names[appid]?.[s.id] ?? s.name })) : base,
+        members: new Map(members[appid] ?? []),
+      };
     },
     async fetchAchievementSetProgress(appid) {
       asked.push(`progress:${appid}`);
@@ -678,5 +682,228 @@ describe('getDashboardData', () => {
     assert.equal(withSets.completedCount, 2, 'and the finished set');
     assert.deepEqual(strip(withSets), strip(without),
       'the unlocked total, the average and every game row stay on the flat list');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Which achievement is in which set
+// ---------------------------------------------------------------------------
+
+describe('the set of each achievement', () => {
+  const MEMBERS = new Map([['A', 0], ['B', 1], ['C', 1]]);
+  const members = (db, appid) => [...achievementSetMembersFor(db, appid)];
+
+  test('is stored with the sets, in the same write', () => {
+    const db = openDb(':memory:');
+    game(db, '1');
+    assert.equal(replaceAchievementSets(db, '1', [ROW(0), ROW(1)], '2026-10-15T12:00:00.000Z', MEMBERS), true);
+    assert.deepEqual(members(db, '1'), [['A', 0], ['B', 1], ['C', 1]]);
+  });
+
+  test('a new reading replaces the last one, and an achievement that moved to another set is in that one', () => {
+    const db = openDb(':memory:');
+    game(db, '1');
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], undefined, MEMBERS);
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], undefined, new Map([['A', 1], ['D', 0]]));
+    assert.deepEqual(members(db, '1').sort(), [['A', 1], ['D', 0]], 'B and C left the list, so they leave the table');
+  });
+
+  test('a game whose sets are cleared loses them too, and a write with no sets ignores the members it is handed', () => {
+    const db = openDb(':memory:');
+    game(db, '1');
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], undefined, MEMBERS);
+    replaceAchievementSets(db, '1', [], undefined, MEMBERS);
+    assert.deepEqual(members(db, '1'), [], 'with no set to file them under, they would be rows nothing can draw');
+  });
+
+  test('a game that is not in the table writes nothing, members included', () => {
+    const db = openDb(':memory:');
+    assert.equal(replaceAchievementSets(db, '404', [ROW(0), ROW(1)], undefined, MEMBERS), false);
+    assert.deepEqual(members(db, '404'), []);
+  });
+
+  test("one game's members are not another's", () => {
+    const db = openDb(':memory:');
+    game(db, '1'); game(db, '2');
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], undefined, MEMBERS);
+    replaceAchievementSets(db, '2', [ROW(0), ROW(1)], undefined, new Map([['A', 1]]));
+    assert.equal(members(db, '1').length, 3);
+    assert.deepEqual(members(db, '2'), [['A', 1]]);
+  });
+
+  test('are deleted with the game', () => {
+    const db = openDb(':memory:');
+    game(db, '1'); game(db, '2');
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], undefined, MEMBERS);
+    replaceAchievementSets(db, '2', [ROW(0), ROW(1)], undefined, MEMBERS);
+    deleteGame(db, '1');
+    assert.deepEqual(members(db, '1'), []);
+    assert.equal(members(db, '2').length, 3, 'the other game keeps its own');
+  });
+
+  test('a write that fails halfway leaves the last reading whole, members and all', () => {
+    const db = openDb(':memory:');
+    game(db, '1');
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], undefined, MEMBERS);
+    // A set id that is null breaks the INSERT of a row after the old rows are already gone
+    assert.throws(() => replaceAchievementSets(db, '1', [ROW(0), { ...ROW(1), setId: null }], undefined, new Map([['Z', 0]])));
+    assert.equal(achievementSetsFor(db, '1').length, 2, 'the rows came back');
+    assert.deepEqual(members(db, '1').sort(), [['A', 0], ['B', 1], ['C', 1]], 'and so did the members');
+  });
+
+  test('a member that cannot be written rolls the whole reading back: the rows, the stamp and the members', () => {
+    const db = openDb(':memory:');
+    game(db, '1');
+    const before = '2026-10-10T00:00:00.000Z';
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], before, MEMBERS);
+    // The same name twice, as pairs: the second insert breaks the primary key after the rows are written
+    assert.throws(() => replaceAchievementSets(db, '1', [ROW(0)], '2026-10-16T00:00:00.000Z', [['A', 0], ['A', 1]]));
+    assert.equal(achievementSetsFor(db, '1').length, 2, 'the rows of the last reading are back');
+    assert.equal(getGame(db, '1').sets_checked_at, before, 'and so is the stamp');
+    assert.deepEqual(members(db, '1').sort(), [['A', 0], ['B', 1], ['C', 1]], 'and the members');
+  });
+
+  test('the sync stores what the English reply files under each set', async () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    const steam = fakeSteam({ sets: { 1: TWO_SETS }, members: { 1: [['A', 0], ['B', 1]] } });
+    await syncAchievementSets(db, steam);
+    assert.deepEqual(members(db, '1').sort(), [['A', 0], ['B', 1]]);
+  });
+
+  test('a game that answers one group has none, and loses any it had', async () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], ago(10), MEMBERS);
+    const steam = fakeSteam({ sets: { 1: [S(0, '', { total: 4, need: 4 })] }, members: { 1: [['A', 0]] } });
+    await syncAchievementSets(db, steam);
+    assert.deepEqual(members(db, '1'), []);
+    assert.equal(achievementSetsFor(db, '1').length, 0);
+  });
+
+  test('a game left unread keeps the members it had', async () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    replaceAchievementSets(db, '1', [ROW(0), ROW(1)], ago(10), MEMBERS);
+    const steam = fakeSteam({ sets: { 1: TWO_SETS }, members: { 1: [['Z', 0]] }, fail: ['1'], failOn: 'progress' });
+    await syncAchievementSets(db, steam);
+    assert.deepEqual(members(db, '1').sort(), [['A', 0], ['B', 1], ['C', 1]], 'a reading that could not be completed replaces nothing');
+  });
+});
+
+describe('selectSetsTargets: a rise in the achievement total', () => {
+  const asked = (db) => selectSetsTargets(db).map((g) => g.appid).sort();
+
+  test('asks a game again when its total rose after it was last read, whether or not it holds sets', () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    game(db, '2', { achieved: 1, total: 4 });
+    stampSets(db, '1', ago(2));
+    storeSets(db, '2', ago(2));
+    assert.deepEqual(asked(db), [], 'nothing is due: both were read two days ago');
+    updateGameStats(db, '1', { achieved: 1, total: 6 });
+    updateGameStats(db, '2', { achieved: 1, total: 6 });
+    assert.deepEqual(asked(db), ['1', '2'], 'a patch added achievements, and a DLC set is the usual way one does');
+  });
+
+  test('does not when the rise came before the last reading, so the reading that saw it is not repeated', () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    stampSets(db, '1', ago(1));
+    db.prepare('UPDATE games SET new_ach_date = ? WHERE appid = ?').run(ago(3), '1');
+    assert.deepEqual(asked(db), []);
+  });
+
+  test('is read again once and then rests: the reading that follows the rise ends it', async () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    stampSets(db, '1', ago(2));
+    updateGameStats(db, '1', { achieved: 1, total: 6 });
+    assert.deepEqual(asked(db), ['1']);
+    await syncAchievementSets(db, fakeSteam({ sets: { 1: [S(0, '', { total: 6, need: 6 })] } }));
+    assert.deepEqual(asked(db), [], 'it was stamped by the reading, which is later than the rise');
+  });
+
+  test('a game that never grew is left to the weekly re-read', () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 1, total: 4 });
+    stampSets(db, '1', ago(SETS_STALE_DAYS - 1));
+    assert.deepEqual(asked(db), []);
+    stampSets(db, '1', ago(SETS_STALE_DAYS + 1));
+    assert.deepEqual(asked(db), ['1']);
+  });
+
+  test('is not charged to the capped group, so a rise is never left waiting behind a backlog', () => {
+    const db = openDb(':memory:');
+    for (let i = 1; i <= 5; i++) { game(db, String(i), { achieved: 1, total: 4 }); stampSets(db, String(i), ago(40 + i)); }
+    // Stale as well as grown, and the newest of the stale ones: in the capped group it would lose to
+    // every game with an older stamp
+    game(db, '9', { achieved: 1, total: 4 });
+    stampSets(db, '9', ago(SETS_STALE_DAYS + 3));
+    db.prepare('UPDATE games SET new_ach_date = ? WHERE appid = ?').run(ago(1), '9');
+    const picked = selectSetsTargets(db, { refreshBudget: 1 }).map((g) => g.appid);
+    assert.ok(picked.includes('9'), 'the grown game was squeezed out by a budget that is for the stale ones');
+    assert.equal(picked.length, 2, 'one grown, and the oldest stale one within the budget of 1');
+  });
+});
+
+describe('getMissingAchievements for a game with sets', () => {
+  const ach = (apiName, nameEn = apiName) => ({ apiName, nameCn: apiName, nameEn, description: 'd' });
+  const NAMES = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+  const FILED = new Map([['A', 0], ['B', 0], ['C', 0], ['D', 0], ['E', 1], ['F', 1], ['G', 2], ['H', 2]]);
+
+  /** Base game A-D, an owned pack E-F, and a pack the account does not own G-H. Unlocked: A and E */
+  function fixture({ members = FILED } = {}) {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 2, total: 8 });
+    replaceAchievements(db, '1', NAMES.map((n) => ach(n)));
+    replaceAchievementSets(db, '1', [
+      ROW(0, { nameEn: '', nameCn: '', total: 4, need: 4, done: 1 }),
+      ROW(1, { nameEn: 'Pale Reach', nameCn: '皓寒之渚', dlcAppid: '2561440', total: 2, need: 2, done: 1 }),
+      ROW(2, { nameEn: 'Iron Rig', nameCn: '铁钻机', dlcAppid: '2561450', total: 2, need: 2, achievable: false }),
+    ], undefined, members);
+    return db;
+  }
+  const api = (db, uiLanguage = 'en') => createApi({
+    db,
+    config: { uiLanguage, language: 'english' },
+    steam: { fetchPlayerAchievements: async () => ({ achievements: NAMES.map((apiname) => ({ apiname, achieved: apiname === 'A' || apiname === 'E' ? 1 : 0 })) }) },
+  });
+
+  test('files each unfinished achievement under its set, in the order the strip draws them', async () => {
+    const r = await api(fixture()).getMissingAchievements('1');
+    assert.deepEqual(r.groups.map((g) => [g.id, g.earnable, g.count]), [[0, true, 3], [1, true, 1], [2, false, 2]]);
+    assert.deepEqual(Object.fromEntries(r.missing.map((m) => [m.name, m.setId])), { B: 0, C: 0, D: 0, F: 1, G: 2, H: 2 });
+  });
+
+  test('says how many can be earned, and how many sit in a set the account cannot earn', async () => {
+    const r = await api(fixture()).getMissingAchievements('1');
+    assert.equal(r.total, 8);
+    assert.equal(r.missingCount, 4, 'three in the base game and one in the pack, not the two that cannot be earned');
+    assert.equal(r.notOwnedCount, 2);
+  });
+
+  test('names the sets in the interface language', async () => {
+    const db = fixture();
+    assert.deepEqual((await api(db, 'zh').getMissingAchievements('1')).groups.map((g) => g.name), ['', '皓寒之渚', '铁钻机']);
+    assert.deepEqual((await api(db, 'en').getMissingAchievements('1')).groups.map((g) => g.name), ['', 'Pale Reach', 'Iron Rig']);
+  });
+
+  test('a game without sets is the flat list', async () => {
+    const db = openDb(':memory:');
+    game(db, '1', { achieved: 2, total: 8 });
+    replaceAchievements(db, '1', NAMES.map((n) => ach(n)));
+    const r = await api(db).getMissingAchievements('1');
+    assert.equal(r.groups, null);
+    assert.equal(r.missingCount, 6);
+    assert.equal(r.notOwnedCount, 0);
+    assert.ok(r.missing.every((m) => m.setId === null));
+  });
+
+  test('a game whose reading carries no members yet is the flat list too, rather than one lump called a set', async () => {
+    const r = await api(fixture({ members: new Map() })).getMissingAchievements('1');
+    assert.equal(r.groups, null);
+    assert.equal(r.missingCount, 6, 'counted as before: nothing says which of these can be earned');
+    assert.equal(r.notOwnedCount, 0);
   });
 });

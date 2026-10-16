@@ -23,6 +23,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 | `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
 | `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL, and when each one first appeared |
 | `achievement_sets` | the sets a developer has split a game's achievements into (the base game, modes, each DLC), and how far along you are in each |
+| `achievement_set_members` | which set each achievement of a game with sets is in, so the list of what is left can be split by set |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
 | `hltb` | appid → its HowLongToBeat entry and how many hours finishing it takes |
 | `hltb_history` | one row per reading taken from HowLongToBeat, so a figure's movement can be measured rather than guessed at |
@@ -54,7 +55,7 @@ Six decisions worth knowing before you write queries (`sets_checked_at` has its 
   UPDATE games SET stats_checked_at = NULL WHERE appid = '...';
   ```
 
-- **`perfect_lost_date`, `new_ach_date` and `ach_added_date` record things that happened, not things that are true.** They feed the 🔔 notifications on the Dashboard: a game you had at 100% that the developer then added achievements to, any game whose achievement total went up, and a game Steam previously reported as having no achievement system that now has one. One event is one moment: a finished game gaining achievements gets the same timestamp in `perfect_lost_date` and `new_ach_date`, and the bell lists it once.
+- **`perfect_lost_date`, `new_ach_date` and `ach_added_date` record things that happened, not things that are true.** They feed the 🔔 notifications on the Dashboard: a game you had at 100% that the developer then added achievements to, any game whose achievement total went up, and a game Steam previously reported as having no achievement system that now has one. One event is one moment: a finished game gaining achievements gets the same timestamp in `perfect_lost_date` and `new_ach_date`, and the bell lists it once. `new_ach_date` has a second reader: the sync asks a game for its sets again when the stamp is later than its last sets reading, so what the stamp means cannot change without that.
 
   Both are stamped inside `updateGameStats`, which is the only moment the previous values are still visible. A row that has dropped below 100% looks exactly like a row that was never at 100%, and `has_achievements` is overwritten with `1` the instant new stats arrive — so neither event can be reconstructed afterwards from the row itself. That is also why the notifications start out empty on an existing database: nothing recorded these events before the columns existed, and there is no way to backfill them.
 
@@ -130,9 +131,9 @@ A developer can split a game's achievements into **sets**: the base game, a mode
 
 - **Nothing here changes `games.total`, `achieved` or the average completion rate.** Those still come from the flat list of every achievement, DLC you do not own included. Steam's own achievements page divides by what you can earn instead, so a game with DLC you do not own reads lower here than there.
 
-- **The Dashboard's Completed count is the one figure computed from these rows.** It counts finished games and finished sets, one each. A game with sets adds one for every set whose `completed` is 1, whose `visible` is not 0 and whose `total` is above 0; any other game adds one when `achieved` equals `total` and `total` is above 0. A game with sets is judged by them alone, so one that is short of 100% on the flat list can still add units. Two rows are the exception: a game with `has_achievements` 0 adds nothing, and a locked row keeps counting the sets it holds, which the sync no longer refreshes. Games marked Unvetted add nothing.
+- **The Dashboard's Completed count is computed from these rows, and so is the remaining count in a game's panel** (described under `achievement_set_members` below). The Completed count counts finished games and finished sets, one each. A game with sets adds one for every set whose `completed` is 1, whose `visible` is not 0 and whose `total` is above 0; any other game adds one when `achieved` equals `total` and `total` is above 0. A game with sets is judged by them alone, so one that is short of 100% on the flat list can still add units. Two rows are the exception: a game with `has_achievements` 0 adds nothing, and a locked row keeps counting the sets it holds, which the sync no longer refreshes. Games marked Unvetted add nothing.
 
-The sets are asked for in the sync's fifth phase, and only a game Steam reports with sets costs more than one request. A game is asked when it has never been, when it has sets and its stats were read since (progress moves when you play), and when its last reading is a week old (capped per run, oldest first, so they do not all fall due together). A game whose reading cannot be completed — Steam refuses the request for your own progress, or answers with no set at all — is left unread and asked again on the next sync. Deleting a game from the Dashboard deletes its sets. To force one game to be read again:
+The sets are asked for in the sync's fifth phase, and only a game Steam reports with sets costs more than one request. A game is asked when it has never been, when it has sets and its stats were read since (progress moves when you play), when its achievement total rose since it was last asked (a patch that adds achievements is how a DLC set arrives, and a game with no sets is not covered by the rule before), and when its last reading is a week old (capped per run, oldest first, so they do not all fall due together). A game whose reading cannot be completed — Steam refuses the request for your own progress, or answers with no set at all — is left unread and asked again on the next sync. Deleting a game from the Dashboard deletes its sets. To force one game to be read again:
 
 ```sql
 UPDATE games SET sets_checked_at = NULL WHERE appid = '...';
@@ -146,6 +147,27 @@ SELECT g.name, s.set_id, s.name_en, s.dlc_appid, s.done, s.need, s.achievable, s
   JOIN games g ON g.appid = s.appid
  WHERE s.total > 0
  ORDER BY g.name, s.position, s.set_id;
+```
+
+### `achievement_set_members` columns
+
+`appid` + `api_name` (primary key together) / `set_id`
+
+Which set each achievement of a game with sets is in, by its internal name (`achievements.api_name`). It comes from the same reply as the sets, which files every achievement under its `groupid`, so it costs no request of its own. It is replaced in the same transaction as `achievement_sets`: a reading that fails leaves both as they were, and a game that loses its sets loses these too.
+
+- **A table of its own rather than a column of `achievements`.** That table is written by the schema phase, which skips a finished game and keeps its rows across refreshes. These come from another phase and are replaced whole.
+- **Rows exist only for a game that holds sets**, and only for achievements the reply files under a set it lists. An achievement that is not here was placed by no reading, and the list of what is left shows it under 「其他」 rather than dropping it.
+- **A game can hold sets and no members** — a reply with no list of achievements has none to record — and its list is then the flat one.
+- **The list of what is left follows the sets as a view, and stores nothing.** For a game with sets, `missingCount` in `getMissingAchievements` leaves out the achievements of drawn sets you cannot earn and reports them as `notOwnedCount`. An achievement in a set the Dashboard does not draw (developer-only, or archived with no progress of yours) is counted as one you can earn, and is listed under 「其他」.
+- Deleting a game deletes them, and the backup carries the table.
+
+How many achievements each set holds, for one game:
+
+```sql
+SELECT set_id, COUNT(*) AS achievements
+  FROM achievement_set_members
+ WHERE appid = '...'
+ GROUP BY set_id;
 ```
 
 ### `hltb` columns
