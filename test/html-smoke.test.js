@@ -3803,6 +3803,18 @@ describe('the list of what is left, split by set', () => {
     assert.match(html, /<div class="ach-grid" id="[^"]*" hidden>/, 'the grid keeps an id that is one value');
   });
 
+  test('the toggle keeps a visible focus ring, a pointer-sized target, a clear scroll position and no motion when it is asked for', () => {
+    // The rule that starts a line: the one before it shares its first selector with the heading's
+    const css = read('Dashboard.html').match(/^\s*\.ach-group-toggle \{[^}]*\}/m)?.[0] ?? '';
+    assert.match(css, /scroll-margin-top:\s*calc\(var\(--topbar-h\)/,
+      'focus scrolls the toggle to the top edge, where the frozen bars cover it');
+    assert.match(css, /min-height:\s*28px/, 'a pointer target under WCAG 2.2\'s 24px minimum is hard to hit');
+    assert.match(read('Dashboard.html'), /\.ach-group-toggle:focus-visible \{[^}]*outline:\s*2px solid var\(--accent\)/,
+      'a keyboard user cannot see which toggle has focus');
+    assert.match(read('Dashboard.html'), /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.ach-group-caret \{ transition: none; \}/,
+      'the caret still turns for somebody who has asked for no motion');
+  });
+
   test('every section is a named group, so a screen reader can tell where one set ends', () => {
     const html = draw({ groups: [group(0, ''), group(1, 'Pack')], missing: [item('A', 0), item('B', 1), item('Q', null)] });
     assert.equal(count(html, 'role="group"'), 3, 'the base game, the pack and what no set holds');

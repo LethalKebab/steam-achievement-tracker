@@ -1626,6 +1626,10 @@
       font: inherit;
       text-align: left;
       cursor: pointer;
+      /* The top bar and the table header are sticky. Reaching a toggle with Shift+Tab scrolls it to the
+         top edge of the viewport, which is under both; this keeps it clear (WCAG 2.2 AA, Focus Not
+         Obscured). The header is about 34px tall and the rest is margin */
+      scroll-margin-top: calc(var(--topbar-h) + 48px);
     }
     .ach-group-toggle:hover { background: var(--surface-2); }
     .ach-group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
