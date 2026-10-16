@@ -8,9 +8,10 @@
  * and in this project the same question had four answers (see the table in
  * `lib/pathsafe.js`), two of which missed it.
  *
- * So there are two layers here: the predicate itself, and **whether all four callers
- * genuinely route through it** — the predicate being extracted while one place still
- * writes its own is the only meaningful regression for this fix.
+ * So there are two layers here: the predicate itself, and **whether every caller
+ * genuinely routes through it** — the predicate being extracted while one place still
+ * writes its own is the only meaningful regression for this fix. (The draft path a guide
+ * is written under has its own test, in `guideadd-run.test.js`: it needs a whole run.)
  */
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';

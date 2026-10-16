@@ -448,7 +448,7 @@ describe('begin must not erase the previous result either', () => {
       // Raised through msgError, so the entry travels with the sentence
       s.end(msgError('gen.noGroups'));
 
-      assert.match(s.snapshot().finished[0].error, /挑不出成形的分组/);
+      assert.match(s.snapshot().finished[0].error, /没有成形的分组/);
       setMessageLanguage('en');
       assert.match(s.snapshot().finished[0].error, /No usable grouping/);
     } finally {

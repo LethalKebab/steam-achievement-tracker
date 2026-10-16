@@ -53,6 +53,7 @@ Optional. The AI searches the web and drafts an achievement guide, and what it w
 ### 5. Rewrites in place, and backs out safely
 
 * **Only what you picked**: ask the AI to revise a few entries and only those are rewritten. Every other byte survives untouched, including paragraphs you edited by hand.
+* **After a game update**: achievements an update added can be written into the guide you already have, each under the section it belongs to. Nothing else in the guide is touched.
 * **Backed up twice**: the original is kept behind the backup button at the end of the game's row before anything is overwritten, and again when the new version is written back. You can always change your mind.
 
 ```mermaid

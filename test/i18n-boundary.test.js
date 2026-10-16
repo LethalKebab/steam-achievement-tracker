@@ -41,6 +41,7 @@ import {
   buildRegroupPrompt, regroupSystemFor, chunkDefs,
 } from '../lib/guidegen.js';
 import { buildPatchFeedback } from '../lib/guidepatch.js';
+import { placementSystemFor, buildPlacementPrompt } from '../lib/guideplace.js';
 import { clusterConstraint, sameKindClusters } from '../lib/guidecluster.js';
 import { MESSAGES, setMessageLanguage } from '../lib/messages.js';
 import { CLI_MESSAGES, clog } from '../lib/cli-messages.js';
@@ -503,6 +504,15 @@ describe('every prompt that reaches the model forks, not only the rules', () => 
     assignment: new Map([['A', 'Opening'], ['B', 'Collectibles'], ['C', 'Shop'], ['D', 'Combat']]),
     sections: ['Opening', 'Collectibles', 'Shop', 'Combat'],
   };
+  // One entry to write alongside the two to rewrite: the achievements a game update added
+  const ADDED_ENTRIES = [...ENTRIES, { apiName: 'F', def: DEFS[5], text: null, added: true }];
+  const SECTIONS = [
+    { index: 0, title: 'Opening', path: [], level: 2, apiNames: ['A', 'B'], anchor: { line: 3 } },
+    { index: 1, title: 'Shop', path: ['Optional'], level: 3, apiNames: ['C', 'D', 'E'], anchor: { line: 8 } },
+  ];
+  const NEW_ITEMS = [
+    { apiName: 'F', def: DEFS[5], text: '**Deal 100k**<br>Deal cumulative damage in Operations: 100,000.<br>Farm it in Operations.' },
+  ];
 
   /** Every prompt the generator sends, as a function of the language alone */
   const PROMPTS = [
@@ -514,7 +524,11 @@ describe('every prompt that reaches the model forks, not only the rules', () => 
     ["the whole guide's rejection list", (lang) => buildFeedback(FINDINGS, lang)],
     ['a partial rewrite', (lang) => buildPatchMessage(ENTRIES, { lang })],
     ['a partial rewrite with a requirement', (lang) => buildPatchMessage(ENTRIES, { instruction: 'say what is mutually exclusive', lang })],
+    ['a partial rewrite that also writes new entries', (lang) => buildPatchMessage(ADDED_ENTRIES, { lang })],
+    ['a partial rewrite that only writes new entries', (lang) => buildPatchMessage(ADDED_ENTRIES.slice(2), { lang })],
     ["a partial rewrite's rejection list", (lang) => buildPatchFeedback(FINDINGS, ENTRIES, ['C'], lang)],
+    ["the placement pass's system prompt", (lang) => placementSystemFor(lang)],
+    ['the placement pass', (lang) => buildPlacementPrompt({ game: 'Test Game', items: NEW_ITEMS, sections: SECTIONS, defs: DEFS, lang })],
     ["the classification pass's system prompt", (lang) => regroupSystemFor(lang)],
     ['the classification pass', (lang) => buildRegroupPrompt('Test Game', DEFS, CURRENT, CLUSTERS, lang)],
     ['the same-kind cluster constraint', (lang) => clusterConstraint(DEFS, CLUSTERS, lang)],

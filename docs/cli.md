@@ -137,7 +137,7 @@ Because ticking a Notion checkbox cannot be undone from here, run `checkbox-sync
 | `guide-gen <appid>` | Researches and writes a guide, validates it, files it | AI + Steam (+ Notion) |
 | `guide-gen --dry-run` | Prints the prompt and the landing plan, sends no request | — |
 | `guide-gen --overwrite` | Rewrites the whole guide — backs the old one up, shows what you lose, then asks | AI + Steam (+ Notion) |
-| `guide-gen --only <what>` | Rewrites just the entries you name; every other byte stays as it is | AI + Steam (+ Notion) |
+| `guide-gen --only <what>` | Rewrites just the entries you name, and writes the ones the guide has no entry for; every other byte stays as it is | AI + Steam (+ Notion) |
 | `guide-gen --local` | Writes `guides/*.md` instead of going to Notion | AI + Steam |
 
 Shared flags for `ai-check` and `guide-gen`:
@@ -156,6 +156,7 @@ Shared flags for `ai-check` and `guide-gen`:
 ```bash
 node tracker.js guide-gen <appid> --only rare --note "写清楚前置条件和易错过的地方"
 node tracker.js guide-gen <appid> --only locked --dry-run   # see what it picked, spend nothing
+node tracker.js guide-gen <appid> --only missing            # write what a game update added
 node tracker.js guide-gen <appid> --only "成就名A,成就名B"
 ```
 
@@ -165,10 +166,15 @@ node tracker.js guide-gen <appid> --only "成就名A,成就名B"
 |---|---|
 | `rare` | Global unlock rate under 10%; `rare:5` sets a different threshold |
 | `locked` | Achievements you have not earned yet |
+| `missing` | Achievements the guide has no entry for. They are written and filed under the section they belong to; see [guides.md](guides.md#adding-entries-the-guide-doesnt-have) |
 | `section:<heading>` | Everything under that heading |
 | `名A,名B` | A comma-separated list of achievement names |
 
-Run it with `--dry-run` first — that prints the selected entries and the exact request, without sending anything.
+An achievement the guide has no entry for is picked by `locked`, `rare` and a name as well as by `missing`, and is written rather than skipped.
+
+`locked` and `missing` take no argument, so a name that begins with either word and a colon (「Missing: The Heist」) is looked up as a name.
+
+Run it with `--dry-run` first — that prints the selected entries and the request that writes them, without sending anything. Choosing a section for each new entry is a second, smaller request that only exists once the entries are written, so `--dry-run` does not show it.
 
 The Dashboard offers the same selectors on its ♻ 重写 dialog, plus a per-achievement picker. The two surfaces deliberately offer the same set.
 
