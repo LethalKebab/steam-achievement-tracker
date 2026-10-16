@@ -217,7 +217,7 @@ function progressPrinter() {
 
 // The label is a key now; the text lives in `lib/tracker-messages.js` like everything else the
 // CLI prints. A phase with no entry still falls through to its own raw name below
-const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', 'library-family': 'phase.libraryFamily', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', hltb: 'phase.hltb' };
+const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', 'library-family': 'phase.libraryFamily', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', sets: 'phase.sets', hltb: 'phase.hltb' };
 
 function makeProgressHandler(p) {
   return (ev) => {
@@ -732,6 +732,16 @@ async function cmdSync() {
     }
     if (r.stats.bumped.length) console.log(clog('sync.bumped', { names: r.stats.bumped.join('、') }));
     console.log(clog('sync.schema', { processed: r.schema.processed, candidates: r.schema.candidates, skipped: r.schema.skippedNoSchema }));
+    // Only when the phase had something to ask: after the first run it is idle on most syncs, and a
+    // permanent 「查了 0 款」 is noise on a screen that has to stay readable
+    if (r.sets.candidates) {
+      console.log(
+        clog('sync.sets', { checked: r.sets.checked, withSets: r.sets.withSets })
+          + (r.sets.failed ? clog('sync.setsFailed', { n: r.sets.failed }) : '')
+      );
+    }
+    if (r.sets.error) console.log(clog('sync.setsError', { error: r.sets.error }));
+    else if (r.sets.stopped) console.log(clog('sync.setsStopped'));
   } else {
     if (only.includes('library')) {
       const r = await syncLibrary(db, steam, { onProgress });

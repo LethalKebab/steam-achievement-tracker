@@ -98,6 +98,21 @@ describe('the store path has to use storeDelay (source assertions)', () => {
     assert.match(schema, /await sleep\(steam\.delay\)/, 'phase three is the Web API too');
   });
 
+  test('the sets phase waits on the fast one after each of its three requests', () => {
+    const src = strip(read('../lib/sync.js'));
+    // English structure, Chinese names, this account's progress — all api.steampowered.com
+    const calls = [...src.matchAll(/steam\.fetchAchievementSet(?:s|Progress)\(/g)];
+    assert.ok(calls.length >= 3, `sync.js should hold the three sets requests, found ${calls.length}`);
+    for (const m of calls) {
+      // The **next** sleep after the call, as above: no fixed window to drift as the code grows
+      const s = src.slice(m.index).match(/await sleep\(([^)]*)\)/);
+      assert.ok(s, `no sleep after the sets request at offset ${m.index}`);
+      assert.equal(s[1].trim(), 'steam.delay', `the sets requests go to the Web API, found ${s[1]}`);
+    }
+    const phase = between(src, 'export async function syncAchievementSets(', 'export async function');
+    assert.doesNotMatch(phase, /storeDelay/, 'the sets phase has no business on the store endpoint');
+  });
+
   test('both knobs are genuinely read in steam.js — reading one fewer is a silent merge', () => {
     const src = strip(read('../lib/steam.js'));
     assert.match(src, /cfg\.requestDelayMs/);

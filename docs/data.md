@@ -22,6 +22,7 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 |---|---|
 | `games` | one row per appid: both names, achieved/total, completion rate, status, ♥/★/family flags |
 | `achievements` | per-achievement detail — CN + EN names, CN + EN descriptions, hidden flag, icon URL, and when each one first appeared |
+| `achievement_sets` | the sets a developer has split a game's achievements into (the base game, modes, each DLC), and how far along you are in each |
 | `guides` | appid → guide location, plus `kind` (`notion` or `local`) and `lang` (which language the guide is written in) |
 | `hltb` | appid → its HowLongToBeat entry and how many hours finishing it takes |
 | `hltb_history` | one row per reading taken from HowLongToBeat, so a figure's movement can be measured rather than guessed at |
@@ -30,9 +31,9 @@ Only the third is a surprise, and it is why the whole extracted folder is the th
 
 ### `games` columns
 
-`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `hidden` / `new_ach_date` / `updated_at` / `last_played` / `playtime_forever` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url`
+`appid` (primary key) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` / `priority` / `family` / `hidden` / `new_ach_date` / `updated_at` / `last_played` / `playtime_forever` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` / `cover_url` / `sets_checked_at`
 
-Six decisions worth knowing before you write queries:
+Six decisions worth knowing before you write queries (`sets_checked_at` has its own section, below `achievements`):
 
 - **"This game has no achievements" is `has_achievements = 0` with `NULL` counts** — not a `0` total, and not a string like `N/A` sitting in a numeric column. `total IS NULL AND has_achievements IS NULL` means "not synced yet", which is a different thing.
 - **`status` and `sync_locked` are separate columns.** `status` is the label you see and sort by (`''`, `Unvetted`, `Manual`); `sync_locked` is what actually makes a sync skip the row. The Dashboard moves both together, but you can keep the label while re-enabling the daily refresh:
@@ -108,6 +109,42 @@ Six decisions worth knowing before you write queries:
   **The apportionment step itself is unverified.** That fit says the weight tracks time *between* games; using it to divide one game's hours assumes the same law holds *within* one. No data here can test it — a finished game has nothing left to measure.
 
 - **Neither column survives a `SELECT *`-style rewrite.** `replaceAchievements` upserts the descriptive columns and deletes only the rows the new schema no longer names. Clearing the game's rows first would discard both columns on every description refresh — which is most syncs — silently.
+
+### `achievement_sets` columns
+
+`appid` + `set_id` (primary key together) / `name_en` / `name_cn` / `dlc_appid` / `position` / `total` / `need` / `archived` / `visible` / `achievable` / `done` / `completed` / `completed_at` / `checked_at`
+
+A developer can split a game's achievements into **sets**: the base game, a mode, a character, each DLC. Steam gives each set its own progress bar and a completion mark. Steam's own name for a set is `group`, which is where `set_id` (its `groupid`) and `dlc_appid` come from.
+
+- **Rows exist only for a game Steam reports with more than one group.** A game without sets answers with one group, id 0, holding everything, and stores no rows. `games.sets_checked_at` is what records that a game was asked: `NULL` means never, and a stamp with no rows means asked and there are none. The stamp and the rows are written in one transaction, so a game is never recorded as asked without its answer.
+
+- **`set_id` 0 is the base game, and it can be empty.** A game that moved every achievement into other sets (Left 4 Dead 2 does) has a base set with `total = 0`, which the Dashboard does not draw. `name_en` and `name_cn` are `''` for the base game — it has no name of its own, and the page words it. For a set with no translation Steam answers the same text in both languages, so the two columns holding one string is normal.
+
+- **`total` is how many achievements the set holds, `need` is how many complete it.** They differ once a developer archives an achievement: an archived one that you have not unlocked is not required.
+
+- **`achievable = 0` means Steam left the set out of your answer, which is a DLC you cannot play.** That is not zero progress, and `done` for such a set says nothing. Only the sets you can earn are counted as "completed 1 of 8" on Steam's own page, and the Dashboard follows it.
+
+- **`completed` is Steam's own flag, and it is not `done >= need`.** A completed set stays completed after the developer adds achievements to it, so a set can read `9 / 10` and be complete. `completed_at` is Steam's unix seconds.
+
+- **`visible = 0` is a set Steam marks as developer-only or not public**, and the Dashboard never draws one. An archived set is drawn only if you have progress in it, as on Steam.
+
+- **Nothing here changes `games.total`, `achieved` or the average completion rate.** Those still come from the flat list of every achievement, DLC you do not own included. Steam's own achievements page divides by what you can earn instead, so a game with DLC you do not own reads lower here than there.
+
+The sets are asked for in the sync's fifth phase, and only a game Steam reports with sets costs more than one request. A game is asked when it has never been, when it has sets and its stats were read since (progress moves when you play), and when its last reading is a week old (capped per run, oldest first, so they do not all fall due together). A game whose reading cannot be completed — Steam refuses the request for your own progress, or answers with no set at all — is left unread and asked again on the next sync. Deleting a game from the Dashboard deletes its sets. To force one game to be read again:
+
+```sql
+UPDATE games SET sets_checked_at = NULL WHERE appid = '...';
+```
+
+The games that have sets, and how far along each set is:
+
+```sql
+SELECT g.name, s.set_id, s.name_en, s.dlc_appid, s.done, s.need, s.achievable, s.completed
+  FROM achievement_sets s
+  JOIN games g ON g.appid = s.appid
+ WHERE s.total > 0
+ ORDER BY g.name, s.position, s.set_id;
+```
 
 ### `hltb` columns
 

@@ -37,11 +37,12 @@ No build step, nothing to deploy — edit and re-run. `serve` doesn't hot-reload
 
 ## Sync phases (`lib/sync.js`)
 
-`fullSync` = `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema`, over the whole library in one pass. No cursor, no runtime cap; Ctrl+C is safe because each game is committed as it completes.
+`fullSync` = `syncLibrary` → `syncAchievementStats` → `syncAchievementSchema` → `syncAchievementRarity` → `syncAchievementSets` → `syncHltb`, over the whole library in one pass. No cursor, no runtime cap; Ctrl+C is safe because each game is committed as it completes.
 
 - Rows whose appid is **not** in the current `GetOwnedGames` snapshot are left entirely untouched by `syncLibrary`. The preservation rule keys off *ownership*, not `status`.
 - `syncAchievementStats` skips rows on **`sync_locked = 1`**, not on `status`. If a row won't update, check that first.
 - **Which rows phase 2 checks is decided by `selectStatsTargets()`**, and only when a `selection` is passed (the Dashboard auto-sync and `sync --fast`; plain `node tracker.js sync` stays a true full pass). It unions *played* (`rtime_last_played` moved), *unowned* (absent from `GetOwnedGames`, so no timestamp exists), and a budgeted *sweep*. The split exists because `achieved` and `total` change for different reasons: `achieved` is a fact about the account and can't move without playing, but `total` is a fact about the *game* — a developer patch adds achievements with zero playtime — so gating `total` on `rtime` is simply wrong. The sweep is the only thing that catches that; don't remove it as an optimisation.
+- **`syncAchievementSets` records the achievement sets a developer has split a game into, and moves no count.** It reads two `IPlayerService` methods (`GetGameAchievements`, public; `GetUserAchievements`, key + steamid) because the flat endpoints above show no group at all. A game is stored only from a complete reading, stamped in the same transaction (`games.sets_checked_at`); a failed request writes nothing and is asked again. `games.total`, `achieved` and the average completion rate keep coming from the flat list, DLC the account does not own included. Shapes and rules: the `lib/sets.js` rows in `CLAUDE.md` and `docs/data.md`.
 - No destructive rebuild exists, deliberately: a "wipe and repopulate from `GetOwnedGames`" helper would silently drop every family-shared and manually-maintained row, and the API cannot give that data back.
 
 ## Steam Web API quirks (verified, don't re-discover)
@@ -57,6 +58,7 @@ No build step, nothing to deploy — edit and re-run. `serve` doesn't hot-reload
 9. Guide content stays out of the database — only a pointer is stored. Guides need to be human-editable and tickable in Notion, so the database tracks *where* a guide is, never its text.
 10. **`status` and `sync_locked` are separate columns on purpose.** "Skip the daily achievement sync" and "pin this row's label so Steam can't re-classify it Unvetted" are different wishes; a single flag cannot express one without the other. The Dashboard toggles both together, but they can be diverged by hand. `family` is separate from both again: purely informational, never affects sync.
 11. An `appdetails` reply is not always keyed by the appid you asked for: some titles come back under another appid's key while `data.steam_appid` still names the one you asked about. Read replies with `appDetailsOf(reply, appid)` in `lib/steam.js`, never with `reply[appid]` — the latter reports "no store page" for those titles. The cover and the English name then go missing without any error, and the Notion icon falls back to the 32×32 square icon or to nothing.
+12. **Achievement sets are visible only through `IPlayerService/GetGameAchievements` and `GetUserAchievements`**, never through `GetSchemaForGame`, `GetPlayerAchievements` or `GetGlobalAchievementPercentagesForApp`, which answer one flat list. A game without sets answers one group (id 0). A DLC set the account cannot play is **absent** from `GetUserAchievements`, not flagged. `GetGamesWithAchievementProgress` is `404` for a key and `GetAchievementsProgress` is `401`, so a game costs its own requests.
 
 ## Debugging Steam API responses
 
@@ -92,7 +94,7 @@ sqlite3 data/steam.db "SELECT COUNT(*) FROM achievements WHERE appid = '3117820'
 
 ## `games` table schema
 
-`appid` (PK) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` (♥) / `priority` (★) / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` (the 🔔 transition stamps) / `cover_url`
+`appid` (PK) / `name` / `name_en` / `achieved` / `total` / `has_achievements` / `rate` / `status` / `sync_locked` / `favorite` (♥) / `priority` (★) / `family` / `new_ach_date` / `updated_at` / `last_played` / `stats_checked_at` / `perfect_lost_date` / `ach_added_date` (the 🔔 transition stamps) / `cover_url` / `sets_checked_at`
 
 - `status`: `''` normal, `'Unvetted'`, `'Manual'`
 - `has_achievements = 0` replaces the old `'N/A'` string in a numeric column; `NULL` = not synced yet
