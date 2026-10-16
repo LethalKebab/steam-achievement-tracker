@@ -591,6 +591,8 @@ The two pages differ in one way. `Setup.html` repaints in place on a language ch
 
 **Dates follow the interface, not the machine.** `lastUpdated` is formatted server-side against `uiLanguage`; a page reading in English with a `zh-CN` timestamp on it is the one line that looks like a bug rather than a choice.
 
+**Words the owner has rejected as too spoken are a test.** `wording-blocklist.test.js` lists each one with what to write instead, and searches the Chinese half of every message table plus both pages, `lib/rpc.js`, `tracker.js` and `README.zh.md`, with comments left out. A word joins the list when it is rejected, in the change that replaces it. The list records decisions and is not a style checklist: nothing on it is inferred. Two things are not searched: the prompts sent to the model, which are not text a reader sees, and the design records, which quote the words they discuss.
+
 ---
 
 ## 13. The setup page (`Setup.html`)
