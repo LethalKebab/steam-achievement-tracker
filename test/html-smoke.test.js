@@ -3411,6 +3411,56 @@ describe('the list a row opens lasts one reading of the table', () => {
     }
   });
 
+  test('a finished game opens to its sets without asking Steam for a list it cannot have', () => {
+    const sets = [{ id: 0, base: true, name: '', dlc: false, earnable: true, done: 40, need: 40, complete: true, completedAt: null }];
+    const p = panel();
+    p.games([{ appid: '10', rate: 1, total: 10, sets }]);
+    p.open('10');
+    assert.equal(p.sent.length, 0, 'a request went out for what is missing in a game with nothing missing');
+    assert.deepEqual(p.entry('10'), { total: 10, missingCount: 0, missing: [], guide: null, local: true },
+      'the panel reads this entry like the server\'s own answer, so it has to have the same shape — and say it is the page\'s own');
+    assert.equal(p.expanded(), '10', 'the row did not open');
+    p.forget(); // what loadDashboard does once a sync finishes
+    assert.equal(p.sent.length, 0, 'a refresh asks Steam for the list of a finished game');
+    assert.equal(p.expanded(), '10', 'a finished game with sets is closed by a refresh, so the sets vanish under the reader');
+  });
+
+  test('an entry the page made for a finished game is not trusted once the game is not finished', () => {
+    const sets = [{ id: 0, base: true, name: '', dlc: false, earnable: true, done: 40, need: 40, complete: true, completedAt: null }];
+    // A hand edit of a locked row moves its numbers with no reload of the table, so nothing forgets the entry
+    const p = panel();
+    p.games([{ appid: '10', rate: 1, total: 10, sets }]);
+    p.open('10');
+    p.collapse();
+    p.games([{ appid: '10', rate: 0.5, total: 10, sets }]);
+    p.open('10');
+    assert.equal(p.sent.length, 1, 'reopening served "nothing missing" for a game that now has something missing');
+
+    // And a refresh after a patch un-finished it while its row was open
+    const q = panel();
+    q.games([{ appid: '10', rate: 1, total: 10, sets }]);
+    q.open('10');
+    q.games([{ appid: '10', rate: 0.9, total: 11, sets }]);
+    q.forget();
+    assert.equal(q.sent.length, 1, 'the open row was not asked again');
+    assert.deepEqual(q.entry('10'), { loading: true },
+      'the row went on showing the game as finished until the server answered');
+  });
+
+  test('a finished game opens only if it has sets to show', () => {
+    // eslint-disable-next-line no-new-func
+    const can = new Function(fnBody('canExpandRow') + '\nreturn canExpandRow;')();
+    const one = [{ id: 0 }];
+    assert.equal(can({ appid: '1', rate: 1, total: 10 }), false, 'a finished game with nothing to show opens an empty row');
+    assert.equal(can({ appid: '1', rate: 1, total: 10, sets: null }), false);
+    assert.equal(can({ appid: '1', rate: 1, total: 10, sets: [] }), false);
+    assert.equal(can({ appid: '1', rate: 1, total: 10, sets: one }), true, 'a finished game with sets is where a finished set is seen');
+    assert.equal(can({ appid: '1', rate: 0.5, total: 10 }), true, 'an unfinished game opens as it always did');
+    assert.equal(can({ appid: '1', rate: 1, total: 'N/A', sets: one }), false);
+    assert.equal(can({ appid: '1', rate: null, total: null, sets: one }), false, 'a game not synced yet has nothing to open to');
+    assert.equal(can({ rate: 0.5, total: 10 }), false);
+  });
+
   test('a list arriving while a row is being edited waits for the edit to end', () => {
     const p = panel();
     p.open('10');
@@ -3434,5 +3484,162 @@ describe('the list a row opens lasts one reading of the table', () => {
   test('the arrow and the check that closes a finished row are one rule', () => {
     assert.match(CODE, /const canExpand = canExpandRow\(g\);/,
       'render() decides expandability on its own, and the arrow and forgetMissingLists will drift apart');
+  });
+});
+
+/**
+ * The strip of achievement sets above a game's list.
+ *
+ * `renderSetStrip` is the page's own function, run here with the four helpers it leans on replaced by
+ * readable stubs — and **`escapeHtml` is the real one**, because a set's name comes from a developer
+ * and a stub that returns its input would make the escaping assertions vacuous. Everything the strip
+ * says was decided by the server (`displaySets`), so what is tested is that the page draws it
+ * faithfully: which chips, which state each carries, what the heading counts.
+ */
+describe('the strip of sets above a game\'s list', () => {
+  const PAGE_JS = inlineScripts(read('Dashboard.html')).join(SEP);
+  // Line comments first: a `//` here can hold a `/*`, and the other order eats code
+  const CODE = PAGE_JS.replace(/(^|[^:"'`\\])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
+  const fnBody = (name) => {
+    const at = CODE.indexOf('function ' + name + '(');
+    assert.ok(at !== -1, `${name} is gone, so this check has lost its target rather than passed`);
+    let depth = 0, i = CODE.indexOf('{', at);
+    for (; i < CODE.length; i++) {
+      if (CODE[i] === '{') depth++;
+      else if (CODE[i] === '}' && --depth === 0) break;
+    }
+    return CODE.slice(at, i + 1);
+  };
+
+  // eslint-disable-next-line no-new-func
+  const draw = new Function('t', 'icon', 'barColor', 'fmtDay', [fnBody('renderSetStrip'), fnBody('escapeHtml'), 'return renderSetStrip;'].join(SEP))(
+    // Slots rendered as `key(a=1,b=2)`: no quote in it for the real escapeHtml to turn into an entity
+    (key, values) => key + (values ? '(' + Object.entries(values).map(([k, v]) => `${k}=${v}`).join(',') + ')' : ''),
+    (name) => `[${name}]`,
+    () => 'COLOR',
+    (ms) => `D${ms}`
+  );
+  const set = (extra = {}) => ({
+    id: 1, base: false, name: 'Pack', dlc: true, earnable: true, done: 3, need: 8, complete: false, completedAt: null, ...extra,
+  });
+  const count = (html, needle) => html.split(needle).length - 1;
+
+  test('a game with no sets to show gets no strip', () => {
+    for (const g of [null, undefined, {}, { sets: null }, { sets: [] }, { sets: 'x' }]) {
+      assert.equal(draw(g), '', JSON.stringify(g));
+    }
+  });
+
+  test('one chip per set, the base game named by the page, and the heading counting only what can be earned', () => {
+    const sets = [
+      set({ id: 0, base: true, name: '', dlc: false, done: 46, need: 56 }),
+      set({ id: 1, name: 'Northern Lords', done: 9, need: 10 }),
+      set({ id: 2, name: 'Royal Court', done: 20, need: 20, complete: true, completedAt: 1700000000000 }),
+      set({ id: 8, name: 'Khans of the Steppe', earnable: false, done: 0, need: 10 }),
+      set({ id: 9, name: 'All Under Heaven', earnable: false, done: 0, need: 20 }),
+    ];
+    const html = draw({ sets });
+    assert.equal(count(html, 'class="set-chip'), 5);
+    assert.equal(count(html, 'is-off'), 2);
+    assert.match(html, /<span class="set-name">sets\.base<\/span>/, 'the base game has no name of its own, so the page words it');
+    assert.match(html, /sets\.head\(done=1,total=3\)/,
+      'the heading counts the sets that can be earned — a DLC the account does not own is not one of them');
+    assert.ok(html.indexOf('sets.base') < html.indexOf('Northern Lords'), 'the order the server chose was not kept');
+  });
+
+  test('a set the account cannot earn draws a dash and no bar, and the others each draw a bar and a count', () => {
+    const off = draw({ sets: [set({ id: 0, base: true }), set({ earnable: false, done: 0, need: 10 })] });
+    const chips = off.split('<div class="set-chip').slice(1);
+    assert.equal(count(chips[0], 'bar-track'), 1);
+    assert.match(chips[0], /<span class="set-n">3\/8<\/span>/);
+    assert.equal(count(chips[1], 'bar-track'), 0, 'a bar for a set that cannot be earned reads as progress of nought');
+    assert.match(chips[1], /<span class="set-n">–<\/span>/);
+  });
+
+  test('the check is Steam\'s word that a set is finished, and the bar is the arithmetic', () => {
+    // Steam keeps a finished set finished after the developer adds to it, so 9 of 10 can be finished
+    const grown = draw({ sets: [set({ complete: true, done: 9, need: 10 }), set({ id: 2 })] });
+    assert.equal(count(grown.split('<div class="set-chip')[1], '[check]'), 1, 'a finished set lost its check because the count fell short');
+    assert.match(grown, /width:90\.0%/, 'the bar says how far the set is, not whether it is finished');
+    const exact = draw({ sets: [set({ complete: false, done: 10, need: 10 }), set({ id: 2 })] });
+    assert.equal(count(exact, '[check]'), 0, 'the count reached the total, and the page decided on its own that the set is finished');
+    assert.match(exact, /bar-fill done/, '100% still carries the destination glow');
+  });
+
+  test('a set the account cannot earn never carries the check, even if a stale row says it is finished', () => {
+    const html = draw({ sets: [set({ earnable: false, complete: true }), set({ id: 2 })] });
+    assert.equal(count(html, '[check]'), 0);
+  });
+
+  test('the bar never runs past its track', () => {
+    assert.match(draw({ sets: [set({ done: 12, need: 10 }), set({ id: 2 })] }), /width:100\.0%/);
+    assert.match(draw({ sets: [set({ done: 0, need: 0 }), set({ id: 2 })] }), /width:0\.0%/, 'a set with nothing to complete divided by zero');
+  });
+
+  test('the completion date and the missing DLC are said in the title, and to a screen reader', () => {
+    const html = draw({ sets: [
+      set({ id: 2, name: 'Royal Court', done: 20, need: 20, complete: true, completedAt: 1700000000000 }),
+      set({ id: 8, name: 'Khans', earnable: false }),
+      set({ id: 3, name: 'Plain' }),
+    ] });
+    const [, done, off, plain] = html.split('<div class="set-chip');
+    assert.match(done, /title="Royal Court · sets\.completedOn\(date=D1700000000000\)"/);
+    assert.match(off, /title="Khans · sets\.notOwned"/);
+    assert.match(plain, /title="Plain"/, 'a set with nothing to add carries just its own name, which the clamp may have cut');
+    // The check and the dash carry a state the chip's text does not, so each chip says it aloud as well
+    assert.match(done, /aria-label="Royal Court, 20\/20, sets\.completedOn\(date=D1700000000000\)"/);
+    assert.match(off, /aria-label="Khans, sets\.notOwned"/);
+    assert.match(plain, /aria-label="Plain, 3\/8"/);
+  });
+
+  test('a finished set with no date still says it is finished, and an unearnable set that is not a DLC says nothing more', () => {
+    const html = draw({ sets: [
+      set({ id: 2, name: 'Done', done: 8, need: 8, complete: true, completedAt: null }),
+      set({ id: 5, name: 'Restricted', earnable: false, dlc: false }),
+      set({ id: 6, name: 'Pack', earnable: false, dlc: true }),
+    ] });
+    const [, done, restricted, pack] = html.split('<div class="set-chip');
+    assert.match(done, /title="Done · sets\.complete"/);
+    assert.match(done, /aria-label="Done, 8\/8, sets\.complete"/);
+    assert.doesNotMatch(restricted, /sets\.notOwned/, 'a set that is not a DLC was called one the account does not own');
+    assert.match(restricted, /title="Restricted"/);
+    assert.match(pack, /sets\.notOwned/);
+  });
+
+  test('a count that is not a number is drawn as 0, and a set with nothing to complete shows its count alone', () => {
+    const hostile = draw({ sets: [set({ done: '<b>x</b>', need: '"><i>' }), set({ id: 2, done: 3, need: 0 })] });
+    assert.doesNotMatch(hostile, /<b>|<i>/, 'a value that is not a number reached the markup');
+    assert.match(hostile, /<span class="set-n">0<\/span>/, 'no count of 0/0');
+    assert.match(hostile, /<span class="set-n">3<\/span>/, 'a set with nothing to complete is drawn as 3/0');
+  });
+
+  test('what a developer wrote is escaped, in the name, in the title and in the spoken label', () => {
+    const hostile = '"><img src=x onerror=alert(1)>';
+    const html = draw({ sets: [set({ name: hostile }), set({ id: 2 })] });
+    assert.doesNotMatch(html, /<img/, 'a set named with markup put markup on the page');
+    assert.equal(count(html, '&lt;img src=x onerror=alert(1)&gt;'), 3, 'the name, the title and the label all have to be escaped');
+    // Each value must sit whole inside its quotes: a raw quote in one would end it and the literal
+    // that follows would no longer line up
+    assert.match(html.split('<div class="set-chip')[1], /^(?: is-off)?" role="listitem" title="[^"]*" aria-label="[^"]*">/,
+      'an attribute was closed early, so a value became markup');
+  });
+
+  test('the panel draws the strip in every state of its list, and drops the all-done line when it does', () => {
+    const body = fnBody('renderMissingRow');
+    assert.match(body, /const sets = renderSetStrip\(game\);/, 'the panel no longer asks for the strip');
+    assert.match(body, /<td colspan="5">' \+ sets \+ inner/,
+      'the strip is not in front of the list in every state: while it loads, when it failed, and when it arrived');
+    assert.match(body, /inner = sets \? '' :/, 'with the strip drawn, a second line saying everything is unlocked says it twice');
+  });
+
+  test('its strings are in the table with both halves, and take the same slots', () => {
+    const s = pageStrings('Dashboard.html');
+    const slots = (x) => (x.match(/\{[a-zA-Z]+\}/g) ?? []).sort().join(',');
+    for (const key of ['sets.head', 'sets.base', 'sets.completedOn', 'sets.complete', 'sets.notOwned']) {
+      assert.ok(s[key] && s[key][0] && s[key][1], `${key} is missing a half`);
+      assert.equal(slots(s[key][0]), slots(s[key][1]), `${key}: the two halves fill different slots`);
+    }
+    assert.equal(slots(s['sets.head'][0]), '{done},{total}');
+    assert.equal(slots(s['sets.completedOn'][0]), '{date}');
   });
 });

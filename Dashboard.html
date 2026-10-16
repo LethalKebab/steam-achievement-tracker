@@ -1503,6 +1503,69 @@
       padding: var(--s4) var(--s5);
     }
     .missing-header { font-size: var(--fs-sm); color: var(--text-3); margin-bottom: var(--s3); }
+
+    /* ---- The sets a game's achievements are divided into ---------------------
+       A strip above the list of what is missing, one chip per set, in the order Steam shows them.
+       The chips are the card family the list below uses (--surface, --line-2, --r-md) and the bar is
+       the table's own, so the strip reads as part of the panel rather than as a second component.
+
+       **State is shape and position, never the label's own text** (the rule the filter chips follow):
+       a finished set has a check in a leading slot, and a set the account cannot earn is dashed with
+       no bar. The slot is a fixed box on every chip, so a name does not slide sideways when its set
+       is finished. **Not colour alone** — the check and the dash each carry their state without it.
+
+       The names clamp to two lines rather than one: a DLC set is usually named after its pack, and
+       「A Little to the Left: Cupboards & Drawers」 is not told apart from its sibling by its first
+       twenty characters. The chip's `title` carries the whole name. */
+    .set-strip { margin-bottom: var(--s4); }
+    .set-strip .missing-header { margin-bottom: var(--s2); }
+    .set-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+      gap: var(--s2);
+      align-items: stretch;
+    }
+    .set-chip {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: var(--s2);
+      min-width: 0;
+      padding: var(--s2);
+      background: var(--surface);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+    }
+    .set-top { display: flex; align-items: flex-start; gap: var(--s1); min-width: 0; }
+    .set-mark {
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--fs-md);
+      height: calc(var(--fs-sm) * 1.4);
+      font-size: var(--fs-md);
+      color: var(--prog-done);
+    }
+    .set-name {
+      flex: 1;
+      min-width: 0;
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text);
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .set-meter { display: flex; align-items: center; gap: var(--s2); }
+    /* `margin-left: auto` puts the dash of a set the account cannot earn where the count would be,
+       under the same edge as every other chip's, rather than at the left of an empty row */
+    .set-n { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .set-chip.is-off { background: none; border-style: dashed; }
+    .set-chip.is-off .set-name, .set-chip.is-off .set-n { color: var(--text-3); }
     .ach-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
@@ -3028,6 +3091,15 @@
       'ach.notWritten':       ['攻略里还未写这条', 'Not written up yet'],
       'ach.openInGuide':      ['在攻略中打开', 'Open in the guide'],
 
+      // ---- Achievement sets (the strip above a game's list) -------------------
+      // Steam's own Chinese for these is 集合 and 基础游戏, so the page says what its Steam page says.
+      // The count is of the sets this account can earn: a DLC it does not own is not one of them
+      'sets.head':            ['集合:已完成 {done} 个,共 {total} 个', 'Sets: {done} of {total} completed'],
+      'sets.base':            ['基础游戏', 'Base game'],
+      'sets.completedOn':     ['{date} 完成', 'Completed {date}'],
+      'sets.complete':        ['已完成', 'Completed'],
+      'sets.notOwned':        ['未拥有该 DLC', 'DLC not owned'],
+
       // ---- Deleting a row -----------------------------------------------------
       'del.title':            ['删除《{game}》?', 'Delete {game}?'],
       'del.body':             ['从本地删掉这一行,无法撤销。', 'Removes this row locally. It cannot be undone.'],
@@ -3508,6 +3580,11 @@
      */
     function fmtCount(n) {
       return typeof n === 'number' ? n.toLocaleString(LANG === 'en' ? 'en-GB' : 'zh-CN') : '–';
+    }
+
+    /** A day, from epoch milliseconds, in the interface's own locale for the same reason as fmtCount */
+    function fmtDay(ms) {
+      return new Date(ms).toLocaleDateString(LANG === 'en' ? 'en-GB' : 'zh-CN');
     }
 
     /**
@@ -4481,13 +4558,18 @@
     }
 
     /**
-     * Whether a row opens to its list of what is still missing. The criterion is **the game genuinely
-     * not being finished**, not which filter is on: a completed game appears in the table whenever
-     * 「已完成」 is not excluded, and an expand arrow on it would open an empty list. render() draws the
-     * arrow from this, and forgetMissingLists decides from it whether the open row is still one
+     * Whether a row opens. The criterion is **the game having something to open to**, not which filter
+     * is on: a list of what is still missing when it is not finished, and its sets when it has some.
+     * A completed game with neither appears in the table whenever 「已完成」 is not excluded, and an
+     * expand arrow on it would open nothing. A completed game with sets does open — a finished set is
+     * what there is to see there. render() draws the arrow from this, and forgetMissingLists decides
+     * from it whether the open row is still one
      */
     function canExpandRow(g) {
-      return Boolean(g && g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid);
+      return Boolean(
+        g && g.total !== 'N/A' && g.total !== null && g.appid &&
+        (g.rate !== 1 || (Array.isArray(g.sets) && g.sets.length > 0))
+      );
     }
 
     /**
@@ -4496,12 +4578,14 @@
      * the bell must not close a list that happened to be open already. One copy, because the row and
      * the bell reaching the same list by two routes is how the two drift apart.
      *
-     * A failure is not kept as the answer: opening the row again is how it is asked for again
+     * A failure is not kept as the answer: opening the row again is how it is asked for again. **Nor
+     * is an entry the page made itself (`local`)**: it describes the game as it was when it was
+     * made, and a game whose numbers were edited since is no longer finished
      */
     function openMissingPanel(appid) {
       expandedAppid = appid;
       const had = missingAchCache[appid];
-      if (!had || missingListFailed(had)) fetchMissingList(appid);
+      if (!had || had.local || missingListFailed(had)) fetchMissingList(appid);
       render();
     }
 
@@ -4522,6 +4606,15 @@
      * would put back exactly what the emptying removed, with nothing left to ask again
      */
     function fetchMissingList(appid) {
+      // A finished game has nothing missing to ask Steam for: it opens only to show its sets, which
+      // are already on its row. Answered here in the shape the server would give, so no row of the
+      // panel needs to know the difference — except that it is marked `local`, which is what keeps it
+      // from being trusted past the moment it was made (see openMissingPanel and forgetMissingLists)
+      const finished = allGames.find(function(g) { return String(g.appid) === String(appid); });
+      if (finished && finished.rate === 1) {
+        missingAchCache[appid] = { total: finished.total, missingCount: 0, missing: [], guide: null, local: true };
+        return;
+      }
       const gen = missingAchGen;
       const had = missingAchCache[appid];
       if (!had || had.error) missingAchCache[appid] = { loading: true };
@@ -4555,11 +4648,15 @@
      *
      * The open row is asked again at once and keeps what it shows until the answer arrives: emptied,
      * it would collapse to the loading line and move every row under it for as long as the request
-     * takes. **An open row that can no longer expand is closed instead** — the sync finished its game,
-     * or the bell went to one already finished — or every later reading would fetch a list nobody
-     * can see, and a patch that reopens the game would open the row by itself. A row the filters are
-     * hiding stays open and is asked again, so it is current when the filter is cleared. A closed
-     * row is simply forgotten, and asked for when it is next opened
+     * takes. **An open row that can no longer expand is closed instead** — the sync finished a game
+     * that has no sets to show, or the bell went to one already finished — or a patch that reopens
+     * the game would open the row by itself. A row the filters are hiding stays open and is asked
+     * again, so it is current when the filter is cleared. A closed row is simply forgotten, and
+     * asked for when it is next opened.
+     *
+     * **An entry the page made itself (`local`) is not kept on screen meanwhile.** It is made again
+     * at once, and kept, it would show a game a patch has just un-finished as finished until the
+     * server's answer arrived
      */
     function forgetMissingLists() {
       missingAchGen++;
@@ -4568,7 +4665,7 @@
       if (!expandedAppid) return;
       const game = allGames.find(function(g) { return String(g.appid) === expandedAppid; });
       if (!canExpandRow(game)) { expandedAppid = null; return; }
-      if (shown && !shown.loading && !shown.error) missingAchCache[expandedAppid] = shown;
+      if (shown && !shown.loading && !shown.error && !shown.local) missingAchCache[expandedAppid] = shown;
       fetchMissingList(expandedAppid);
     }
 
@@ -4640,13 +4737,17 @@
       const data = missingAchCache[appid];
       const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
       const gameName = game ? game.name : '';
+      // The sets come from the game's own row, not from the list, so they are on screen while the
+      // list is still loading, and when it failed
+      const sets = renderSetStrip(game);
       let inner;
       if (!data || data.loading) {
         inner = '<div class="missing-header">' + escapeHtml(t('ach.loading')) + '</div>';
       } else if (data.error) {
         inner = '<div class="missing-header">' + escapeHtml(data.error) + '</div>';
       } else if (data.missingCount === 0) {
-        inner = '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
+        // With the sets drawn above, a line saying everything is unlocked only says it a second time
+        inner = sets ? '' : '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
       } else {
         // A guide that was genuinely read this time is the only one whose language can be trusted;
         // a failed read puts its own message here instead
@@ -4706,7 +4807,58 @@
               + '</div>';
           }).join('') + '</div>';
       }
-      return '<tr class="missing-row"><td colspan="5">' + inner + '</td></tr>';
+      return '<tr class="missing-row"><td colspan="5">' + sets + inner + '</td></tr>';
+    }
+
+    /**
+     * The strip of sets above a game's list: one chip each, or '' when the game has none to show.
+     *
+     * **Everything on a chip is a fact the server already decided** (`displaySets`): which sets, in
+     * what order, how far along, whether this account can earn it. The page draws; it computes
+     * nothing but a bar width. In particular a set is finished when Steam says so (`complete`) and
+     * not when `done` reaches `need`, because Steam keeps a set finished after the developer adds to
+     * it — 9 of 10 can be a finished set, and a second opinion here would disagree with the first.
+     *
+     * A set the account cannot earn (a DLC it does not own) has no bar and a dash where the count
+     * would be. The heading counts only the sets that can be earned, as Steam's own page does.
+     * Names are escaped, the title too: both come from a developer
+     */
+    function renderSetStrip(game) {
+      const sets = game && Array.isArray(game.sets) ? game.sets : null;
+      if (!sets || !sets.length) return '';
+      const earnable = sets.filter(function(s) { return s.earnable; });
+      const finished = earnable.filter(function(s) { return s.complete; }).length;
+      const chips = sets.map(function(s) {
+        const name = s.base ? t('sets.base') : s.name;
+        // Numbers however they arrived: they are written into markup
+        const done = Number(s.done) || 0;
+        const need = Number(s.need) || 0;
+        const rate = need > 0 ? Math.min(done / need, 1) : (s.complete ? 1 : 0);
+        const finishedHere = s.earnable && s.complete;
+        // Only a DLC set is called one that is not owned: a set the account cannot earn for another
+        // reason has no word here, and the dash says what there is to say
+        let state = '';
+        if (!s.earnable) state = s.dlc ? t('sets.notOwned') : '';
+        else if (finishedHere) state = s.completedAt ? t('sets.completedOn', { date: fmtDay(s.completedAt) }) : t('sets.complete');
+        const count = need > 0 ? done + '/' + need : String(done);
+        const meter = s.earnable
+          ? '<div class="bar-track"><div class="bar-fill' + (rate >= 1 ? ' done' : '') + '" style="width:'
+            + (rate * 100).toFixed(1) + '%; background:' + barColor(rate) + '"></div></div>'
+            + '<span class="set-n">' + count + '</span>'
+          : '<span class="set-n">–</span>';
+        // Read out as one piece: the check and the dash carry a state the chip's text does not
+        const spoken = name + (s.earnable ? ', ' + count : '') + (state ? ', ' + state : '');
+        return '<div class="set-chip' + (s.earnable ? '' : ' is-off') + '" role="listitem" title="'
+          + escapeHtml(name + (state ? ' · ' + state : '')) + '" aria-label="' + escapeHtml(spoken) + '">'
+          + '<div class="set-top"><span class="set-mark">' + (finishedHere ? icon('check') : '') + '</span>'
+          + '<span class="set-name">' + escapeHtml(name) + '</span></div>'
+          + '<div class="set-meter">' + meter + '</div>'
+          + '</div>';
+      }).join('');
+      return '<div class="set-strip">'
+        + '<div class="missing-header">' + escapeHtml(t('sets.head', { done: finished, total: earnable.length })) + '</div>'
+        + '<div class="set-list" role="list">' + chips + '</div>'
+        + '</div>';
     }
 
     function escapeHtml(s) {

@@ -426,12 +426,27 @@ The jump to Notion is an **icon beside the achievement name**, not a labelled li
 The list is fetched the first time a row opens and kept while the table shows the same reading. **`loadDashboard` forgets every list** (`forgetMissingLists`), because each path that changes what a list shows ends there: a finished sync changes what is unlocked, and a guide being written, restored or re-registered changes what the cards say and where they link. A list kept past that goes on naming achievements already unlocked while the count beside it has moved on — and closing the window only hides it in the tray, so the page lives for days.
 
 - **The open row is asked again at once, and keeps its list on screen until the answer lands.** Emptied, the panel would collapse to its loading line and move every row below it for as long as the request takes.
-- **An open row that can no longer expand is closed instead** (`canExpandRow`, the rule `render()` draws the arrow from): the sync finished the game, or the bell went to one already finished. Left open, every later reading fetches a list nobody can see, and a patch that reopens the game opens the row by itself. A row the filters are hiding stays open and is asked again, so it is current when the filter is cleared.
+- **An open row that can no longer expand is closed instead** (`canExpandRow`, the rule `render()` draws the arrow from): the sync finished a game that has no sets to show, or the bell went to one already finished. Left open, a patch that reopens the game opens the row by itself. A row the filters are hiding stays open and is asked again, so it is current when the filter is cleared.
 - **A reply is written in only if nothing has emptied the cache since its request went out** (`missingAchGen`). A request sent before a sync finished describes the game as it was, and written in afterwards it would put back exactly what was just forgotten.
 - **A reply does not redraw the table while a row's numbers are being edited** (`redrawIfOpen`): `render()` would replace the two fields being typed into, and the focus with them. The list waits in the cache for the repaint that ends the edit — the same rule `setGuideBusy` follows.
 - **A failure is not kept as the answer.** Whether the request failed, the server answered `{error}` (Steam busy, say), or only the guide read inside an answer failed, opening the row again asks again; in the last case the list stays on screen meanwhile.
 
 `html-smoke.test.js` runs these functions against a stub `rpc` that holds each reply until the test releases it, and a `render` that counts its calls, so the order replies land in is the test's to choose. Every assertion was mutation-tested.
+
+### The strip of achievement sets, and why a finished game can open
+
+A game whose developer has split its achievements into sets (`lib/sets.js`, [data.md](data.md)) opens to a strip above its list of what is missing: one chip per set, in the order Steam shows them, each with its name, a bar and `done/need`. The strip is the card family the list uses (`--surface`, `--line-2`, `--r-md`) and the bar is the table's own, so it reads as part of the panel.
+
+- **The strip is drawn from the game's own row (`game.sets`), not from the list.** It is on screen while the list loads and when the list failed, and `renderMissingRow` puts it in front of every state of the list.
+- **A finished game with sets opens, and one without still does not.** `canExpandRow` is `rate !== 1` or having sets; a finished set is what there is to see in a finished game. Such a row **asks Steam for nothing** — it has no list to fetch, so `fetchMissingList` fills the cache itself with `{ total, missingCount: 0, missing: [], guide: null, local: true }`, the shape the server would give. **`local` keeps it from being trusted past the moment it was made**: reopening the row and a refresh after a sync both make it again rather than keep it, so a game that a patch or a hand edit has un-finished does not read as finished while the server's answer is on its way. A refresh keeps the row open and still sends nothing while the game is finished.
+- **With the strip drawn, the 「所有成就都已解锁」 line is dropped.** The chips already say it.
+- **State is shape and position, never the label's own text** — the rule the filter chips follow. A finished set has a check in a leading slot that is **a fixed-size box on every chip**, so a name does not slide sideways when its set is finished. A set the account cannot earn is dashed, dimmed, with a dash where the count would be and no bar. Neither depends on colour.
+- **The check is Steam's word that a set is finished (`complete`); the bar is the arithmetic.** A set Steam keeps finished after the developer adds to it can read 9 of 10 with a check, and the bar then says 90%. The page computes nothing but the bar's width, and caps it at 100%.
+- **The heading counts only the sets the account can earn**, as Steam's own page does: 「集合:已完成 1 个,共 8 个」 sits above eleven chips when three DLC sets are not owned.
+- **Names clamp to two lines, not one.** A DLC set is named after its pack, and two siblings can share their first twenty characters. The chip's `title` carries the whole name, a finished set's completion date, and 「未拥有该 DLC」 on a set that cannot be earned.
+- **The chips are not interactive**, so they have no hover or focus state. The wording is Steam's own Chinese for these — 集合 and 基础游戏 — so the page says what its Steam page says.
+
+`html-smoke.test.js` runs `renderSetStrip` with the page's real `escapeHtml`, because a set's name comes from a developer, and runs `canExpandRow` and `fetchMissingList` through the same harness as the list above. Every assertion was mutation-tested.
 
 ---
 
