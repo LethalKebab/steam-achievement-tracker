@@ -500,10 +500,13 @@ describe('a third party being down is not this program failing', () => {
       fetchAppName: async () => '',
       fetchAppNameEn: async () => '',
       // Real stats, not 'no achievement system' — that marks has_achievements = 0 and the game
-      // stops being a phase-five target, so the throw under test would never be reached
+      // stops being a target of the hours phase, so the throw under test would never be reached
       fetchAchievementStats: async () => ({ total: 4, achieved: 1, unlocked: ['A'] }),
       fetchGlobalAchievementPercentages: async () => null,
       fetchAchievementSchema: async () => null,
+      // The sets phase runs before the hours one and reads a client with these two requests
+      fetchAchievementSets: async () => ({ sets: [{ id: 0, name: '', dlcAppid: null, position: 0, total: 4, need: 4, archived: false, visible: true }] }),
+      fetchAchievementSetProgress: async () => new Map(),
       delay: 0, storeDelay: 0,
     };
     const r = await fullSync(db, steam, { hltb: exploding });

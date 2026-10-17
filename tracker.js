@@ -35,7 +35,10 @@ import {
   getGame, achievementsFor, appIdsWithAchievements,
 } from './lib/db.js';
 import { SteamClient } from './lib/steam.js';
-import { fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats, agcrPercent } from './lib/sync.js';
+import {
+  fullSync, syncLibrary, syncAchievementStats, syncAchievementSchema, computeAgcrStats, computeProfileStats,
+  agcrPercent,
+} from './lib/sync.js';
 import { HltbClient } from './lib/hltb.js';
 import { runFamilyImport } from './lib/family.js';
 import { setMessageLanguage, messageLanguage, achName } from './lib/messages.js';
@@ -217,7 +220,7 @@ function progressPrinter() {
 
 // The label is a key now; the text lives in `lib/tracker-messages.js` like everything else the
 // CLI prints. A phase with no entry still falls through to its own raw name below
-const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', 'library-family': 'phase.libraryFamily', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', hltb: 'phase.hltb' };
+const PHASE_LABEL = { library: 'phase.library', 'library-en': 'phase.libraryEn', 'library-family': 'phase.libraryFamily', achievements: 'phase.achievements', schema: 'phase.schema', rarity: 'phase.rarity', sets: 'phase.sets', hltb: 'phase.hltb' };
 
 function makeProgressHandler(p) {
   return (ev) => {
@@ -732,6 +735,16 @@ async function cmdSync() {
     }
     if (r.stats.bumped.length) console.log(clog('sync.bumped', { names: r.stats.bumped.join('、') }));
     console.log(clog('sync.schema', { processed: r.schema.processed, candidates: r.schema.candidates, skipped: r.schema.skippedNoSchema }));
+    // Only when the phase had something to ask: after the first run it is idle on most syncs, and a
+    // permanent 「查了 0 款」 is noise on a screen that has to stay readable
+    if (r.sets.candidates) {
+      console.log(
+        clog('sync.sets', { checked: r.sets.checked, withSets: r.sets.withSets })
+          + (r.sets.failed ? clog('sync.setsFailed', { n: r.sets.failed }) : '')
+      );
+    }
+    if (r.sets.error) console.log(clog('sync.setsError', { error: r.sets.error }));
+    else if (r.sets.stopped) console.log(clog('sync.setsStopped'));
   } else {
     if (only.includes('library')) {
       const r = await syncLibrary(db, steam, { onProgress });
@@ -757,7 +770,7 @@ async function cmdSync() {
   const agcrPct = agcrPercent(agcr.avg, 3);
   console.log(clog('sync.done', {
     seconds: ((Date.now() - t0) / 1000).toFixed(0),
-    pct: agcrPct.whole, exact: agcrPct.precise, perfect: agcr.perfectCount,
+    pct: agcrPct.whole, exact: agcrPct.precise, completed: computeProfileStats(db).completed,
   }));
 }
 
@@ -783,7 +796,7 @@ function cmdStatus() {
   console.log(clog('status.db', { n: countGames(db) }));
   console.log(clog('status.lastSync', { when: last ? new Date(last).toLocaleString(locale) : clog('status.never') }));
   console.log(clog('status.agcr', { pct: agcrPct.whole, exact: agcrPct.precise, n: agcr.eligibleCount }));
-  console.log(clog('status.perfect', { n: agcr.perfectCount }));
+  console.log(clog('status.completed', { n: computeProfileStats(db).completed }));
   console.log(clog('status.flags', {
     unvetted: count((g) => g.status === 'Unvetted'),
     manual: count((g) => g.status === 'Manual'),

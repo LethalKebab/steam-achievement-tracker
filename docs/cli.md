@@ -72,7 +72,7 @@ All commands are `node tracker.js <command>`. The **Network** column tells you w
 | Command | What it does | Network |
 |---|---|---|
 | `init` | Steam API key and SteamID64; `--notion` and `--ai` add those | Steam |
-| `sync` | Full refresh: library, achievement counts, achievement detail | Steam |
+| `sync` | Full refresh: library, achievement counts, achievement detail, achievement sets | Steam |
 | `sync --fast` | Sampled refresh — the same work the Dashboard does | Steam |
 | `sync --library` | Only check for new games, and fill in any missing English names | Steam |
 | `sync --achievements` | Only refresh achievement counts | Steam |
@@ -185,7 +185,7 @@ The Dashboard offers the same selectors on its ♻ 重写 dialog, plus a per-ach
 | | Starting `serve` | 立即同步 | Command line |
 |---|---|---|---|
 | **Find new guide pages** | every time | — | `guides` |
-| **Library + achievement counts + detail** | only if data is stale | every press | `sync`, `sync --fast` |
+| **Library + achievement counts + detail + sets** | only if data is stale | every press | `sync`, `sync --fast` |
 | **Tick guide checkboxes** | after a sync, or if a new guide page turned up | after the sync | `checkbox-sync` |
 | **Update guide page status** | every time | after the sync | `guide-status` |
 

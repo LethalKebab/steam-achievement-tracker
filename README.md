@@ -15,6 +15,7 @@ The dashboard lists your games and how complete each one is, floating anything y
 * **Family-shared games count too**: a game you played out of a family member's library is picked up on the next sync and marked **Family**, even though Steam does not list it as one of yours.
 * **Refunded games have to be put back by hand**: Steam stops counting one as yours the moment it is refunded, so nothing brings it in for you. Search its name in the dashboard and matches from the Steam store appear under your own games; pick one to add the row.
 * **Games Steam stops answering for**: the sync names them. A refunded game nobody else in the family owns keeps the last figures it managed to read, and you maintain that row by hand from then on.
+* **Achievement sets**: when a developer has split a game's achievements into sets, such as the base game and each DLC, opening the game's row shows how far along you are in each. A finished set is marked, and a DLC you do not own is dimmed. A game's own counts and the average completion rate still use its whole achievement list, DLC you do not own included, so a game can read lower here than on its Steam page. The Completed figure at the top counts each finished set once. The list of what is still missing is split by set too, with the DLC you do not own closed at the end.
 
 ```mermaid
 graph TD

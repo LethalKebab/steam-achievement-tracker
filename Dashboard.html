@@ -1503,6 +1503,69 @@
       padding: var(--s4) var(--s5);
     }
     .missing-header { font-size: var(--fs-sm); color: var(--text-3); margin-bottom: var(--s3); }
+
+    /* ---- The sets a game's achievements are divided into ---------------------
+       A strip above the list of what is missing, one chip per set, in the order Steam shows them.
+       The chips are the card family the list below uses (--surface, --line-2, --r-md) and the bar is
+       the table's own, so the strip reads as part of the panel rather than as a second component.
+
+       **State is shape and position, never the label's own text** (the rule the filter chips follow):
+       a finished set has a check in a leading slot, and a set the account cannot earn is dashed with
+       no bar. The slot is a fixed box on every chip, so a name does not slide sideways when its set
+       is finished. **Not colour alone** — the check and the dash each carry their state without it.
+
+       The names clamp to two lines rather than one: a DLC set is usually named after its pack, and
+       「A Little to the Left: Cupboards & Drawers」 is not told apart from its sibling by its first
+       twenty characters. The chip's `title` carries the whole name. */
+    .set-strip { margin-bottom: var(--s4); }
+    .set-strip .missing-header { margin-bottom: var(--s2); }
+    .set-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+      gap: var(--s2);
+      align-items: stretch;
+    }
+    .set-chip {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: var(--s2);
+      min-width: 0;
+      padding: var(--s2);
+      background: var(--surface);
+      border: 1px solid var(--line-2);
+      border-radius: var(--r-md);
+    }
+    .set-top { display: flex; align-items: flex-start; gap: var(--s1); min-width: 0; }
+    .set-mark {
+      flex: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: var(--fs-md);
+      height: calc(var(--fs-sm) * 1.4);
+      font-size: var(--fs-md);
+      color: var(--prog-done);
+    }
+    .set-name {
+      flex: 1;
+      min-width: 0;
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      line-height: 1.4;
+      color: var(--text);
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .set-meter { display: flex; align-items: center; gap: var(--s2); }
+    /* `margin-left: auto` puts the dash of a set the account cannot earn where the count would be,
+       under the same edge as every other chip's, rather than at the left of an empty row */
+    .set-n { flex: none; margin-left: auto; font-size: var(--fs-xs); color: var(--text-2); font-variant-numeric: tabular-nums; }
+    .set-chip.is-off { background: none; border-style: dashed; }
+    .set-chip.is-off .set-name, .set-chip.is-off .set-n { color: var(--text-3); }
     .ach-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
@@ -1524,6 +1587,69 @@
          height the tallest card in a row takes, its row-mates take with it */
       align-items: stretch;
     }
+    /* ---- The list of what is left, split by set ------------------------------
+       One section per set that has something left, in the strip's order. The heading is the set's
+       name and how many are left in it, and it hangs above its own grid, so a card never has to say
+       which set it is in. **The sets the account cannot earn come last and closed**: nothing in them
+       can be done, so each is one line until it is asked for, dashed and muted like its chip in the
+       strip.
+
+       **State is shape and position, not colour.** The caret turns, the cards are dashed, and the
+       toggle is a real button whose `aria-expanded` says it aloud; a closed grid is `hidden`, so it
+       is out of the tab order as well as out of sight. The toggle is taller than a pointer target
+       has to be (WCAG 2.2 asks for 24px, it is 28) so it does not have to be hit exactly. */
+    .ach-group + .ach-group { margin-top: var(--s4); }
+    .ach-group-head, .ach-group-toggle {
+      display: flex;
+      align-items: baseline;
+      gap: var(--s2);
+      min-width: 0;
+      margin-bottom: var(--s2);
+    }
+    .ach-group-name {
+      min-width: 0;
+      overflow-wrap: anywhere;
+      font-size: var(--fs-sm);
+      font-weight: 600;
+      color: var(--text-2);
+    }
+    .ach-group-n { flex: none; font-size: var(--fs-xs); color: var(--text-3); font-variant-numeric: tabular-nums; }
+    .ach-group-toggle {
+      align-items: center;
+      width: fit-content;
+      max-width: 100%;
+      min-height: 28px;
+      padding: var(--s1) var(--s2);
+      border: 0;
+      border-radius: var(--r-sm);
+      background: none;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+      /* The top bar and the table header are sticky. Reaching a toggle with Shift+Tab scrolls it to the
+         top edge of the viewport, which is under both; this keeps it clear (WCAG 2.2 AA, Focus Not
+         Obscured). The header is about 34px tall and the rest is margin */
+      scroll-margin-top: calc(var(--topbar-h) + 48px);
+    }
+    .ach-group-toggle:hover { background: var(--surface-2); }
+    .ach-group-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+    /* A closed set has no grid under it, so the margin that separates a heading from its cards would
+       only widen the gap to the next section */
+    .ach-group-toggle[aria-expanded="false"] { margin-bottom: 0; }
+    /* The caret: a pure-CSS triangle, pointing down when open and right when closed. transform is a
+       compositor property, so opening one set does not relayout the list */
+    .ach-group-caret {
+      flex: none;
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--text-3);
+      transition: transform var(--dur-1) ease;
+    }
+    .ach-group-toggle[aria-expanded="false"] .ach-group-caret { transform: rotate(-90deg); }
+    .ach-group.is-off .ach-group-name, .ach-group.is-off .ach-name { color: var(--text-3); }
+    .ach-group.is-off .ach-item { background: none; border-style: dashed; }
     .ach-item {
       display: flex;
       gap: var(--s2);
@@ -2410,6 +2536,7 @@
         transform: none;
       }
       .bar-fill { transition: none; }
+      .ach-group-caret { transition: none; }
       /* The skeleton rows **do not pulse**, but they stay — they are not decoration, they are the sentence "waiting for Steam to answer" */
       .game-search-result.skeleton { animation: none; opacity: 0.6; }
       /* **The transition is on .chip and the two pseudo-elements, not on the container** —
@@ -2551,19 +2678,19 @@
         <span class="reading" title="库里的游戏总数" data-t-title="card.totalTitle">
           <span class="value" id="cardTotal">–</span><span class="label" data-t="card.total">游戏</span>
         </span>
-        <!-- Second, beside the game count and ahead of the two rates: these two are the plain
-             「库里有多少」 pair, and both rates after them are derived from these numbers.
+        <!-- Second, beside the game count and ahead of the two readings derived from the rows.
+             Unlike the game count it leaves 「受限」 games out, as Steam's profile does.
              **The label names the state, not the noun.** A bare 「成就」 sitting next to 「游戏」
              reads as 「库里一共有多少个成就」, which is a different and equally believable
              number; 「已解锁成就」 can only mean the one thing -->
-        <span class="reading" title="整个库里已解锁的成就总数" data-t-title="card.achievedTitle">
+        <span class="reading" title="已解锁的成就总数;不含「受限」游戏" data-t-title="card.achievedTitle">
           <span class="value" id="cardAchieved">–</span><span class="label" data-t="card.achieved">已解锁成就</span>
         </span>
         <span class="reading" title="AGCR:所有游戏完成率的平均值" data-t-title="card.avgTitle">
           <span class="value" id="cardAvg">–</span><span class="label" data-t="card.avg">平均完成率</span>
         </span>
-        <span class="reading" title="已经解锁全部成就的游戏" data-t-title="card.perfectTitle">
-          <span class="value" id="cardPerfect">–</span><span class="label" data-t="card.perfect">完美</span>
+        <span class="reading" title="已完成的游戏和集合,每个计一次;不含「受限」游戏" data-t-title="card.completedTitle">
+          <span class="value" id="cardCompleted">–</span><span class="label" data-t="card.completed">已完成</span>
         </span>
       </div>
     </div>
@@ -2703,7 +2830,7 @@
            API rather than the user's; the database column is still called Unvetted (it
            reaches CSV and is a compatibility surface). The explanation goes in a title and
            takes no screen space -->
-      <button type="button" class="chip" data-filter="unvetted" data-state="not" data-t-title="chip.unvettedTitle" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label" data-t="filter.unvetted">受限</span></button>
+      <button type="button" class="chip" data-filter="unvetted" data-state="not" data-t-title="chip.unvettedTitle" title="Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方的「已解锁成就」「平均完成率」「已完成」 —— 和 Steam 自己的算法一致。"><span class="chip-dot"></span><span class="chip-label" data-t="filter.unvetted">受限</span></button>
       <!-- Excluded at startup, for the same reason as 「已完成」: this page answers 「还有
            什么值得打」, and a game with no achievement system contributes nothing to it —
            it does not even have one target to aim at.
@@ -2903,11 +3030,11 @@
       'card.total':           ['游戏', 'Games'],
       'card.totalTitle':      ['库里的游戏总数', 'How many games are in the library'],
       'card.achieved':        ['已解锁成就', 'Unlocked'],
-      'card.achievedTitle':   ['整个库里已解锁的成就总数', 'How many achievements you have unlocked across the whole library'],
+      'card.achievedTitle':   ['已解锁的成就总数;不含「受限」游戏', 'How many achievements you have unlocked; Limited games are not counted'],
       'card.avg':             ['平均完成率', 'Average completion'],
       'card.avgTitle':        ['AGCR:所有游戏完成率的平均值', 'AGCR: the mean completion rate across every game'],
-      'card.perfect':         ['完美', 'Perfect'],
-      'card.perfectTitle':    ['已经解锁全部成就的游戏', 'Games with every achievement unlocked'],
+      'card.completed':       ['已完成', 'Completed'],
+      'card.completedTitle':  ['已完成的游戏和集合,每个计一次;不含「受限」游戏', 'Completed games and sets, one each; Limited games are not counted'],
       'ui.loading':           ['加载中…', 'Loading…'],
       'ui.syncNow':           ['立即同步', 'Sync now'],
       'ui.settings':          ['设置', 'Settings'],
@@ -2923,7 +3050,7 @@
       'ui.close':             ['关闭', 'Close'],
       'ui.cancel':            ['取消', 'Cancel'],
       'ui.toTop':             ['回到顶部', 'Back to top'],
-      'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方「平均完成率」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but excluded from the average completion rate above — the same as Steam’s own method.'],
+      'chip.unvettedTitle':   ['Steam 把这些游戏归为「个人资料功能受限」,默认不出现在它的库存接口里。这里照常同步它们,但不计入上方的「已解锁成就」「平均完成率」「已完成」 —— 和 Steam 自己的算法一致。', 'Steam classes these as “Profile Features Limited” and leaves them out of its owned-games API by default. They are synced here as normal but not counted in the Unlocked, Average completion or Completed figures above — the same as Steam’s own method.'],
       'gen.stepOf':           ['第 {n} / {of} 步', 'step {n} of {of}'],
       'gen.written':          ['已写 {done} / {of} 条', '{done} of {of} written'],
       'gen.showLog':          ['查看步骤', 'Show steps'],
@@ -2986,7 +3113,7 @@
       'table.syncingRow':     ['数据同步中…', 'Syncing…'],
       'table.openGuide':      ['(点击查看攻略)', ' (opens the guide)'],
       'table.count':          ['显示 {shown} / 共 {total}', 'Showing {shown} of {total}'],
-      'table.unvettedTitle':  ['Steam 归为「个人资料功能受限」,不计入平均完成率', 'Steam classes this as “Profile Features Limited”; it is excluded from the average completion rate'],
+      'table.unvettedTitle':  ['Steam 归为「个人资料功能受限」,不计入上方的「已解锁成就」「平均完成率」「已完成」','Steam classes this as “Profile Features Limited”; it is not counted in the Unlocked, Average completion or Completed figures'],
       'table.lockOn':         ['已锁定:不参与自动同步,数据需手动填写。点击解锁', 'Locked: excluded from automatic syncing, the numbers are yours to fill in. Click to unlock'],
       'table.lockOff':        ['锁定这一行:停止自动同步', 'Lock this row: stop syncing it automatically'],
       'table.locked':         ['已锁定', 'locked'],
@@ -3027,6 +3154,19 @@
       'ach.searchGuide':      ['搜索攻略', 'Search'],
       'ach.notWritten':       ['攻略里还未写这条', 'Not written up yet'],
       'ach.openInGuide':      ['在攻略中打开', 'Open in the guide'],
+      // The list of what is left, split by set: a heading says how many are left in the set, and
+      // achievements the server could not place in any set go under the last one
+      'ach.groupLeft':        ['剩余 {n} 个', '{n} remaining'],
+      'ach.groupOther':       ['其他', 'Other'],
+
+      // ---- Achievement sets (the strip above a game's list) -------------------
+      // Steam's own Chinese for these is 集合 and 基础游戏, so the page says what its Steam page says.
+      // The count is of the sets this account can earn: a DLC it does not own is not one of them
+      'sets.head':            ['集合:已完成 {done} 个,共 {total} 个', 'Sets: {done} of {total} completed'],
+      'sets.base':            ['基础游戏', 'Base game'],
+      'sets.completedOn':     ['{date} 完成', 'Completed {date}'],
+      'sets.complete':        ['已完成', 'Completed'],
+      'sets.notOwned':        ['未拥有该 DLC', 'DLC not owned'],
 
       // ---- Deleting a row -----------------------------------------------------
       'del.title':            ['删除《{game}》?', 'Delete {game}?'],
@@ -3493,6 +3633,14 @@
     let missingAchCache = {};
     /** How many times the cache has been emptied. A reply is written in only if this has not moved since its request went out */
     let missingAchGen = 0;
+    /**
+     * The sets a person has opened in a list of what is left, as `appid|set id`. Only the sets the
+     * account cannot earn start closed, and render() rebuilds the table on every filter and every
+     * keystroke in the search box, so what was opened is kept here rather than in the markup — or the
+     * next keystroke would close it again. Not emptied with the lists: it names no achievement, and a
+     * set that has gone is simply never asked for
+     */
+    const openSetGroups = new Set();
 
     function fmtPct(rate) {
       if (rate === null || rate === undefined) return '';
@@ -3508,6 +3656,11 @@
      */
     function fmtCount(n) {
       return typeof n === 'number' ? n.toLocaleString(LANG === 'en' ? 'en-GB' : 'zh-CN') : '–';
+    }
+
+    /** A day, from epoch milliseconds, in the interface's own locale for the same reason as fmtCount */
+    function fmtDay(ms) {
+      return new Date(ms).toLocaleDateString(LANG === 'en' ? 'en-GB' : 'zh-CN');
     }
 
     /**
@@ -4464,16 +4617,48 @@
         });
       });
 
-      // The height is left entirely to the CSS max-height, and this only decides "was it
-      // genuinely clipped".
-      // **Measure everything first, then change the classes together** — reading scrollHeight
-      // and writing a class in the same loop forces one reflow per card, and a game with four
-      // hundred achievements can stall for a visible beat
-      const wins = Array.prototype.slice.call(body.querySelectorAll('.ach-guide'));
+      clampGuides(body);
+
+      // The sets the account cannot earn start closed; toggleSetGroup opens and closes them
+      body.querySelectorAll('.ach-group-toggle').forEach(function(btn) {
+        btn.addEventListener('click', function() { toggleSetGroup(btn); });
+      });
+    }
+
+    /**
+     * Open or close one set in a list of what is left, in place, and remember which it is: the next
+     * filter or keystroke redraws the row from scratch, and the choice is read back from
+     * openSetGroups. **The state lives on the button** (`aria-expanded`), which is what a screen
+     * reader reads, and the grid it controls follows it (`hidden`)
+     */
+    function toggleSetGroup(btn) {
+      const open = btn.getAttribute('aria-expanded') !== 'true';
+      btn.setAttribute('aria-expanded', String(open));
+      const grid = document.getElementById(btn.getAttribute('aria-controls'));
+      if (grid) {
+        grid.hidden = !open;
+        // Measured only now: while the grid was hidden every guide window in it read as 0 high, so
+        // none could have been found clipped
+        if (open) clampGuides(grid);
+      }
+      if (open) openSetGroups.add(btn.dataset.key); else openSetGroups.delete(btn.dataset.key);
+    }
+
+    /**
+     * Decide which guide windows under `root` are genuinely clipped, and give those the gradient and
+     * the gesture. The height is left entirely to the CSS max-height.
+     *
+     * **Measure everything first, then change the classes together** — reading scrollHeight and
+     * writing a class in the same loop forces one reflow per card, and a game with four hundred
+     * achievements can stall for a visible beat. A window already marked is left alone, so a set that
+     * is opened, closed and opened again does not bind its click twice
+     */
+    function clampGuides(root) {
+      const wins = Array.prototype.slice.call(root.querySelectorAll('.ach-guide'));
       const overflowing = wins.map(function(el) { return el.scrollHeight > el.clientHeight + 1; });
       wins.forEach(function(el, i) {
         // Nothing is done to an unclipped one: it is already complete and gets neither the gradient nor the gesture
-        if (!overflowing[i]) return;
+        if (!overflowing[i] || el.classList.contains('clamped')) return;
         el.classList.add('clamped');
         // toggle rather than add — once expanded it has to be collapsible with another click. The single-argument flip is deliberate
         el.addEventListener('click', function() { el.classList.toggle('expanded'); });
@@ -4481,13 +4666,18 @@
     }
 
     /**
-     * Whether a row opens to its list of what is still missing. The criterion is **the game genuinely
-     * not being finished**, not which filter is on: a completed game appears in the table whenever
-     * 「已完成」 is not excluded, and an expand arrow on it would open an empty list. render() draws the
-     * arrow from this, and forgetMissingLists decides from it whether the open row is still one
+     * Whether a row opens. The criterion is **the game having something to open to**, not which filter
+     * is on: a list of what is still missing when it is not finished, and its sets when it has some.
+     * A completed game with neither appears in the table whenever 「已完成」 is not excluded, and an
+     * expand arrow on it would open nothing. A completed game with sets does open — a finished set is
+     * what there is to see there. render() draws the arrow from this, and forgetMissingLists decides
+     * from it whether the open row is still one
      */
     function canExpandRow(g) {
-      return Boolean(g && g.rate !== 1 && g.total !== 'N/A' && g.total !== null && g.appid);
+      return Boolean(
+        g && g.total !== 'N/A' && g.total !== null && g.appid &&
+        (g.rate !== 1 || (Array.isArray(g.sets) && g.sets.length > 0))
+      );
     }
 
     /**
@@ -4496,12 +4686,14 @@
      * the bell must not close a list that happened to be open already. One copy, because the row and
      * the bell reaching the same list by two routes is how the two drift apart.
      *
-     * A failure is not kept as the answer: opening the row again is how it is asked for again
+     * A failure is not kept as the answer: opening the row again is how it is asked for again. **Nor
+     * is an entry the page made itself (`local`)**: it describes the game as it was when it was
+     * made, and a game whose numbers were edited since is no longer finished
      */
     function openMissingPanel(appid) {
       expandedAppid = appid;
       const had = missingAchCache[appid];
-      if (!had || missingListFailed(had)) fetchMissingList(appid);
+      if (!had || had.local || missingListFailed(had)) fetchMissingList(appid);
       render();
     }
 
@@ -4522,6 +4714,15 @@
      * would put back exactly what the emptying removed, with nothing left to ask again
      */
     function fetchMissingList(appid) {
+      // A finished game has nothing missing to ask Steam for: it opens only to show its sets, which
+      // are already on its row. Answered here in the shape the server would give, so no row of the
+      // panel needs to know the difference — except that it is marked `local`, which is what keeps it
+      // from being trusted past the moment it was made (see openMissingPanel and forgetMissingLists)
+      const finished = allGames.find(function(g) { return String(g.appid) === String(appid); });
+      if (finished && finished.rate === 1) {
+        missingAchCache[appid] = { total: finished.total, missingCount: 0, missing: [], guide: null, local: true };
+        return;
+      }
       const gen = missingAchGen;
       const had = missingAchCache[appid];
       if (!had || had.error) missingAchCache[appid] = { loading: true };
@@ -4555,11 +4756,15 @@
      *
      * The open row is asked again at once and keeps what it shows until the answer arrives: emptied,
      * it would collapse to the loading line and move every row under it for as long as the request
-     * takes. **An open row that can no longer expand is closed instead** — the sync finished its game,
-     * or the bell went to one already finished — or every later reading would fetch a list nobody
-     * can see, and a patch that reopens the game would open the row by itself. A row the filters are
-     * hiding stays open and is asked again, so it is current when the filter is cleared. A closed
-     * row is simply forgotten, and asked for when it is next opened
+     * takes. **An open row that can no longer expand is closed instead** — the sync finished a game
+     * that has no sets to show, or the bell went to one already finished — or a patch that reopens
+     * the game would open the row by itself. A row the filters are hiding stays open and is asked
+     * again, so it is current when the filter is cleared. A closed row is simply forgotten, and
+     * asked for when it is next opened.
+     *
+     * **An entry the page made itself (`local`) is not kept on screen meanwhile.** It is made again
+     * at once, and kept, it would show a game a patch has just un-finished as finished until the
+     * server's answer arrived
      */
     function forgetMissingLists() {
       missingAchGen++;
@@ -4568,7 +4773,7 @@
       if (!expandedAppid) return;
       const game = allGames.find(function(g) { return String(g.appid) === expandedAppid; });
       if (!canExpandRow(game)) { expandedAppid = null; return; }
-      if (shown && !shown.loading && !shown.error) missingAchCache[expandedAppid] = shown;
+      if (shown && !shown.loading && !shown.error && !shown.local) missingAchCache[expandedAppid] = shown;
       fetchMissingList(expandedAppid);
     }
 
@@ -4640,13 +4845,19 @@
       const data = missingAchCache[appid];
       const game = allGames.find(function(g){ return String(g.appid) === String(appid); });
       const gameName = game ? game.name : '';
+      // The sets come from the game's own row, not from the list, so they are on screen while the
+      // list is still loading, and when it failed
+      const sets = renderSetStrip(game);
+      // The server splits the list by set only for a game with sets it could place the achievements in
+      const hasGroups = Boolean(data && Array.isArray(data.groups) && data.groups.length);
       let inner;
       if (!data || data.loading) {
         inner = '<div class="missing-header">' + escapeHtml(t('ach.loading')) + '</div>';
       } else if (data.error) {
         inner = '<div class="missing-header">' + escapeHtml(data.error) + '</div>';
-      } else if (data.missingCount === 0) {
-        inner = '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
+      } else if (data.missingCount === 0 && !hasGroups) {
+        // With the sets drawn above, a line saying everything is unlocked only says it a second time
+        inner = sets ? '' : '<div class="missing-header">' + escapeHtml(t('ach.allDone')) + '</div>';
       } else {
         // A guide that was genuinely read this time is the only one whose language can be trusted;
         // a failed read puts its own message here instead
@@ -4663,50 +4874,168 @@
         } else if (data.guide && data.guide.error) {
           head += ' · ' + data.guide.error;
         }
-        inner = '<div class="missing-header">' + escapeHtml(head) + '</div>'
-          + '<div class="ach-grid">' + newFirst(data.missing).map(function(a) {
-            const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
-            const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
-              + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' ' + escapeHtml(t('ach.searchGuide')) + '</a>';
-            let tail;
-            if (a.guide) {
-              // After stripping the restatement of the official name and description there may
-              // be nothing left (the guide copied only the official copy and wrote no method).
-              // In that case no window is drawn at all — the name, the description and the jump
-              // button are all still above, and an empty box only tells you "there should have
-              // been something here"
-              const substeps = a.guide.subSteps.map(function(s) {
-                return '<div class="ach-substep' + (s.checked ? ' done' : '') + '"'
-                  + ' style="margin-left:' + (s.depth * 12) + 'px">' + escapeHtml(s.text) + '</div>';
-              }).join('');
-              tail = (a.guide.text || substeps)
-                ? '<div class="ach-guide">'
-                  + (a.guide.text ? '<div class="ach-guide-text">' + escapeHtml(a.guide.text) + '</div>' : '')
-                  + substeps + '</div>'
-                : '';
-            } else if (hasGuide) {
-              tail = '<div class="ach-gap">' + escapeHtml(t('ach.notWritten')) + '</div>' + search;
-            } else {
-              tail = search;
-            }
-            // The jump button hangs beside the achievement name rather than inside the guide
-            // window — the window gets clipped, and this is the card's only action; putting it
-            // above also stops its position drifting with the guide's length
-            const jump = (a.guide && a.guide.url)
-              ? '<a class="ach-jump" href="' + escapeHtml(a.guide.url)
-                + '" target="_blank" rel="noopener" title="' + escapeHtml(t('ach.openInGuide')) + '">' + GEN_BOOK + '</a>'
+        // One card per achievement, drawn the same whether the list is flat or split by set
+        const card = function(a) {
+          const query = encodeURIComponent(gameName + ' ' + a.name + ' achievement guide');
+          const search = '<a class="ach-guide-link" href="https://www.google.com/search?q=' + query
+            + '" target="_blank" rel="noopener">' + GEN_SEARCH + ' ' + escapeHtml(t('ach.searchGuide')) + '</a>';
+          let tail;
+          if (a.guide) {
+            // After stripping the restatement of the official name and description there may
+            // be nothing left (the guide copied only the official copy and wrote no method).
+            // In that case no window is drawn at all — the name, the description and the jump
+            // button are all still above, and an empty box only tells you "there should have
+            // been something here"
+            const substeps = a.guide.subSteps.map(function(s) {
+              return '<div class="ach-substep' + (s.checked ? ' done' : '') + '"'
+                + ' style="margin-left:' + (s.depth * 12) + 'px">' + escapeHtml(s.text) + '</div>';
+            }).join('');
+            tail = (a.guide.text || substeps)
+              ? '<div class="ach-guide">'
+                + (a.guide.text ? '<div class="ach-guide-text">' + escapeHtml(a.guide.text) + '</div>' : '')
+                + substeps + '</div>'
               : '';
-            return '<div class="ach-item">'
-              + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
-              + '<div class="ach-body">'
-              + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name)
-                + (isNewAch(a) ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('ach.new')) + '</span>' : '')
-                + '</div>' + jump + '</div>'
-              + '<div class="ach-desc">' + escapeHtml(a.description) + '</div>' + tail + '</div>'
-              + '</div>';
-          }).join('') + '</div>';
+          } else if (hasGuide) {
+            tail = '<div class="ach-gap">' + escapeHtml(t('ach.notWritten')) + '</div>' + search;
+          } else {
+            tail = search;
+          }
+          // The jump button hangs beside the achievement name rather than inside the guide
+          // window — the window gets clipped, and this is the card's only action; putting it
+          // above also stops its position drifting with the guide's length
+          const jump = (a.guide && a.guide.url)
+            ? '<a class="ach-jump" href="' + escapeHtml(a.guide.url)
+              + '" target="_blank" rel="noopener" title="' + escapeHtml(t('ach.openInGuide')) + '">' + GEN_BOOK + '</a>'
+            : '';
+          return '<div class="ach-item">'
+            + '<img class="ach-icon" src="' + a.icon + '" loading="lazy" onerror="this.style.visibility=\'hidden\'">'
+            + '<div class="ach-body">'
+            + '<div class="ach-head"><div class="ach-name">' + escapeHtml(a.name)
+              + (isNewAch(a) ? '<span class="badge badge-new">' + icon('sparkle') + escapeHtml(t('ach.new')) + '</span>' : '')
+              + '</div>' + jump + '</div>'
+            + '<div class="ach-desc">' + escapeHtml(a.description) + '</div>' + tail + '</div>'
+            + '</div>';
+        };
+        const list = hasGroups
+          ? renderMissingGroups(data, appid, card)
+          : '<div class="ach-grid">' + newFirst(data.missing).map(card).join('') + '</div>';
+        // With only sets the account cannot earn left, nothing is left to earn, so no heading says so
+        inner = (data.missingCount > 0 ? '<div class="missing-header">' + escapeHtml(head) + '</div>' : '') + list;
       }
-      return '<tr class="missing-row"><td colspan="5">' + inner + '</td></tr>';
+      return '<tr class="missing-row"><td colspan="5">' + sets + inner + '</td></tr>';
+    }
+
+    /**
+     * The list of what is left when the server split it by set (`data.groups`): one section per set
+     * that has something left, in the order of the strip above. The sets the account can earn come
+     * first, each under a heading; the ones it cannot (a DLC it does not own) come last and closed,
+     * since nothing in them can be done. `card` draws one achievement — this only files them.
+     *
+     * **Every achievement is drawn once.** One whose set is not among the groups — a set the strip
+     * does not draw, or one no reading placed — goes under its own heading after the sets that can be
+     * earned: dropping it would hide something the count above includes.
+     *
+     * A closed set is a button and a hidden grid, out of the reading order and the tab order until it
+     * is opened. What was opened is in `openSetGroups`, keyed by game as well as by set, because set
+     * ids repeat from game to game. Names are escaped, the title too: they come from a developer
+     */
+    function renderMissingGroups(data, appid, card) {
+      const listed = data.groups.map(function(g) { return g.id; });
+      const itemsOf = function(g) {
+        return newFirst(data.missing.filter(function(a) { return a.setId === g.id; }));
+      };
+      const nameOf = function(g) { return g.base ? t('sets.base') : g.name; };
+      // A section a person can act on: a heading with how many are left, and the grid under it. It is
+      // a named group as well, since the heading is a div and says nothing to a screen reader's list
+      // of landmarks by itself
+      const section = function(name, items) {
+        const left = t('ach.groupLeft', { n: items.length });
+        return '<div class="ach-group" role="group" aria-label="' + escapeHtml(name + ', ' + left) + '">'
+          + '<div class="ach-group-head"><span class="ach-group-name">' + escapeHtml(name) + '</span>'
+          + '<span class="ach-group-n">' + escapeHtml(left) + '</span></div>'
+          + '<div class="ach-grid">' + items.map(card).join('') + '</div></div>';
+      };
+
+      const earnable = data.groups.filter(function(g) { return g.earnable; }).map(function(g) {
+        return section(nameOf(g), itemsOf(g));
+      }).join('');
+
+      const loose = newFirst(data.missing.filter(function(a) { return listed.indexOf(a.setId) === -1; }));
+      const other = loose.length ? section(t('ach.groupOther'), loose) : '';
+
+      const closed = data.groups.filter(function(g) { return !g.earnable; }).map(function(g) {
+        const key = appid + '|' + g.id;
+        const isOpen = openSetGroups.has(key);
+        const items = itemsOf(g);
+        const name = nameOf(g);
+        // Only a DLC set is called one that is not owned: a set the account cannot earn for another
+        // reason has no word here, as on its chip in the strip
+        const state = g.dlc ? t('sets.notOwned') : '';
+        const spoken = name + ', ' + items.length + (state ? ', ' + state : '');
+        // Both ids are text the database holds, so this is escaped like the rest
+        const gridId = escapeHtml('ach-set-' + appid + '-' + g.id);
+        return '<div class="ach-group is-off">'
+          + '<button type="button" class="ach-group-toggle" aria-expanded="' + isOpen + '" aria-controls="' + gridId + '"'
+          + ' data-key="' + escapeHtml(key) + '"'
+          + ' title="' + escapeHtml(name + (state ? ' · ' + state : '')) + '" aria-label="' + escapeHtml(spoken) + '">'
+          + '<span class="ach-group-caret"></span><span class="ach-group-name">' + escapeHtml(name) + '</span>'
+          + '<span class="ach-group-n">' + items.length + '</span></button>'
+          + '<div class="ach-grid" id="' + gridId + '"' + (isOpen ? '' : ' hidden') + '>' + items.map(card).join('') + '</div>'
+          + '</div>';
+      }).join('');
+
+      return earnable + other + closed;
+    }
+
+    /**
+     * The strip of sets above a game's list: one chip each, or '' when the game has none to show.
+     *
+     * **Everything on a chip is a fact the server already decided** (`displaySets`): which sets, in
+     * what order, how far along, whether this account can earn it. The page draws; it computes
+     * nothing but a bar width. In particular a set is finished when Steam says so (`complete`) and
+     * not when `done` reaches `need`, because Steam keeps a set finished after the developer adds to
+     * it — 9 of 10 can be a finished set, and a second opinion here would disagree with the first.
+     *
+     * A set the account cannot earn (a DLC it does not own) has no bar and a dash where the count
+     * would be. The heading counts only the sets that can be earned, as Steam's own page does.
+     * Names are escaped, the title too: both come from a developer
+     */
+    function renderSetStrip(game) {
+      const sets = game && Array.isArray(game.sets) ? game.sets : null;
+      if (!sets || !sets.length) return '';
+      const earnable = sets.filter(function(s) { return s.earnable; });
+      const finished = earnable.filter(function(s) { return s.complete; }).length;
+      const chips = sets.map(function(s) {
+        const name = s.base ? t('sets.base') : s.name;
+        // Numbers however they arrived: they are written into markup
+        const done = Number(s.done) || 0;
+        const need = Number(s.need) || 0;
+        const rate = need > 0 ? Math.min(done / need, 1) : (s.complete ? 1 : 0);
+        const finishedHere = s.earnable && s.complete;
+        // Only a DLC set is called one that is not owned: a set the account cannot earn for another
+        // reason has no word here, and the dash says what there is to say
+        let state = '';
+        if (!s.earnable) state = s.dlc ? t('sets.notOwned') : '';
+        else if (finishedHere) state = s.completedAt ? t('sets.completedOn', { date: fmtDay(s.completedAt) }) : t('sets.complete');
+        const count = need > 0 ? done + '/' + need : String(done);
+        const meter = s.earnable
+          ? '<div class="bar-track"><div class="bar-fill' + (rate >= 1 ? ' done' : '') + '" style="width:'
+            + (rate * 100).toFixed(1) + '%; background:' + barColor(rate) + '"></div></div>'
+            + '<span class="set-n">' + count + '</span>'
+          : '<span class="set-n">–</span>';
+        // Read out as one piece: the check and the dash carry a state the chip's text does not
+        const spoken = name + (s.earnable ? ', ' + count : '') + (state ? ', ' + state : '');
+        return '<div class="set-chip' + (s.earnable ? '' : ' is-off') + '" role="listitem" title="'
+          + escapeHtml(name + (state ? ' · ' + state : '')) + '" aria-label="' + escapeHtml(spoken) + '">'
+          + '<div class="set-top"><span class="set-mark">' + (finishedHere ? icon('check') : '') + '</span>'
+          + '<span class="set-name">' + escapeHtml(name) + '</span></div>'
+          + '<div class="set-meter">' + meter + '</div>'
+          + '</div>';
+      }).join('');
+      return '<div class="set-strip">'
+        + '<div class="missing-header">' + escapeHtml(t('sets.head', { done: finished, total: earnable.length })) + '</div>'
+        + '<div class="set-list" role="list">' + chips + '</div>'
+        + '</div>';
     }
 
     function escapeHtml(s) {
@@ -6018,7 +6347,7 @@
         // The whole number barely moves in a large library, so hovering it shows the same average to
         // two places. On the number rather than the reading: the label beside it keeps the definition
         document.getElementById('cardAvg').title = data.avgPrecise || '';
-        document.getElementById('cardPerfect').textContent = fmtCount(data.perfectCount);
+        document.getElementById('cardCompleted').textContent = fmtCount(data.completedCount);
         document.getElementById('cardAchieved').textContent = fmtCount(data.achievedTotal);
         // The element ships with data-t="ui.loading" so it reads correctly before this arrives.
         // Once it holds a real timestamp that key is wrong, and applyStrings would repaint 「加载中…」
